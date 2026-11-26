@@ -1,5 +1,22 @@
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import { CONNECTION_ACCOUNT } from "@arden-hq/protocol/chat"
+import {
+  APPROVAL_ASKED,
+  APPROVAL_ASKER,
+  APPROVAL_CARD,
+  APPROVAL_DIFF,
+  APPROVAL_GRANT_FOLDER,
+  APPROVAL_PREVIEW,
+  AUTOMATION_PROMPT,
+  CONNECTION_ACCOUNT,
+  CONTENT_START,
+  CONTEXT_SIZE,
+  MESSAGE_CLOSURE,
+  RUN_ACTIVITY_TARGET,
+  RUN_CAUSE,
+  RUN_USAGE,
+  SESSION_NAME,
+  TODO_EXPLANATION
+} from "@arden-hq/protocol/chat"
 import { ChatProjectionEventSchema } from "@arden-hq/protocol/effect/chat"
 import { type Effect, Schema } from "effect"
 import { isJsonObject, type JsonObject } from "../json.js"
@@ -9,21 +26,243 @@ type StoredEventUpgrade = (event: JsonObject, sessionId: string) => JsonObject
 const withoutKeys = (event: JsonObject, keys: ReadonlyArray<string>): JsonObject =>
   Object.fromEntries(Object.entries(event).filter(([key]) => !keys.includes(key)))
 
+const textOr = (value: unknown, fallback: string): string =>
+  typeof value === "string" ? value : fallback
+
+const withRoute = (event: JsonObject, sessionId: string): JsonObject =>
+  isJsonObject(event["decision_route"])
+    ? event
+    : {
+        ...event,
+        decision_route: {
+          source_kind: "run",
+          source_session_id: textOr(event["session_id"], sessionId),
+          basis: "source_v1"
+        }
+      }
+
 const connectionNeeded: StoredEventUpgrade = (event, sessionId) => {
-  if ("account" in event) return event
+  if ("account" in event) return withRoute(event, sessionId)
   const ref = event["account_ref"]
+  return withRoute(
+    {
+      ...withoutKeys(event, ["account_ref"]),
+      session_id: textOr(event["session_id"], sessionId),
+      account:
+        typeof ref === "string"
+          ? { kind: CONNECTION_ACCOUNT.account, ref }
+          : { kind: CONNECTION_ACCOUNT.default }
+    },
+    sessionId
+  )
+}
+
+const approvalNeeded: StoredEventUpgrade = (event, sessionId) => {
+  if ("asked" in event) return event
+  const asked = event["asked_at"]
+  const preview = event["content_preview"]
+  const diff = event["diff"]
+  const folder = event["grant_folder"]
+  const presentation = event["presentation"]
+  const work = event["work"]
+  const places = event["rule_places"]
+  return withRoute(
+    {
+      ...withoutKeys(event, [
+        "asked_at",
+        "content_preview",
+        "path",
+        "scope",
+        "expires_at",
+        "presentation",
+        "work"
+      ]),
+      session_id: textOr(event["session_id"], sessionId),
+      action: textOr(event["action"], ""),
+      asked:
+        typeof asked === "string"
+          ? { kind: APPROVAL_ASKED.recorded, at: asked }
+          : { kind: APPROVAL_ASKED.unrecorded },
+      preview:
+        typeof preview === "string"
+          ? { kind: APPROVAL_PREVIEW.preview, text: preview }
+          : { kind: APPROVAL_PREVIEW.none },
+      diff:
+        typeof diff === "string"
+          ? { kind: APPROVAL_DIFF.diff, patch: diff }
+          : { kind: APPROVAL_DIFF.none },
+      rule_places: Array.isArray(places) ? places : [],
+      can_attach_folder_to_space: event["can_attach_folder_to_space"] === true,
+      grant_folder:
+        typeof folder === "string"
+          ? { kind: APPROVAL_GRANT_FOLDER.folder, folder }
+          : { kind: APPROVAL_GRANT_FOLDER.none },
+      card: isJsonObject(presentation)
+        ? { kind: APPROVAL_CARD.presented, presentation }
+        : { kind: APPROVAL_CARD.plain },
+      asker: isJsonObject(work)
+        ? { kind: APPROVAL_ASKER.work, work }
+        : { kind: APPROVAL_ASKER.chat }
+    },
+    sessionId
+  )
+}
+
+const messageEnd: StoredEventUpgrade = (event) => {
+  if ("closure" in event) return event
+  const content = event["content"]
+  const start = event["content_start_seq"]
   return {
-    ...withoutKeys(event, ["account_ref"]),
-    session_id: typeof event["session_id"] === "string" ? event["session_id"] : sessionId,
-    account:
-      typeof ref === "string"
-        ? { kind: CONNECTION_ACCOUNT.account, ref }
-        : { kind: CONNECTION_ACCOUNT.default }
+    ...withoutKeys(event, ["content", "content_start_seq"]),
+    closure:
+      typeof content === "string"
+        ? { kind: MESSAGE_CLOSURE.complete, content }
+        : { kind: MESSAGE_CLOSURE.abandoned },
+    content_start:
+      typeof start === "number"
+        ? { kind: CONTENT_START.anchored, seq: start }
+        : { kind: CONTENT_START.unanchored }
   }
 }
 
+const todoUpdated: StoredEventUpgrade = (event) => {
+  const explanation = event["explanation"]
+  if (isJsonObject(explanation)) return event
+  const toolCallId = event["tool_call_id"]
+  return {
+    ...event,
+    tool_call_id: typeof toolCallId === "string" ? toolCallId : (event["run_id"] ?? null),
+    explanation:
+      typeof explanation === "string"
+        ? { kind: TODO_EXPLANATION.given, text: explanation }
+        : { kind: TODO_EXPLANATION.none }
+  }
+}
+
+const runStarted: StoredEventUpgrade = (event) => {
+  if (Array.isArray(event["causes"])) return event
+  const question = event["question_answer"]
+  const result = event["agent_result"]
+  const interaction = event["interaction"]
+  const update = event["update"]
+  const task = event["automation_task_id"]
+  const name = event["automation_name"]
+  const prompt = event["automation_prompt"]
+  return {
+    ...withoutKeys(event, [
+      "question_answer",
+      "agent_result",
+      "interaction",
+      "update",
+      "is_meta_run",
+      "meta_client_id",
+      "integrations",
+      "integration_errors",
+      "session_name",
+      "automation_task_id",
+      "automation_name",
+      "automation_prompt",
+      "automation_context_mode"
+    ]),
+    causes: [
+      ...(isJsonObject(question)
+        ? [{ kind: RUN_CAUSE.questionAnswer, question_id: question["question_id"] ?? null }]
+        : []),
+      ...(isJsonObject(result) ? [{ kind: RUN_CAUSE.agentResult, agent_result: result }] : []),
+      ...(isJsonObject(interaction) ? [{ kind: RUN_CAUSE.interaction, interaction }] : []),
+      ...(isJsonObject(update) ? [{ kind: RUN_CAUSE.update, update }] : []),
+      ...(typeof task === "string" && typeof name === "string"
+        ? [
+            {
+              kind: RUN_CAUSE.automation,
+              task_id: task,
+              name,
+              prompt:
+                typeof prompt === "string"
+                  ? { kind: AUTOMATION_PROMPT.own, text: prompt }
+                  : { kind: AUTOMATION_PROMPT.delegated },
+              context_mode: textOr(event["automation_context_mode"], "continue")
+            }
+          ]
+        : [])
+    ]
+  }
+}
+
+const sessionUpdated: StoredEventUpgrade = (event) => {
+  const name = event["name"]
+  if (isJsonObject(name)) return event
+  return {
+    ...event,
+    name:
+      typeof name === "string" ? { kind: SESSION_NAME.named, name } : { kind: SESSION_NAME.unnamed }
+  }
+}
+
+const contextSize = (tokens: unknown) =>
+  typeof tokens === "number"
+    ? { kind: CONTEXT_SIZE.measured, input_tokens: tokens }
+    : { kind: CONTEXT_SIZE.unmeasured }
+
+const countOr = (value: unknown): number => (typeof value === "number" ? value : 0)
+
+const runFinished: StoredEventUpgrade = (event) => {
+  if ("context" in event) return event
+  const usage = event["usage"]
+  return {
+    ...withoutKeys(event, ["context_input_tokens"]),
+    usage: isJsonObject(usage) ? { kind: RUN_USAGE.metered, usage } : { kind: RUN_USAGE.unmetered },
+    context: contextSize(event["context_input_tokens"]),
+    message_count: countOr(event["message_count"])
+  }
+}
+
+const runError: StoredEventUpgrade = (event) => ({
+  ...withoutKeys(event, ["debug_id", "recoverable"]),
+  code: textOr(event["code"], "provider_error")
+})
+
+const tokenUsage: StoredEventUpgrade = (event) => {
+  if ("context" in event) return event
+  return {
+    ...withoutKeys(event, ["context_input_tokens", "cost", "task_id", "child_run_id"]),
+    context: contextSize(event["context_input_tokens"]),
+    message_count: countOr(event["message_count"]),
+    scope: textOr(event["scope"], "run")
+  }
+}
+
+const runActivity: StoredEventUpgrade = (event) => {
+  if ("target" in event) return event
+  const ids = event["tool_call_ids"]
+  return {
+    ...withoutKeys(event, ["tool_call_ids"]),
+    target: Array.isArray(ids)
+      ? { kind: RUN_ACTIVITY_TARGET.calls, tool_call_ids: ids }
+      : { kind: RUN_ACTIVITY_TARGET.run }
+  }
+}
+
+const thinking: StoredEventUpgrade = (event) => ({
+  ...event,
+  run_id: textOr(event["run_id"], "")
+})
+
 const upgrades: Partial<Record<ChatProjectionEvent["type"], StoredEventUpgrade>> = {
-  connection_needed: connectionNeeded
+  connection_needed: connectionNeeded,
+  approval_needed: approvalNeeded,
+  approval_resolved: withRoute,
+  connection_resolved: withRoute,
+  TEXT_MESSAGE_END: messageEnd,
+  REASONING_MESSAGE_END: messageEnd,
+  todo_updated: todoUpdated,
+  RUN_STARTED: runStarted,
+  session_updated: sessionUpdated,
+  RUN_FINISHED: runFinished,
+  RUN_ERROR: runError,
+  token_usage: tokenUsage,
+  run_activity: runActivity,
+  thinking
 }
 
 const isKnownType = (type: string): type is ChatProjectionEvent["type"] =>

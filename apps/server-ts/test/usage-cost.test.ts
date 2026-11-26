@@ -69,7 +69,10 @@ it("keeps the cost providers report beside usage, and leaves a total unknown whe
         usage: { ...tokens(5), cost: 0.00002 }
       })
       const pricedCalls = yield* usage.sessionUsage({ sessionId: priced.sessionId, limit: 5 })
-      expect(pricedCalls.runs[0]?.calls.map((call) => call.usage?.cost)).toEqual([0.0004, 0.0001])
+      expect(pricedCalls.runs[0]?.calls.map((call) => call.usage?.cost)).toEqual([
+        { kind: "reported", usd: 0.0004 },
+        { kind: "reported", usd: 0.0001 }
+      ])
       const first = yield* usage.report({ days: 1 })
       expect(first.daily.map((cell) => [cell.kind, cell.total, cell.cost]).sort()).toEqual([
         ["chat", 34, 0.0005],
@@ -177,7 +180,9 @@ const finishedResult = async (cost: number | undefined) => {
     const detail = async () =>
       runDecoders.detail(await (await running.fetch(runRoutes.detail(runId))).json())
     await expect.poll(async () => (await detail()).status, { timeout: 8_000 }).toBe("completed")
-    return (await detail()).result
+    const ended = await detail()
+    if (!("result" in ended) || ended.result.kind === "none") throw new Error("Run had no result")
+    return ended.result.result
   } finally {
     await server?.stop().catch(() => undefined)
     await rm(directory, { recursive: true, force: true })
@@ -189,23 +194,22 @@ it(
   { timeout: 20_000 },
   async () => {
     const priced = await finishedResult(0.0003)
-    expect(priced?.cost).toBe(0.0003)
-    expect(priced?.usage).toEqual({
+    expect(priced.usage).toEqual({
       prompt: 2,
       completion: 1,
       total: 3,
       cache_read: 0,
       cache_write: 0,
-      cost: 0.0003
+      cost: { kind: "reported", usd: 0.0003 }
     })
     const unpriced = await finishedResult(undefined)
-    expect(unpriced === null ? [] : Object.keys(unpriced)).not.toContain("cost")
-    expect(unpriced?.usage).toEqual({
+    expect(unpriced.usage).toEqual({
       prompt: 2,
       completion: 1,
       total: 3,
       cache_read: 0,
-      cache_write: 0
+      cache_write: 0,
+      cost: { kind: "unreported" }
     })
   }
 )

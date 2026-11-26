@@ -1,4 +1,5 @@
 import type { RuntimeRunStatus } from "../chat/runtime.js"
+import type { EndedRunDetail, RunDetail } from "./contracts.js"
 import { RuntimeRunStatusSchema } from "../common/schema.js"
 
 /** Whether a Run in this status has ended. A new status fails compilation here until it is placed. */
@@ -88,3 +89,15 @@ export const isForegroundRunStatus = (
 export const isExecutingRunStatus = (
   status: string | null | undefined
 ): status is ExecutingRunStatus => status != null && executingRunStatuses.has(status)
+
+export const runHasEnded = (detail: RunDetail): detail is EndedRunDetail =>
+  isTerminalRunStatus(detail.status)
+
+export const RUN_STATUS = {
+  pending: "pending",
+  running: "running",
+  interrupted: "interrupted",
+  error: "error",
+  cancelled: "cancelled",
+  completed: "completed"
+} as const satisfies { readonly [Status in RuntimeRunStatus]: Status }

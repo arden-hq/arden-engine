@@ -15,6 +15,12 @@ export type ApprovalAsker =
   | { readonly kind: typeof APPROVAL_ASKER.chat }
   | { readonly kind: typeof APPROVAL_ASKER.work; readonly work: RunApprovalWork }
 
+export const APPROVAL_ASKED = { unrecorded: "unrecorded", recorded: "recorded" } as const
+
+export type ApprovalAsked =
+  | { readonly kind: typeof APPROVAL_ASKED.unrecorded }
+  | { readonly kind: typeof APPROVAL_ASKED.recorded; readonly at: string }
+
 export const APPROVAL_PREVIEW = { none: "no_preview", preview: "preview" } as const
 
 export type ApprovalPreview =

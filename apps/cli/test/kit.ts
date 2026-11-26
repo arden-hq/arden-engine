@@ -40,7 +40,17 @@ export const approvalNeeded = (toolId: string, runId = "run-1"): HeadlessRunEven
     tool_id: toolId,
     name: "write_file",
     run_id: runId,
-    session_id: "session-1"
+    session_id: "session-1",
+    asked: { kind: "unrecorded" },
+    preview: { kind: "no_preview" },
+    diff: { kind: "no_diff" },
+    action: "write",
+    rule_places: [],
+    can_attach_folder_to_space: false,
+    grant_folder: { kind: "none" },
+    card: { kind: "plain" },
+    decision_route: { source_kind: "run", source_session_id: "session-1", basis: "source_v1" },
+    asker: { kind: "chat" }
   }
 })
 
@@ -101,28 +111,38 @@ export const completedRun = (text = "Final answer"): RunDetail => ({
   version: 1,
   run_id: "run-1",
   turn_id: "turn-1",
-  late_result_at: null,
   session_id: "session-1",
   status: "completed",
   started_at: "2026-08-30T00:00:00.000Z",
   updated_at: "2026-08-30T00:00:01.000Z",
   ended_at: "2026-08-30T00:00:01.000Z",
-  stop_reason: "stop",
-  last_event_sequence: 2,
-  model_id: "fixture-model",
-  reasoning_effort: null,
-  client_id: "client-1",
+  stop_reason: { kind: "stated", reason: "stop" },
+  events: { kind: "through", sequence: 2 },
+  model: { kind: "model", model_id: "fixture-model" },
+  reasoning: { kind: "default" },
+  client: { kind: "client", client_id: "client-1" },
+  local_instructions: [],
+  memory_context: [],
   result: {
-    text,
-    data: { verdict: "ok" },
-    usage: { prompt: 4, completion: 2, total: 6, cache_read: 0, cache_write: 0 },
-    cost: 0,
-    duration_ms: 1_000,
-    tool_time_ms: 0,
-    steps: 1,
-    last_input_tokens: 4
+    kind: "on_time",
+    result: {
+      text,
+      data: { verdict: "ok" },
+      usage: {
+        prompt: 4,
+        completion: 2,
+        total: 6,
+        cache_read: 0,
+        cache_write: 0,
+        cost: { kind: "reported", usd: 0 }
+      },
+      duration_ms: 1_000,
+      tool_time_ms: 0,
+      steps: 1,
+      context: { kind: "measured", input_tokens: 4 }
+    }
   },
-  error: null
+  failure: { kind: "none" }
 })
 
 export const defaultClient = (): CliClient => ({

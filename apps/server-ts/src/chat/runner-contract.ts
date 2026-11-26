@@ -14,7 +14,7 @@ import type {
   ToolResult
 } from "@arden-hq/loop"
 import type { HistoryChange } from "@arden-hq/loop"
-import type { RunUsage } from "@arden-hq/protocol/runs"
+import type { StoredRunUsage as RunUsage } from "../persistence/runs/stored-result.js"
 import type { RunPolicy } from "../execution/policy.js"
 import type { RunAuthority } from "../execution/authority.js"
 import type { EffectTarget, EffectTargetOrigin, ToolEffect } from "../execution/tool-effect.js"

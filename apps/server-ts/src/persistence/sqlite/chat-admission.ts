@@ -15,7 +15,8 @@ import {
 import type { ModelCatalog } from "../../models/catalog.js"
 import type { IntelligenceSettingsStore, LimitSettingsStore } from "../settings/store.js"
 import type { ChatRules } from "../chat/rules.js"
-import { senderOf, startedBy } from "../transcript/interaction.js"
+import { senderOf } from "../transcript/interaction.js"
+import { runCauses } from "../transcript/run-causes.js"
 import { StoredMessageEnvelopeSchema, isWrittenByPerson } from "../transcript/model.js"
 import { dropPendingArchive } from "./pending-archive.js"
 import { chatAdmissionInputSchema } from "./chat-admission-input.js"
@@ -716,21 +717,14 @@ export const makeChatAdmission = ({
                 run_id: runId,
                 session_id: valid.sessionId,
                 turn_id: acceptedMessage.message_id,
-                ...(questionAnswer === undefined ? {} : { question_answer: questionAnswer }),
-                ...(agentResult === undefined
-                  ? {}
-                  : { is_meta_run: true, agent_result: agentResult }),
-                ...startedBy(interactionSender, acceptedMessage.content),
-                ...(delivery?.kind === "update" ? { update: delivery.update } : {}),
-                ...(automationRun === undefined
-                  ? {}
-                  : {
-                      is_meta_run: true,
-                      automation_task_id: automationRun.automationId,
-                      automation_name: automationRun.name,
-                      automation_prompt: automationRun.prompt,
-                      automation_context_mode: automationRun.contextMode
-                    })
+                causes: runCauses({
+                  questionAnswer,
+                  agentResult,
+                  sender: interactionSender,
+                  content: acceptedMessage.content,
+                  update: delivery?.kind === "update" ? delivery.update : undefined,
+                  automation: automationRun
+                })
               } satisfies ChatProjectionEvent,
               runId
             },

@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema } from "../common/schema.js"
 import { RunContextSchema } from "./context.js"
+import { RunCursorPageNextSchema } from "./list-options.js"
 
 const identity = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1024))
 const text = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8000))
@@ -180,14 +181,7 @@ export const RunQuestionSchema = Schema.Struct({
 
 export const RunQuestionListSchema = Schema.Struct({
   questions: Schema.Array(RunQuestionSchema),
-  next_cursor: Schema.NullOr(identity)
-})
-export const RunQuestionListOptionsSchema = Schema.Struct({
-  space_id: Schema.optionalKey(identity),
-  session_id: Schema.optionalKey(identity),
-  item_id: Schema.optionalKey(identity),
-  state: Schema.optionalKey(Schema.Literals(["actionable", "all"])),
-  cursor: Schema.optionalKey(identity)
+  next: RunCursorPageNextSchema
 })
 export const ResolveRunQuestionInputSchema = Schema.Struct({
   client_id: identity,
@@ -232,7 +226,6 @@ export const answerWords = (said: AnswerSaid): string =>
 export type RunQuestion = typeof RunQuestionSchema.Type
 export type RunQuestionContent = typeof RunQuestionContentSchema.Type
 export type RunQuestionList = typeof RunQuestionListSchema.Type
-export type RunQuestionListOptions = typeof RunQuestionListOptionsSchema.Type
 export type ResolveRunQuestionInput = typeof ResolveRunQuestionInputSchema.Type
 
 export const encodeResolveRunQuestionEffect = (

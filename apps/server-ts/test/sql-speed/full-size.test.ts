@@ -155,18 +155,27 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/sessions/:sessionId/queue": [`/sessions/${ids.chat}/queue`],
     "/chat/runs/status": ["/chat/runs/status"],
     "/chat/runs": [
-      "/chat/runs",
-      `/chat/runs${q({ session_id: ids.chat })}`,
-      `/chat/runs${q({ active: "true" })}`
+      `/chat/runs${q({ filter: "all", active: "false", limit: "500", page: "first" })}`,
+      `/chat/runs${q({ filter: "session", session_id: ids.chat, active: "false", limit: "500", page: "first" })}`,
+      `/chat/runs${q({ filter: "all", active: "true", limit: "500", page: "first" })}`
     ],
     "/chat/runs/:runId": [ids.chatRun, ids.forkRun, ids.agentRun].map((id) => `/chat/runs/${id}`),
     "/chat/runs/:runId/progress": [ids.chatRun, ids.forkRun].map(
       (id) => `/chat/runs/${id}/progress`
     ),
-    "/chat/runs/:runId/events": [`/chat/runs/${ids.chatRun}/events${q({ after_sequence: "0" })}`],
+    "/chat/runs/:runId/events": [
+      `/chat/runs/${ids.chatRun}/events${q({ after_sequence: "0", limit: "100" })}`
+    ],
     "/usage/limits": ["/usage/limits"],
-    "/usage": ["/usage", `/usage${q({ days: "30" })}`, `/usage${q({ days: "150" })}`],
-    "/usage/sessions/:sessionId": [`/usage/sessions/${ids.chat}`, `/usage/sessions/${ids.thread}`],
+    "/usage": [
+      `/usage${q({ days: "7" })}`,
+      `/usage${q({ days: "30" })}`,
+      `/usage${q({ days: "150" })}`
+    ],
+    "/usage/sessions/:sessionId": [
+      `/usage/sessions/${ids.chat}${q({ limit: "20" })}`,
+      `/usage/sessions/${ids.thread}${q({ limit: "20" })}`
+    ],
     "/scripts/:workflowRef": [`/scripts/${MISSING}${q({ session_id: ids.chat })}`],
     "/browser-procedures": ["/browser-procedures"],
     "/browser-procedures/:id": [`/browser-procedures/${MISSING}`],
@@ -203,12 +212,14 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/spaces/work/:itemId/history": [
       `/spaces/work/${ids.taskItem}/history${q({ after_version: "0", through: "head", limit: "50" })}`
     ],
-    "/spaces/work/:itemId/attempts": [`/spaces/work/${ids.taskItem}/attempts`],
+    "/spaces/work/:itemId/attempts": [
+      `/spaces/work/${ids.taskItem}/attempts${q({ limit: "25", page: "first" })}`
+    ],
     "/chat/questions": [
-      "/chat/questions",
-      `/chat/questions${q({ space_id: ids.space })}`,
-      `/chat/questions${q({ session_id: ids.chat })}`,
-      `/chat/questions${q({ state: "all" })}`
+      `/chat/questions${q({ filter: "all", state: "actionable", page: "first" })}`,
+      `/chat/questions${q({ filter: "space", space_id: ids.space, state: "actionable", page: "first" })}`,
+      `/chat/questions${q({ filter: "session", session_id: ids.chat, state: "actionable", page: "first" })}`,
+      `/chat/questions${q({ filter: "all", state: "all", page: "first" })}`
     ],
     "/spaces/work/attachments/:attachmentId": [`/spaces/work/attachments/1`],
     "/spaces/work/all": [

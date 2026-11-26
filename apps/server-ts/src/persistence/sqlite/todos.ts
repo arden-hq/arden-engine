@@ -234,7 +234,7 @@ export const makeTodoStore = ({
                     type: "todo_updated",
                     run_id: validRunId,
                     tool_call_id: validToolCallId,
-                    explanation: explanationText(input.explanation),
+                    explanation: input.explanation,
                     items
                   } satisfies ChatProjectionEvent
                 }

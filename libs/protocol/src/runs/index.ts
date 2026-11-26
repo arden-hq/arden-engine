@@ -8,8 +8,15 @@ import {
 } from "./home.js"
 export type { HomeLetter, HomeOffer } from "./home.js"
 import { decoderFor, runBoundary } from "../common/boundary.js"
-import { WorkerAttemptPageSchema, type WorkerAttemptPageOptions } from "./attempts.js"
-import type { RunEventPageOptions, SessionUsageOptions, UsageReportOptions } from "./contracts.js"
+import { WorkerAttemptPageSchema } from "./attempts.js"
+import type {
+  RunEventPageOptions,
+  RunListOptions,
+  RunQuestionListOptions,
+  SessionUsageOptions,
+  UsageReportOptions,
+  WorkerAttemptPageOptions
+} from "./list-options.js"
 import {
   PlanLimitsReportSchema,
   RunDetailSchema,
@@ -21,8 +28,7 @@ import {
 import {
   RunQuestionSchema,
   RunQuestionListSchema,
-  encodeResolveRunQuestionEffect,
-  type RunQuestionListOptions
+  encodeResolveRunQuestionEffect
 } from "./questions.js"
 import {
   encodeTaskAttemptsPathEffect,
@@ -30,6 +36,7 @@ import {
   encodeRunQuestionsPathEffect,
   encodeRunQuestionAnswerPathEffect,
   encodeRunEventPagePathEffect,
+  encodeRunListPathEffect,
   encodeSessionUsagePathEffect,
   encodeUsageReportPathEffect
 } from "./routes.js"
@@ -59,14 +66,14 @@ export const runDecoders = {
 
 export const runRoutes = {
   homePresence: "/home/presence",
-  taskAttempts(itemId: string, options: WorkerAttemptPageOptions = {}): string {
+  taskAttempts(itemId: string, options: WorkerAttemptPageOptions): string {
     return runBoundary(
       encodeTaskAttemptsPathEffect({ itemId, options }),
       "Invalid Task attempts route",
       "encode"
     )
   },
-  questions(options: RunQuestionListOptions = {}): string {
+  questions(options: RunQuestionListOptions): string {
     return runBoundary(encodeRunQuestionsPathEffect(options), "Invalid question route", "encode")
   },
   answerQuestion(questionId: string): string {
@@ -82,19 +89,21 @@ export const runRoutes = {
   detail(runId: string): string {
     return runBoundary(encodeRunDetailPathEffect(runId), "Invalid Run route", "encode")
   },
-  events(runId: string, options: RunEventPageOptions = {}): string {
+  events(runId: string, options: RunEventPageOptions): string {
     return runBoundary(
       encodeRunEventPagePathEffect({ runId, options }),
       "Invalid Run events route",
       "encode"
     )
   },
-  list: "/chat/runs",
+  list(options: RunListOptions): string {
+    return runBoundary(encodeRunListPathEffect(options), "Invalid Run list route", "encode")
+  },
   planLimits: "/usage/limits",
-  usage(options: UsageReportOptions = {}): string {
+  usage(options: UsageReportOptions): string {
     return runBoundary(encodeUsageReportPathEffect({ options }), "Invalid usage route", "encode")
   },
-  sessionUsage(sessionId: string, options: SessionUsageOptions = {}): string {
+  sessionUsage(sessionId: string, options: SessionUsageOptions): string {
     return runBoundary(
       encodeSessionUsagePathEffect({ sessionId, options }),
       "Invalid chat usage route",

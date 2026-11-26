@@ -3,6 +3,23 @@ import { expect, it } from "vitest"
 import { ProtocolError } from "@arden-hq/protocol"
 import { runDecoders } from "@arden-hq/protocol/runs"
 
+const terminalResult = {
+  text: "The answer",
+  data: { verdict: "supported" },
+  usage: {
+    prompt: 10,
+    completion: 4,
+    total: 14,
+    cache_read: 0,
+    cache_write: 0,
+    cost: { kind: "reported", usd: 0.01 }
+  },
+  duration_ms: 2000,
+  tool_time_ms: 250,
+  steps: 2,
+  context: { kind: "measured", input_tokens: 10 }
+} as const
+
 const completedRun = {
   version: 1,
   run_id: "run/alpha",
@@ -12,36 +29,22 @@ const completedRun = {
   started_at: "2026-08-30T10:00:00Z",
   updated_at: "2026-08-30T10:00:02Z",
   ended_at: "2026-08-30T10:00:02Z",
-  stop_reason: "end_turn",
-  last_event_sequence: 5,
-  model_id: "fixture-model",
-  reasoning_effort: null,
-  client_id: "client-alpha",
-  result: {
-    text: "The answer",
-    data: { verdict: "supported" },
-    usage: {
-      prompt: 10,
-      completion: 4,
-      total: 14,
-      cache_read: 0,
-      cache_write: 0
-    },
-    cost: 0.01,
-    duration_ms: 2000,
-    tool_time_ms: 250,
-    steps: 2,
-    last_input_tokens: 10
-  },
-  error: null,
-  late_result_at: null
+  stop_reason: { kind: "stated", reason: "end_turn" },
+  events: { kind: "through", sequence: 5 },
+  model: { kind: "model", model_id: "fixture-model" },
+  reasoning: { kind: "default" },
+  client: { kind: "client", client_id: "client-alpha" },
+  local_instructions: [],
+  memory_context: [],
+  result: { kind: "on_time", result: terminalResult },
+  failure: { kind: "none" }
 } as const
 
 it("decodes an ordered durable Run event page", () => {
   const page = {
     run_id: "run/alpha",
     session_id: "session/alpha",
-    trace_removed_at: null,
+    trace: { kind: "kept" },
     events: [
       {
         sequence: 1,
@@ -50,7 +53,8 @@ it("decodes an ordered durable Run event page", () => {
           type: "RUN_STARTED",
           run_id: "run/alpha",
           session_id: "session/alpha",
-          turn_id: "turn/alpha"
+          turn_id: "turn/alpha",
+          causes: []
         }
       },
       {
@@ -60,7 +64,10 @@ it("decodes an ordered durable Run event page", () => {
           type: "RUN_FINISHED",
           run_id: "run/alpha",
           session_id: "session/alpha",
-          turn_id: "turn/alpha"
+          turn_id: "turn/alpha",
+          usage: { kind: "unmetered" },
+          context: { kind: "unmeasured" },
+          message_count: 0
         }
       }
     ],
@@ -87,29 +94,45 @@ it("decodes an ordered durable Run event page", () => {
 })
 
 it("exposes late outcomes without reviving cancelled Runs", () => {
-  const late = { ...completedRun, status: "cancelled", late_result_at: "2026-08-30T10:00:03Z" }
+  const late = {
+    ...completedRun,
+    status: "cancelled",
+    result: { kind: "late", result: terminalResult, at: "2026-08-30T10:00:03Z" }
+  }
   expect(runDecoders.detail(late).status).toBe("cancelled")
-  expect(() => runDecoders.detail({ ...late, late_result_at: null })).toThrow(ProtocolError)
-  expect(() => runDecoders.detail({ ...late, result: null })).toThrow(ProtocolError)
+  expect(() =>
+    runDecoders.detail({ ...late, result: { kind: "on_time", result: terminalResult } })
+  ).toThrow(ProtocolError)
+  expect(() =>
+    runDecoders.detail({ ...completedRun, status: "running", ended_at: undefined })
+  ).not.toThrow()
+  expect(() =>
+    runDecoders.detail({ ...completedRun, status: "error", failure: { kind: "none" } })
+  ).toThrow(ProtocolError)
 })
 
-it("tells a reported cost from an unknown one in a Run's result", () => {
-  const reported = {
+it("tells a reported cost from an unreported one in a Run's result", () => {
+  const unpriced = {
     ...completedRun,
     result: {
-      ...completedRun.result,
-      usage: { ...completedRun.result.usage, cost: 0.0004 },
-      cost: 0.0004
+      kind: "on_time",
+      result: {
+        ...terminalResult,
+        usage: { ...terminalResult.usage, cost: { kind: "unreported" } }
+      }
     }
   }
-  expect(runDecoders.detail(reported).result).toEqual(reported.result)
-  const { cost: _cost, ...unknown } = completedRun.result
-  const unpriced = { ...completedRun, result: unknown }
-  expect(runDecoders.detail(unpriced).result).toEqual(unknown)
+  expect(runDecoders.detail(unpriced)).toEqual(unpriced)
   expect(() =>
     runDecoders.detail({
       ...completedRun,
-      result: { ...completedRun.result, usage: { ...completedRun.result.usage, cost: -1 } }
+      result: {
+        kind: "on_time",
+        result: {
+          ...terminalResult,
+          usage: { ...terminalResult.usage, cost: { kind: "reported", usd: -1 } }
+        }
+      }
     })
   ).toThrow(ProtocolError)
 })

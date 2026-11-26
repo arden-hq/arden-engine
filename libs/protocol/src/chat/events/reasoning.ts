@@ -1,14 +1,20 @@
 import { Schema } from "effect"
-import { event, optionalString } from "../../common/schema.js"
+import { event } from "../../common/schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { CommonServerEventFields } from "../../common/event-fields.js"
-import { StreamRecordSchema, type StreamRecord } from "./text.js"
+import {
+  ContentStartSchema,
+  MessageClosureSchema,
+  StreamRecordSchema,
+  type ContentStart,
+  type MessageClosure,
+  type StreamRecord
+} from "./text.js"
 
 export interface ReasoningMessageStartEvent extends CommonServerEventFields {
   readonly type: "REASONING_MESSAGE_START"
   readonly message_id: string
   readonly record: StreamRecord
-  readonly role?: string
 }
 
 /**
@@ -25,10 +31,8 @@ export interface ReasoningMessageContentEvent extends CommonServerEventFields {
 export interface ReasoningMessageEndEvent extends CommonServerEventFields {
   readonly type: "REASONING_MESSAGE_END"
   readonly message_id: string
-  /** Authoritative restatement of the accumulated reasoning deltas; absent on
-   * abnormal closure and in journals older than this field. */
-  readonly content?: string
-  readonly content_start_seq?: number
+  readonly closure: MessageClosure
+  readonly content_start: ContentStart
 }
 
 /** Reasoning text: one reasoning message streamed as start, content deltas, end. */
@@ -39,8 +43,7 @@ export type ReasoningStreamEvent =
 
 export const ReasoningMessageStartEventSchema = event("REASONING_MESSAGE_START", {
   message_id: Schema.String,
-  record: StreamRecordSchema,
-  role: optionalString
+  record: StreamRecordSchema
 })
 
 export const ReasoningMessageContentEventSchema = event("REASONING_MESSAGE_CONTENT", {
@@ -50,12 +53,8 @@ export const ReasoningMessageContentEventSchema = event("REASONING_MESSAGE_CONTE
 
 export const ReasoningMessageEndEventSchema = event("REASONING_MESSAGE_END", {
   message_id: Schema.String,
-  // Present on every normal completion so the reasoning deltas have a
-  // restating terminal and can be pruned from live retention; absent on
-  // abnormal closure and in journals older than this field, where the
-  // accumulated stream stands.
-  content: optionalString,
-  content_start_seq: Schema.optionalKey(Schema.Int)
+  closure: MessageClosureSchema,
+  content_start: ContentStartSchema
 })
 
 export const reasoningStreamEventSchemas = [

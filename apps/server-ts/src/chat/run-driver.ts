@@ -1,10 +1,10 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { ContextExperiments } from "../context/experiments.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
-import type { ChatApprovalMode, ChatRunErrorCode } from "@arden-hq/protocol/chat"
+import { contextSize, type ChatApprovalMode, type ChatRunErrorCode } from "@arden-hq/protocol/chat"
 import type { JsonObject } from "../persistence/json.js"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import type { RunTerminalResult, RunUsage } from "@arden-hq/protocol/runs"
+import type { StoredRunTerminalResult, StoredRunUsage } from "../persistence/runs/stored-result.js"
 import { addCost, decodeMessage, providerErrorCode } from "@arden-hq/loop"
 import type { AgentEvent, Result as LoopResult } from "@arden-hq/loop"
 import { Cause, Effect, Result, Schema, Stream } from "effect"
@@ -124,7 +124,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
   const services = yield* Effect.context<never>()
   const runPromise = Effect.runPromiseWith(services)
   const tools = yield* makeDurableTools(host, input)
-  let observedResult: RunTerminalResult | undefined
+  let observedResult: StoredRunTerminalResult | undefined
   let quotaPause: ModelAdmission | undefined
   let purpose: RunPurposeObserver | undefined
   const work = Effect.gen(function* () {
@@ -297,7 +297,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
                                               session_id: input.sessionId,
                                               scope: "run",
                                               usage: context.usage,
-                                              context_input_tokens: context.inputTokens,
+                                              context: contextSize(context.inputTokens),
                                               message_count: projected.count
                                             } satisfies ChatProjectionEvent,
                                             runId: input.runId
@@ -429,7 +429,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
       tool_time_ms: totals.toolTimeMs,
       steps: totals.steps,
       last_input_tokens: result.last_input_tokens
-    } satisfies RunTerminalResult
+    } satisfies StoredRunTerminalResult
     observedResult = terminalResult
     yield* appendEventBatches(host, input, mapper.finalText(terminalTextId, result.text))
     const terminal = yield* whileRunActive(
@@ -630,7 +630,7 @@ const accumulateRunTotals = (previous: RunTotals | undefined, result: LoopResult
   steps: (previous?.steps ?? 0) + result.steps
 })
 
-const runTotalsUsage = (totals: RunTotals): RunUsage => ({
+const runTotalsUsage = (totals: RunTotals): StoredRunUsage => ({
   prompt: totals.prompt,
   completion: totals.completion,
   total: totals.prompt + totals.completion + totals.cacheRead + totals.cacheWrite,

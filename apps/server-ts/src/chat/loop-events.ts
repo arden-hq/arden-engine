@@ -1,3 +1,4 @@
+import { messageEnd } from "@arden-hq/protocol/chat"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { AgentEvent, StopReason } from "@arden-hq/loop"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
@@ -185,7 +186,7 @@ export const makeLoopEventMapper = (
             {
               type: "TEXT_MESSAGE_END",
               message_id: messageId,
-              content: event.content
+              ...messageEnd(event.content)
             }
           ]
         ]
@@ -237,7 +238,7 @@ export const makeLoopEventMapper = (
             {
               type: "REASONING_MESSAGE_END",
               message_id: event.message_id,
-              ...(content === undefined ? {} : { content })
+              ...messageEnd(content)
             }
           ]
         ]
@@ -381,7 +382,7 @@ export const makeLoopEventMapper = (
           [
             { type: "model_response_reset", message_ids: turnIds, tool_call_ids: [] },
             ...(start === null ? [] : [start]),
-            { type: "TEXT_MESSAGE_END", message_id: messageId, content }
+            { type: "TEXT_MESSAGE_END", message_id: messageId, ...messageEnd(content) }
           ]
         ]
       }
@@ -394,7 +395,7 @@ export const makeLoopEventMapper = (
       return [
         [
           ...(start === null ? [] : [start]),
-          { type: "TEXT_MESSAGE_END", message_id: targetId, content }
+          { type: "TEXT_MESSAGE_END", message_id: targetId, ...messageEnd(content) }
         ]
       ]
     },

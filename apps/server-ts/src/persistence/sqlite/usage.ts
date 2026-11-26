@@ -10,6 +10,7 @@ import { DateTime, Effect, Option } from "effect"
 import { UsageStore, UsageStoreError, type StoredSessionUsage } from "../usage/store.js"
 import { backgroundUsage } from "./usage-background.js"
 import { DAILY_COST_SUM } from "./run-usage.js"
+import { providerCost } from "../runs/stored-result.js"
 import type { PersistenceDeps } from "./deps.js"
 
 const error = (
@@ -102,7 +103,7 @@ const callUsage = (row: ModelCallRow): RunUsage | null =>
         cache_read: row.cache_read,
         cache_write: row.cache_write,
         total: row.total,
-        ...withCost(row.cost)
+        cost: providerCost(row.cost ?? undefined)
       }
 
 /** A reported cost read back from SQLite, where NULL is unknown; absent from the answer then. */

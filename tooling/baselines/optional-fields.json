@@ -1,11 +1,6 @@
 {
   "libs/protocol/src/chat/approval-presentation.ts": 31,
   "libs/protocol/src/chat/contracts.ts": 28,
-  "libs/protocol/src/chat/events/approval.ts": 27,
-  "libs/protocol/src/chat/events/reasoning.ts": 4,
-  "libs/protocol/src/chat/events/run.ts": 47,
-  "libs/protocol/src/chat/events/session.ts": 4,
-  "libs/protocol/src/chat/events/text.ts": 4,
   "libs/protocol/src/chat/events/tool.ts": 50,
   "libs/protocol/src/chat/facade-schema.ts": 26,
   "libs/protocol/src/chat/history.ts": 50,
@@ -14,11 +9,11 @@
   "libs/protocol/src/common/schema.ts": 11,
   "libs/protocol/src/runs/approval-schema.ts": 12,
   "libs/protocol/src/runs/approvals.ts": 3,
-  "libs/protocol/src/runs/attempts.ts": 10,
+  "libs/protocol/src/runs/attempts.ts": 5,
   "libs/protocol/src/runs/context.ts": 2,
-  "libs/protocol/src/runs/contracts.ts": 13,
+  "libs/protocol/src/runs/contracts.ts": 5,
   "libs/protocol/src/runs/home.ts": 17,
   "libs/protocol/src/runs/progress.ts": 3,
-  "libs/protocol/src/runs/questions.ts": 20,
-  "libs/protocol/src/runs/schema.ts": 58
+  "libs/protocol/src/runs/questions.ts": 14,
+  "libs/protocol/src/runs/schema.ts": 33
 }

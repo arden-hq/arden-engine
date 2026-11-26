@@ -63,7 +63,7 @@ const run = async (sources: MemoryTurn["sources"] | undefined, reader: RunMemory
         }),
         summaries: partialService("SummaryStore", { chats: () => Effect.succeed(new Map()) }),
         work: partialService("WorkStore", {
-          questions: () => Effect.succeed({ questions: [], next_cursor: null })
+          questions: () => Effect.succeed({ questions: [], next: { kind: "end" as const } })
         }),
         chat: {
           recordMemoryContext: (input) => Effect.sync(() => void records.push(input.context))

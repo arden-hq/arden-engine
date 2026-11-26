@@ -1,11 +1,7 @@
 import { storeErrorFields } from "../errors.js"
-import type {
-  ModelCallKind,
-  RunTerminalResult,
-  SessionRunRecord,
-  UsageReport
-} from "@arden-hq/protocol/runs"
+import type { ModelCallKind, SessionRunRecord, UsageReport } from "@arden-hq/protocol/runs"
 import { Context, Effect, Schema } from "effect"
+import type { StoredRunUsage } from "../runs/stored-result.js"
 
 export class UsageStoreError extends Schema.TaggedError<UsageStoreError>()("UsageStoreError", {
   ...storeErrorFields({
@@ -24,7 +20,7 @@ export interface ModelCallUsage {
   readonly owner: UsageOwner
 }
 
-export type UsageTokens = RunTerminalResult["usage"]
+export type UsageTokens = StoredRunUsage
 
 export interface StoredSessionUsage {
   readonly session_id: string

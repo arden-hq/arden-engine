@@ -434,7 +434,10 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
+        await emit(options, {
+          ...card,
+          data: { ...card.data, asked: { kind: "recorded", at: ASKED_AT } }
+        })
         await emit(options, approvalNeeded("tool-2"))
         return completedRun()
       },
@@ -733,8 +736,14 @@ describe("approvals with no one at the terminal", () => {
       client: {
         ...approvalClient(answers),
         wait: async (_run, options) => {
-          await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
-          await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
+          await emit(options, {
+            ...card,
+            data: { ...card.data, asked: { kind: "recorded", at: ASKED_AT } }
+          })
+          await emit(options, {
+            ...card,
+            data: { ...card.data, asked: { kind: "recorded", at: ASKED_AT } }
+          })
           await emit(options, approvalNeeded("tool-9", "run-other"))
           return completedRun()
         }

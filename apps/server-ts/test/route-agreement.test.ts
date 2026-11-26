@@ -167,14 +167,26 @@ const tables: Readonly<Record<string, RouteTable>> = {
     device: () => relayRoutes.device("abcdefghijklmnopqrstuv")
   }),
   runRoutes: table(runRoutes, {
-    taskAttempts: () => runRoutes.taskAttempts(itemId),
-    questions: () => runRoutes.questions(),
+    taskAttempts: () => runRoutes.taskAttempts(itemId, { limit: 25, page: { kind: "first" } }),
+    questions: () =>
+      runRoutes.questions({
+        filter: { kind: "all" },
+        state: "actionable",
+        page: { kind: "first" }
+      }),
     answerQuestion: () => runRoutes.answerQuestion("question-1"),
     progress: () => runRoutes.progress("run-1"),
     detail: () => runRoutes.detail("run-1"),
-    events: () => runRoutes.events("run-1"),
-    usage: () => runRoutes.usage(),
-    sessionUsage: () => runRoutes.sessionUsage(sessionId)
+    events: () => runRoutes.events("run-1", { afterSequence: 0, limit: 100 }),
+    list: () =>
+      runRoutes.list({
+        filter: { kind: "all" },
+        active: false,
+        limit: 500,
+        page: { kind: "first" }
+      }),
+    usage: () => runRoutes.usage({ days: 7 }),
+    sessionUsage: () => runRoutes.sessionUsage(sessionId, { limit: 20 })
   }),
   sessionRoutes: table(sessionRoutes, {
     list: () =>

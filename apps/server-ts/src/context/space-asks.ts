@@ -1,3 +1,4 @@
+import { RUN_PAGE, RUN_QUESTION_FILTER, RUN_QUESTION_STATE } from "@arden-hq/protocol/runs"
 import { answerSaid, answerWords, type RunQuestion } from "@arden-hq/protocol/runs"
 import { clipLine } from "@arden-hq/std/text"
 import { DateTime, Effect } from "effect"
@@ -18,7 +19,11 @@ export const spaceAsksContext = Effect.fn("Context.spaceAsks")(
   }) {
     if (input.spaceId === undefined) return undefined
     const since = DateTime.toEpochMillis(yield* DateTime.now) - ASKED_WITHIN_MS
-    const { questions } = yield* input.work.questions({ space_id: input.spaceId, state: "all" })
+    const { questions } = yield* input.work.questions({
+      filter: { kind: RUN_QUESTION_FILTER.space, space_id: input.spaceId },
+      state: RUN_QUESTION_STATE.all,
+      page: { kind: RUN_PAGE.first }
+    })
     const lines = questions
       .filter((question) => question.permission_offer === null && question.focus_choice === null)
       .flatMap((question) => askedLine(question, since, input.includeOpen))

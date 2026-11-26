@@ -1,8 +1,12 @@
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import { sanitizeApprovalPresentation, type ApprovalPresentation } from "@arden-hq/protocol/chat"
+import {
+  APPROVAL_ASKED,
+  APPROVAL_ASKER,
+  sanitizeApprovalPresentation,
+  type ApprovalPresentation
+} from "@arden-hq/protocol/chat"
 import { ApprovalPresentationSchema } from "@arden-hq/protocol/effect/chat"
 import { Effect, Schema } from "effect"
-import type { RuleSavedIn } from "@arden-hq/protocol/runs"
 import { SqlClient } from "effect/unstable/sql"
 import { ChatEventStore } from "../events/store.js"
 import {
@@ -20,7 +24,7 @@ import {
   type ToolExecutionIdentity
 } from "../tools/store.js"
 import { spaceFolderGrantOf } from "../permissions/space-folder-approval.js"
-import { grantFolderField } from "../permissions/grant-folder.js"
+import { grantFolderOf } from "../permissions/grant-folder.js"
 import { decodeJson, encodeJson } from "./json.js"
 import type { ApprovalPermissionContext } from "./permissions.js"
 import { toldKey, UnitOfWork } from "../unit-of-work.js"
@@ -36,7 +40,7 @@ import {
 } from "./tool-rows.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { loadPendingDecisionRoutes, type DecisionRouteRef } from "./decision-route-journal.js"
-import { workOf } from "./run-approvals.js"
+import { approvalCard, approvalDiff, approvalPreview, workOf } from "./run-approvals.js"
 import { resumeToolCoordinator } from "./tool-coordinator.js"
 import { detachedWorkflowCalls } from "./detached-workflow-calls.js"
 
@@ -139,11 +143,6 @@ const approvalGrantPayload = (input: PendingToolApprovalInput): JsonObject => {
   }
 }
 
-const approvalGrantEvent = (
-  input: PendingToolApprovalInput
-): { readonly rule_places?: ReadonlyArray<RuleSavedIn> } =>
-  input.permissionContext === undefined ? {} : { rule_places: input.permissionContext.places }
-
 export const approvalPayload = (input: PendingToolApprovalInput): JsonObject => ({
   ...(input.description === null ? {} : { description: input.description }),
   ...(input.presentation === undefined
@@ -162,11 +161,11 @@ const approvalNeededDraft = (
   event: {
     type: "approval_needed",
     tool_id: input.toolCallId,
-    asked_at: askedAt,
+    asked: { kind: APPROVAL_ASKED.recorded, at: askedAt },
     name: input.toolName,
-    content_preview: input.preview,
-    ...(input.diff === undefined ? {} : { diff: input.diff }),
-    ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+    preview: approvalPreview(input.preview),
+    diff: approvalDiff(input.diff ?? null),
+    card: approvalCard(input.presentation),
     run_id: input.runId,
     session_id: input.sessionId,
     decision_route: {
@@ -175,10 +174,10 @@ const approvalNeededDraft = (
       basis: "source_v1"
     },
     action: input.action,
-    scope: input.scope,
-    ...(canAttachFolderToSpace(input) ? { can_attach_folder_to_space: true } : {}),
-    ...grantFolderField(input.toolName, input.data),
-    ...approvalGrantEvent(input)
+    rule_places: input.permissionContext?.places ?? [],
+    can_attach_folder_to_space: canAttachFolderToSpace(input),
+    grant_folder: grantFolderOf(input.toolName, input.data),
+    asker: { kind: APPROVAL_ASKER.chat }
   } satisfies ChatProjectionEvent,
   runId: input.runId
 })
@@ -205,14 +204,11 @@ export const pendingDecisionDraft = Effect.fn("SqliteToolExecutionStore.pendingD
         )
       )
       return {
-        event: {
-          ...connectionNeededEvent(pendingConnectionDecision(input, data, sourceKind)),
-          decision_route: {
-            source_kind: sourceKind,
-            source_session_id: input.sessionId,
-            basis: "source_v1"
-          }
-        },
+        event: connectionNeededEvent(pendingConnectionDecision(input, data, sourceKind), {
+          source_kind: sourceKind,
+          source_session_id: input.sessionId,
+          basis: "source_v1"
+        }),
         runId: input.runId
       }
     }
@@ -539,7 +535,7 @@ export const appendEscalatedApprovalDraft = Effect.fn(
                 },
                 ...(work === null || recipient.viewer_session_id === sourceSessionId
                   ? {}
-                  : { work })
+                  : { asker: { kind: APPROVAL_ASKER.work, work } })
               },
               admission: "detached"
             }

@@ -1,5 +1,7 @@
-import type { RunTerminalResult } from "@arden-hq/protocol/runs"
-import { RunUsageSchema } from "@arden-hq/protocol/effect/runs"
+import {
+  StoredRunUsageSchema as RunUsageSchema,
+  type StoredRunUsage
+} from "../runs/stored-result.js"
 import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { ChatWriteError } from "../chat/store.js"
@@ -7,7 +9,7 @@ import { decodeJson } from "./json.js"
 import type { JsonColumnError } from "./json.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 
-type Usage = RunTerminalResult["usage"]
+type Usage = StoredRunUsage
 const empty: Usage = { prompt: 0, completion: 0, total: 0, cache_read: 0, cache_write: 0 }
 
 /**

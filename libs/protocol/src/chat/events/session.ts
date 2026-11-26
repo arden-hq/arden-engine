@@ -1,10 +1,8 @@
 import { Schema } from "effect"
 import {
-  IsoDateTimeStringSchema,
   SessionFocusSchema,
   TodoListItemSchema,
   event,
-  optionalNullableString,
   sessionEvent,
   NonNegativeIntSchema
 } from "../../common/schema.js"
@@ -17,8 +15,6 @@ export interface MessageIngestedEvent extends CommonServerEventFields {
   readonly type: "message_ingested"
   readonly client_id: string
   readonly run_id: string
-  /** When the run took the message in — for a steer, where its phase starts. */
-  readonly applied_at?: string
 }
 
 export interface TranscriptChangedEvent extends CommonServerEventFields {
@@ -57,10 +53,16 @@ export interface FocusClearedEvent extends CommonServerEventFields {
 export interface TodoUpdatedEvent extends CommonServerEventFields {
   readonly type: "todo_updated"
   readonly run_id: string
-  readonly tool_call_id?: string | null
-  readonly explanation?: string | null
+  readonly tool_call_id: string
+  readonly explanation: TodoExplanation
   readonly items: ReadonlyArray<TodoListItem>
 }
+
+export const TODO_EXPLANATION = { none: "none", given: "given" } as const
+
+export type TodoExplanation =
+  | { readonly kind: typeof TODO_EXPLANATION.none }
+  | { readonly kind: typeof TODO_EXPLANATION.given; readonly text: string }
 
 /** Session state that changes under a run: ingested input, transcript, compaction, focus, todo. */
 export type SessionStateEvent =
@@ -74,9 +76,7 @@ export type SessionStateEvent =
 
 export const MessageIngestedEventSchema = event("message_ingested", {
   client_id: Schema.String,
-  run_id: Schema.String,
-  /** When the run took the message in — for a steer, where its phase starts. */
-  applied_at: Schema.optionalKey(IsoDateTimeStringSchema)
+  run_id: Schema.String
 })
 
 export const TranscriptChangedEventSchema = event("transcript_changed", {})
@@ -119,8 +119,11 @@ export const FocusClearedEventSchema = sessionEvent("focus_cleared", Schema.Stri
 
 export const TodoUpdatedEventSchema = event("todo_updated", {
   run_id: Schema.String,
-  tool_call_id: optionalNullableString,
-  explanation: optionalNullableString,
+  tool_call_id: Schema.String,
+  explanation: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(TODO_EXPLANATION.none) }),
+    Schema.Struct({ kind: Schema.Literal(TODO_EXPLANATION.given), text: Schema.String })
+  ]),
   items: Schema.Array(TodoListItemSchema)
 })
 

@@ -1,5 +1,6 @@
 import { isPublicActivityTool } from "../views/tool-words.js"
 import type { ChatProjectionEvent } from "./events/stream.js"
+import { RUN_ACTIVITY_TARGET } from "./events/run.js"
 import type { JsonRecord } from "../common/json.js"
 
 export interface RunActivity extends JsonRecord {
@@ -40,15 +41,16 @@ export const reduceRunActivity = (
   if (current === undefined || record.sequence <= current.sequence || record.fromOtherRun)
     return current
   if (event.type === "run_activity") {
+    const target = event.target
     return event.run_id === current.runId
       ? {
           ...current,
           sequence: record.sequence,
-          ...(event.tool_call_ids === undefined
+          ...(target.kind === RUN_ACTIVITY_TARGET.run
             ? { purpose: event.description }
             : {
                 operations: current.operations.map((operation) =>
-                  event.tool_call_ids?.includes(operation.id)
+                  target.tool_call_ids.includes(operation.id)
                     ? { ...operation, text: event.description }
                     : operation
                 )

@@ -5,6 +5,7 @@ import {
   PositiveIntSchema
 } from "../common/schema.js"
 import { RunContextSchema } from "./context.js"
+import { RunAttemptPageNextSchema } from "./list-options.js"
 
 /** A worker attempt, including historical attempts whose execution has been retained. */
 export const WorkerAttemptSchema = Schema.Struct({
@@ -21,28 +22,8 @@ export const WorkerAttemptSchema = Schema.Struct({
 
 export const WorkerAttemptPageSchema = Schema.Struct({
   attempts: Schema.Array(WorkerAttemptSchema),
-  next_cursor: Schema.NullOr(PositiveIntSchema)
-})
-
-export const WorkerAttemptPageOptionsSchema = Schema.Struct({
-  cursor: Schema.optionalKey(PositiveIntSchema),
-  limit: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(100)))
-})
-
-/** Query of `GET /spaces/work/:itemId/attempts`. */
-export const WorkerAttemptPageQuerySchema = Schema.Struct({
-  cursor: Schema.optionalKey(
-    Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
-  ),
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(100)
-    )
-  )
+  next: RunAttemptPageNextSchema
 })
 
 export type WorkerAttempt = typeof WorkerAttemptSchema.Type
 export type WorkerAttemptPage = typeof WorkerAttemptPageSchema.Type
-export type WorkerAttemptPageOptions = typeof WorkerAttemptPageOptionsSchema.Type

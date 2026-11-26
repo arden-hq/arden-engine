@@ -26,7 +26,8 @@ const started = (sessionId: string) => ({
     type: "RUN_STARTED",
     run_id: runId,
     session_id: sessionId,
-    turn_id: "open-turn"
+    turn_id: "open-turn",
+    causes: []
   } satisfies ChatProjectionEvent,
   runId
 })
@@ -53,7 +54,10 @@ const finished = {
   event: {
     type: "RUN_FINISHED",
     run_id: runId,
-    turn_id: "open-turn"
+    turn_id: "open-turn",
+    usage: { kind: "unmetered" },
+    context: { kind: "unmeasured" },
+    message_count: 0
   } satisfies ChatProjectionEvent,
   runId
 }

@@ -1,13 +1,13 @@
 import { abortAfter } from "@arden-hq/std/timer"
 import { latestChats, oneSession } from "./session-list.js"
 import { newChat, wholeFork } from "./session-requests.js"
+import { receiptFromRun, type ReceiptResult, type ReceiptRun } from "./run-receipt-detail.js"
 import { nameText, runIsActive, spaceIdOf } from "@arden-hq/protocol/sessions"
 import {
   HeadlessHttpError,
   HeadlessTimeoutError,
   type HeadlessRunEvent,
   type RunDetail,
-  type RunTerminalResult,
   type SubmittedRun
 } from "@arden-hq/headless"
 import {
@@ -88,12 +88,12 @@ export interface CommandReceiptV1 {
   readonly client_id: string | null
   readonly run_status: RunDetail["status"] | null
   /** The model the Run ran on, as the server names it (llama.cpp, OpenRouter: the server's own id). */
-  readonly model_id: RunDetail["model_id"]
-  readonly reasoning_effort: RunDetail["reasoning_effort"]
+  readonly model_id: ReceiptRun["model_id"]
+  readonly reasoning_effort: ReceiptRun["reasoning_effort"]
   /** The server's terminal result as it sent it. Its `cost` is the dollars the
    *  provider reported for the Run's model requests, absent when it reported
    *  none (llama.cpp, Codex): never an estimate (see the CLI README). */
-  readonly result: RunTerminalResult | null
+  readonly result: ReceiptResult | null
   readonly error: CommandReceiptError | null
   readonly declined: ReadonlyArray<DeclinedRequest>
 }
@@ -156,45 +156,6 @@ export const invalidInputReceipt = (
   command: CommandReceiptV1["command"],
   message: string
 ): CommandReceiptV1 => failedReceipt(command, { code: "invalid_input", message }, { exitCode: 2 })
-
-const receiptFromRun = (
-  command: CommandReceiptV1["command"],
-  detail: RunDetail,
-  declined: ReadonlyArray<DeclinedRequest>
-): CommandReceiptV1 => {
-  const base = {
-    version: 1,
-    type: "command_receipt",
-    command,
-    run_id: detail.run_id,
-    session_id: detail.session_id,
-    client_id: detail.client_id,
-    run_status: detail.status,
-    model_id: detail.model_id,
-    reasoning_effort: detail.reasoning_effort,
-    declined
-  } as const
-  if (detail.status === "completed" && detail.result !== null) {
-    return { ...base, status: "completed", exit_code: 0, result: detail.result, error: null }
-  }
-
-  const error = detail.error ?? {
-    code: detail.status === "completed" ? "missing_result" : detail.status,
-    message:
-      detail.stop_reason ??
-      (detail.status === "completed"
-        ? "Completed Run has no terminal result"
-        : `Run ended with status ${detail.status}`)
-  }
-  return {
-    ...base,
-    status:
-      detail.status === "cancelled" || detail.status === "interrupted" ? detail.status : "failed",
-    exit_code: 1,
-    result: null,
-    error
-  }
-}
 
 const progressWriter = (
   dependencies: CliDependencies,

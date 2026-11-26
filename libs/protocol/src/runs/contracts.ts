@@ -6,17 +6,46 @@ import type { JsonRecord, JsonValue } from "../common/json.js"
 import type { RuntimeRunStatus } from "../chat/runtime.js"
 import type { AutomationRunOutcome } from "../automations/outcome.js"
 import type { ModelCallKind } from "./usage.js"
+import type { ContextSize } from "../chat/events/run.js"
+import type { ActiveRunStatus, TerminalRunStatus } from "./status.js"
 export type { HomeEvidence } from "./home.js"
 
 export type { RunApprovalWork, RunOrigin, RunTaskBinding, RunContext } from "./context.js"
-export type { WorkerAttempt, WorkerAttemptPage, WorkerAttemptPageOptions } from "./attempts.js"
+export type { WorkerAttempt, WorkerAttemptPage } from "./attempts.js"
 export type {
   RunQuestion,
   RunQuestionContent,
   RunQuestionList,
-  RunQuestionListOptions,
   ResolveRunQuestionInput
 } from "./questions.js"
+export {
+  RUN_LIST_FILTER,
+  RUN_LIST_PAGE_MAX,
+  RUN_PAGE,
+  RUN_PAGE_NEXT,
+  RUN_QUESTION_FILTER,
+  RUN_QUESTION_STATE,
+  WORKER_ATTEMPT_PAGE_MAX
+} from "./list-options.js"
+export type {
+  RunEventPageOptions,
+  RunListFilter,
+  RunListOptions,
+  RunPage,
+  RunPageNext,
+  RunQuestionFilter,
+  RunQuestionListOptions,
+  RunQuestionState,
+  SessionUsageOptions,
+  UsageReportOptions,
+  WorkerAttemptPageOptions
+} from "./list-options.js"
+
+export const PROVIDER_COST = { unreported: "unreported", reported: "reported" } as const
+
+export type ProviderCost =
+  | { readonly kind: typeof PROVIDER_COST.unreported }
+  | { readonly kind: typeof PROVIDER_COST.reported; readonly usd: number }
 
 export interface RunUsage extends JsonRecord {
   readonly prompt: number
@@ -24,29 +53,17 @@ export interface RunUsage extends JsonRecord {
   readonly total: number
   readonly cache_read: number
   readonly cache_write: number
-  /**
-   * US dollars, as the model provider reported them for every request counted
-   * (OpenRouter does; llama.cpp and Codex report none). Absent when any of
-   * them reported none: a cost is never estimated, and 0 means a reported 0.
-   */
-  readonly cost?: number
+  readonly cost: ProviderCost
 }
 
-/** Final model output and bounded execution metrics persisted with a completed Run. */
 export interface RunTerminalResult extends JsonRecord {
   readonly text: string
   readonly data: JsonValue
   readonly usage: RunUsage
-  /**
-   * The Run's own model requests' cost, the same as `usage.cost`: absent when
-   * a provider reported none. Side jobs (a chat name, a compaction summary)
-   * are counted in the usage report, not here.
-   */
-  readonly cost?: number
   readonly duration_ms: number
   readonly tool_time_ms: number
   readonly steps: number
-  readonly last_input_tokens: number | null
+  readonly context: ContextSize
 }
 
 export interface RunError extends JsonRecord {
@@ -54,13 +71,31 @@ export interface RunError extends JsonRecord {
   readonly message: string
 }
 
-export interface RunLocalInstructionSource extends JsonRecord {
+export const LOCAL_INSTRUCTION_STATUS = {
+  loaded: "loaded",
+  truncated: "truncated",
+  empty: "empty",
+  unreadable: "unreadable"
+} as const
+
+interface RunLocalInstructionPlace extends JsonRecord {
   readonly root: string
   readonly path: string
   readonly scope: string
-  readonly status: "loaded" | "empty" | "unreadable" | "truncated"
-  readonly digest: string | null
 }
+
+export type RunLocalInstructionSource =
+  | (RunLocalInstructionPlace & {
+      readonly status:
+        | typeof LOCAL_INSTRUCTION_STATUS.loaded
+        | typeof LOCAL_INSTRUCTION_STATUS.truncated
+      readonly digest: string
+    })
+  | (RunLocalInstructionPlace & {
+      readonly status:
+        | typeof LOCAL_INSTRUCTION_STATUS.empty
+        | typeof LOCAL_INSTRUCTION_STATUS.unreadable
+    })
 
 /**
  * How much of a Memory source reached the prompt: `passage` is the part a search matched,
@@ -189,28 +224,81 @@ export interface RunMemoryContext extends JsonRecord {
 
 export type RunMemoryComposition = RunMemoryContext & { readonly budget: RunMemoryBudget }
 
-/** Durable, restart-safe projection of one Run. */
-export interface RunDetail extends JsonRecord {
+export const RUN_STOP_REASON = { unstated: "unstated", stated: "stated" } as const
+
+export type RunStopReason =
+  | { readonly kind: typeof RUN_STOP_REASON.unstated }
+  | { readonly kind: typeof RUN_STOP_REASON.stated; readonly reason: string }
+
+export const RUN_RESULT = { none: "none", on_time: "on_time", late: "late" } as const
+
+export type RunResultState =
+  | { readonly kind: typeof RUN_RESULT.none }
+  | { readonly kind: typeof RUN_RESULT.on_time; readonly result: RunTerminalResult }
+  | {
+      readonly kind: typeof RUN_RESULT.late
+      readonly result: RunTerminalResult
+      readonly at: string
+    }
+
+export const RUN_FAILURE = { none: "none", failed: "failed" } as const
+
+export type RunFailure =
+  | { readonly kind: typeof RUN_FAILURE.none }
+  | ({ readonly kind: typeof RUN_FAILURE.failed } & RunError)
+
+export const RUN_EVENTS_SEEN = { none: "none", through: "through" } as const
+
+export type RunEventsSeen =
+  | { readonly kind: typeof RUN_EVENTS_SEEN.none }
+  | { readonly kind: typeof RUN_EVENTS_SEEN.through; readonly sequence: number }
+
+export const RUN_MODEL = { unrecorded: "unrecorded", model: "model" } as const
+
+export type RunModel =
+  | { readonly kind: typeof RUN_MODEL.unrecorded }
+  | { readonly kind: typeof RUN_MODEL.model; readonly model_id: string }
+
+export const RUN_REASONING = { default: "default", effort: "effort" } as const
+
+export type RunReasoning =
+  | { readonly kind: typeof RUN_REASONING.default }
+  | { readonly kind: typeof RUN_REASONING.effort; readonly effort: string }
+
+export const RUN_CLIENT = { none: "none", client: "client" } as const
+
+export type RunClient =
+  | { readonly kind: typeof RUN_CLIENT.none }
+  | { readonly kind: typeof RUN_CLIENT.client; readonly client_id: string }
+
+interface RunDetailFields extends JsonRecord {
   readonly version: 1
   readonly run_id: string
   readonly session_id: string
   readonly turn_id: string
-  readonly status: RuntimeRunStatus
   readonly started_at: string
   readonly updated_at: string
-  readonly ended_at: string | null
-  readonly stop_reason: string | null
-  readonly last_event_sequence: number | null
-  readonly model_id: string | null
-  readonly reasoning_effort: string | null
-  readonly client_id: string | null
-  readonly result: RunTerminalResult | null
-  readonly late_result_at: string | null
-  readonly error: RunError | null
-  readonly local_instructions?: ReadonlyArray<RunLocalInstructionSource>
-  /** What the Run was sent from Memory, each composition in order; absent when it was sent none. */
-  readonly memory_context?: ReadonlyArray<RunMemoryContext>
+  readonly events: RunEventsSeen
+  readonly model: RunModel
+  readonly reasoning: RunReasoning
+  readonly client: RunClient
+  readonly local_instructions: ReadonlyArray<RunLocalInstructionSource>
+  readonly memory_context: ReadonlyArray<RunMemoryContext>
 }
+
+export interface ActiveRunDetail extends RunDetailFields {
+  readonly status: ActiveRunStatus
+}
+
+export interface EndedRunDetail extends RunDetailFields {
+  readonly status: TerminalRunStatus
+  readonly ended_at: string
+  readonly stop_reason: RunStopReason
+  readonly result: RunResultState
+  readonly failure: RunFailure
+}
+
+export type RunDetail = ActiveRunDetail | EndedRunDetail
 
 export interface RunEvent extends JsonRecord {
   readonly sequence: number
@@ -218,19 +306,19 @@ export interface RunEvent extends JsonRecord {
   readonly event: ChatProjectionEvent
 }
 
-/** One ordered page from the Run's durable event journal. */
+export const RUN_TRACE = { kept: "kept", removed: "removed" } as const
+
+export type RunTrace =
+  | { readonly kind: typeof RUN_TRACE.kept }
+  | { readonly kind: typeof RUN_TRACE.removed; readonly at: string }
+
 export interface RunEventPage extends JsonRecord {
   readonly run_id: string
   readonly session_id: string
-  readonly trace_removed_at: string | null
+  readonly trace: RunTrace
   readonly events: ReadonlyArray<RunEvent>
   readonly next_after_sequence: number
   readonly has_more: boolean
-}
-
-export interface RunEventPageOptions {
-  readonly afterSequence?: number
-  readonly limit?: number
 }
 
 /** One day × attribution × kind cell of the durable usage rollup. */
@@ -355,10 +443,6 @@ export interface PlanLimitsReport extends JsonRecord {
   readonly plans: ReadonlyArray<PlanLimits>
 }
 
-export interface UsageReportOptions {
-  readonly days?: number
-}
-
 /** One model call of a Run; usage is null until (unless) its response arrived. */
 export interface RunModelCall extends JsonRecord {
   readonly usage: RunUsage | null
@@ -401,8 +485,4 @@ export interface SessionRunUsage extends SessionRunRecord {
 export interface SessionUsageReport extends JsonRecord {
   readonly session_id: string
   readonly runs: ReadonlyArray<SessionRunUsage>
-}
-
-export interface SessionUsageOptions {
-  readonly limit?: number
 }

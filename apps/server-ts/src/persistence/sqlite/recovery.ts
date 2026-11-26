@@ -40,6 +40,7 @@ import {
   continueFinishedRunInTransaction,
   durableFinalReply,
   loadRunStreamedMessages,
+  textEnd,
   type QueuedMessage,
   type RecoveryCause,
   settledToolStatus,
@@ -390,10 +391,7 @@ const recoverChatRunInTransaction = Effect.fn("SqlitePersistence.recoverChatRun"
   }
   const { openText } = yield* loadRunStreamedMessages(sql, run.session_id, run.run_id)
   for (const messageId of openText) {
-    drafts.push({
-      event: { type: "TEXT_MESSAGE_END", message_id: messageId, session_id: run.session_id },
-      runId: run.run_id
-    })
+    drafts.push({ event: textEnd(messageId, run.session_id, undefined), runId: run.run_id })
   }
   drafts.push({
     event: terminalEvent(outcome, run, nextProjection.length, settleCause),

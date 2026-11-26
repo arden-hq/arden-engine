@@ -11,6 +11,18 @@ import {
   NonNegativeIntSchema,
   PositiveIntSchema
 } from "../common/schema.js"
+import {
+  LOCAL_INSTRUCTION_STATUS,
+  PROVIDER_COST,
+  RUN_CLIENT,
+  RUN_EVENTS_SEEN,
+  RUN_FAILURE,
+  RUN_MODEL,
+  RUN_REASONING,
+  RUN_RESULT,
+  RUN_STOP_REASON,
+  RUN_TRACE
+} from "./contracts.js"
 import type {
   PlanLimitsReport,
   RunDetail,
@@ -21,10 +33,22 @@ import type {
   UsageReport
 } from "./contracts.js"
 import { MODEL_CALL_KINDS } from "./usage.js"
-import { isActiveRunStatus } from "./status.js"
+import { RunCursorPageNextSchema } from "./list-options.js"
+import { ACTIVE_RUN_STATUSES, RUN_STATUS, TERMINAL_RUN_STATUSES } from "./status.js"
+import { CONTEXT_SIZE } from "../chat/events/run.js"
 
 const NonNegativeNumberSchema = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
 const IdentifierSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
+
+const ProviderCostSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(PROVIDER_COST.unreported) }),
+  Schema.Struct({ kind: Schema.Literal(PROVIDER_COST.reported), usd: NonNegativeNumberSchema })
+])
+
+const ContextSizeSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CONTEXT_SIZE.unmeasured) }),
+  Schema.Struct({ kind: Schema.Literal(CONTEXT_SIZE.measured), input_tokens: NonNegativeIntSchema })
+])
 
 export const RunUsageSchema = withExtras({
   prompt: NonNegativeIntSchema,
@@ -32,18 +56,17 @@ export const RunUsageSchema = withExtras({
   total: NonNegativeIntSchema,
   cache_read: NonNegativeIntSchema,
   cache_write: NonNegativeIntSchema,
-  cost: Schema.optionalKey(NonNegativeNumberSchema)
+  cost: ProviderCostSchema
 })
 
 export const RunTerminalResultSchema = withExtras({
   text: Schema.String,
   data: Schema.Json,
   usage: RunUsageSchema,
-  cost: Schema.optionalKey(NonNegativeNumberSchema),
   duration_ms: NonNegativeIntSchema,
   tool_time_ms: NonNegativeIntSchema,
   steps: NonNegativeIntSchema,
-  last_input_tokens: Schema.NullOr(NonNegativeIntSchema)
+  context: ContextSizeSchema
 })
 
 export const RunErrorSchema = withExtras({
@@ -51,13 +74,19 @@ export const RunErrorSchema = withExtras({
   message: Schema.String
 })
 
-export const RunLocalInstructionSourceSchema = withExtras({
-  root: Schema.String,
-  path: Schema.String,
-  scope: Schema.String,
-  status: Schema.Literals(["loaded", "empty", "unreadable", "truncated"] as const),
-  digest: Schema.NullOr(Schema.String)
-})
+const localInstructionPlace = { root: Schema.String, path: Schema.String, scope: Schema.String }
+
+export const RunLocalInstructionSourceSchema = Schema.Union([
+  withExtras({
+    ...localInstructionPlace,
+    status: Schema.Literals([LOCAL_INSTRUCTION_STATUS.loaded, LOCAL_INSTRUCTION_STATUS.truncated]),
+    digest: Schema.String
+  }),
+  withExtras({
+    ...localInstructionPlace,
+    status: Schema.Literals([LOCAL_INSTRUCTION_STATUS.empty, LOCAL_INSTRUCTION_STATUS.unreadable])
+  })
+])
 
 const RunMemoryOutcomeSchema = Schema.Literals(["whole", "passage", "cut", "dropped"] as const)
 const RunMemoryCutReasonSchema = Schema.Literals([
@@ -128,62 +157,86 @@ export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras
   sources: Schema.Array(RunMemorySourceSchema)
 })
 
-export const RunDetailSchema: Schema.Codec<RunDetail> = withExtras({
+const runDetailFields = {
   version: Schema.Literal(1),
   run_id: IdentifierSchema,
   session_id: IdentifierSchema,
   turn_id: IdentifierSchema,
-  status: RuntimeRunStatusSchema,
   started_at: IsoDateTimeStringSchema,
   updated_at: IsoDateTimeStringSchema,
-  ended_at: Schema.NullOr(IsoDateTimeStringSchema),
-  stop_reason: Schema.NullOr(Schema.String),
-  last_event_sequence: Schema.NullOr(NonNegativeIntSchema),
-  model_id: Schema.NullOr(IdentifierSchema),
-  reasoning_effort: Schema.NullOr(IdentifierSchema),
-  client_id: Schema.NullOr(IdentifierSchema),
-  result: Schema.NullOr(RunTerminalResultSchema),
-  late_result_at: Schema.NullOr(IsoDateTimeStringSchema),
-  error: Schema.NullOr(RunErrorSchema),
-  local_instructions: Schema.optionalKey(Schema.Array(RunLocalInstructionSourceSchema)),
-  memory_context: Schema.optionalKey(Schema.Array(RunMemoryContextSchema))
-}).check(
-  Schema.makeFilter((run) => {
-    const active = isActiveRunStatus(run.status)
-    const issues: Array<Schema.FilterIssue> = []
-    if (active && run.ended_at !== null) {
-      issues.push({ path: ["ended_at"], issue: "must be null while the Run is active" })
-    }
-    if (!active && run.ended_at === null) {
-      issues.push({ path: ["ended_at"], issue: "is required after the Run ends" })
-    }
-    if (active && (run.stop_reason !== null || run.result !== null || run.error !== null)) {
-      issues.push({ path: ["status"], issue: "active Runs cannot have a terminal outcome" })
-    }
-    if (run.status !== "completed" && run.result !== null && run.late_result_at === null) {
-      issues.push({
-        path: ["result"],
-        issue: "requires a late result timestamp for other terminal Runs"
-      })
-    }
-    if (run.late_result_at !== null && (active || run.result === null)) {
-      issues.push({
-        path: ["late_result_at"],
-        issue: "requires a terminal Run with a retained result"
-      })
-    }
-    if (run.status === "completed" && run.error !== null) {
-      issues.push({ path: ["error"], issue: "completed Runs cannot have an error" })
-    }
-    if (run.status === "error" && run.error === null) {
-      issues.push({ path: ["error"], issue: "is required for failed Runs" })
-    }
-    if (run.status === "cancelled" && run.error !== null) {
-      issues.push({ path: ["error"], issue: "cancelled Runs cannot have an error" })
-    }
-    return issues
+  events: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_EVENTS_SEEN.none) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_EVENTS_SEEN.through), sequence: NonNegativeIntSchema })
+  ]),
+  model: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_MODEL.unrecorded) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_MODEL.model), model_id: IdentifierSchema })
+  ]),
+  reasoning: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_REASONING.default) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_REASONING.effort), effort: IdentifierSchema })
+  ]),
+  client: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_CLIENT.none) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_CLIENT.client), client_id: IdentifierSchema })
+  ]),
+  local_instructions: Schema.Array(RunLocalInstructionSourceSchema),
+  memory_context: Schema.Array(RunMemoryContextSchema)
+}
+
+const RunResultStateSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(RUN_RESULT.none) }),
+  Schema.Struct({ kind: Schema.Literal(RUN_RESULT.on_time), result: RunTerminalResultSchema }),
+  Schema.Struct({
+    kind: Schema.Literal(RUN_RESULT.late),
+    result: RunTerminalResultSchema,
+    at: IsoDateTimeStringSchema
   })
-)
+])
+
+const RunFailureSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(RUN_FAILURE.none) }),
+  Schema.Struct({
+    kind: Schema.Literal(RUN_FAILURE.failed),
+    code: IdentifierSchema,
+    message: Schema.String
+  })
+])
+
+export const RunDetailSchema: Schema.Codec<RunDetail> = Schema.Union([
+  withExtras({ ...runDetailFields, status: Schema.Literals(ACTIVE_RUN_STATUSES) }),
+  withExtras({
+    ...runDetailFields,
+    status: Schema.Literals(TERMINAL_RUN_STATUSES),
+    ended_at: IsoDateTimeStringSchema,
+    stop_reason: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(RUN_STOP_REASON.unstated) }),
+      Schema.Struct({ kind: Schema.Literal(RUN_STOP_REASON.stated), reason: Schema.String })
+    ]),
+    result: RunResultStateSchema,
+    failure: RunFailureSchema
+  }).check(
+    Schema.makeFilter((run) => {
+      const issues: Array<Schema.FilterIssue> = []
+      if (run.status !== RUN_STATUS.completed && run.result.kind === RUN_RESULT.on_time) {
+        issues.push({
+          path: ["result"],
+          issue: "requires a late result timestamp for other terminal Runs"
+        })
+      }
+      if (run.status === RUN_STATUS.completed && run.failure.kind === RUN_FAILURE.failed) {
+        issues.push({ path: ["failure"], issue: "completed Runs cannot have an error" })
+      }
+      if (run.status === RUN_STATUS.error && run.failure.kind === RUN_FAILURE.none) {
+        issues.push({ path: ["failure"], issue: "is required for failed Runs" })
+      }
+      if (run.status === RUN_STATUS.cancelled && run.failure.kind === RUN_FAILURE.failed) {
+        issues.push({ path: ["failure"], issue: "cancelled Runs cannot have an error" })
+      }
+      return issues
+    })
+  )
+])
 
 export const RunEventSchema = withExtras({
   sequence: PositiveIntSchema,
@@ -194,7 +247,10 @@ export const RunEventSchema = withExtras({
 export const RunEventPageSchema: Schema.Codec<RunEventPage> = withExtras({
   run_id: IdentifierSchema,
   session_id: IdentifierSchema,
-  trace_removed_at: Schema.NullOr(IsoDateTimeStringSchema),
+  trace: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_TRACE.kept) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_TRACE.removed), at: IsoDateTimeStringSchema })
+  ]),
   events: Schema.Array(RunEventSchema),
   next_after_sequence: NonNegativeIntSchema,
   has_more: Schema.Boolean
@@ -214,20 +270,6 @@ export const RunEventPageSchema: Schema.Codec<RunEventPage> = withExtras({
     return issues
   })
 )
-
-/** Query of `GET /chat/runs/:runId/events`. */
-export const RunEventPageQuerySchema = Schema.Struct({
-  after_sequence: Schema.optionalKey(
-    Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
-  ),
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(200)
-    )
-  )
-})
 
 export const decodeRunTerminalResultEffect = (
   value: unknown
@@ -296,43 +338,12 @@ export const UsageAutomationRowSchema = withExtras({
   outcomes: Schema.Array(UsageAutomationOutcomeSchema)
 })
 
-/** Query of `GET /usage`. */
-export const UsageQuerySchema = Schema.Struct({
-  days: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(365)
-    )
-  )
-})
-
 export const UsageReportSchema: Schema.Codec<UsageReport, JsonRecord> = withExtras({
   days: PositiveIntSchema,
   since: Schema.String.check(Schema.isMinLength(10), Schema.isMaxLength(10)),
   daily: Schema.Array(UsageDailyCellSchema),
   top_sessions: Schema.Array(UsageTopSessionSchema),
   automations: Schema.Array(UsageAutomationRowSchema)
-})
-
-/** The most Runs one `GET /chat/runs` answer holds. */
-export const RUN_LIST_PAGE_MAX = 500
-
-/**
- * Query of `GET /chat/runs`. `after` is the `next` of the page before;
- * `session_id` keeps one chat's Runs; `active=true` keeps the Runs still going.
- */
-export const RunListQuerySchema = Schema.Struct({
-  after: Schema.optionalKey(Schema.NonEmptyString),
-  session_id: Schema.optionalKey(Schema.NonEmptyString),
-  active: Schema.optionalKey(Schema.Literal("true")),
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(RUN_LIST_PAGE_MAX)
-    )
-  )
 })
 
 /**
@@ -354,21 +365,10 @@ export const RunListSchema = withExtras({
       started_at: Schema.NonEmptyString
     })
   ),
-  next: Schema.optionalKey(Schema.NonEmptyString),
+  next: RunCursorPageNextSchema,
   idle: Schema.Boolean
 })
 export type RunList = typeof RunListSchema.Type
-
-/** Query of `GET /usage/sessions/:sessionId`. */
-export const SessionUsageQuerySchema = Schema.Struct({
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(50)
-    )
-  )
-})
 
 export const SessionUsageReportSchema: Schema.Codec<SessionUsageReport> = withExtras({
   session_id: IdentifierSchema,

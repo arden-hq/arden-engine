@@ -1,4 +1,9 @@
-import { reduceRunActivity, type RunActivityProjection } from "@arden-hq/protocol/chat"
+import {
+  MESSAGE_CLOSURE,
+  RUN_ACTIVITY_TARGET,
+  reduceRunActivity,
+  type RunActivityProjection
+} from "@arden-hq/protocol/chat"
 import { Buffer } from "node:buffer"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import {
@@ -201,34 +206,55 @@ const coalescedTransient = (
   }
 }
 
+type RunActivityEvent = Extract<ChatProjectionEvent, { readonly type: "run_activity" }>
+
+const activityCallIds = (event: RunActivityEvent): ReadonlyArray<string> | undefined =>
+  event.target.kind === RUN_ACTIVITY_TARGET.calls ? event.target.tool_call_ids : undefined
+
+const withActivityCalls = (
+  event: RunActivityEvent,
+  ids: ReadonlyArray<string>
+): RunActivityEvent => ({
+  ...event,
+  target: { kind: RUN_ACTIVITY_TARGET.calls, tool_call_ids: ids }
+})
+
+const activityCallsOf = (
+  event: ChatProjectionEvent
+): { readonly event: RunActivityEvent; readonly ids: ReadonlyArray<string> } | undefined => {
+  if (event.type !== "run_activity") return undefined
+  const ids = activityCallIds(event)
+  return ids === undefined ? undefined : { event, ids }
+}
+
 const settledActivityIds = (event: ChatProjectionEvent): ReadonlyArray<string> | undefined => {
   if (event.type === "TOOL_CALL_RESULT") return [event.tool_call_id]
-  return event.type === "model_response_reset" || event.type === "run_activity"
-    ? event.tool_call_ids
-    : undefined
+  return event.type === "model_response_reset" ? event.tool_call_ids : activityCallsOf(event)?.ids
 }
 
 const pruneSettledTransient = (
   records: ReadonlyArray<RetainedActiveRecord>,
   record: SessionEventRecord
 ): ReadonlyArray<RetainedActiveRecord> => {
-  const replacedIds = record.event.type === "run_activity" ? record.event.tool_call_ids : undefined
+  const replacedIds =
+    record.event.type === "run_activity" ? activityCallIds(record.event) : undefined
   const settledIds = settledActivityIds(record.event)
   const retained = records.flatMap((candidate) => {
     const event = candidate.record.event
     if (event.type !== "run_activity") return [candidate]
-    if (event.tool_call_ids === undefined)
+    const calls = activityCallIds(event)
+    if (calls === undefined)
       return record.event.type === "run_activity" && replacedIds === undefined ? [] : [candidate]
     if (settledIds === undefined) return [candidate]
-    const ids = event.tool_call_ids.filter((id) => !settledIds.includes(id))
+    const ids = calls.filter((id) => !settledIds.includes(id))
     if (ids.length === 0) return []
-    if (ids.length === event.tool_call_ids.length) return [candidate]
-    return [retain({ ...candidate.record, event: { ...event, tool_call_ids: ids } })]
+    if (ids.length === calls.length) return [candidate]
+    return [retain({ ...candidate.record, event: withActivityCalls(event, ids) })]
   })
   records = retained
   const event = record.event
   if (event.type === "TEXT_MESSAGE_END") {
-    return event.content === undefined
+    return event.closure.kind === MESSAGE_CLOSURE.abandoned
       ? records
       : records.filter(
           (candidate) =>
@@ -237,7 +263,7 @@ const pruneSettledTransient = (
         )
   }
   if (event.type === "REASONING_MESSAGE_END") {
-    return event.content === undefined
+    return event.closure.kind === MESSAGE_CLOSURE.abandoned
       ? records
       : records.filter(
           (candidate) =>
@@ -312,7 +338,10 @@ const recoverOverflow = (
   const records = pruneSettledTransient(held.records, record)
   const bytes = records === held.records ? held.bytes : totalBytes(records)
   const reasoningMessageIds = new Set(held.reasoningMessageIds)
-  if (record.event.type === "REASONING_MESSAGE_END" && record.event.content !== undefined) {
+  if (
+    record.event.type === "REASONING_MESSAGE_END" &&
+    record.event.closure.kind === MESSAGE_CLOSURE.complete
+  ) {
     reasoningMessageIds.delete(record.event.message_id)
   } else if (record.event.type === "model_response_reset") {
     for (const messageId of record.event.message_ids) reasoningMessageIds.delete(messageId)
@@ -430,15 +459,16 @@ export const reduceActiveProjection = (
   allowCoalescing: boolean
 ): ActiveProjectionState | undefined => {
   if (record.event.type === "run_activity" && record.event.run_id !== current?.runId) return current
-  if (record.event.type === "run_activity" && record.event.tool_call_ids !== undefined) {
+  const recordCalls = activityCallsOf(record.event)
+  if (recordCalls !== undefined) {
     const activeIds = new Set(
       current?.kind === "terminal"
         ? []
         : current?.activity?.operations.map((operation) => operation.id)
     )
-    const ids = record.event.tool_call_ids.filter((id) => activeIds.has(id))
+    const ids = recordCalls.ids.filter((id) => activeIds.has(id))
     if (ids.length === 0) return current
-    record = { ...record, event: { ...record.event, tool_call_ids: ids } }
+    record = { ...record, event: withActivityCalls(recordCalls.event, ids) }
   }
   if (current?.kind === "terminal" && record.sequence <= current.throughSequence) return current
   if (

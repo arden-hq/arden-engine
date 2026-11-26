@@ -1,5 +1,5 @@
 import { INTERACTION_KIND, ROLE } from "@arden-hq/std/message-vocabulary"
-import type { Interaction, InteractionSender } from "@arden-hq/protocol/chat"
+import { RUN_CAUSE, type InteractionSender, type RunCause } from "@arden-hq/protocol/chat"
 import { InteractionSenderSchema } from "@arden-hq/protocol/effect/chat"
 import { Option, Schema } from "effect"
 import { evidenceText } from "./content.js"
@@ -15,8 +15,15 @@ export const senderOf = (message: {
 export const startedBy = (
   sender: InteractionSender | undefined,
   content: unknown
-): Record<never, never> | { readonly interaction: Interaction } =>
-  sender === undefined ? {} : { interaction: { ...sender, content: evidenceText(content) } }
+): ReadonlyArray<RunCause> =>
+  sender === undefined
+    ? []
+    : [
+        {
+          kind: RUN_CAUSE.interaction,
+          interaction: { ...sender, content: evidenceText(content) }
+        }
+      ]
 
 type StoredSender = {
   readonly from: {

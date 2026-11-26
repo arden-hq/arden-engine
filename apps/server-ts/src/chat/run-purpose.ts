@@ -1,3 +1,4 @@
+import { RUN_ACTIVITY_TARGET } from "@arden-hq/protocol/chat"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import type { ToolCall } from "@arden-hq/loop"
@@ -116,7 +117,12 @@ export const makeRunPurpose = (input: {
                 type: "run_activity",
                 run_id: request.run.runId,
                 description: text,
-                ...(taskDescription ? {} : { tool_call_ids: request.batch.map((call) => call.id) })
+                target: taskDescription
+                  ? { kind: RUN_ACTIVITY_TARGET.run }
+                  : {
+                      kind: RUN_ACTIVITY_TARGET.calls,
+                      tool_call_ids: request.batch.map((call) => call.id)
+                    }
               },
               runId: request.run.runId
             }

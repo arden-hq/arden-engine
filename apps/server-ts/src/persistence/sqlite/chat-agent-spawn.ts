@@ -1,3 +1,4 @@
+import { delegatedCauses } from "../transcript/run-causes.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { countOf } from "@arden-hq/std/count"
 import { storedSender } from "../transcript/interaction.js"
@@ -707,14 +708,7 @@ export const makeAgentSpawner = ({
                           run_id: childRunId,
                           session_id: childSessionId,
                           turn_id: childMessage.message_id,
-                          ...(parentAutomation === null || parentAutomationContextMode === null
-                            ? {}
-                            : {
-                                is_meta_run: true,
-                                automation_task_id: parentAutomation.automationId,
-                                automation_name: parentAutomation.name,
-                                automation_context_mode: parentAutomationContextMode
-                              })
+                          causes: delegatedCauses(parentAutomation, parentAutomationContextMode)
                         } satisfies ChatProjectionEvent,
                         runId: childRunId
                       },

@@ -29,9 +29,9 @@ import {
   type RunQuestion,
   type RunDetail,
   type RunEventPage,
-  type RunEventPageOptions,
   type RunList,
-  type RunTerminalResult
+  type RunTerminalResult,
+  RUN_CLIENT
 } from "@arden-hq/protocol/runs"
 import {
   sessionDecoders,
@@ -46,6 +46,7 @@ import {
 } from "@arden-hq/protocol/sessions"
 import { retryableStatus } from "@arden-hq/std/retry"
 import { sleep } from "@arden-hq/std/sleep"
+import { listAllRuns, type HeadlessRunListOptions } from "./run-list.js"
 
 export type { ModelCatalog, ResolveRunQuestionInput, RunDetail, RunQuestion, RunTerminalResult }
 
@@ -80,7 +81,9 @@ export interface HeadlessStreamOptions {
   readonly signal?: AbortSignal
 }
 
-export interface HeadlessRunEventOptions extends RunEventPageOptions {
+export interface HeadlessRunEventOptions {
+  readonly afterSequence?: number
+  readonly limit?: number
   readonly signal?: AbortSignal
 }
 
@@ -91,12 +94,6 @@ export interface WaitForRunOptions {
   /** Called for each event, with a signal that aborts when the wait's own signal or its timeout
    *  does. It does not abort when the wait returns. */
   readonly onEvent?: (event: HeadlessRunEvent, signal: AbortSignal) => void | PromiseLike<void>
-}
-
-/** Which Runs `listRuns` returns; every Run when empty. */
-export interface HeadlessRunListOptions {
-  readonly sessionId?: string
-  readonly active?: boolean
 }
 
 export class HeadlessHttpError extends Error {
@@ -192,11 +189,14 @@ interface RunIdentity {
   readonly clientId: string | null
 }
 
+const clientIdOf = (detail: RunDetail): string | null =>
+  detail.client.kind === RUN_CLIENT.client ? detail.client.client_id : null
+
 const assertRunIdentity = (detail: RunDetail, submitted: RunIdentity): void => {
   if (detail.run_id !== submitted.runId || detail.session_id !== submitted.sessionId) {
     throw new HeadlessProtocolError("Arden returned a Run that does not match its submission")
   }
-  if (detail.client_id !== submitted.clientId) {
+  if (clientIdOf(detail) !== submitted.clientId) {
     throw new HeadlessProtocolError("Arden returned a Run with a different client identity")
   }
 }
@@ -318,29 +318,15 @@ export class HeadlessClient {
    * access only: the app's command-line secret is refused.
    */
   async listRuns(options: HeadlessRunListOptions = {}): Promise<RunList> {
-    const runs: Array<RunList["runs"][number]> = []
-    let after: string | undefined
-    for (;;) {
-      const query = new URLSearchParams()
-      if (after !== undefined) query.set("after", after)
-      if (options.sessionId !== undefined) query.set("session_id", options.sessionId)
-      if (options.active === true) query.set("active", "true")
-      const text = query.toString()
-      const page = runDecoders.list(
-        await this.#requestJson(text.length === 0 ? runRoutes.list : `${runRoutes.list}?${text}`, {
-          method: "GET"
-        })
-      )
-      runs.push(...page.runs)
-      if (page.next === undefined) return { runs, idle: page.idle }
-      after = page.next
-    }
+    return listAllRuns(options, async (path) =>
+      runDecoders.list(await this.#requestJson(path, { method: "GET" }))
+    )
   }
 
   async getRunEvents(runId: string, options: HeadlessRunEventOptions = {}): Promise<RunEventPage> {
-    const { signal, ...page } = options
+    const { signal, afterSequence = 0, limit = 100 } = options
     return runDecoders.eventPage(
-      await this.#requestJson(runRoutes.events(runId, page), {
+      await this.#requestJson(runRoutes.events(runId, { afterSequence, limit }), {
         method: "GET",
         ...(signal === undefined ? {} : { signal })
       })
@@ -377,7 +363,7 @@ export class HeadlessClient {
     const detail = await this.#getRun(runId, options.signal)
     if (isTerminalRunStatus(detail.status)) return detail
     return this.#waitFor(
-      { runId: detail.run_id, sessionId: detail.session_id, clientId: detail.client_id },
+      { runId: detail.run_id, sessionId: detail.session_id, clientId: clientIdOf(detail) },
       options
     )
   }

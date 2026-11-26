@@ -121,6 +121,7 @@ export {
   isRequestInvalid,
   providerSentence,
   runFailureText,
+  RUN_FAILURE_TEXT,
   type RunFailureText
 } from "./run-failure.js"
 export { RESTART_INTERRUPTION } from "./restart-words.js"
@@ -138,6 +139,21 @@ export type {
 export type { CapabilityCandidate, CapabilityProposal } from "./capability-proposal.js"
 export type { ChatRunErrorCode, RunTerminalEvent, TransientRunErrorCode } from "./events/run.js"
 export { isLastingRunError, TRANSIENT_RUN_ERROR_CODES } from "./events/run.js"
+export {
+  AUTOMATION_PROMPT,
+  CONTEXT_SIZE,
+  contextSize,
+  RUN_ACTIVITY_TARGET,
+  RUN_CAUSE,
+  RUN_USAGE,
+  SESSION_NAME,
+  type AutomationPrompt,
+  type ContextSize,
+  type RunActivityTarget,
+  type RunCause,
+  type RunUsage,
+  type SessionName
+} from "./events/run.js"
 export { endsReadingMessage, isRunTerminalEvent } from "./events/run.js"
 
 /** Plain response decoders for the current Chat boundary. */
@@ -279,4 +295,13 @@ export {
   canDenyApprovalByReply,
   EDITABLE_KIND
 } from "./approval-presentation.js"
-export { STREAM_RECORD, type StreamRecord } from "./events/text.js"
+export {
+  CONTENT_START,
+  MESSAGE_CLOSURE,
+  messageEnd,
+  STREAM_RECORD,
+  type ContentStart,
+  type MessageClosure,
+  type StreamRecord
+} from "./events/text.js"
+export { TODO_EXPLANATION, type TodoExplanation } from "./events/session.js"

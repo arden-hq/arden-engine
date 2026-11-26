@@ -1,6 +1,6 @@
 import type { CompletionResponse, ModelProvider, ModelRequestMiddleware } from "@arden-hq/loop"
 import { STREAM_MARK, type ModelPhaseTiming, type StreamMark } from "@arden-hq/protocol/daemon"
-import type { RunUsage } from "@arden-hq/protocol/runs"
+import type { StoredRunUsage as RunUsage } from "../persistence/runs/stored-result.js"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 

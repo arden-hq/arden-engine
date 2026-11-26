@@ -1,3 +1,4 @@
+import { SESSION_NAME } from "@arden-hq/protocol/chat"
 import type { ChatProjectionEvent, EntityKind } from "@arden-hq/protocol"
 import { entityTarget, taskSpace } from "../event-links.js"
 import { Effect } from "effect"
@@ -60,7 +61,10 @@ const tellRename = Effect.fn("Tells.rename")(function* (context: TellContext, se
         event: {
           type: "session_updated",
           session_id: sessionId,
-          name: row.name
+          name:
+            row.name === null
+              ? { kind: SESSION_NAME.unnamed }
+              : { kind: SESSION_NAME.named, name: row.name }
         } satisfies ChatProjectionEvent
       }
     ]

@@ -1,6 +1,7 @@
 import { StopTaskRecordSchema, WorkPageRecordSchema } from "../../persistence/work/task-record.js"
 import { HomeStore } from "../../persistence/home/store.js"
 import { SpaceWorkPageQuerySchema } from "@arden-hq/protocol/effect/spaces/work"
+import { runQuestionListOptions, workerAttemptPageOptions } from "@arden-hq/protocol/effect/runs"
 import { chatTaskDraft, taskDraft } from "../../persistence/work/task-input.js"
 import { taskPatchOf } from "../../persistence/work/task-patch.js"
 import {
@@ -119,9 +120,11 @@ export const WorkHandlers = HttpApiBuilder.group(
           .pipe(Effect.as({ ok: true as const }), Effect.catch(failStore))
       )
       .handle("attempts", ({ params, query }) =>
-        store.attempts(params.itemId, query).pipe(Effect.catch(failStore))
+        store.attempts(params.itemId, workerAttemptPageOptions(query)).pipe(Effect.catch(failStore))
       )
-      .handle("questions", ({ query }) => store.questions(query).pipe(Effect.catch(failStore)))
+      .handle("questions", ({ query }) =>
+        store.questions(runQuestionListOptions(query)).pipe(Effect.catch(failStore))
+      )
       .handle("resolveQuestion", ({ params, payload }) =>
         store
           .resolveQuestion({

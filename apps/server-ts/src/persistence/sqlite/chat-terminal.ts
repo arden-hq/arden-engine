@@ -1,5 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { loadRun, loadActiveRun, requireReceiptForRun, setCheckpoint } from "./chat-run.js"
+import { runTotals, textEnd } from "./recovery-finish.js"
 import { readableConversationSql } from "./session-presentation.js"
 import {
   MessageListSchema,
@@ -19,7 +20,7 @@ import { recordFinalRunUsage } from "./run-usage.js"
 import { rejectUncertainMutationTerminal } from "./chat-terminal-guard.js"
 import type { CancelInput } from "@arden-hq/protocol/chat"
 import { CancelInputSchema, ChatRunErrorCodeSchema } from "@arden-hq/protocol/effect/chat"
-import { RunTerminalResultSchema } from "@arden-hq/protocol/effect/runs"
+import { StoredRunTerminalResultSchema as RunTerminalResultSchema } from "../runs/stored-result.js"
 import { DateTime, Effect, Schema } from "effect"
 import {
   ChatWriteStore,
@@ -301,14 +302,11 @@ export const makeChatTerminal = ({
                     ? []
                     : [
                         {
-                          event: {
-                            type: "TEXT_MESSAGE_END",
-                            message_id: assistantMessage.message_id,
-                            session_id: run.session_id,
-                            ...(typeof assistantMessage.content === "string"
-                              ? { content: assistantMessage.content }
-                              : {})
-                          } satisfies ChatProjectionEvent,
+                          event: textEnd(
+                            assistantMessage.message_id,
+                            run.session_id,
+                            assistantMessage.content
+                          ),
                           runId: run.run_id
                         }
                       ]),
@@ -413,14 +411,11 @@ export const makeChatTerminal = ({
                   ? []
                   : [
                       {
-                        event: {
-                          type: "TEXT_MESSAGE_END",
-                          message_id: assistantMessage.message_id,
-                          session_id: run.session_id,
-                          ...(typeof assistantMessage.content === "string"
-                            ? { content: assistantMessage.content }
-                            : {})
-                        } satisfies ChatProjectionEvent,
+                        event: textEnd(
+                          assistantMessage.message_id,
+                          run.session_id,
+                          assistantMessage.content
+                        ),
                         runId: run.run_id
                       }
                     ]),
@@ -432,10 +427,7 @@ export const makeChatTerminal = ({
                     session_id: run.session_id,
                     turn_id: run.turn_id,
                     message_count: projection.length,
-                    ...(valid.usage === undefined ? {} : { usage: valid.usage }),
-                    ...(valid.lastInputTokens === undefined
-                      ? {}
-                      : { context_input_tokens: valid.lastInputTokens })
+                    ...runTotals(valid.usage, valid.lastInputTokens)
                   } satisfies ChatProjectionEvent,
                   runId: run.run_id
                 }
@@ -548,11 +540,7 @@ export const makeChatTerminal = ({
                       }
                     ]),
                 {
-                  event: {
-                    type: "TEXT_MESSAGE_END",
-                    message_id: run.assistant_message_id,
-                    session_id: run.session_id
-                  } satisfies ChatProjectionEvent,
+                  event: textEnd(run.assistant_message_id, run.session_id, undefined),
                   runId: run.run_id
                 },
                 {
@@ -678,11 +666,7 @@ export const makeChatTerminal = ({
                       }
                     ]),
                 {
-                  event: {
-                    type: "TEXT_MESSAGE_END",
-                    message_id: run.assistant_message_id,
-                    session_id: run.session_id
-                  } satisfies ChatProjectionEvent,
+                  event: textEnd(run.assistant_message_id, run.session_id, undefined),
                   runId: run.run_id
                 },
                 {

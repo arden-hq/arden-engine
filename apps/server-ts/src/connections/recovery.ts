@@ -111,9 +111,15 @@ export const pendingConnectionDecision = (
   service: data.service
 })
 
-export const connectionNeededEvent = (decision: PendingConnectionDecision): ChatProjectionEvent => {
+export const connectionNeededEvent = (
+  decision: PendingConnectionDecision,
+  decisionRoute: Extract<
+    ChatProjectionEvent,
+    { readonly type: "connection_needed" }
+  >["decision_route"]
+): ChatProjectionEvent => {
   const { decision_delivery: _delivery, ...fields } = decision.snapshot
-  return { type: "connection_needed", ...fields }
+  return { type: "connection_needed", ...fields, decision_route: decisionRoute }
 }
 
 export const requestConnection = (input: RequestConnectionInput): PauseRequested => {

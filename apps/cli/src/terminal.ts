@@ -1,3 +1,4 @@
+import { APPROVAL_ASKED, APPROVAL_CARD, APPROVAL_PREVIEW } from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { liveSessions } from "./session-list.js"
 import { activeRunId } from "@arden-hq/protocol/sessions"
@@ -166,14 +167,14 @@ export const requestResponder = (input: {
     signal: AbortSignal | undefined
   ): Promise<void> => {
     const card = ask === undefined ? "unknown" : await cardOf(data.name, signal)
-    const offered = approvalChoices(card, (data.rule_places ?? []).length > 0)
+    const offered = approvalChoices(card, data.rule_places.length > 0)
     const note = cardNote(card)
-    const presentation = data.presentation
+    const presentation =
+      data.card.kind === APPROVAL_CARD.presented ? data.card.presentation : undefined
     const shown = [
       ...(presentation?.fields ?? []).map((field) => `${field.label}: ${field.value}`),
       ...(presentation?.body === undefined ? [] : [presentation.body.text]),
-      data.path,
-      data.content_preview
+      data.preview.kind === APPROVAL_PREVIEW.preview ? data.preview.text : undefined
     ]
       .filter((line): line is string => typeof line === "string" && line.length > 0)
       .map((line) => `  ${clip(line)}`)
@@ -339,7 +340,7 @@ const answering = (
 ) => ({
   runId,
   toolId: card.tool_id,
-  ...(card.asked_at === undefined ? {} : { askedAt: card.asked_at })
+  ...(card.asked.kind === APPROVAL_ASKED.recorded ? { askedAt: card.asked.at } : {})
 })
 
 const plainError = (cause: unknown): string =>
