@@ -14,7 +14,6 @@ import { sessionLineage } from "../persistence/sessions/lineage.js"
 import { ConversationArtifactError, ConversationArtifacts } from "../artifacts/conversation.js"
 import { mutationReceiptHost } from "../persistence/tools/mutation-receipt.js"
 import {
-  displayLocalPath,
   policyPathOptions,
   resolveLocalPath,
   sessionPathPolicy,
@@ -24,6 +23,7 @@ import type { ServerRunContext } from "./run-context.js"
 import { sharedResourceSessions } from "../execution/authority.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { publishNoReplace } from "@arden-hq/std/publish"
+import { displayLocalPath } from "../storage/local-directory.js"
 
 const ParametersSchema = Schema.Struct({
   artifact_ref: Schema.String.check(Schema.isPattern(/^(?:viz|file)-[a-f0-9]{32}$/)).annotate({

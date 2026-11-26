@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import type { SessionQueries } from "../src/persistence/sessions/queries.js"
 import {
-  displayLocalPath,
   policyPathOptions,
   resolveLocalPath,
   sandboxRule,
@@ -17,6 +16,7 @@ import {
 import { NO_PATH_RULES, localRunAuthority } from "./fixtures/local-policy.js"
 import { runCommandUntil } from "../src/tools/shell-run.js"
 import { partialService } from "./kit.js"
+import { displayLocalPath } from "../src/storage/local-directory.js"
 
 describe("Sandboxed file reads", () => {
   it("read the whole disk except secrets and Arden's state, and reopen only Skills inside it", async () => {

@@ -745,24 +745,6 @@ export type ChatServerEventAgrees = Assert<
   Agrees<(typeof chatServerEventSchemas)[number]["Type"], ChatServerEvent>
 >
 
-export const decodeChatRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(ChatRequestSchema)(value)
-
-export const decodeToolResultRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(ToolResultRequestSchema)(value)
-
-export const decodeConnectionResultRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(ConnectionResultRequestSchema)(value)
-
-export const decodeCancelRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(CancelRequestSchema)(value)
-
-export const decodeHistoryQueryEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(HistoryQuerySchema)(value)
-
-export const decodeMarkSessionReadResponseEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(MarkSessionReadResponseSchema)(value)
-
 /** @internal Compile-time check that the schema and the type agree. */
 export type ChatReceiptStatusAgrees = Assert<
   Agrees<(typeof ChatReceiptStatusSchema)["Type"], ChatReceiptStatus>

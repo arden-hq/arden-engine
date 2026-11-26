@@ -21,7 +21,6 @@ import type { ChatWriteError } from "../chat/store.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { appendMessagesInTransaction } from "./chat-transcript.js"
 import { writeError, type ChatWriteOperation } from "./chat-write-errors.js"
-import { communicationToldSql, ownMessagePredicate } from "./transcript.js"
 import { questionVisiblePredicate } from "./question-events.js"
 import { runColumns, runDestinationSessionId } from "./run-destination.js"
 import { RUN_END_APPROVAL_FEEDBACK } from "./tool-receipts.js"
@@ -34,6 +33,7 @@ import {
   answeredProposalStatusList,
   erroredRunStatusList
 } from "./status-sets.js"
+import { communicationToldSql, ownMessagePredicate } from "./transcript-predicates.js"
 
 const FIRST_LOOK = Duration.days(3)
 const LATE_SLACK = Duration.days(2)

@@ -7,7 +7,8 @@ import type {
   CreateSpaceTaskInput,
   SpaceTask,
   SpaceTaskCaptureInput,
-  SpaceTaskSource
+  SpaceTaskSource,
+  CreateChatTaskInput
 } from "@arden-hq/protocol/spaces/work"
 import {
   SpaceTaskCaptureInputSchema,
@@ -30,6 +31,7 @@ import type { Writer } from "./deps.js"
 import type { UnitOfWork } from "../unit-of-work.js"
 import { runMayActSql } from "./run-liveness.js"
 import { slugify, uniqueName } from "@arden-hq/std/slug"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 const taskKey = (text: string): string => slugify(text, { max: 60, fallback: "task" })
 
@@ -73,6 +75,40 @@ const scopeWords = (scope: TaskScope): string => {
   }
 }
 
+export interface WorkCaptureSql {
+  readonly create: (
+    scope: TaskScope,
+    input: CreateTaskInput
+  ) => Effect.Effect<SpaceTask, WorkStoreError>
+  readonly createFromChat: (options: {
+    readonly scope: TaskScope
+    readonly input: CreateSpaceTaskInput
+    readonly sessionId: string
+    readonly runId: string
+    readonly toolCallId?: string
+    readonly capture: SpaceTaskCaptureInput
+  }) => Effect.Effect<SpaceTask, WorkStoreError>
+  readonly createInChat: (
+    sessionId: string,
+    input: CreateChatTaskInput
+  ) => Effect.Effect<SpaceTask, WorkStoreError>
+  readonly createInTransaction: (options: {
+    readonly scope: TaskScope
+    readonly input: CreateSpaceTaskInput
+    readonly actor: "user" | "worker"
+    readonly taskSources: ReadonlyArray<SpaceTaskSource>
+    readonly capture: SpaceTaskCaptureInput
+    readonly runId?: string
+    readonly toolCallId?: string
+    readonly settledInference?: boolean
+    readonly reuseExisting?: boolean
+    readonly fromChat?: string
+    readonly originMessageId?: string
+    readonly causedBy?: string
+  }) => Effect.Effect<SpaceTask, SqlError | WorkStoreError, UnitOfWork>
+  readonly freeKey: (scope: TaskScope, text: string) => Effect.Effect<string, WorkStoreError>
+}
+
 export const makeWorkCaptureSql = (options: {
   readonly writer: Writer
   readonly sessionEvents: SessionLifecycleEvents["Service"]
@@ -84,7 +120,7 @@ export const makeWorkCaptureSql = (options: {
     at: string,
     runId?: string
   ) => Effect.Effect<void, WorkStoreError, UnitOfWork>
-}) => {
+}): WorkCaptureSql => {
   const { writer, sessionEvents, taskEvent } = options
   const sql = writer.sql
   const spaceJobs = makeSpaceJobSql(sql, sessionEvents)

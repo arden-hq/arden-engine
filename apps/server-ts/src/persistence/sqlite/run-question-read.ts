@@ -6,7 +6,10 @@ import {
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
-import type { WorkStore } from "../work/store.js"
+import type { WorkStore, WorkStoreError } from "../work/store.js"
+import type { RunQuestion } from "@arden-hq/protocol/runs"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import { decodeJson } from "./json.js"
 import { questionVisiblePredicate } from "./question-events.js"
@@ -36,7 +39,15 @@ export interface QuestionRow {
 }
 const CursorSchema = Schema.Struct({ at: Schema.String, id: Schema.String })
 
-export const makeRunQuestionReader = (sql: SqlClient.SqlClient) => {
+export interface RunQuestionReader {
+  readonly get: (id: string) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly questions: WorkStore["Service"]["questions"]
+  readonly select: Statement<Row>
+  readonly openSelect: Statement<Row>
+  readonly decode: (row: QuestionRow) => Effect.Effect<RunQuestion, WorkStoreError>
+}
+
+export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionReader => {
   const decode = Effect.fn(
     function* (row: QuestionRow) {
       const context = yield* decodeJson(RunContextSchema, row.context)

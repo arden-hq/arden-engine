@@ -79,7 +79,7 @@ const promiseWithTimeout = async <A>(
   }
 }
 
-export const makeMcpClient = () =>
+export const makeMcpClient = (): Client =>
   new Client(
     { name: "arden", version: "0.1.0" },
     { capabilities: {}, jsonSchemaValidator: new AjvJsonSchemaValidator() }

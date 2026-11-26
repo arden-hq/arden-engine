@@ -381,16 +381,20 @@ export const SessionTriageActionRequestSchema = Schema.Struct({
   action: Schema.Literals(["dismiss", "accept", "undo"] as const)
 })
 
-export const decodeSessionListQueryEffect = (value: unknown) =>
+const resolveSessionListQuery = (query: typeof SessionListQuerySchema.Type) => ({
+  ...query,
+  scope: query.scope ?? "all",
+  live: query.live === true || query.live === "true",
+  limit: query.limit ?? 100,
+  ...(query.offset === undefined ? {} : { offset: query.offset }),
+  sort: query.sort ?? "activity"
+})
+
+export const decodeSessionListQueryEffect = (
+  value: unknown
+): Effect.Effect<ReturnType<typeof resolveSessionListQuery>, Schema.SchemaError> =>
   Schema.decodeUnknownEffect(SessionListQuerySchema)(value).pipe(
-    Effect.map((query) => ({
-      ...query,
-      scope: query.scope ?? "all",
-      live: query.live === true || query.live === "true",
-      limit: query.limit ?? 100,
-      ...(query.offset === undefined ? {} : { offset: query.offset }),
-      sort: query.sort ?? "activity"
-    }))
+    Effect.map(resolveSessionListQuery)
   )
 
 export const decodeCreateSessionRequestEffect = (

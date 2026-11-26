@@ -27,7 +27,10 @@ const decodeLocalAccess = Schema.decodeUnknownEffect(
   )
 )
 
-export const openServer = (options: HostedServerOptions, scope: Scope.Closeable) =>
+export const openServer = (
+  options: HostedServerOptions,
+  scope: Scope.Closeable
+): Effect.Effect<OpenServer, Error | Schema.SchemaError> =>
   Effect.gen(function* () {
     const configContext = yield* Layer.buildWithScope(layer(options), scope)
     const config = Context.get(configContext, ServerConfig)

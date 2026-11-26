@@ -17,8 +17,6 @@ import { AutomationTriggersSchema, scheduleEffect } from "./automation-schedule.
 import { resumeAutomation } from "./automation-resume.js"
 import { deleteAutomationRow } from "./automation-removal.js"
 import {
-  automationRowSelect,
-  makeAutomationRowReads,
   readWorkOwner,
   type AutomationStoreDeps,
   type AutomationRow,
@@ -36,6 +34,7 @@ import {
 } from "./automation-instruction-provenance.js"
 import { userAutomationSql } from "./authority-sql.js"
 import { fullResultJson } from "./tool-result-storage.js"
+import { automationRowSelect, makeAutomationRowReads } from "./automation-row-reads.js"
 
 interface AutomationRunRow {
   readonly id: number

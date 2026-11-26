@@ -3,6 +3,8 @@ export * from "./child-agent.js"
 export * from "./communication-schema.js"
 export * from "./gmail-receipt.js"
 export * from "./schema.js"
+export * from "./request-decoders.js"
 export * from "./facade-schema.js"
+export * from "./facade-mappers.js"
 
 export * from "./change-evidence.js"

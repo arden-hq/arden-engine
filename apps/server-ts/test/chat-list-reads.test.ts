@@ -2,9 +2,9 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { SessionStore } from "../src/persistence/sessions/store.js"
-import { automationRowSelect } from "../src/persistence/sqlite/automation-rows.js"
 import { ownerNamedChats } from "../src/persistence/sqlite/transcript-search.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { automationRowSelect } from "../src/persistence/sqlite/automation-row-reads.js"
 
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 1, 0, minute)).toISOString()
 

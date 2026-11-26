@@ -4,16 +4,15 @@ import { BackgroundTools } from "./background-tools.js"
 import { makeRunBudget } from "./budget.js"
 import { makeSemaphore, type FairReadWriteLock, type Semaphore } from "../internal/concurrency.js"
 import type { AgentConfig } from "./config.js"
-import { dispatchToolCalls, type BackgroundedCall } from "../tools/dispatch.js"
+import { dispatchToolCalls, type BackgroundedCall, type DispatchOutput } from "../tools/dispatch.js"
 import { AgentCallbackError } from "../errors.js"
 import { applyJsonSchemaConverter } from "../tools/tool.js"
-import { isConversationalInput, isHumanMessage, renderInteraction } from "./interactions.js"
+import { renderInteraction } from "./interactions.js"
 import { makeToolSearch, type ToolSearchStrategy } from "../tools/search.js"
 import { applyModelRequestMiddlewares } from "./middleware.js"
 import { prepareProviderRequest, resolveModelCapabilities } from "./provider-capabilities.js"
-import { runModelTurn } from "./model-turn.js"
+import { runModelTurn, type ModelTurnOutput } from "./model-turn.js"
 import {
-  messageId,
   type ChatMessage,
   type JsonObject,
   type Metadata,
@@ -31,7 +30,6 @@ import {
 } from "../contracts/tools.js"
 import {
   addUsage,
-  usageInputTokens,
   zeroUsage,
   type CompletionResponse,
   type ModelProvider,
@@ -41,20 +39,18 @@ import {
   type Usage
 } from "../contracts/provider.js"
 import {
-  StopReason,
   type AgentEvent,
   type AgentHooks,
   type AgentStreamEvent,
-  type PendingToolRequest,
-  type Result,
-  type RunBudget,
-  type ToolPaused
+  type RunBudget
 } from "../contracts/events.js"
-import { budgetStopReason, withBudgetReminder } from "./policy.js"
+import { withBudgetReminder } from "./policy.js"
 import type { AgentOutputOptions } from "./structured-output.js"
-import { callbackFailure, hookCall, invoke } from "./guards.js"
+import { hookCall, invoke } from "./guards.js"
 import { decodeMessages } from "../internal/validate.js"
+import { carryLoadedTools, preloadRecord, toolsChangedRecord } from "./tool-records.js"
 import { makeHistoryJournal, type HistoryJournal } from "./history-journal.js"
+import { stopForBudget } from "./run-cost.js"
 
 export type AgentCostGetter = number | PromiseLike<number> | (() => number | PromiseLike<number>)
 
@@ -216,115 +212,6 @@ export const makeRun = (input: {
   return run
 }
 
-const currentCost = async (run: Run): Promise<number> => {
-  const getter = run.wiring.costGetter
-  if (getter === undefined) return run.state.localCost
-  let cost: number
-  try {
-    cost = await (typeof getter === "function" ? getter() : getter)
-  } catch (cause) {
-    throw callbackFailure("costGetter", cause)
-  }
-  if (!Number.isFinite(cost) || cost < 0) {
-    throw callbackFailure("costGetter", new RangeError("cost must be finite and non-negative"))
-  }
-  return cost
-}
-
-export const stopForBudget = async (run: Run): Promise<StopReason | null> => {
-  const snapshot = await run.budget.snapshot()
-  const nowMs = invoke("clock", run.wiring.clock)
-  const cost = await currentCost(run)
-  return budgetStopReason({
-    config: run.wiring.config,
-    budget: snapshot,
-    startedAtMs: run.state.startedAtMs,
-    nowMs,
-    cost
-  })
-}
-
-const result = async (
-  run: Run,
-  text: string,
-  reason: StopReason,
-  steps: number,
-  pausedTools: ReadonlyArray<PendingToolRequest>
-): Promise<Result> => {
-  const { wiring, state, messages } = run
-  const fallback = wiring.config.policy.fallbackResultText
-  const finalText =
-    reason !== StopReason.END_TURN &&
-    reason !== StopReason.PAUSED &&
-    text.trim().length === 0 &&
-    fallback !== undefined
-      ? invoke("policy.fallbackResultText", () => fallback(messages, reason) || text)
-      : text
-  const nowMs = invoke("clock", wiring.clock)
-  const cost = await currentCost(run)
-  state.resultText = finalText
-  return {
-    text: finalText,
-    ...(state.structuredObject === null ? {} : { object: state.structuredObject.value }),
-    stop_reason: reason,
-    steps,
-    usage: state.usage,
-    last_input_tokens:
-      state.lastResponse === null ? null : usageInputTokens(state.lastResponse.usage),
-    cost,
-    duration_ms: Math.max(0, Math.trunc(nowMs - state.startedAtMs)),
-    tool_time_ms: state.toolTimeMs,
-    paused_tools: [...pausedTools],
-    messages: messages.map((message) => structuredClone(message))
-  }
-}
-
-export const finalize = async (
-  run: Run,
-  text: string,
-  reason: StopReason,
-  steps: number,
-  pausedTools: ReadonlyArray<PendingToolRequest> = []
-): Promise<void> => {
-  run.toolsController.abort()
-  await run.emit(await result(run, text, reason, steps, pausedTools))
-}
-
-export const pauseResult = (paused: ReadonlyArray<ToolPaused>): ReadonlyArray<PendingToolRequest> =>
-  paused.map((event) => ({
-    tool_call_id: event.tool_id,
-    name: event.name,
-    args: { ...event.args },
-    reason: event.reason,
-    detail: event.detail
-  }))
-
-export const stepFinished = (run: Run): Promise<void> =>
-  run.history.checkpoint((messages, change) =>
-    hookCall("onStepFinish", () =>
-      run.wiring.hooks.onStepFinish?.(run.state.step, run.state.lastResponse, messages, change)
-    )
-  )
-
-export const drainPending = async (run: Run): Promise<number> => {
-  const pending = await hookCall(
-    "getPendingMessages",
-    () => run.wiring.hooks.getPendingMessages?.() ?? []
-  )
-  if (pending.length === 0) return 0
-  const valid = decodeMessages(pending)
-  if (valid.some(isConversationalInput)) run.state.inputAdmission.pending = true
-  run.messages.push(...valid)
-  if (valid.some((message) => isOwnerMessage(run, message))) await announceInputTaken(run)
-  return valid.length
-}
-
-export const isOwnerMessage = (run: Run, message: ChatMessage): boolean =>
-  (run.wiring.hooks.isOwnerMessage ?? isHumanMessage)(message)
-
-export const announceInputTaken = (run: Run): Promise<void> =>
-  run.emit({ _tag: "InputTaken", depth: 0, parent_id: null })
-
 export const prepare = async (
   run: Run,
   { contextOverflow = false }: { readonly contextOverflow?: boolean } = {}
@@ -429,77 +316,11 @@ export const prepare = async (
   }
 }
 
-type DeveloperRecord = ChatMessage & { readonly role: typeof ROLE.developer }
-
-const appendOnlyToolRecord = (
-  kind: "tool-change" | "tool-load",
-  content: string,
-  tools:
-    | { readonly removed_tools: ReadonlyArray<string> }
-    | { readonly loaded_tools: ReadonlyArray<string> }
-    | undefined = undefined
-): DeveloperRecord => ({
-  message_id: messageId(kind),
-  role: ROLE.developer,
-  content,
-  ...tools
-})
-
-const toolsChangedRecord = (
-  previous: ReadonlySet<string> | undefined,
-  deferred: ReadonlyArray<ToolDeclaration>
-): DeveloperRecord | undefined => {
-  if (previous === undefined) return undefined
-  const current = new Set(deferred.map((tool) => tool.name))
-  const added = [...current].filter((name) => !previous.has(name)).sort()
-  const removed = [...previous].filter((name) => !current.has(name)).sort()
-  if (added.length === 0 && removed.length === 0) return undefined
-  return appendOnlyToolRecord(
-    "tool-change",
-    [
-      "Tools changed in this conversation.",
-      ...(added.length === 0 ? [] : [`Now found by tool search: ${added.join(", ")}.`]),
-      ...(removed.length === 0 ? [] : [`No longer available: ${removed.join(", ")}.`])
-    ].join(" "),
-    removed.length === 0 ? undefined : { removed_tools: removed }
-  )
-}
-
-const preloadRecord = (
-  names: ReadonlyArray<string>,
-  deferred: ReadonlyArray<ToolDeclaration>,
-  loaded: ReadonlySet<string>
-): DeveloperRecord | undefined => {
-  const catalog = new Set(deferred.map((tool) => tool.name))
-  const missing = [...new Set(names)]
-    .filter((name) => catalog.has(name) && !loaded.has(name))
-    .sort()
-  if (missing.length === 0) return undefined
-  return appendOnlyToolRecord(
-    "tool-load",
-    `Tools loaded for this conversation: ${missing.join(", ")}.`,
-    { loaded_tools: missing }
-  )
-}
-
-const carryLoadedTools = (
-  replacement: ReadonlyArray<ChatMessage>,
-  loaded: ReadonlySet<string>,
-  prepared: ModelRequest
-): { readonly history: ReadonlyArray<ChatMessage>; readonly record?: ChatMessage } => {
-  const deferred = new Set(prepared.deferredTools.map((tool) => tool.name))
-  const kept = loadedToolNames(replacement)
-  const names = [...loaded].filter((name) => deferred.has(name) && !kept.has(name)).sort()
-  if (names.length === 0) return { history: replacement }
-  const record = appendOnlyToolRecord(
-    "tool-load",
-    `Tools still loaded from earlier in this conversation: ${names.join(", ")}.`,
-    { loaded_tools: names }
-  )
-  return { history: [...replacement, record], record }
-}
-
-export const callModel = async (run: Run, view: StepView, instruction: string | null = null) => {
+export const callModel = async (
+  run: Run,
+  view: StepView,
+  instruction: string | null = null
+): Promise<ModelTurnOutput> => {
   const { wiring, state, messages } = run
   const requestSnapshot = [...view.messages]
   const requestMessages =
@@ -613,7 +434,7 @@ export const runTools = async (
     readonly foreground?: boolean
     readonly signal?: AbortSignal
   } = {}
-) => {
+): Promise<DispatchOutput> => {
   const { wiring, toolSignal } = run
   const admission = run.state.inputAdmission
   const adopt = (backgrounded: BackgroundedCall): void => {

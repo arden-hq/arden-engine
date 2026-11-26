@@ -2,8 +2,6 @@ import { ToolExecutionError } from "@arden-hq/loop"
 import { Schema } from "effect"
 
 import {
-  displayLocalPath,
-  LocalRevisionConflict,
   type LocalPathPolicy,
   type LocalPathServices,
   policyPathOptions,
@@ -14,6 +12,8 @@ import { RipgrepSearchError } from "./ripgrep.js"
 import type { ServerRunContext } from "./run-context.js"
 import { toolFault, toolRefusal } from "./tool-failure.js"
 import type { SessionPathPolicy } from "../storage/local-paths.js"
+import { LocalRevisionConflict } from "../storage/local-revision.js"
+import { displayLocalPath } from "../storage/local-directory.js"
 
 export const PathSchema = Schema.String.check(
   Schema.isMinLength(1),

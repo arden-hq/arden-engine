@@ -5,7 +5,7 @@ import {
 } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { AutomationRules } from "../automations/model.js"
-import { decodeJson, encodeJson } from "./json.js"
+import { decodeJson, encodeJson, type JsonColumnError } from "./json.js"
 import { QueueContextSchema } from "./automation-queue-context.js"
 import { AutomationStoreError } from "../automations/store.js"
 import { listenerTriggers } from "./automation-schedule.js"
@@ -18,6 +18,9 @@ import { eventFromSnapshot, matchEvent } from "./automation-listening.js"
 import type { SqlClient } from "effect/unstable/sql"
 import type { Statement } from "effect/unstable/sql/Statement"
 import type { Row } from "effect/unstable/sql/SqlConnection"
+import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { SessionLifecycleEventError } from "../sessions/events.js"
+import type { UnitOfWork } from "../unit-of-work.js"
 
 export const dropMeasuredRows = (sql: SqlClient.SqlClient, automationId: string): Statement<Row> =>
   sql`DELETE FROM automation_event_queue
@@ -62,17 +65,73 @@ export const restartMeasuredTriggers = Effect.fn("AutomationTriggerArming.restar
   }
 )
 
-export interface ListeningAutomation {
+interface ListeningAutomation {
   readonly automationId: string
   readonly idle: number | null
   readonly count: number | null
   readonly chatQuiet: EventAutomationTrigger | null
 }
 
+export interface TriggerArming {
+  readonly listeningAutomations: (
+    operation:
+      | "space_review"
+      | "list"
+      | "create"
+      | "update"
+      | "diagnostics"
+      | "get"
+      | "toggle"
+      | "delete"
+      | "runs"
+      | "request_run"
+      | "claim"
+      | "renew"
+      | "complete"
+      | "defer"
+      | "fail"
+      | "release"
+      | "recover"
+      | "prepare_run_session"
+      | "prepare_home_letter"
+      | "handler_item"
+      | "observe_chat_run"
+      | "seed_builtin"
+      | "reconcile_space_jobs"
+      | "trigger_feed"
+      | "dispatch_event"
+      | "event_triggers"
+      | "rearm_idle"
+      | "record_skips"
+  ) => Effect.Effect<readonly ListeningAutomation[], AutomationStoreError>
+  readonly armTrigger: (
+    automationId: string,
+    dueMs: number,
+    trigger:
+      | {
+          readonly source: "idle"
+          readonly input_sequence: number
+          readonly input_at: string
+          readonly queued_at: string
+        }
+      | {
+          readonly source: "count"
+          readonly session_id: string
+          readonly through_sequence: number | null
+          readonly every_n: number
+          readonly queued_at: string
+        }
+  ) => Effect.Effect<void, SqlError | SessionLifecycleEventError | JsonColumnError, UnitOfWork>
+  readonly rearmAutomation: (
+    task: ListeningAutomation,
+    nowMs: number
+  ) => Effect.Effect<void, SqlError | SessionLifecycleEventError | JsonColumnError, UnitOfWork>
+}
+
 export const makeTriggerArming = ({
   writer,
   sessionEvents
-}: Pick<PersistenceDeps, "writer" | "sessionEvents">) => {
+}: Pick<PersistenceDeps, "writer" | "sessionEvents">): TriggerArming => {
   const sql = writer.sql
   const listeningAutomations = Effect.fn("SqliteAutomationStore.listeningAutomations")(function* (
     operation: StoreOperation

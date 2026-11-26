@@ -20,7 +20,18 @@ const taskSourceKey = (source: SpaceTaskSource): string => {
   }
 }
 
-export const makeWorkSourceSql = (sql: SqlClient.SqlClient) => {
+export interface WorkSourceSql {
+  readonly add: (options: {
+    readonly itemId: string
+    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly now: string
+  }) => Effect.Effect<void, WorkStoreError>
+  readonly read: (
+    itemIds: readonly string[]
+  ) => Effect.Effect<Map<string, SpaceTaskSource[]>, WorkStoreError>
+}
+
+export const makeWorkSourceSql = (sql: SqlClient.SqlClient): WorkSourceSql => {
   const add = Effect.fn("WorkSources.add")(function* (options: {
     readonly itemId: string
     readonly sources: ReadonlyArray<SpaceTaskSource>

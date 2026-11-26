@@ -39,7 +39,10 @@ const LimitSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100
       description: "Maximum events per page, from 1 to 100. Defaults to 25."
     })
   )
-export const searchParametersSchema = (emails: ReadonlyArray<string>) =>
+export const searchParametersSchema = (
+  emails: ReadonlyArray<string>
+): ReturnType<typeof buildSearchParameters> => buildSearchParameters(emails)
+const buildSearchParameters = (emails: ReadonlyArray<string>) =>
   Schema.Struct({
     query: Schema.String.check(Schema.isMaxLength(1_024))
       .pipe(Schema.withDecodingDefault(Effect.succeed("")))
@@ -94,7 +97,10 @@ const scopeSchema = Schema.optionalKey(
   })
 )
 const AttendeeSchema = Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(320))
-export const createParametersSchema = (emails: ReadonlyArray<string>) =>
+export const createParametersSchema = (
+  emails: ReadonlyArray<string>
+): ReturnType<typeof buildCreateParameters> => buildCreateParameters(emails)
+const buildCreateParameters = (emails: ReadonlyArray<string>) =>
   Schema.Struct({
     attachments: Schema.optionalKey(CalendarAttachmentRefsSchema),
     account_ref: requiredAccountRefSchema(emails),
@@ -245,7 +251,10 @@ export const RespondParametersSchema = Schema.Struct({
   scope: scopeSchema
 })
 
-export const freeBusyParametersSchema = (emails: ReadonlyArray<string>) =>
+export const freeBusyParametersSchema = (
+  emails: ReadonlyArray<string>
+): ReturnType<typeof buildFreeBusyParameters> => buildFreeBusyParameters(emails)
+const buildFreeBusyParameters = (emails: ReadonlyArray<string>) =>
   Schema.Struct({
     account_ref: accountRefSchema(emails),
     calendars: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(320)))

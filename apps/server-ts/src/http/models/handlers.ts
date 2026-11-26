@@ -6,6 +6,7 @@ import { ModelProviderService } from "../../models/provider.js"
 import type { ModelSettingsSnapshot } from "../../persistence/models/store.js"
 import { ArdenApi } from "../api.js"
 import { failInternal } from "../errors.js"
+import type { ModelResetScope } from "@arden-hq/protocol/models"
 
 const catalogResponse = (catalog: CatalogListing) => {
   const models = catalog.providers.flatMap((provider) => provider.models)
@@ -30,7 +31,22 @@ const catalogResponse = (catalog: CatalogListing) => {
   }
 }
 
-export const modelSettingsResponse = (catalog: CatalogListing, settings: ModelSettingsSnapshot) => {
+export type ModelSettingsResponse = {
+  readonly chat_model: string | null
+  readonly at_defaults: Readonly<Record<ModelResetScope, boolean>>
+  readonly reasoning_effort: string | null
+  readonly reasoning_efforts: string[]
+  readonly model_reasoning_efforts: { [x: string]: string }
+  readonly model_roles: {
+    background: { model: string | null; reasoning_effort: string | null }
+    helper: { model: string | null; reasoning_effort: string | null }
+  }
+}
+
+export const modelSettingsResponse = (
+  catalog: CatalogListing,
+  settings: ModelSettingsSnapshot
+): ModelSettingsResponse => {
   const chatModel = catalog.providers
     .flatMap((provider) => provider.models)
     .find((model) => model.id === settings.chatModelId)

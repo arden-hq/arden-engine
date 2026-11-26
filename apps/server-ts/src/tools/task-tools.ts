@@ -23,7 +23,7 @@ import {
   TASK_TEXT_DESCRIPTION,
   TASK_USER_FACING
 } from "./task-wording.js"
-import { defineServerTool, type ServerTool } from "./define.js"
+import { defineServerTool, type ServerTool, type ServerToolMetadataInput } from "./define.js"
 import { refuseCapChange, saveCap, tokenBudgetCard } from "./task-token-cap.js"
 import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
 import {
@@ -543,7 +543,7 @@ const applyTaskChange = async (
   }
 }
 
-export const taskWriteMetadata = (displayName: string, preview: string) =>
+export const taskWriteMetadata = (displayName: string, preview: string): ServerToolMetadataInput =>
   ({
     effect: "arden_db",
     scopes: ["worker", "agent_research", "agent_code"],

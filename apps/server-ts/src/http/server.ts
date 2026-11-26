@@ -9,8 +9,10 @@ import { FocusChoiceHandlers } from "./focus-choices/handlers.js"
 import { AnswerBlockHandlers } from "./answer-blocks/handlers.js"
 import { WorkerStatus } from "../automations/worker-status.js"
 import { NodeHttpServer } from "@effect/platform-node"
+import type { NodeServices } from "@effect/platform-node/NodeServices"
+import type { ServeError } from "effect/unstable/http/HttpServerError"
 import { Effect, Layer } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { HttpRouter, type Etag, type HttpPlatform, type HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
 import { BrowserClient } from "../browser/service.js"
@@ -130,6 +132,11 @@ import {
   acknowledgeTerminalNotice,
   terminalsFile
 } from "../terminals/restart-notices.js"
+import type { StorageStartupError } from "../persistence/service.js"
+import type { AutomationStoreError } from "../persistence/automations/store.js"
+import type { WikiError } from "../wiki/errors.js"
+import type { SkillError } from "../skills/errors.js"
+import type { McpStoreError } from "../persistence/mcp/store.js"
 
 export type ServerLayerOptions = Omit<HostedServerOptions, "modelHost"> & {
   readonly modelHost?: ModelHostSource | undefined
@@ -447,7 +454,22 @@ const composeServer = (
   return Layer.mergeAll(transport, served, chat, providerSwitch)
 }
 
-export const serverLayer = (config: ServerConfigShape, options: ServerLayerOptions = {}) =>
+export const serverLayer = (
+  config: ServerConfigShape,
+  options: ServerLayerOptions = {}
+): Layer.Layer<
+  | HttpServer.HttpServer
+  | NodeServices
+  | HttpPlatform.HttpPlatform
+  | Etag.Generator
+  | ChatMessage
+  | QueueHold
+  | ChatHistory
+  | ChatEventStream
+  | ChatStop
+  | ModelProviderSwitch,
+  StorageStartupError | ServeError | AutomationStoreError | WikiError | SkillError | McpStoreError
+> =>
   Layer.unwrap(
     Effect.gen(function* () {
       const root = yield* DataRoot

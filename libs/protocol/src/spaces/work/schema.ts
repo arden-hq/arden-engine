@@ -31,6 +31,8 @@ import {
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
+type EncodedText = Effect.Effect<string, Schema.SchemaError>
+type Decoded<S extends Schema.Decoder<unknown>> = Effect.Effect<S["Type"], Schema.SchemaError>
 const NonEmptyStringSchema = Schema.String.check(Schema.isMinLength(1))
 const TrimmedTextSchema = Schema.Trim.check(Schema.isMinLength(1))
 const WorkTimestampSchema = IsoDateTimeStringSchema
@@ -423,15 +425,6 @@ export type StopSpaceTaskResponseAgrees = Assert<
   Agrees<(typeof StopSpaceTaskResponseSchema)["Type"], StopSpaceTaskResponse>
 >
 export const WorkOkResponseSchema = Schema.Struct({ ok: Schema.Literal(true) })
-export const encodeMoveTaskToChatEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(MoveTaskToChatInputSchema)(value, strict).pipe(
-    Effect.map(JSON.stringify)
-  )
-export const encodeAcknowledgeTaskResultEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(AcknowledgeTaskResultInputSchema)(value, strict).pipe(
-    Effect.map(JSON.stringify)
-  )
-
 export const SpaceWorkPageSchema: Schema.Codec<SpaceWorkPage> = withExtras({
   items: Schema.Array(SpaceTaskSchema),
   events: Schema.Array(SpaceTaskEventSchema),
@@ -524,11 +517,6 @@ export const CreateChatTaskInputSchema = Schema.Struct({
   token_budget: Schema.optionalKey(PositiveIntSchema)
 })
 
-export const encodeCreateChatTaskRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(CreateChatTaskInputSchema)(value, strict).pipe(
-    Effect.map((input) => JSON.stringify(input))
-  )
-
 /** A Task without a Space: in the chat `session_id` names, or in none. */
 export const CreateLooseTaskInputSchema = Schema.Struct({
   ...newTaskInputFields,
@@ -543,12 +531,6 @@ export const CreateSpaceTaskAttachmentInputSchema = Schema.Struct({
   name: boundedTrimmed(WORK_ATTACHMENT_NAME_MAX_CHARS),
   media_type: mediaTypeInputSchema,
   data: attachmentBytesFromBase64Schema
-})
-
-const CreateSpaceTaskAttachmentConsumerInputSchema = Schema.Struct({
-  name: boundedTrimmed(WORK_ATTACHMENT_NAME_MAX_CHARS),
-  mediaType: mediaTypeInputSchema,
-  bytes: attachmentBytesSchema
 })
 
 export type CreateSpaceTaskAttachmentRequest = typeof CreateSpaceTaskAttachmentInputSchema.Type
@@ -637,11 +619,6 @@ export const UpdateSpaceTaskPatchSchema = Schema.Struct(updateSpaceTaskPatchFiel
   )
 )
 
-const SpaceTaskBlockStateSchema = Schema.Struct({
-  blocked: Schema.Boolean,
-  waiting_on: Schema.NullOr(taskWaitingOnSchema)
-}).check(Schema.makeFilter((state) => waitingOnIssue(state)))
-
 /** Internal optimistic-concurrency wire shape. It is intentionally exported
  * only through the Effect subpath, never as a public contract. */
 export const InternalUpdateSpaceTaskRequestSchema = Schema.Struct({
@@ -649,49 +626,31 @@ export const InternalUpdateSpaceTaskRequestSchema = Schema.Struct({
   ...updateSpaceTaskPatchFields
 })
 
-export const decodeSpaceTaskEventEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(SpaceTaskEventSchema)(value)
+/** @internal Compile-time check that the schema and the type agree. */
+export type SpaceTaskStatusAgrees = Assert<
+  Agrees<(typeof SpaceTaskStatusSchema)["Type"], SpaceTaskStatus>
+>
 
-export const decodeSpaceSnapshotEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(SpaceSnapshotSchema)(value)
+/** @internal Compile-time check that the schema and the type agree. */
+export type SpaceTaskActivityAgrees = Assert<
+  Agrees<(typeof SpaceTaskActivitySchema)["Type"], SpaceTaskActivity>
+>
 
-export const decodeSpaceTaskRunEffect = (value: unknown) =>
+const CreateSpaceTaskAttachmentConsumerInputSchema = Schema.Struct({
+  name: boundedTrimmed(WORK_ATTACHMENT_NAME_MAX_CHARS),
+  mediaType: mediaTypeInputSchema,
+  bytes: attachmentBytesSchema
+})
+
+const SpaceTaskBlockStateSchema = Schema.Struct({
+  blocked: Schema.Boolean,
+  waiting_on: Schema.NullOr(taskWaitingOnSchema)
+}).check(Schema.makeFilter((state) => waitingOnIssue(state)))
+
+export const decodeSpaceTaskRunEffect = (value: unknown): Decoded<typeof SpaceTaskRunSchema> =>
   Schema.decodeUnknownEffect(SpaceTaskRunSchema)(value)
 
-export const decodeCreateSpaceTaskInputEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(CreateSpaceTaskInputSchema)(value, strict).pipe(
-    Effect.map((input) => (input.body?.trim() === "" ? { ...input, body: null } : input))
-  )
-
-export const decodeCreateSpaceTaskCommentInputEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(CreateSpaceTaskCommentInputSchema)(value, strict)
-
-export const decodeCreateSpaceTaskAttachmentInputEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(CreateSpaceTaskAttachmentInputSchema)(value, strict)
-
-export const decodeUpdateSpaceTaskPatchEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(UpdateSpaceTaskPatchSchema)(value, strict).pipe(
-    Effect.map((patch) => (patch.body?.trim() === "" ? { ...patch, body: null } : patch))
-  )
-
-export const encodeNewTaskRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(NewTaskInputSchema)(value, strict).pipe(
-    Effect.map((input) =>
-      JSON.stringify(input.body?.trim() === "" ? { ...input, body: null } : input)
-    )
-  )
-
-export const encodeCreateLooseTaskRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(CreateLooseTaskInputSchema)(value, strict).pipe(
-    Effect.map((input) =>
-      JSON.stringify(input.body?.trim() === "" ? { ...input, body: null } : input)
-    )
-  )
-
-export const encodeCreateSpaceTaskCommentRequestEffect = (value: unknown) =>
-  decodeCreateSpaceTaskCommentInputEffect(value).pipe(Effect.map(JSON.stringify))
-
-export const encodeCreateSpaceTaskAttachmentRequestEffect = (value: unknown) =>
+export const encodeCreateSpaceTaskAttachmentRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(CreateSpaceTaskAttachmentConsumerInputSchema)(value, strict).pipe(
     Effect.flatMap((input) =>
       Schema.encodeEffect(CreateSpaceTaskAttachmentInputSchema)({
@@ -703,7 +662,10 @@ export const encodeCreateSpaceTaskAttachmentRequestEffect = (value: unknown) =>
     Effect.map(JSON.stringify)
   )
 
-export const encodeUpdateSpaceTaskRequestEffect = (currentTask: unknown, patch: unknown) =>
+export const encodeUpdateSpaceTaskRequestEffect = (
+  currentTask: unknown,
+  patch: unknown
+): EncodedText =>
   Schema.decodeUnknownEffect(SpaceTaskSchema)(currentTask).pipe(
     Effect.flatMap((task) =>
       decodeUpdateSpaceTaskPatchEffect(patch).pipe(
@@ -733,17 +695,9 @@ export const encodeUpdateSpaceTaskRequestEffect = (currentTask: unknown, patch: 
     Effect.map(JSON.stringify)
   )
 
-export const encodeStopSpaceTaskRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(StopSpaceTaskInputSchema)(value, strict).pipe(
-    Effect.map(JSON.stringify)
+export const decodeUpdateSpaceTaskPatchEffect = (
+  value: unknown
+): Decoded<typeof UpdateSpaceTaskPatchSchema> =>
+  Schema.decodeUnknownEffect(UpdateSpaceTaskPatchSchema)(value, strict).pipe(
+    Effect.map((patch) => (patch.body?.trim() === "" ? { ...patch, body: null } : patch))
   )
-
-/** @internal Compile-time check that the schema and the type agree. */
-export type SpaceTaskStatusAgrees = Assert<
-  Agrees<(typeof SpaceTaskStatusSchema)["Type"], SpaceTaskStatus>
->
-
-/** @internal Compile-time check that the schema and the type agree. */
-export type SpaceTaskActivityAgrees = Assert<
-  Agrees<(typeof SpaceTaskActivitySchema)["Type"], SpaceTaskActivity>
->

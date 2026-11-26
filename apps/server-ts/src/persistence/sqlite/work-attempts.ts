@@ -9,6 +9,7 @@ import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { decodeJson } from "./json.js"
 import { workError } from "./work-records.js"
+import type { WorkStore } from "../work/store.js"
 
 interface AttemptRow {
   readonly id: number
@@ -24,7 +25,7 @@ interface AttemptRow {
   readonly error: string | null
 }
 
-export const makeWorkAttempts = (sql: SqlClient.SqlClient) =>
+export const makeWorkAttempts = (sql: SqlClient.SqlClient): WorkStore["Service"]["attempts"] =>
   Effect.fn("Work.attempts")(function* (itemId: string, input: WorkerAttemptPageOptions) {
     const options = yield* Schema.decodeUnknownEffect(WorkerAttemptPageOptionsSchema)(input).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid attempts page", cause))

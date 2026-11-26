@@ -40,6 +40,7 @@ import {
   readMcpOAuthAccountIdentity,
   type McpOAuthVault
 } from "./vault.js"
+import { type McpRuntime } from "./runtime-types.js"
 
 type McpConnectFailure =
   | {
@@ -93,7 +94,7 @@ const classifyConnectFailure = (
   return { kind: "other", retryable: true }
 }
 
-type RuntimeStatus = PublicMcpServer["status"]
+export type RuntimeStatus = PublicMcpServer["status"]
 
 export interface RuntimeEntry {
   readonly config: McpStoredServer
@@ -150,15 +151,13 @@ const httpStatusCode = (cause: unknown): number | undefined => {
   return typeof cause.code === "number" ? cause.code : undefined
 }
 
-interface ConnectOptions {
+export interface ConnectOptions {
   readonly status?: "starting" | "reconnecting"
   readonly retryAttempt?: number
   readonly refreshPath?: boolean
 }
 
 export const cancelRetry = (entry: RuntimeEntry): void => entry.retryTimer?.cancel()
-
-export type McpRuntime = ReturnType<typeof makeMcpRuntime>
 
 export const makeMcpRuntime = ({
   store,
@@ -174,7 +173,7 @@ export const makeMcpRuntime = ({
   readonly operations: KeyedSerialQueue
   readonly secrets: ReturnType<typeof makeMcpServerSecrets>
   readonly tokenAuth: McpTokenAuth
-}) => {
+}): McpRuntime => {
   const runtimes = new Map<string, RuntimeEntry>()
   const connectedListeners = new Set<(config: McpStoredServer) => void>()
   const changeListeners = new Set<(name: string) => void>()

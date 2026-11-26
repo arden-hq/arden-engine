@@ -72,11 +72,29 @@ const actApprovalTitle = (
   }
 }
 
+export type ActApprovalPresentation = {
+  readonly image?: {
+    readonly width: number
+    readonly height: number
+    readonly src: string
+    readonly ring?: {
+      readonly x: number
+      readonly y: number
+      readonly width: number
+      readonly height: number
+    }
+  }
+  readonly body?: { readonly label: string; readonly text: string }
+  readonly title: string
+  readonly subject: string
+  readonly fields: { label: string; value: string }[]
+}
+
 export const actApprovalPresentation = (
   input: ActInput,
   label: { readonly role: string; readonly name: string } | undefined,
   seen: TargetSeen | undefined
-) => {
+): ActApprovalPresentation => {
   const body = withheldTextNotice(input)
   const crop = seen?.crop ?? undefined
   const near = seen?.context ?? undefined

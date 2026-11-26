@@ -30,7 +30,6 @@ import type { StoredThread } from "../sessions/thread.js"
 import { runMayActSql } from "./run-liveness.js"
 import { writeError } from "./chat-write-errors.js"
 import { userContent } from "../transcript/user-content.js"
-import { enqueueRunDelivery } from "./work-deliveries.js"
 import {
   threadStep,
   type ThreadEvent,
@@ -39,6 +38,7 @@ import {
 import { messageTurnIdSql } from "./message-turns.js"
 import { userChatSql } from "./chat-ownership.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
 interface FocusChoiceRow {
   readonly choice_id: string

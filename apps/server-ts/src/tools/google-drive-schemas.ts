@@ -19,7 +19,10 @@ const accountRefSchema = (emails: ReadonlyArray<string>) =>
   Schema.optionalKey(driveAccountRefSchema(optionalAccountRefDescription("google_drive", emails)))
 const fileRefSchema = (description: string) =>
   Schema.String.annotate({ description }).check(Schema.isMinLength(3), Schema.isMaxLength(2_048))
-export const searchParametersSchema = (emails: ReadonlyArray<string>) =>
+export const searchParametersSchema = (
+  emails: ReadonlyArray<string>
+): ReturnType<typeof buildSearchParameters> => buildSearchParameters(emails)
+const buildSearchParameters = (emails: ReadonlyArray<string>) =>
   Schema.Struct({
     query: Schema.String.check(Schema.isMaxLength(1_024))
       .pipe(Schema.withDecodingDefault(Effect.succeed("")))

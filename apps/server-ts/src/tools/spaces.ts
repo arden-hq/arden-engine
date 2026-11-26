@@ -21,18 +21,12 @@ import { formatWikiPage } from "../wiki/page.js"
 import { Wiki } from "../wiki/service.js"
 import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
 import type { ServerRunContext } from "./run-context.js"
-import {
-  MAX_WIKI_CONTENT_CHARS,
-  boundedBody,
-  loadSnapshot,
-  pageData,
-  wikiFailure,
-  writtenPageData
-} from "./wiki.js"
+import { boundedBody, loadSnapshot, pageData, wikiFailure, writtenPageData } from "./wiki.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { pageReceipt, pageSource } from "./wiki-records.js"
 import { workTarget } from "./work-reach.js"
 import { refusalError } from "./refusal.js"
+import { MAX_WIKI_CONTENT_CHARS } from "./wiki-schemas.js"
 
 const MAX_PAGE_LINES = 4_000
 

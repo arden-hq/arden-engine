@@ -9,10 +9,23 @@ import { taskEventSpeaksSql } from "./work-presentation.js"
 import type { QueueWriter } from "./automation-enqueue.js"
 import { journalTaskHistory, type AddedTaskHistory } from "./task-history.js"
 
+export interface WorkEvents {
+  readonly taskEvent: (
+    spaceId: string | null,
+    itemId: string,
+    eventType: string,
+    summary: string,
+    at: string,
+    runId?: string,
+    contentKind?: "summary" | "result",
+    resultSummary?: string
+  ) => Effect.Effect<void, WorkStoreError, UnitOfWork>
+}
+
 export const makeWorkEvents = (
   sql: SqlClient.SqlClient,
   sessionEvents: SessionLifecycleEvents["Service"]
-) => {
+): WorkEvents => {
   const taskEvent = (
     spaceId: string | null,
     itemId: string,

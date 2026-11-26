@@ -1,6 +1,1 @@
-{
-  "apps/cli/test/app-launch.test.ts": 1,
-  "apps/server-ts/test/agent-bash-sandbox.test.ts": 2,
-  "apps/server-ts/test/command-never-paths.test.ts": 1,
-  "apps/server-ts/test/local-paths.test.ts": 1
-}
+{}

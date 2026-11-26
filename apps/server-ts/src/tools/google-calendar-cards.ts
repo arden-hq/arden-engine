@@ -26,7 +26,26 @@ import {
   CALENDAR_ATTACHMENT_ACCESS_NOTE
 } from "./google-calendar-attachments.js"
 
-export const makeCalendarCards = (google: GoogleToolConnections) => {
+export interface CalendarCards {
+  readonly createCard: (
+    input: ReturnType<typeof createParametersSchema>["Type"],
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly editCard: (
+    input: typeof EditParametersSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly deleteCard: (
+    input: typeof DeleteParametersSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly respondCard: (
+    input: typeof RespondParametersSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+}
+
+export const makeCalendarCards = (google: GoogleToolConnections): CalendarCards => {
   const createCard = async (
     input: ReturnType<typeof createParametersSchema>["Type"],
     signal: AbortSignal

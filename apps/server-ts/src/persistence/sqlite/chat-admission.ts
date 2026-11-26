@@ -15,9 +15,8 @@ import {
 import type { ModelCatalog } from "../../models/catalog.js"
 import type { IntelligenceSettingsStore, LimitSettingsStore } from "../settings/store.js"
 import type { ChatRules } from "../chat/rules.js"
-import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
 import { senderOf, startedBy } from "../transcript/interaction.js"
-import { isWrittenByPerson } from "../transcript/model.js"
+import { StoredMessageEnvelopeSchema, isWrittenByPerson } from "../transcript/model.js"
 import { dropPendingArchive } from "./pending-archive.js"
 import { chatAdmissionInputSchema } from "./chat-admission-input.js"
 import { AutomationId } from "../automations/model.js"
@@ -36,7 +35,8 @@ import { decodeJson, encodeJson } from "./json.js"
 import { bindHandlerItem } from "./automation-handler-item.js"
 import { assertAutomationLease } from "./automation-lease.js"
 import { readModelSelection, readRequestedModel, runInheritsChatModel } from "./models.js"
-import { arrivalIdentitySql, liftOwedUpdate, readDeliveryForAdmission } from "./work-deliveries.js"
+import { liftOwedUpdate, readDeliveryForAdmission } from "./work-delivery-admission.js"
+import { arrivalIdentitySql } from "./work-delivery-routing.js"
 import {
   captureScheduledContext,
   continuedContext,

@@ -4,6 +4,7 @@ import { Statement, type SqlClient } from "effect/unstable/sql"
 import { keyMessageJson } from "./chat-key-message.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { delegatedLinkSql, sessionAncestors, sessionDescendants } from "./tree-walk.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export const userChatSql = (alias?: string): Statement.Fragment => {
   const prefix = alias === undefined ? "" : `${alias}.`
@@ -68,8 +69,24 @@ export interface ChatSettledState {
   readonly settled: boolean
 }
 
-export const readChatSettled = (sql: SqlClient.SqlClient, spaceId: string) =>
-  chatSettled(sql, { kind: "space", spaceId })
+export const readChatSettled = (
+  sql: SqlClient.SqlClient,
+  spaceId: string
+): Effect.Effect<
+  {
+    settled: boolean
+    session_id: string
+    run_id: string | null
+    turn_id: string | null
+    pending: number
+    status: string | null
+    session_ref: string
+    title: string | null
+    owner_turn_id: string | null
+  }[],
+  SqlError,
+  never
+> => chatSettled(sql, { kind: "space", spaceId })
 
 const chatSettled = Effect.fn("Chat.settled")(function* (
   sql: SqlClient.SqlClient,

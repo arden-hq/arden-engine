@@ -3,6 +3,10 @@ import { Schema } from "effect"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { HomeLetterInputSchema } from "../home/model.js"
 import { HandlerItemSchema } from "../automations/handler-item.js"
+import { Effect } from "effect"
+import { AutomationStoreError } from "../automations/store.js"
+import { decodeJson, encodeJson } from "./json.js"
+import { type StoreOperation, type QueueEntry, storeError } from "./automation-rows.js"
 
 const BatchedEventSchema = Schema.Struct({
   event_type: Schema.NonEmptyString,
@@ -37,3 +41,36 @@ export const QueueContextSchema = Schema.Struct({
   handler_item: Schema.optionalKey(HandlerItemSchema)
 })
 export type QueueContext = typeof QueueContextSchema.Type
+
+export const decodeQueueContext = (
+  row: Pick<QueueEntry, "context" | "task_id">,
+  operation: StoreOperation
+): Effect.Effect<QueueContext, AutomationStoreError> =>
+  decodeJson(QueueContextSchema, row.context).pipe(
+    Effect.mapError((cause) =>
+      storeError(
+        operation,
+        "corrupt",
+        "Stored Automation job context is corrupt",
+        row.task_id,
+        cause
+      )
+    )
+  )
+
+export const encodeQueueContext = (
+  context: QueueContext,
+  operation: StoreOperation,
+  automationId: string
+): Effect.Effect<string, AutomationStoreError> =>
+  encodeJson(QueueContextSchema, context).pipe(
+    Effect.mapError((cause) =>
+      storeError(
+        operation,
+        "storage",
+        "Could not encode the Automation job context",
+        automationId,
+        cause
+      )
+    )
+  )

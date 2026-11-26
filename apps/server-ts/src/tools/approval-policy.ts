@@ -3,9 +3,16 @@ import { Effect } from "effect"
 import { authorityScopes, type RunAuthority } from "../execution/authority.js"
 import type { CallFacts } from "../execution/decide.js"
 import type { ApprovalMode } from "@arden-hq/protocol/permissions"
-import type { ToolScopeKey } from "../execution/policy.js"
-import type { ApprovalPolicyStore } from "../persistence/permissions/approval-policy.js"
-import type { PermissionRules } from "../persistence/permissions/rules.js"
+import type { ToolScopeKey, RunCapability } from "../execution/policy.js"
+import type {
+  ApprovalPolicyStore,
+  ApprovalPolicyError
+} from "../persistence/permissions/approval-policy.js"
+import type {
+  PermissionRules,
+  RuleDecision,
+  PermissionRulesError
+} from "../persistence/permissions/rules.js"
 import {
   jobHoldsShell,
   matchesTool,
@@ -13,7 +20,6 @@ import {
   ruleDecision,
   type RunRules
 } from "../execution/rules.js"
-import type { RuleDecision } from "../persistence/permissions/rules.js"
 import { parseMcpSource } from "../mcp/naming.js"
 import type { ServerTool } from "./define.js"
 import { toolAvailableInScopes, toolRunsUnattended } from "./tool-scopes.js"
@@ -66,10 +72,35 @@ export const reachOf = (input: {
   }
 }
 
+export interface ToolApprovalPolicy {
+  readonly live: (input: {
+    readonly runId: string
+    readonly authority: RunAuthority
+  }) => Effect.Effect<
+    {
+      rules: RunRules
+      state: "active" | "settling" | "revoked"
+      mode: ApprovalMode
+      noApproval: boolean
+      currentScope: RunCapability | undefined
+    },
+    ApprovalPolicyError | PermissionRulesError
+  >
+  readonly decisions: (input: {
+    readonly runId: string
+    readonly authority: RunAuthority
+    readonly tools: ReadonlyArray<ServerTool>
+    readonly scopeNames: Record<ToolScopeKey, ReadonlySet<string>>
+  }) => Effect.Effect<
+    Record<string, ToolApprovalDecision>,
+    ApprovalPolicyError | PermissionRulesError
+  >
+}
+
 export const makeToolApprovalPolicy = (services: {
   readonly policy: ApprovalPolicyStore["Service"]
   readonly rules: PermissionRules["Service"]
-}) => {
+}): ToolApprovalPolicy => {
   const live = Effect.fn("ToolApprovalPolicy.live")(function* (input: {
     readonly runId: string
     readonly authority: RunAuthority
@@ -106,5 +137,3 @@ export const makeToolApprovalPolicy = (services: {
 
   return { live, decisions }
 }
-
-export type ToolApprovalPolicy = ReturnType<typeof makeToolApprovalPolicy>

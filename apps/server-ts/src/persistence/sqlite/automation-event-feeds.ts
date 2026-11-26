@@ -10,6 +10,7 @@ import { iso } from "../../runtime/clock.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
 import { itemDetailOf } from "./connection-items.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 const ITEMS_BATCH = 200
 
@@ -111,7 +112,27 @@ export const makeAutomationEventFeeds = ({
   }
 }
 
-export const readTaskHistory = (sql: SqlClient.SqlClient, eventId: number) =>
+export const readTaskHistory = (
+  sql: SqlClient.SqlClient,
+  eventId: number
+): Effect.Effect<
+  | {
+      eventId: number
+      kind: string
+      summary: string
+      at: string
+      itemId: string
+      key: string
+      text: string
+      status: string
+      blocked: boolean
+      spaceId: string | undefined
+      spaceName: string | undefined
+    }
+  | undefined,
+  SqlError,
+  never
+> =>
   sql<{
     readonly event_id: number
     readonly event_type: string

@@ -5,9 +5,11 @@ import path from "node:path"
 import { Effect } from "effect"
 
 import type { SpaceFolderApprovalData } from "../persistence/permissions/space-folder-approval.js"
-import { ardenStateRoot, realHome, type LocalPathServices } from "../storage/local-paths.js"
+import { type LocalPathServices } from "../storage/local-paths.js"
 import type { ServerRunContext } from "./run-context.js"
 import { tooWide } from "../fs/protected-paths.js"
+import { realHome } from "../storage/local-directory.js"
+import { ardenStateRoot } from "../storage/local-paths.js"
 
 export interface FolderGrant {
   readonly place: "space"

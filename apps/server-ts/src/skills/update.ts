@@ -2,11 +2,11 @@ import { formatBytes } from "@arden-hq/std/count"
 import { Effect } from "effect"
 import { join } from "node:path"
 
-import { atomicCompareAndSwap } from "../storage/local-paths.js"
 import { skillError } from "./errors.js"
 import { MAX_REFERENCE_BYTES, readSkillReference } from "./resources.js"
 import { parseSkillMetadata } from "./metadata.js"
 import type { SkillLoadedContent } from "./service.js"
+import { atomicCompareAndSwap } from "../storage/local-revision.js"
 
 export interface SkillUpdateInput {
   readonly name: string

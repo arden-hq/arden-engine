@@ -321,7 +321,7 @@ const ownedBehaviors = [
       "apps/server-ts/src/computer/install.ts",
       "apps/server-ts/src/skills/marketplace.ts",
       "apps/server-ts/src/artifacts/conversation.ts",
-      "apps/server-ts/src/storage/local-paths.ts",
+      "apps/server-ts/src/storage/local-revision.ts",
       "apps/desktop/electron/daemon-log.cjs",
       "libs/revisions/src/storage/service.ts",
       "libs/revisions/src/storage/files.ts"
