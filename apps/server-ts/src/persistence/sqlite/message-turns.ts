@@ -1,10 +1,11 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { Backfill } from "./backfills/backfill.js"
+import type { Fragment } from "effect/unstable/sql/Statement"
 
 const MESSAGE_TURN_IDS_BACKFILL = "message_turn_ids"
 
-export const messageTurnIdSql = (sql: SqlClient.SqlClient, table: string) =>
+export const messageTurnIdSql = (sql: SqlClient.SqlClient, table: string): Fragment =>
   sql.literal(`(CASE
     WHEN EXISTS (SELECT 1 FROM message_turns AS mt WHERE mt.message_rowid = ${table}.message_rowid)
     THEN (SELECT mt.turn_id FROM message_turns AS mt WHERE mt.message_rowid = ${table}.message_rowid)

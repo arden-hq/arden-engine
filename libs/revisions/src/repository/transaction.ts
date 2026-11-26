@@ -19,6 +19,7 @@ import { currentMap, materializeTree, validHash, type RepositoryError } from "./
 import type { RevisionStorageShape } from "../storage/service.js"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
+import type { StorageError } from "../storage/service.js"
 
 const readTransaction = Effect.fn("RevisionTransaction.readTransaction")(function* (
   storage: RevisionStorageShape,
@@ -448,7 +449,7 @@ export const validateBeforePrepare = (
 export const writePreparedMarker = (
   storage: RevisionStorageShape,
   transaction: ValidatedTransaction
-) =>
+): Effect.Effect<void, StorageError, never> =>
   storage.writeMetadata(
     `transactions/${transaction.transactionId}/PREPARED`,
     new Uint8Array(),

@@ -35,7 +35,11 @@ export const makeMcpAuthorization = ({
   readonly credentials: KeyedSerialQueue
   readonly operations: KeyedSerialQueue
   readonly callbacks?: McpOAuthCallbacks
-}) => {
+}): {
+  start: (current: RuntimeEntry, url: string) => Promise<McpAuthorizationStart>
+  cancel: (name: string) => Promise<void>
+  close: () => Promise<void>
+} => {
   const pendingOAuth = new Map<string, PendingOAuth>()
 
   const cancel = async (name: string): Promise<void> => {

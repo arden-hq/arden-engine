@@ -4,6 +4,8 @@ import { ownerPresentSql } from "./home-presence.js"
 import { OFFER_EXPIRY_HOURS, OFFER_LATER_HOURS } from "./offer-rules.js"
 import type { ProposalRow } from "./task-proposals.js"
 import { workError } from "./work-records.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const SPACE_OPEN_PROPOSAL_CAP = 3
 
@@ -13,7 +15,7 @@ export const assertOpenProposalRoom = Effect.fn("Work.assertOpenProposalRoom")(f
 ) {
   const open = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
     FROM task_proposals WHERE place = 'space' AND space_id = ${options.spaceId} AND status = 'offered'
-      AND proposal_id != ${options.proposalId ?? ""}`
+      AND (${options.proposalId ?? null} IS NULL OR proposal_id != ${options.proposalId ?? null})`
   if ((open[0]?.count ?? 0) >= SPACE_OPEN_PROPOSAL_CAP)
     return yield* workError(
       "conflict",
@@ -33,7 +35,7 @@ export const offerInSightSql = (
   sql: SqlClient.SqlClient,
   alias: string | undefined,
   at: string
-) => {
+): Statement.Statement<Row> => {
   const column = (name: string) =>
     Statement.fragment([Statement.literal(alias === undefined ? name : `${alias}.${name}`)])
   return sql`(${column("status")} = 'offered'
@@ -42,7 +44,11 @@ export const offerInSightSql = (
 
 /** The owner's Later: the offer stays open but out of sight for `OFFER_LATER_HOURS`, and its
  * expiry clock starts over once it is back. */
-export const putOfferOff = (sql: SqlClient.SqlClient, proposalId: string, now: DateTime.Utc) =>
+export const putOfferOff = (
+  sql: SqlClient.SqlClient,
+  proposalId: string,
+  now: DateTime.Utc
+): Effect.Effect<void, SqlError, never> =>
   sql`UPDATE task_proposals SET revision = revision + 1, updated_at = ${DateTime.formatIso(now)},
     ${restartOfferWait},
     put_off_until = ${DateTime.formatIso(DateTime.add(now, { hours: OFFER_LATER_HOURS }))}

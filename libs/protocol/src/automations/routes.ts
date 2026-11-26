@@ -2,6 +2,7 @@ import { Schema } from "effect"
 
 import { appendSearch, encodeRouteEffect, encodeSegment, routeSegment } from "../common/routes.js"
 import { NonNegativeIntSchema, PositiveIntSchema } from "../common/schema.js"
+import type { Effect } from "effect/Effect"
 
 const AutomationIdSchema = routeSegment()
 const AutomationEventRouteOptionsSchema = Schema.Struct({
@@ -19,19 +20,32 @@ const automationPath = (taskId: string): string => `/automations/${encodeSegment
 const itemPathEffect = (value: unknown, suffix = "") =>
   encodeRouteEffect(AutomationIdSchema, value, (taskId) => `${automationPath(taskId)}${suffix}`)
 
-export const encodeAutomationEventsPathEffect = (value: unknown) =>
+export const encodeAutomationEventsPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(AutomationEventRouteOptionsSchema, value, (options) =>
     appendSearch("/automations/events", [["after_seq", options.afterSeq]])
   )
 
-export const encodeAutomationItemPathEffect = (value: unknown) => itemPathEffect(value)
-export const encodeAutomationDescriptionPathEffect = (value: unknown) =>
-  itemPathEffect(value, "/description/generate")
-export const encodeAutomationTogglePathEffect = (value: unknown) => itemPathEffect(value, "/toggle")
-export const encodeAutomationRunPathEffect = (value: unknown) => itemPathEffect(value, "/run")
-export const encodeAutomationResetPathEffect = (value: unknown) => itemPathEffect(value, "/reset")
+export const encodeAutomationItemPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => itemPathEffect(value)
+export const encodeAutomationDescriptionPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => itemPathEffect(value, "/description/generate")
+export const encodeAutomationTogglePathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => itemPathEffect(value, "/toggle")
+export const encodeAutomationRunPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => itemPathEffect(value, "/run")
+export const encodeAutomationResetPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => itemPathEffect(value, "/reset")
 
-export const encodeAutomationRunsPathEffect = (value: unknown) =>
+export const encodeAutomationRunsPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(AutomationRunsRouteSchema, value, ({ taskId, options }) =>
     appendSearch(`${automationPath(taskId)}/runs`, [["limit", options.limit]])
   )
@@ -42,7 +56,9 @@ const AutomationSkippedRunRouteSchema = Schema.Struct({
 })
 
 /** "Run with this event": a run of the Automation with the event a skip held back. */
-export const encodeAutomationRunWithEventPathEffect = (value: unknown) =>
+export const encodeAutomationRunWithEventPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(
     AutomationSkippedRunRouteSchema,
     value,

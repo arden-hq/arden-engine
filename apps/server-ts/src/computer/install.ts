@@ -48,8 +48,7 @@ export async function verifyCuaApp(options: {
     timeout: 10_000,
     maxBuffer: 2 * 1024 * 1024
   })
-  const raw: unknown = JSON.parse(manifest.stdout)
-  return Schema.decodeUnknownSync(Manifest)(raw).binary_version
+  return Schema.decodeUnknownSync(Schema.fromJsonString(Manifest))(manifest.stdout).binary_version
 }
 
 export async function recoverCuaApp(options: {

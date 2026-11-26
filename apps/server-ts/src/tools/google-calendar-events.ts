@@ -131,7 +131,17 @@ export const eventSource = (
   item: CalendarEvent,
   data: ReturnType<typeof eventData>,
   use: "read" | "found"
-) => {
+): {
+  excerpt?: string
+  at?: string
+  by?: string
+  href?: string
+  provider: string
+  kind: string
+  ref: string
+  title: string
+  use: "read" | "found"
+} => {
   const excerpt = use === "read" ? passage(data.description) : undefined
   return {
     provider: "calendar",

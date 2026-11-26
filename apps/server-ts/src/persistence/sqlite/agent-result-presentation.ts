@@ -2,6 +2,8 @@ import { AgentResultSchema } from "@arden-hq/protocol/effect/chat"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { previewLine } from "../transcript/preview-line.js"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 export const agentResultPresentation = Effect.fn(function* (
   sql: SqlClient.SqlClient,
@@ -30,7 +32,9 @@ export const agentResultPresentation = Effect.fn(function* (
   return preview === null ? result : { ...result, preview }
 })
 
-export const agentResultMessagePredicate = (sql: SqlClient.SqlClient) => sql`EXISTS (
+export const agentResultMessagePredicate = (
+  sql: SqlClient.SqlClient
+): Statement<Row> => sql`EXISTS (
   SELECT 1 FROM automation_deliveries d
   JOIN chat_runs r ON r.run_id = json_extract(d.payload, '$.runIds[0]')
   JOIN sessions child ON child.session_id = r.session_id

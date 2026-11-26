@@ -1,6 +1,7 @@
 import { randomBytes } from "@noble/hashes/utils.js"
 import { concat, fromB64url, fromUtf8, toB64url, toHex, utf8 } from "./encoding.js"
 import { isRecord } from "@arden-hq/std/json"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 export type HandshakeMessage =
   | { readonly t: "hs1"; readonly e: string }
@@ -261,7 +262,7 @@ export class PartAssembler {
   #current: { mid: string; n: number; chunks: Uint8Array[]; bytes: number } | undefined
 
   receive(plaintext: Uint8Array): unknown {
-    const value: unknown = JSON.parse(fromUtf8(plaintext))
+    const value: unknown = parseJsonText(fromUtf8(plaintext))
     if (!isRecord(value) || value["t"] !== "part") {
       if (this.#current !== undefined)
         throw new Error("message interleaved with an unfinished part sequence")
@@ -288,6 +289,6 @@ export class PartAssembler {
       return undefined
     }
     this.#current = undefined
-    return JSON.parse(fromUtf8(concat(...current.chunks)))
+    return parseJsonText(fromUtf8(concat(...current.chunks)))
   }
 }

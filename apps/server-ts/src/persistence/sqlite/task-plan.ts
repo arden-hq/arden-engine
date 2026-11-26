@@ -64,7 +64,12 @@ export const readTaskIntent = Effect.fn("Work.readTaskIntent")(function* (
   return row === undefined ? undefined : { asked: originalRequest(row).text, now: taskWords(row) }
 })
 
-export const makeFinishCheck = (sql: SqlClient.SqlClient) =>
+export const makeFinishCheck = (
+  sql: SqlClient.SqlClient
+): ((args_0: {
+  readonly runId: string
+  readonly itemId: string
+}) => Effect.Effect<TaskFinishCheck, WorkStoreError, never>) =>
   Effect.fn("Work.finishCheck")(
     function* ({
       runId,

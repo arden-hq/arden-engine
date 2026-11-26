@@ -1,7 +1,7 @@
 import { ladderDelayMs } from "@arden-hq/std/retry"
 import { sleep } from "@arden-hq/std/sleep"
 import type { EventMessage, ResetMessage } from "@arden-hq/relay-protocol"
-import type { Schema } from "effect"
+import { Option, Schema } from "effect"
 import type { Loopback, RelayLog } from "./ports.js"
 import type { StreamRoute } from "./routes.js"
 import { errorMessage } from "@arden-hq/std/errors"
@@ -21,14 +21,9 @@ interface Entry {
 
 type Sink = (message: EventMessage | ResetMessage) => void
 
-const parse = (data: string): Schema.Json => {
-  try {
-    const value: Schema.Json = JSON.parse(data)
-    return value
-  } catch {
-    return data
-  }
-}
+const decodeData = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+const parse = (data: string): Schema.Json => Option.getOrElse(decodeData(data), () => data)
 
 export class RelayStream {
   readonly sid: string

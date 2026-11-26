@@ -500,12 +500,16 @@ export const toAutomationList = (
   automations: response.automations.map(toAutomation)
 })
 
-export const decodeAutomationRunsQueryEffect = (value: unknown) =>
+export const decodeAutomationRunsQueryEffect = (
+  value: unknown
+): Effect.Effect<{ limit: number }, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(AutomationRunsQuerySchema)(value).pipe(
     Effect.map((query) => ({ ...query, limit: query.limit ?? 20 }))
   )
 
-export const encodeCreateAutomationRequestEffect = (value: unknown) =>
+export const encodeCreateAutomationRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(CreateAutomationInputSchema)(value, strict).pipe(
     Effect.map((input) => ({
       ...input,
@@ -518,12 +522,16 @@ export const encodeCreateAutomationRequestEffect = (value: unknown) =>
     Effect.map(JSON.stringify)
   )
 
-export const encodeResetAutomationSettingRequestEffect = (value: unknown) =>
+export const encodeResetAutomationSettingRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ResetAutomationSettingInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeUpdateAutomationRequestEffect = (value: unknown) =>
+export const encodeUpdateAutomationRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(UpdateAutomationInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )

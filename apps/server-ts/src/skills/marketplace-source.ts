@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import type { MarketplaceSkill } from "@arden-hq/protocol/skills"
 import {
   MarketplaceSkillIdSchema,
@@ -237,7 +238,7 @@ const requestJson = Effect.fn("SkillMarketplace.requestJson")(function* (
 ) {
   const response = yield* request(fetcher, url, operation)
   return yield* Effect.tryPromise({
-    try: () => response.json(),
+    try: () => parseJsonBody(response),
     catch: (cause) =>
       skillError(operation, "unavailable", "Skill marketplace returned invalid data", cause)
   })

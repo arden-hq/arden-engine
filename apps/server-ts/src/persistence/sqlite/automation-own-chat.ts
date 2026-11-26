@@ -12,6 +12,9 @@ import { iso } from "../../runtime/clock.js"
 import { nextId } from "./deps.js"
 import { insertSession } from "./session-insert.js"
 import { userAutomationSql } from "./authority-sql.js"
+import type { SessionLifecycleEventError } from "../sessions/events.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { UnitOfWork } from "../unit-of-work.js"
 
 export const insertOwnChat = <A, E, R>(input: {
   readonly sql: SqlClient.SqlClient
@@ -23,7 +26,7 @@ export const insertOwnChat = <A, E, R>(input: {
   readonly approvalMode: string
   readonly startedAt: string
   readonly complete: Effect.Effect<A, E, R>
-}) =>
+}): Effect.Effect<A, SessionLifecycleEventError | SqlError | E, UnitOfWork | R> =>
   insertSession({
     sql: input.sql,
     session: {
@@ -80,7 +83,11 @@ export const ownChat = Effect.fn("SqliteAutomationStore.ownChat")(function* (inp
 export const makeOwnChats = ({
   writer,
   sessionEvents
-}: Pick<AutomationStoreDeps, "writer" | "sessionEvents">) => {
+}: Pick<AutomationStoreDeps, "writer" | "sessionEvents">): {
+  prepareOwnChat: (
+    lease: AutomationJobLeaseRef
+  ) => Effect.Effect<string, AutomationStoreError, never>
+} => {
   const sql = writer.sql
   const prepareOwnChat = Effect.fn("SqliteAutomationStore.prepareOwnChat")(function* (
     lease: AutomationJobLeaseRef

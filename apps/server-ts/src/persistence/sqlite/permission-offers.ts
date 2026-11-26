@@ -22,6 +22,7 @@ import { ruleOfSetting, type PermissionRulesError } from "../permissions/rules.j
 import { decodeJson } from "./json.js"
 import { ownerWordsSql } from "./transcript-owner-messages.js"
 import { workError } from "./work-records.js"
+import type { WorkStoreError } from "../work/store.js"
 
 const OfferChoicesSchema = Schema.Array(OfferChoiceSchema)
 
@@ -31,7 +32,10 @@ const deliveredSql = (sql: SqlClient.SqlClient, message: Statement.Fragment): St
     AND json_extract(${message}.message_json, '$.from_chat') IS NULL
     AND json_extract(${message}.message_json, '$.sent_from') IS NULL)`
 
-export const ownMessageThisTurn = (sql: SqlClient.SqlClient, runId: string) =>
+export const ownMessageThisTurn = (
+  sql: SqlClient.SqlClient,
+  runId: string
+): Effect.Effect<string | undefined, WorkStoreError, never> =>
   Effect.gen(function* () {
     const inTurn = yield* sql<{ readonly message_id: string }>`
       SELECT message.message_id FROM chat_runs AS run

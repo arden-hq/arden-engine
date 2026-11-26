@@ -142,12 +142,16 @@ const encodePatch = (patch: IntelligenceSettingsPatchWire): Record<string, unkno
   ...(patch.summaryMaxTokens === undefined ? {} : { summary_max_tokens: patch.summaryMaxTokens })
 })
 
-export const decodeIntelligenceSettingsPatchRequestEffect = (value: unknown) =>
+export const decodeIntelligenceSettingsPatchRequestEffect = (
+  value: unknown
+): Effect.Effect<Partial<IntelligenceSettings>, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(IntelligenceSettingsPatchRequestSchema)(value, strict).pipe(
     Effect.map(mapPatchRequest)
   )
 
-export const encodeIntelligenceSettingsPatchEffect = (value: unknown) =>
+export const encodeIntelligenceSettingsPatchEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(IntelligenceSettingsPatchSchema)(value, strict).pipe(
     Effect.map(encodePatch),
     Effect.map(JSON.stringify)

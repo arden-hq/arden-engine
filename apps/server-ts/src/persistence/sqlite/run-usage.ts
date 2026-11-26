@@ -4,6 +4,8 @@ import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { ChatWriteError } from "../chat/store.js"
 import { decodeJson } from "./json.js"
+import type { JsonColumnError } from "./json.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 type Usage = RunTerminalResult["usage"]
 const empty: Usage = { prompt: 0, completion: 0, total: 0, cache_read: 0, cache_write: 0 }
@@ -146,4 +148,8 @@ export const recordModelRunUsage = Effect.fn("RunUsage.recordResponse")(function
   yield* account(sql, input.runId)
 })
 
-export const recordFinalRunUsage = (sql: SqlClient.SqlClient, runId: string) => account(sql, runId)
+export const recordFinalRunUsage = (
+  sql: SqlClient.SqlClient,
+  runId: string
+): Effect.Effect<undefined, JsonColumnError | SqlError | ChatWriteError, never> =>
+  account(sql, runId)

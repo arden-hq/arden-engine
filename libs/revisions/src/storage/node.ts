@@ -1,6 +1,6 @@
 import { Deferred, Effect, Layer } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
-import * as properLockfile from "proper-lockfile"
+import { lock as lockFile } from "proper-lockfile"
 
 import { RevisionLockFactory, type RevisionLockFactoryShape } from "./service.js"
 import { managedFileRepositoryLayer, ManagedFileRepository } from "../repository/service.js"
@@ -30,7 +30,7 @@ const nodeLockFactory: RevisionLockFactoryShape = {
     const lost = Deferred.makeUnsafe<never, RevisionStorageError>()
     const releaseNative = yield* Effect.tryPromise({
       try: () =>
-        properLockfile.lock(lockPath, {
+        lockFile(lockPath, {
           stale: staleAfterMs,
           realpath: false,
           onCompromised: (cause) => {

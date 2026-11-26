@@ -174,17 +174,23 @@ export const SetSkillEnabledInputSchema = Schema.Struct({
   enabled: Schema.Boolean
 })
 
-export const encodeSetSkillEnabledRequestEffect = (value: unknown) =>
+export const encodeSetSkillEnabledRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(SetSkillEnabledInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMarketplaceSkillInstallRequestEffect = (value: unknown) =>
+export const encodeMarketplaceSkillInstallRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(MarketplaceSkillInstallInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMarketplaceSkillSearchPathEffect = (value: unknown) =>
+export const encodeMarketplaceSkillSearchPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(MarketplaceSkillSearchTextSchema)(value, strict).pipe(
     Effect.map((query) => {
       const search = new URLSearchParams({ q: query })
@@ -192,10 +198,14 @@ export const encodeMarketplaceSkillSearchPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeSkillItemPathEffect = (value: unknown) =>
+export const encodeSkillItemPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(SkillNameSchema)(value).pipe(
     Effect.map((name) => `${skillsCollectionPath}/${encodeURIComponent(name)}`)
   )
 
-export const encodeSkillContentPathEffect = (value: unknown) =>
+export const encodeSkillContentPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeSkillItemPathEffect(value).pipe(Effect.map((path) => `${path}/content`))

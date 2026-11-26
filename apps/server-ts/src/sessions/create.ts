@@ -2,13 +2,19 @@ import { Effect } from "effect"
 
 import type { ModelStore } from "../persistence/models/store.js"
 import type { NewSession, SessionStore } from "../persistence/sessions/store.js"
+import type { CreatedSession, SessionStoreError } from "../persistence/sessions/store.js"
+import type { ModelStoreError } from "../persistence/models/store.js"
 
 export interface SessionCreationDependencies {
   readonly store: SessionStore["Service"]
   readonly models: ModelStore["Service"]
 }
 
-export const makeSessionCreation = (dependencies: SessionCreationDependencies) =>
+export const makeSessionCreation = (
+  dependencies: SessionCreationDependencies
+): ((
+  session: NewSession & { readonly chatModel?: string | undefined }
+) => Effect.Effect<CreatedSession, SessionStoreError | ModelStoreError, never>) =>
   Effect.fn("SessionCreation.create")(function* (
     session: NewSession & { readonly chatModel?: string | undefined }
   ) {

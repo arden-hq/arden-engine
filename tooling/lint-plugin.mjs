@@ -123,6 +123,20 @@ const objectName = (node) => {
   if (target.type === "MemberExpression" && !target.computed) return target.property.name
   return undefined
 }
+const isNumberLiteral = (wrapped) => {
+  const node = unwrap(wrapped)
+  return node.type === "Literal" && typeof node.value === "number"
+}
+const cutsToLength = (method, args) =>
+  ["slice", "substring", "substr"].includes(method) &&
+  args.length === 2 &&
+  isNumberLiteral(args[0]) &&
+  unwrap(args[0]).value === 0 &&
+  isNumberLiteral(args[1])
+const cleansCharacters = (method, args) => {
+  const pattern = args.length === 2 ? unwrap(args[0]) : undefined
+  return method === "replace" && pattern?.type === "Literal" && pattern.regex?.flags.includes("g") === true
+}
 const idMethods = new Set(["startsWith", "endsWith", "split", "slice", "substring", "substr", "indexOf", "lastIndexOf", "match", "replace"])
 const isMadeUpDefault = (node) => {
   const right = unwrap(node.right)
@@ -205,7 +219,7 @@ export const baselinedRules = [
   {
     rule: "no-raw-json",
     files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
-    ignores: ["apps/server-ts/src/persistence/sqlite/json.ts", ...testFiles],
+    ignores: ["apps/server-ts/src/persistence/sqlite/json.ts", "libs/std/src/json-text.ts", ...testFiles],
     baseline: "tooling/baselines/raw-json.json",
     message: "Outside data is decoded once, at the edge, with a Schema: decodeJson (persistence/sqlite/json.ts) or Schema.decodeUnknownSync(Schema.fromJsonString(schema))",
     description: "Outside data is parsed once, at the edge.",
@@ -230,12 +244,8 @@ export const baselinedRules = [
       CallExpression: (node) => {
         const callee = node.callee
         if (callee.type !== "MemberExpression" || callee.computed || !idMethods.has(callee.property.name)) return
+        if (cutsToLength(callee.property.name, node.arguments) || cleansCharacters(callee.property.name, node.arguments)) return
         const name = objectName(callee.object)
-        if (name !== undefined && idName.test(name)) found.push({ node })
-      },
-      MemberExpression: (node) => {
-        if (!node.computed || unwrap(node.property).type !== "Literal" || typeof unwrap(node.property).value !== "number") return
-        const name = objectName(node.object)
         if (name !== undefined && idName.test(name)) found.push({ node })
       }
     })

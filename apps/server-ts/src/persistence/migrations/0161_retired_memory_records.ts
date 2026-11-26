@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
@@ -6,11 +7,14 @@ const RETIRED_REASONS: ReadonlySet<unknown> = new Set([
   "core_page_budget",
   "continuity_budget"
 ])
-const ALLOWANCE_OF: Readonly<Record<string, string>> = {
+const COLLECTION_SOURCE = "collection"
+const SPACE_SOURCE = "space"
+const ALLOWANCE_OF: Readonly<Record<string, unknown>> = {
   core: "standing_page_allowance",
   index: "index_allowance",
   recalled: "recall_allowance"
 }
+const RESIDENT_BASIS = "resident"
 
 type Json = Record<string, unknown>
 const isObject = (value: unknown): value is Json =>
@@ -18,10 +22,11 @@ const isObject = (value: unknown): value is Json =>
 
 const todaySource = (source: unknown): ReadonlyArray<unknown> => {
   if (!isObject(source)) return [source]
-  if (source["kind"] === "collection") return []
+  const kind = source["kind"]
+  if (kind === COLLECTION_SOURCE) return []
   if (!RETIRED_REASONS.has(source["reason"])) return [source]
-  if (source["kind"] === "space") return []
-  const allowance = ALLOWANCE_OF[String(source["kind"])]
+  if (kind === SPACE_SOURCE) return []
+  const allowance = ALLOWANCE_OF[String(kind)]
   return [allowance === undefined ? source : { ...source, reason: allowance }]
 }
 
@@ -48,7 +53,7 @@ const rewriteRunMemoryRecords = (database: DatabaseSync): void => {
     )
     .all()
   for (const row of rows) {
-    const stored = JSON.parse(String(row["context_manifest_json"])) as unknown
+    const stored = parseMigrationJson(String(row["context_manifest_json"]))
     const next = JSON.stringify(todayRecord(stored))
     if (next !== JSON.stringify(stored)) update.run(next, String(row["run_id"]))
   }
@@ -56,7 +61,7 @@ const rewriteRunMemoryRecords = (database: DatabaseSync): void => {
 
 const withoutResident = (pages: unknown): unknown =>
   Array.isArray(pages)
-    ? pages.filter((page) => !isObject(page) || page["basis"] !== "resident")
+    ? pages.filter((page) => !isObject(page) || page["basis"] !== RESIDENT_BASIS)
     : pages
 
 const todayReviewInput = (input: unknown): unknown => {
@@ -110,7 +115,7 @@ const dropResident = (database: DatabaseSync, input: (typeof LIVE_REVIEW_INPUTS)
   const update = database.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${key} = ?`)
   for (const row of keys) {
     const id = row["key"] as string | number
-    const stored = JSON.parse(String(read.get(id)?.["stored"])) as unknown
+    const stored = parseMigrationJson(String(read.get(id)?.["stored"]))
     update.run(JSON.stringify(input.today(stored)), id)
   }
 }

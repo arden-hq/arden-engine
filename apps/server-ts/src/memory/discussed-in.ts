@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { spaceOfJob } from "../persistence/space-job-id.js"
 
 import type { SpaceStoreError } from "../persistence/spaces/store.js"
 import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
@@ -54,7 +55,7 @@ const userChats = (sessions: Sessions) => {
     const chat =
       header === null ||
       header.sessionType === "agent" ||
-      (header.originAutomationId !== null && !header.originAutomationId.startsWith("space:"))
+      (header.originAutomationId !== null && spaceOfJob(header.originAutomationId) === undefined)
         ? null
         : header
     resolved.set(sessionId, chat)

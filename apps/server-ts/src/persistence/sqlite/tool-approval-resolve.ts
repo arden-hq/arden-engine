@@ -217,7 +217,7 @@ export const makeToolApprovalResolve = ({
 export const keepCommandResult = (
   sql: SqlClient.SqlClient,
   decision: { readonly runId: string; readonly toolCallId: string; readonly commandId?: string }
-) =>
+): Effect.Effect<void, ToolExecutionStoreError, never> =>
   decision.commandId === undefined
     ? Effect.void
     : recordCommandResult(sql, {

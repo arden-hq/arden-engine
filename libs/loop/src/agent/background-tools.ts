@@ -1,4 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { after, type Timer } from "@arden-hq/std/timer"
 import { AgentInvariantError } from "../errors.js"
 import { raceAbort } from "../abort.js"
 import { launchReceipt, parseToolCalls } from "../tools/dispatch.js"
@@ -208,7 +209,7 @@ export class BackgroundTools {
         ...[...this.jobs.values()].map((job) => job.settled),
         ...(options.wake === undefined ? [] : [options.wake])
       ])
-      let timeout: ReturnType<typeof setTimeout> | undefined
+      let timeout: Timer | undefined
       try {
         const maxWaitMs = options.maxWaitMs
         const waiting =
@@ -217,12 +218,12 @@ export class BackgroundTools {
             : Promise.race([
                 completion,
                 new Promise<void>((resolve) => {
-                  timeout = setTimeout(resolve, Math.max(0, maxWaitMs))
+                  timeout = after(Math.max(0, maxWaitMs), resolve)
                 })
               ])
         await raceAbort(waiting, this.options.signal)
       } finally {
-        clearTimeout(timeout)
+        timeout?.cancel()
       }
     }
     let changed = false
@@ -249,19 +250,19 @@ export class BackgroundTools {
     )
     if (fresh.length === 0) return
     const closesInMs = Math.max(...fresh.map((job) => job.graceUntil)) - now
-    let timeout: ReturnType<typeof setTimeout> | undefined
+    let timeout: Timer | undefined
     try {
       await raceAbort(
         Promise.race([
           Promise.all(fresh.map((job) => job.settled)),
           new Promise<void>((resolve) => {
-            timeout = setTimeout(resolve, closesInMs)
+            timeout = after(closesInMs, resolve)
           })
         ]),
         this.options.signal
       )
     } finally {
-      clearTimeout(timeout)
+      timeout?.cancel()
     }
   }
 }

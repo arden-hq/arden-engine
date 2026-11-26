@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import { mcpDecoders, mcpRequests, mcpRoutes } from "@arden-hq/protocol/mcp"
 import { permissionDecoders, permissionRoutes } from "@arden-hq/protocol/permissions"
 import {
@@ -105,7 +106,7 @@ export const applySettings = async ({
     })
     if (!response.ok)
       throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`)
-    return response.json()
+    return parseJsonBody(response)
   }
   // The rules already on the global list, so a second start on the same data
   // folder changes what differs and adds nothing twice.

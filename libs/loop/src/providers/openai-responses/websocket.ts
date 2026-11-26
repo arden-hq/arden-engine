@@ -17,6 +17,7 @@ import {
   HttpStatusError
 } from "../kit/index.js"
 import { errorMessage } from "@arden-hq/std/errors"
+import { abortAfter, every } from "@arden-hq/std/timer"
 import { OpenAiResponsesProviderError } from "./errors.js"
 import { asRecord, type RawResponseEvent } from "./items.js"
 import { makePayload, responsesRoute } from "./request.js"
@@ -178,7 +179,7 @@ export const openResponsesSession = (options: {
           polling = false
         })
     }
-    const timer = setInterval(poll, 100)
+    const timer = every(100, poll)
     const connect = async () => {
       const headers = await options.headers(signal, refreshHeaders)
       refreshHeaders = false
@@ -228,8 +229,7 @@ export const openResponsesSession = (options: {
       priorInput = payload.input
       while (true) {
         if (pollFailure !== undefined) throw pollFailure.cause
-        const deadline = new AbortController()
-        const timer = setTimeout(() => deadline.abort(), options.idleTimeoutMs)
+        const deadline = abortAfter(options.idleTimeoutMs)
         const read = await (async () => {
           try {
             if (saved !== undefined) return { done: false, value: saved }
@@ -242,7 +242,7 @@ export const openResponsesSession = (options: {
               throw new RetryableProviderError("OpenAI WebSocket response stream timed out")
             throw cause
           } finally {
-            clearTimeout(timer)
+            deadline.cancel()
           }
         })()
         saved = undefined
@@ -400,7 +400,7 @@ export const openResponsesSession = (options: {
       throw cause
     } finally {
       generating = false
-      clearInterval(timer)
+      timer.cancel()
       await pollWork
       signal.removeEventListener("abort", onAbort)
     }

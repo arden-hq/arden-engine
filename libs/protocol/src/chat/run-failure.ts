@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "../common/json-text.js"
 /**
  * What a failed run says to the person. A request Arden built wrong is
  * Arden's defect: the person reads one plain sentence, and the provider's raw
@@ -23,12 +24,7 @@ const MODEL_UNAVAILABLE_FALLBACK = "The model server won't run this model."
 export const providerSentence = (message: string): string | undefined => {
   const start = message.indexOf("{")
   if (start < 0) return undefined
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(message.slice(start))
-  } catch {
-    return undefined
-  }
+  const parsed = parseJsonTextOrUndefined(message.slice(start))
   if (typeof parsed !== "object" || parsed === null) return undefined
   const error = "error" in parsed ? parsed.error : undefined
   if (typeof error === "string") return error.trim() || undefined

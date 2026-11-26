@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from "../contracts/messages.js"
 import type { JsonSchemaConverter } from "../tools/tool.js"
 import { errorMessage } from "@arden-hq/std/errors"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 /**
  * Structured output for one invocation. The JSON-Schema response format is
@@ -45,7 +46,7 @@ export const validateOutputText = async (
 ): Promise<OutputValidation> => {
   let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    parsed = parseJsonText(text)
   } catch (cause) {
     return { issues: [{ message: `the final text is not valid JSON: ${errorMessage(cause)}` }] }
   }

@@ -255,7 +255,7 @@ export const appTarget = (input: {
   readonly objectId: string
   readonly title: string
   readonly place?: string
-}) =>
+}): { place?: string; source: string; objectId: string; title: string } =>
   ({
     source: "app",
     objectId: input.objectId,

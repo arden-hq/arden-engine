@@ -160,7 +160,9 @@ interface CreateCardServices {
 }
 
 export const createCardOf =
-  (services: CreateCardServices) =>
+  (
+    services: CreateCardServices
+  ): ((input: CreateInput, ctx: ToolContext<ServerRunContext>) => Promise<ServerApprovalPrompt>) =>
   async (input: CreateInput, ctx: ToolContext<ServerRunContext>): Promise<ServerApprovalPrompt> => {
     return {
       preview: "Create this Automation.",

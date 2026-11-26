@@ -125,7 +125,9 @@ export type HomeLetterBody = typeof HomeLetterBodySchema.Type
 export type HomeLetter = typeof HomeLetterSchema.Type
 export type HomeLetterResponse = typeof HomeLetterResponseSchema.Type
 export const HomePresenceResponseSchema = Schema.Struct({ ok: Schema.Literal(true) })
-export const encodeHomePresenceEffect = (value: unknown) =>
+export const encodeHomePresenceEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(HomePresenceInputSchema)(value, { onExcessProperty: "error" }).pipe(
     Effect.map(JSON.stringify)
   )

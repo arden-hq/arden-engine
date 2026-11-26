@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { CHAT_MESSAGE_MAX_LENGTH, type ChatReplyContext } from "@arden-hq/protocol/chat"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
@@ -20,7 +21,7 @@ export const messageQuote = Effect.fn("MessageQuote.read")(function* (
   const row = rows[0]
   if (row === undefined || row.content === null) return undefined
   if (row.role !== ROLE.user && row.role !== ROLE.assistant) return undefined
-  const content: unknown = row.content_type === "array" ? JSON.parse(row.content) : row.content
+  const content: unknown = row.content_type === "array" ? parseJsonText(row.content) : row.content
   const text = userContent(content).text
   if (text === "") return undefined
   return {

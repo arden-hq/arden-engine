@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import {
   addCost,
   providerErrorCode,
@@ -45,7 +46,7 @@ const dollars = (value: unknown): number | undefined =>
 /** The counts an earlier start left in `file`, so a restart goes on counting. */
 const readUsage = (file: string): Usage => {
   try {
-    const value = JSON.parse(readFileSync(file, "utf8")) as Partial<Record<keyof Usage, unknown>>
+    const value = parseJsonText(readFileSync(file, "utf8")) as Partial<Record<keyof Usage, unknown>>
     return {
       modelRequests: count(value.modelRequests),
       promptTokens: count(value.promptTokens),

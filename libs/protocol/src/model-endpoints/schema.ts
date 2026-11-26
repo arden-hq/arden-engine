@@ -99,12 +99,16 @@ const draftFromWire = (wire: DraftWire): ModelEndpointDraft => ({
   })()
 })
 
-export const decodeModelEndpointDraftEffect = (value: unknown) =>
+export const decodeModelEndpointDraftEffect = (
+  value: unknown
+): Effect.Effect<ModelEndpointDraft, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ModelEndpointDraftRequestSchema)(value, strict).pipe(
     Effect.map(draftFromWire)
   )
 
-export const encodeModelEndpointDraftEffect = (draft: ModelEndpointDraft) =>
+export const encodeModelEndpointDraftEffect = (
+  draft: ModelEndpointDraft
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ModelEndpointDraftRequestSchema)(
     {
       base_url: draft.baseUrl,
@@ -121,12 +125,16 @@ export const DecisionSourceRequestSchema = Schema.Struct({
   source: Schema.Literals(["local", "endpoint", "off"] as const)
 })
 
-export const encodeChatEndpointPathEffect = (id: string) =>
+export const encodeChatEndpointPathEffect = (
+  id: string
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ChatEndpointIdSchema)(id).pipe(
     Effect.map((valid) => `/model-endpoints/chat/${valid}`)
   )
 
-export const encodeDecisionSourceEffect = (source: DecisionSource) =>
+export const encodeDecisionSourceEffect = (
+  source: DecisionSource
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(DecisionSourceRequestSchema)({ source }, strict).pipe(
     Effect.map(JSON.stringify)
   )
@@ -203,12 +211,16 @@ const chatDraftFromWire = (wire: ChatDraftWire): ChatEndpointDraft =>
         auth: chatAuthFromWire(wire.auth)
       }
 
-export const decodeChatEndpointDraftEffect = (value: unknown) =>
+export const decodeChatEndpointDraftEffect = (
+  value: unknown
+): Effect.Effect<ChatEndpointDraft, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ChatEndpointDraftRequestSchema)(value, strict).pipe(
     Effect.map(chatDraftFromWire)
   )
 
-export const encodeChatEndpointDraftEffect = (draft: ChatEndpointDraft) =>
+export const encodeChatEndpointDraftEffect = (
+  draft: ChatEndpointDraft
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ChatEndpointDraftRequestSchema)(
     {
       service: draft.service,

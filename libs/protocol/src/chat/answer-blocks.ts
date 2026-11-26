@@ -1,3 +1,4 @@
+import { parseJsonText } from "../common/json-text.js"
 /** `arden:ui` answer blocks: where they sit in a message, and what they stand
  *  as in places that never draw them (a row's preview line, search text, the
  *  model's older history, the clipboard). This is the one definition of "a
@@ -73,7 +74,7 @@ export const answerBlockTitle = (body: string): string | undefined => {
   const literal = HEADER_TITLE.exec(body)?.[1]
   if (literal === undefined) return undefined
   try {
-    const title = (JSON.parse(`"${literal}"`) as string).trim()
+    const title = (parseJsonText(`"${literal}"`) as string).trim()
     return title.length === 0 ? undefined : title
   } catch {
     return undefined

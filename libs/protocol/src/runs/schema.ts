@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import type { Effect } from "effect"
 import { AutomationRunOutcomeSchema } from "../automations/outcome.js"
 import { ChatProjectionEventSchema } from "../chat/schema.js"
 import type { JsonRecord } from "../common/json.js"
@@ -228,7 +229,9 @@ export const RunEventPageQuerySchema = Schema.Struct({
   )
 })
 
-export const decodeRunTerminalResultEffect = (value: unknown) =>
+export const decodeRunTerminalResultEffect = (
+  value: unknown
+): Effect.Effect<Schema.Schema.Type<typeof RunTerminalResultSchema>, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(RunTerminalResultSchema)(value)
 
 const SessionTypeSchema = Schema.Literals(["chat", "channel", "agent"] as const)

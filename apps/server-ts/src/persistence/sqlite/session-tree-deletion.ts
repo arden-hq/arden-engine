@@ -13,7 +13,7 @@ export const sessionDeletionTree = (
     readonly from: Statement.Fragment
     readonly root?: true
   }
-) =>
+): Statement.Fragment =>
   sessionDescendants(sql, {
     ...walk,
     where: sql`child.session_type = 'agent' OR EXISTS (

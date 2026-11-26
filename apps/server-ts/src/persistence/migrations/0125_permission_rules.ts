@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
@@ -255,7 +256,7 @@ const convertToolSettings = (database: DatabaseSync): void => {
     .get()
   const stored = row?.["overrides_json"]
   if (typeof stored !== "string") return
-  const overrides: unknown = JSON.parse(stored)
+  const overrides: unknown = parseMigrationJson(stored)
   if (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)) return
   const servers = database
     .prepare("SELECT name FROM mcp_servers")

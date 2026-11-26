@@ -224,7 +224,7 @@ const recordChatEvents = Effect.fn("SqliteChatEvents.record")(function* (
 })
 
 export const lookError =
-  (operation: ChatWriteOperation, sessionId: string) =>
+  (operation: ChatWriteOperation, sessionId: string): ((cause: unknown) => ChatWriteError) =>
   (cause: unknown): ChatWriteError =>
     writeError(operation, "storage", "Could not read chat events", { sessionId, cause })
 

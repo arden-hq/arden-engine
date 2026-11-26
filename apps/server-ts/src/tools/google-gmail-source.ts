@@ -11,7 +11,17 @@ export const emailSource = (
     readonly from: string
     readonly receivedAt: string | null
   } & ({ readonly use: "read"; readonly body: string } | { readonly use: "found" })
-) => {
+): {
+  at?: string
+  excerpt?: string
+  by?: string
+  provider: string
+  kind: "message" | "thread"
+  ref: string
+  title: string
+  use: "read" | "found"
+  href: string
+} => {
   const excerpt = input.use === "read" ? passage(unquotedEmail(input.body)) : undefined
   const by = input.from
     .replace(/\s*<[^>]*>\s*$/, "")

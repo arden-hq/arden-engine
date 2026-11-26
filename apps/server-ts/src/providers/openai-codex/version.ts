@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import { Schema } from "effect"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -32,5 +33,5 @@ export const resolveCodexClientVersion = async (options: CodexVersionOptions): P
   })
   if (!response.ok)
     throw new Error(`Could not discover Codex client version (HTTP ${response.status})`)
-  return Schema.decodeUnknownSync(Package)(await response.json()).version
+  return Schema.decodeUnknownSync(Package)(await parseJsonBody(response)).version
 }

@@ -1,6 +1,8 @@
 import type { SqlClient } from "effect/unstable/sql"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export const failureNeedsOwner = (sql: SqlClient.SqlClient) => sql`(
+export const failureNeedsOwner = (sql: SqlClient.SqlClient): Statement<Row> => sql`(
   ending.status = 'failed' AND ending.decided = 1 AND ending.place_kind <> 'parent'
   AND (ending.purpose <> 'chat'
     OR json_extract(chat.metadata_json, '$.run_context.task.item_id') IS NOT NULL)

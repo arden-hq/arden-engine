@@ -25,6 +25,7 @@ import {
 } from "../kit/index.js"
 import { errorFrameFailure } from "./errors.js"
 import { API } from "./request.js"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 /**
  * The fields servers stream reasoning text in: llama.cpp `reasoning_content`,
@@ -324,7 +325,7 @@ export const makeChunkMapper = (options: {
       if (data.length === 0) return []
       let decoded: unknown
       try {
-        decoded = JSON.parse(data)
+        decoded = parseJsonText(data)
       } catch {
         throw new SemanticResponseError(`${options.label} returned an invalid SSE event`)
       }
@@ -390,7 +391,7 @@ const tokens = (value: unknown): number =>
 
 const isCompleteJson = (text: string): boolean => {
   try {
-    JSON.parse(text)
+    parseJsonText(text)
     return true
   } catch {
     return false

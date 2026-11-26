@@ -6,6 +6,8 @@ import { userChatSql } from "./chat-ownership.js"
 import { chatHasActiveWork } from "./session-archive.js"
 import type { PersistenceDeps } from "./deps.js"
 import { storeError } from "./session-rows.js"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 export const onboardingRefusal = Effect.fn("Onboarding.refusal")(function* (
   sql: SqlClient.SqlClient,
@@ -23,7 +25,11 @@ export const onboardingRefusal = Effect.fn("Onboarding.refusal")(function* (
   return undefined
 })
 
-export const markOnboarding = (sql: SqlClient.SqlClient, sessionId: string, at: string) =>
+export const markOnboarding = (
+  sql: SqlClient.SqlClient,
+  sessionId: string,
+  at: string
+): Statement<Row> =>
   sql`UPDATE sessions SET metadata = json_set(COALESCE(metadata, '{}'), '$.onboarding',
       json_object('at', ${at}))
     WHERE session_id = ${sessionId} AND json_type(metadata, '$.onboarding') IS NULL`

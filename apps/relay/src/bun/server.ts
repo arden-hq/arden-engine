@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite"
 import type { SQLQueryBindings } from "bun:sqlite"
 import type { ServerWebSocket } from "bun"
 import { isDeviceId, MAX_FRAME_BYTES } from "@arden-hq/relay-protocol"
+import { every } from "@arden-hq/std/timer"
 import type { Pusher } from "../core/pusher.js"
 import { RelayCore } from "../core/relay-core.js"
 import type { Attachment, Conns } from "../core/relay-core.js"
@@ -135,7 +136,7 @@ export const startRelay = ({
     }
   })
 
-  const interval = setInterval(tick, ALARM_INTERVAL_MS)
+  const interval = every(ALARM_INTERVAL_MS, tick)
   const boundPort = server.port ?? port
   return {
     url: `ws://${hostname}:${boundPort}`,
@@ -143,7 +144,7 @@ export const startRelay = ({
     tick,
     stop: () => {
       stopped = true
-      clearInterval(interval)
+      interval.cancel()
       // Bun 1.3.10: stop(true) closes every socket and the listener at once,
       // but its promise never settles once the server has closed a socket
       // itself (auth failure, revoke), so it is not awaited.

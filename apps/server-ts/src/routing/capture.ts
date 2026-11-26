@@ -46,7 +46,10 @@ export const makeCaptureRouter = (
   dependencies: RouterCandidateDependencies & {
     readonly decisions: Pick<Decisions["Service"], "decide">
   }
-) => {
+): ((input: {
+  readonly image: CompletionImage
+  readonly note: string
+}) => Effect.Effect<RouterDecision, never, never>) => {
   const candidatesOf = makeRouterCandidates(dependencies)
   const guarded = <E, R>(step: Effect.Effect<RouterDecision, E, R>) =>
     step.pipe(

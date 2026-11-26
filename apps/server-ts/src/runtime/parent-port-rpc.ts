@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 import { randomUUID } from "node:crypto"
 
 export interface ParentPortSender {
@@ -42,7 +43,7 @@ interface Pending<T, E> {
   readonly resolve: (value: T) => void
   readonly reject: (cause: unknown) => void
   readonly fail: (failure: ParentPortFailure<E>) => unknown
-  readonly timer: ReturnType<typeof setTimeout>
+  readonly timer: Timer
   readonly detach: () => void
 }
 
@@ -59,7 +60,7 @@ export const createParentPortRpc = <T, E>(
     const request = pending.get(requestId)
     if (request === undefined) return undefined
     pending.delete(requestId)
-    clearTimeout(request.timer)
+    request.timer.cancel()
     request.detach()
     return request
   }
@@ -93,8 +94,9 @@ export const createParentPortRpc = <T, E>(
     return new Promise<T>((resolve, reject) => {
       const onAbort = (): void =>
         cancel(requestId, { kind: "aborted", dispatched: true, reason: signal?.reason })
-      const timer = setTimeout(() => cancel(requestId, { kind: "timeout" }), options.timeoutMs)
-      timer.unref?.()
+      const timer = after(options.timeoutMs, () => cancel(requestId, { kind: "timeout" }), {
+        unref: true
+      })
       pending.set(requestId, {
         resolve,
         reject,

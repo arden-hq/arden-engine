@@ -7,6 +7,11 @@ import type { JobPurpose } from "../job-classification.js"
 import type { Backfill } from "./backfills/backfill.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { endedUnsuccessfullyAutomationRunStatusList } from "./status-sets.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
+import type { AutomationRunStatus } from "@arden-hq/protocol/automations"
+import type { JournalAppendResult } from "@arden-hq/journal/effect"
+import type { SessionLifecycleEventError } from "../sessions/events.js"
+import type { UnitOfWork } from "../unit-of-work.js"
 
 export interface EndedAutomationRun {
   readonly id: number
@@ -40,7 +45,7 @@ export const announceEnded = (
     readonly purpose: JobPurpose
     readonly run: EndedAutomationRun
   }
-) =>
+): Effect.Effect<JournalAppendResult, SessionLifecycleEventError, UnitOfWork> =>
   sessionEvents.appendEventInTransaction({
     type: "automation_finished",
     task_id: input.automationId,
@@ -52,7 +57,9 @@ export const announceEnded = (
     run_session_id: input.run.chatRunId === null ? null : input.run.chatSessionId
   })
 
-export const shownRunStatus = (outcome: string | null) =>
+export const shownRunStatus = (
+  outcome: string | null
+): Effect.Effect<AutomationRunStatus, Schema.SchemaError, never> =>
   outcome === null
     ? Effect.succeed("running" as const)
     : Schema.decodeUnknownEffect(AutomationRunOutcomeSchema)(outcome).pipe(Effect.map(runStatusOf))
@@ -65,8 +72,10 @@ const storedStatus = (
   return "failed"
 }
 
-export const outcomeSql = (sql: SqlClient.SqlClient, run: Statement.Fragment) =>
-  sql`COALESCE(${run}.outcome, ${legacyOutcomeSql(sql, run)})`
+export const outcomeSql = (
+  sql: SqlClient.SqlClient,
+  run: Statement.Fragment
+): Statement.Statement<Row> => sql`COALESCE(${run}.outcome, ${legacyOutcomeSql(sql, run)})`
 
 const legacyOutcomeSql = (sql: SqlClient.SqlClient, run: Statement.Fragment) => sql`CASE
     WHEN ${run}.status = 'running' THEN NULL

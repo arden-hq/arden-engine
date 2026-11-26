@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { FocusChoice } from "@arden-hq/protocol/sessions/focus-choices"
 import { isWrittenByPerson } from "../transcript/model.js"
@@ -84,9 +85,8 @@ export const matchesRecordedFocusTarget = (
   stored: string | null,
   requested: FocusQuestionTargetInput | undefined
 ): Effect.Effect<boolean, WorkStoreError> => {
-  if (stored === null || requested === undefined) {
+  if (stored === null || requested === undefined)
     return Effect.succeed(stored === null && requested === undefined)
-  }
   return decodeJson(internalTargetSchema, stored).pipe(
     Effect.map(
       (target) =>
@@ -327,7 +327,7 @@ const triggeringMessage = Effect.fn("FocusChoice.triggeringMessage")(function* (
           AND json_type(message.message_json, '$.forwarded_from') = 'object'))
     ORDER BY message.seq`
   for (const row of rows) {
-    const stored: unknown = JSON.parse(row.message_json)
+    const stored: unknown = parseJsonText(row.message_json)
     if (!Predicate.isObject(stored)) continue
     if (
       !isWrittenByPerson({ role: String(stored.role), question_answer: stored.question_answer }) &&

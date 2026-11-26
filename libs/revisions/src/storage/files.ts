@@ -1,5 +1,5 @@
 import { Effect, FileSystem, Option, Path, Result } from "effect"
-import * as PlatformError from "effect/PlatformError"
+import { PlatformError, type SystemErrorTag } from "effect/PlatformError"
 
 import { normalizeRelativePath } from "../domain/model.js"
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
@@ -12,10 +12,9 @@ export const storageFailure = (operation: string, cause: unknown): RevisionStora
     cause
   })
 
-const isPlatform = (cause: unknown): cause is PlatformError.PlatformError =>
-  cause instanceof PlatformError.PlatformError
+const isPlatform = (cause: unknown): cause is PlatformError => cause instanceof PlatformError
 
-const isPlatformReason = (cause: unknown, reason: PlatformError.SystemErrorTag): boolean =>
+const isPlatformReason = (cause: unknown, reason: SystemErrorTag): boolean =>
   isPlatform(cause) && cause.reason._tag === reason
 
 const isMissing = (cause: unknown): boolean => isPlatformReason(cause, "NotFound")
@@ -45,7 +44,7 @@ export const relativeParts = Effect.fn("RevisionStorage.relativeParts")(function
 export const entryIsSymlink = (
   fs: FileSystem.FileSystem,
   file: string
-): Effect.Effect<boolean, PlatformError.PlatformError> =>
+): Effect.Effect<boolean, PlatformError> =>
   fs.readLink(file).pipe(
     Effect.as(true),
     Effect.catchTag("PlatformError", (error) =>

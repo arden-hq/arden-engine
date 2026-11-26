@@ -1,3 +1,4 @@
+import { after } from "@arden-hq/std/timer"
 import { spawn } from "node:child_process"
 import { basename, delimiter, isAbsolute } from "node:path"
 import { withSafeGit } from "./git-environment.js"
@@ -85,7 +86,7 @@ export const runBounded = (
     const finish = (result: ProbeResult): void => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      timer.cancel()
       resolve(result)
     }
     const child = spawn(file, args, {
@@ -93,10 +94,10 @@ export const runBounded = (
       stdio: ["ignore", "pipe", "pipe"],
       detached: true
     })
-    const timer = setTimeout(() => {
+    const timer = after(timeoutMs, () => {
       signalProcessGroup(child.pid, "SIGKILL", (signal) => child.kill(signal))
       finish({ kind: "failed" })
-    }, timeoutMs)
+    })
     const collect = (chunk: Buffer): void => {
       if (size >= MAX_OUTPUT_BYTES) return
       chunks.push(chunk)

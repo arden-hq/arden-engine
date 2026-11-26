@@ -18,6 +18,7 @@ import { makeSettingsDocument } from "./settings-document.js"
 import { modelTurnRunStatusList } from "./status-sets.js"
 import { recentNotices } from "./notices.js"
 import { ownerPresentSql } from "./home-presence.js"
+import type { Statement } from "effect/unstable/sql/Statement"
 
 interface DeviceRow {
   readonly dev: string
@@ -74,7 +75,7 @@ export const recordCommandResult = (
     readonly state: Exclude<RelayCommandState, "running">
     readonly result: Schema.Json | undefined
   }
-) =>
+): Statement<{ readonly cid: string }> =>
   sql<{ readonly cid: string }>`UPDATE relay_commands
     SET state = ${input.state},
       result_json = ${input.result === undefined ? null : JSON.stringify(input.result)}

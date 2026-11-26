@@ -40,7 +40,9 @@ type ApprovedAttachments = typeof ApprovedAttachmentsSchema.Type
 export const calendarAttachmentRef = (attachment: CalendarAttachment): string =>
   attachment.fileId ?? attachment.fileUrl
 
-export const calendarAttachmentBody = (attachments: ReadonlyArray<CalendarAttachment>) =>
+export const calendarAttachmentBody = (
+  attachments: ReadonlyArray<CalendarAttachment>
+): { fileUrl: string; title?: string; mimeType?: string; iconLink?: string }[] =>
   attachments.map(({ fileId: _fileId, ...writable }) => writable)
 
 const mergeCalendarAttachments = ({
@@ -146,7 +148,9 @@ export const calendarAttachmentsForExecution = async (
   return saved
 }
 
-export const calendarAttachmentPresentation = (attachments: ReadonlyArray<CalendarAttachment>) =>
+export const calendarAttachmentPresentation = (
+  attachments: ReadonlyArray<CalendarAttachment>
+): { kind: "link"; name: string; media_type: string; url: string }[] =>
   attachments.map((item) => ({
     kind: "link" as const,
     name: item.title ?? calendarAttachmentRef(item),

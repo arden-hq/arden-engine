@@ -29,6 +29,11 @@
       "types": "./dist/errors.d.ts",
       "import": "./dist/errors.js"
     },
+    "./json-text": {
+      "arden-source": "./src/json-text.ts",
+      "types": "./dist/json-text.d.ts",
+      "import": "./dist/json-text.js"
+    },
     "./json": {
       "arden-source": "./src/json.ts",
       "types": "./dist/json.d.ts",
@@ -78,6 +83,11 @@
       "arden-source": "./src/sleep.ts",
       "types": "./dist/sleep.d.ts",
       "import": "./dist/sleep.js"
+    },
+    "./timer": {
+      "arden-source": "./src/timer.ts",
+      "types": "./dist/timer.d.ts",
+      "import": "./dist/timer.js"
     },
     "./text": {
       "arden-source": "./src/text.ts",

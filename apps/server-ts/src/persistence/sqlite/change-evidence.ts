@@ -49,7 +49,7 @@ export const withNestedCallFacts = Effect.fn("ChangeEvidence.nestedCalls")(funct
 export const withCallFacts = <Data extends Readonly<Record<string, unknown>>>(
   calls: NestedCalls,
   data: Data
-) => {
+): Data => {
   const tools = data["tools"]
   if (Array.isArray(tools)) {
     return {

@@ -35,6 +35,8 @@ import { normalizeToolResult } from "../internal/validate.js"
 import { sanitizeToolDisplayTitle, splitToolArguments } from "./display-title.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { isRecord } from "@arden-hq/std/json"
+import { after, type Timer } from "@arden-hq/std/timer"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 const invalidArguments = (message: string): ToolArgumentError => ({
   code: "invalid_tool_arguments",
@@ -73,6 +75,13 @@ const nonObjectArguments = (): ToolArgumentError =>
   )
 
 /** Parse provider tool arguments without throwing or accepting arrays/primitives. */
+const rejected = (toolCall: ToolCall, argumentError: ToolArgumentError): PendingToolCall => ({
+  toolCall,
+  name: toolCall.function.name,
+  args: {},
+  argumentError
+})
+
 export const parseToolCalls = (
   calls: ReadonlyArray<ToolCall>,
   displayTitleArgument: ToolDisplayTitle | undefined
@@ -92,22 +101,15 @@ export const parseToolCalls = (
     }
     let decoded: unknown
     try {
-      decoded = JSON.parse(toolCall.function.arguments)
+      decoded = parseJsonText(toolCall.function.arguments)
     } catch (cause) {
-      return {
+      return rejected(
         toolCall,
-        name: toolCall.function.name,
-        args: {},
-        argumentError: invalidArguments(malformedJsonMessage(toolCall.function.arguments, cause))
-      }
+        invalidArguments(malformedJsonMessage(toolCall.function.arguments, cause))
+      )
     }
     if (!isRecord(decoded)) {
-      return {
-        toolCall,
-        name: toolCall.function.name,
-        args: {},
-        argumentError: nonObjectArguments()
-      }
+      return rejected(toolCall, nonObjectArguments())
     }
     const projected = splitToolArguments(decoded, toolCall.display_title, displayTitleArgument)
     return {
@@ -497,22 +499,20 @@ const executeCall = async (
 }
 
 const foregroundBudget = (afterMs: number) => {
-  let timer: ReturnType<typeof setTimeout> | undefined
+  let timer: Timer | undefined
   let stopped = false
   let expire = (): void => {}
-  const expired = new Promise<"expired">((resolve) => {
-    expire = () => resolve("expired")
-  })
+  const expired = new Promise<"expired">((resolve) => (expire = () => resolve("expired")))
   return {
     expired,
     stop: (): void => {
       stopped = true
-      clearTimeout(timer)
+      timer?.cancel()
     },
     phase: (phase: ToolPhase): void => {
-      clearTimeout(timer)
+      timer?.cancel()
       if (stopped || phase === "waiting" || !Number.isFinite(afterMs)) return
-      timer = setTimeout(expire, afterMs)
+      timer = after(afterMs, expire)
     }
   }
 }

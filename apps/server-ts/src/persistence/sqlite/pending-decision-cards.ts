@@ -1,6 +1,7 @@
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { runAsksVisiblePredicate } from "./question-events.js"
 import { runColumns, runDestinationSessionId } from "./run-destination.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const asking = (sql: SqlClient.SqlClient) => sql`JOIN chat_runs AS card_run
   ON card_run.run_id = source.run_id AND ${runAsksVisiblePredicate(sql, runColumns(sql, "card_run"))}`
@@ -14,7 +15,7 @@ const destination = (sql: SqlClient.SqlClient) =>
 export const pendingDecisionCards = (
   sql: SqlClient.SqlClient,
   session: Statement.Fragment = sql`1 = 1`
-) => sql`
+): Statement.Statement<Row> => sql`
   SELECT source.run_id, source.session_id, source.tool_call_id, source.tool_name,
          source.action, source.scope, source.preview, source.diff, source.requested_at,
          source.kind, source.payload_json, source.expires_at, source.result_feedback,
@@ -32,7 +33,7 @@ export const pendingDecisionCards = (
   WHERE source.status = 'pending' AND ${session}
 `
 
-export const decisionRoutesSql = (sql: SqlClient.SqlClient) => sql`
+export const decisionRoutesSql = (sql: SqlClient.SqlClient): Statement.Statement<Row> => sql`
   SELECT visibility.viewer_session_id, visibility.source_session_id, visibility.source_kind,
     visibility.run_id, visibility.tool_call_id, visibility.route_basis AS basis
   FROM pending_decision_visibility AS visibility
@@ -49,7 +50,7 @@ export const decisionRoutesSql = (sql: SqlClient.SqlClient) => sql`
 export const visiblePendingDecisionCards = (
   sql: SqlClient.SqlClient,
   viewerSessionId: string
-) => sql`
+): Statement.Statement<Row> => sql`
   SELECT card.* FROM (${pendingDecisionCards(sql)}) AS card
   WHERE EXISTS (SELECT 1 FROM (${decisionRoutesSql(sql)}) AS route
     WHERE route.viewer_session_id = ${viewerSessionId} AND route.source_kind = card.source

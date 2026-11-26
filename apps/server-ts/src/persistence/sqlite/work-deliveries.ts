@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql/SqlError"
@@ -120,7 +121,7 @@ const threadDeliveryOwner = Effect.fn("WorkDeliveries.threadOwner")(function* (
     WHERE session_id = ${payload.forwarded.sessionId}
       AND message_id = ${payload.forwarded.messageId}`
   const stored: unknown =
-    forwarded[0] === undefined ? undefined : JSON.parse(forwarded[0].message_json)
+    forwarded[0] === undefined ? undefined : parseJsonText(forwarded[0].message_json)
   const content =
     typeof stored === "object" && stored !== null && "content" in stored
       ? stored.content
@@ -181,9 +182,8 @@ export const readDeliveryForAdmission = Effect.fn(function* (options: {
   const payload = yield* decodeJson(RunDeliveryPayloadSchema, row.payload).pipe(
     Effect.mapError((cause) => workError("storage", "Stored arrival is corrupt", cause))
   )
-  if (payload.sessionId !== options.sessionId || row.body !== content) {
+  if (payload.sessionId !== options.sessionId || row.body !== content)
     return yield* workError("invalid", "Arrival destination or content changed")
-  }
   if (payload.kind === "thread") yield* threadDeliveryOwner(options.sql, payload)
   if (payload.kind !== "update" && payload.timeout === true) {
     const stopped = yield* options.sql`SELECT 1 FROM chat_runs WHERE run_id = ${payload.runIds[0]}

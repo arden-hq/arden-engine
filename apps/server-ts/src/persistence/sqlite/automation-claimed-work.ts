@@ -66,7 +66,7 @@ const JobHandlerIdSchema = Schema.NullOr(Schema.Literals(SYSTEM_HANDLER_IDS))
 
 export const isJobHandlerId = Schema.is(JobHandlerIdSchema)
 
-export const unknownHandlerMessage = (handler: string | null) =>
+export const unknownHandlerMessage = (handler: string | null): string =>
   `Unknown Automation handler: ${handler}`
 
 export const readJobHandler = Effect.fn("AutomationJob.readHandler")(function* (

@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import type { AutomationContextMode, AutomationRun } from "@arden-hq/protocol/automations"
 import { haltAutomation } from "./automation-halt.js"
 import { AutomationRunSchema, AutomationRunSkipSchema } from "@arden-hq/protocol/effect/automations"
@@ -19,9 +20,7 @@ import {
   automationRowSelect,
   makeAutomationRowReads,
   readWorkOwner,
-  type AutomationStoreDeps
-} from "./automation-rows.js"
-import {
+  type AutomationStoreDeps,
   type AutomationRow,
   storeError,
   automationIdEffect,
@@ -150,7 +149,7 @@ export const makeAutomationCatalog = ({
         FROM automation_instruction_revisions WHERE revision_id = ${revisionId} LIMIT 1`
           if (row === undefined) return null
           const parsed = yield* Schema.decodeUnknownEffect(InstructionSnapshotSchema)(
-            JSON.parse(row.instruction_json) as unknown
+            parseJsonText(row.instruction_json)
           ).pipe(
             Effect.mapError((cause) =>
               storeError(
@@ -212,8 +211,8 @@ export const makeAutomationCatalog = ({
                 storeError("get", "corrupt", cause.message, row.task_id, cause)
               )
             )
-            const result = JSON.parse(resultJson) as unknown
-            const args = JSON.parse(receipt.arguments_json) as unknown
+            const result = parseJsonText(resultJson)
+            const args = parseJsonText(receipt.arguments_json)
             if (
               !matchesInstructionReceipt({
                 result,

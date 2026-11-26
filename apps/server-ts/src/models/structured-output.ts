@@ -1,6 +1,6 @@
 import type { AgentOutputOptions } from "@arden-hq/loop"
 import { JsonSchema, Schema, SchemaRepresentation } from "effect"
-import * as OpenAiStructuredOutput from "effect/unstable/ai/OpenAiStructuredOutput"
+import { toCodecOpenAI } from "effect/unstable/ai/OpenAiStructuredOutput"
 import { errorMessage } from "@arden-hq/std/errors"
 import type { JsonObject } from "../persistence/json.js"
 
@@ -24,7 +24,7 @@ type OutputConverter = <S extends Schema.ConstraintDecoder<unknown>>(
  * exists because the accepted subset differs per provider.
  */
 const openAiOutput: OutputConverter = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) => {
-  const converted = OpenAiStructuredOutput.toCodecOpenAI(schema)
+  const converted = toCodecOpenAI(schema)
   return {
     codec: converted.codec,
     jsonSchema: converted.jsonSchema

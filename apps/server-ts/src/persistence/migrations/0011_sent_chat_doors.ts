@@ -1,7 +1,9 @@
+import { parseMigrationJson } from "./json.js"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
 const SEND_TOOL = "session_send_message"
+const CONVERSATION = "conversation"
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -13,9 +15,9 @@ const withSendsInConversation = (message: unknown): Record<string, unknown> | un
   if (!isRecord(message) || !Array.isArray(message["tool_calls"])) return undefined
   let changed = false
   const calls = message["tool_calls"].map((call: unknown) => {
-    if (!isSendCall(call) || call["presentation"] === "conversation") return call
+    if (!isSendCall(call) || call["presentation"] === CONVERSATION) return call
     changed = true
-    return { ...call, presentation: "conversation" }
+    return { ...call, presentation: CONVERSATION }
   })
   return changed ? { ...message, tool_calls: calls } : undefined
 }
@@ -33,7 +35,7 @@ const placeSendsInConversation = (database: DatabaseSync): void => {
   const withSends = new Set<string>()
   for (const row of rows) {
     withSends.add(String(row.session_id))
-    const next = withSendsInConversation(JSON.parse(String(row.message_json)))
+    const next = withSendsInConversation(parseMigrationJson(String(row.message_json)))
     if (next !== undefined)
       updateTranscript.run(JSON.stringify(next), String(row.session_id), String(row.message_id))
   }
@@ -42,7 +44,7 @@ const placeSendsInConversation = (database: DatabaseSync): void => {
   for (const sessionId of withSends) {
     const messages = readProjection.get(sessionId)?.messages
     if (typeof messages !== "string") continue
-    const parsed: unknown = JSON.parse(messages)
+    const parsed: unknown = parseMigrationJson(messages)
     if (!Array.isArray(parsed)) continue
     let changed = false
     const next = parsed.map((message: unknown) => {

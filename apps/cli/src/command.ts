@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import type { PendingChatGptLogin } from "@arden-hq/headless/chatgpt-login"
 import {
   createHeadlessClient,
@@ -97,13 +98,9 @@ export const plainHttpMessage = (cause: HeadlessHttpError): string => {
 }
 
 const detailOf = (text: string): string | undefined => {
-  try {
-    const body: unknown = JSON.parse(text)
-    if (typeof body !== "object" || body === null || !("detail" in body)) return undefined
-    return typeof body.detail === "string" && body.detail.length > 0 ? body.detail : undefined
-  } catch {
-    return undefined
-  }
+  const body = parseJsonTextOrUndefined(text)
+  if (typeof body !== "object" || body === null || !("detail" in body)) return undefined
+  return typeof body.detail === "string" && body.detail.length > 0 ? body.detail : undefined
 }
 
 export class ServerUnavailableError extends Error {
@@ -267,7 +264,7 @@ const accessIn = async (
     return undefined
   }
   try {
-    return daemonDecoders.cliAccess(JSON.parse(Buffer.from(bytes).toString("utf8")))
+    return daemonDecoders.cliAccessText(Buffer.from(bytes).toString("utf8"))
   } catch {
     throw new ServerUnavailableError(`Arden's access file is unreadable: ${path}`)
   }

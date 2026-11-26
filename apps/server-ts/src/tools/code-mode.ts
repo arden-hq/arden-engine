@@ -1,3 +1,4 @@
+import { after } from "@arden-hq/std/timer"
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError, type JsonObject, type ToolContext } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
@@ -213,7 +214,7 @@ export const executeCodeMode = async (
       ctx.signal.removeEventListener("abort", stopWithTurn)
     }
   }
-  const budget = setTimeout(() => requestDetach("budget"), INLINE_BUDGET_MS)
+  const budget = after(INLINE_BUDGET_MS, () => requestDetach("budget"))
   let first: Settled
   try {
     first = await Promise.race([
@@ -224,7 +225,7 @@ export const executeCodeMode = async (
     ctx.signal.removeEventListener("abort", stopWithTurn)
     throw cause
   } finally {
-    clearTimeout(budget)
+    budget.cancel()
   }
 
   if (first.kind === "settled") {

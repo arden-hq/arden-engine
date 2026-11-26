@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 import type { CommandMessage, HttpMethod, MacMessage, PhoneMessage } from "@arden-hq/relay-protocol"
 import {
   FALLBACK_FAILURE,
@@ -32,7 +33,7 @@ export class PhoneSession {
   readonly #requests = new Map<string, AbortController>()
   readonly #running = new Set<string>()
   #sink: Sink | undefined
-  #grace: ReturnType<typeof setTimeout> | undefined
+  #grace: Timer | undefined
 
   constructor(options: {
     readonly dev: string
@@ -51,7 +52,7 @@ export class PhoneSession {
   }
 
   attach(sink: Sink): void {
-    clearTimeout(this.#grace)
+    this.#grace?.cancel()
     this.#grace = undefined
     this.#sink = sink
   }
@@ -61,14 +62,13 @@ export class PhoneSession {
     for (const stream of this.#streams.values()) stream.detach()
     for (const request of this.#requests.values()) request.abort()
     this.#requests.clear()
-    clearTimeout(this.#grace)
-    this.#grace = setTimeout(() => this.#closeStreams(), PhoneLimits.graceMs)
-    this.#grace.unref?.()
+    this.#grace?.cancel()
+    this.#grace = after(PhoneLimits.graceMs, () => this.#closeStreams(), { unref: true })
   }
 
   close(): void {
     this.detach()
-    clearTimeout(this.#grace)
+    this.#grace?.cancel()
     this.#closeStreams()
   }
 

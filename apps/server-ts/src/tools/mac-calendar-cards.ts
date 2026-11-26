@@ -102,7 +102,9 @@ export const changeablePlace = async (
 const APPROVED_TARGET = "mac_target"
 
 /** The calendar or list the card named, kept with the approval so the run uses the same one. */
-export const targetData = (target: MacCalendarRecord | undefined) =>
+export const targetData = (
+  target: MacCalendarRecord | undefined
+): { data?: never } | { data: { mac_target: string } } =>
   target === undefined ? {} : { data: { [APPROVED_TARGET]: target.id } }
 
 export const newItemTarget = async (
@@ -139,7 +141,10 @@ export const changedField = (
   ]
 }
 
-export const notesBody = (before: string | undefined, next: string | undefined) => {
+export const notesBody = (
+  before: string | undefined,
+  next: string | undefined
+): { body?: never } | { body: { before?: string; label: string; text: string } } => {
   const text = next === "" ? "Remove notes" : (next ?? before)
   if (text === undefined || (next === "" && before === undefined)) return {}
   return {

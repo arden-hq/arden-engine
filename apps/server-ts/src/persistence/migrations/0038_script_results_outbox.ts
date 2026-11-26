@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import { createHash } from "node:crypto"
 import type { DatabaseSync } from "node:sqlite"
 import { Predicate } from "effect"
@@ -22,7 +23,7 @@ interface SettledAttempt {
 
 const MAX_SOURCES = 80
 
-const parse = (json: string | null): unknown => (json === null ? null : JSON.parse(json))
+const parse = (json: string | null): unknown => (json === null ? null : parseMigrationJson(json))
 
 const sourceRefs = (lists: ReadonlyArray<string>): ReadonlyArray<unknown> => {
   const seen = new Map<string, unknown>()

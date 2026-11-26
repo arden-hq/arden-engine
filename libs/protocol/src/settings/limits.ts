@@ -139,7 +139,9 @@ export const limitSettingsResponse = (settings: LimitSettings): LimitSettingsWir
 
 const strict = { onExcessProperty: "error" } as const
 
-export const decodeLimitSettingsPatchRequestEffect = (value: unknown) =>
+export const decodeLimitSettingsPatchRequestEffect = (
+  value: unknown
+): Effect.Effect<LimitSettingsPatch, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(LimitSettingsPatchRequestSchema)(value, strict).pipe(
     Effect.map((patch): LimitSettingsPatch => ({
       ...(patch.arden_limit_percent === undefined
@@ -161,7 +163,9 @@ export const decodeLimitSettingsPatchRequestEffect = (value: unknown) =>
     }))
   )
 
-export const encodeLimitSettingsPatchEffect = (value: unknown) =>
+export const encodeLimitSettingsPatchEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(LimitSettingsPatchSchema)(value, strict).pipe(
     Effect.map((patch) =>
       JSON.stringify({

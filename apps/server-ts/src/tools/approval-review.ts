@@ -1,3 +1,4 @@
+import { after } from "@arden-hq/std/timer"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText, foldSpace } from "@arden-hq/std/text"
 import { errorMessage, redactedFailureText } from "@arden-hq/std/errors"
@@ -61,7 +62,6 @@ export type ApprovalReviewVerdict =
 
 export type ApprovalReview = (input: ApprovalReviewInput) => Promise<ApprovalReviewVerdict>
 
-const RuleWordsSchema = Schema.String
 const RULE_WORDS_MAX = 120
 
 const VerdictSchema = Schema.Struct({
@@ -72,7 +72,7 @@ const VerdictSchema = Schema.Struct({
   narrowly_scoped: Schema.Boolean,
   malicious_prompt_injection: Schema.Boolean,
   reason: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
-  rule: Schema.optional(RuleWordsSchema),
+  rule: Schema.optional(Schema.String),
   verdict: Schema.Literals(["allow", "ask"])
 })
 
@@ -84,7 +84,7 @@ const GuardianSchema = Schema.Struct({
   narrowly_scoped: Schema.optional(Schema.Boolean),
   outcome: Schema.Literals(["allow", "deny"]),
   rationale: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000)),
-  rule: Schema.optional(RuleWordsSchema),
+  rule: Schema.optional(Schema.String),
   malicious_prompt_injection: Schema.optional(Schema.Boolean)
 })
 
@@ -93,7 +93,7 @@ const guardianSchema = STRUCTURED_OUTPUT_DIALECTS.openai(
     ...GuardianSchema.fields,
     authorization_source: VerdictSchema.fields.authorization_source,
     narrowly_scoped: Schema.Boolean,
-    rule: RuleWordsSchema,
+    rule: Schema.String,
     malicious_prompt_injection: Schema.Boolean
   })
 ).jsonSchema
@@ -119,9 +119,10 @@ const ruleOf = (rule: string | undefined): { readonly rule?: string } => {
   return words === undefined || words === "" || words.length > RULE_WORDS_MAX ? {} : { rule: words }
 }
 
+const decodeGuardian = Schema.decodeUnknownSync(Schema.fromJsonString(GuardianSchema))
+
 const parseGuardianAssessment = (text: string | null, shown: AuthorityShown): ReviewAssessment => {
-  const raw: unknown = JSON.parse(text ?? "")
-  const full = Schema.decodeUnknownSync(GuardianSchema)(raw, { onExcessProperty: "error" })
+  const full = decodeGuardian(text ?? "", { onExcessProperty: "error" })
   return {
     verdict: full.outcome === "allow" ? "allow" : "ask",
     risk: full.risk_level,
@@ -492,7 +493,7 @@ export const makeApprovalReview = ({
       return { verdict: "ask", why: { kind: "stopped" } }
     }
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), REVIEW_TIMEOUT_MS)
+    const timer = after(REVIEW_TIMEOUT_MS, () => controller.abort())
     const onAbort = () => controller.abort()
     input.signal.addEventListener("abort", onAbort, { once: true })
     if (input.signal.aborted) controller.abort()
@@ -621,7 +622,7 @@ export const makeApprovalReview = ({
       await keep({ decision: "ask", decided_by: timedOut ? "timed_out" : "failed" })
       return { verdict: "ask", why: { kind: timedOut ? "timed_out" : "failed" } }
     } finally {
-      clearTimeout(timer)
+      timer.cancel()
       input.signal.removeEventListener("abort", onAbort)
     }
   }

@@ -90,7 +90,7 @@ const ruleReason = (
 }
 
 export const mapRevisionError =
-  (operation: WikiOperation, pageId?: string) =>
+  (operation: WikiOperation, pageId?: string): ((cause: WikiCommitError) => WikiError) =>
   (cause: WikiCommitError): WikiError => {
     const options = {
       ...(pageId === undefined ? {} : { pageId }),

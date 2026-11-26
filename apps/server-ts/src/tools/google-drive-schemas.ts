@@ -89,7 +89,9 @@ export const ReadSheetParametersSchema = Schema.Struct({
     description: "A1 range to read, such as Sheet1!A1:D50. All values in it are returned."
   }).check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 })
-export const createParametersSchema = (emails: ReadonlyArray<string>) =>
+export const createParametersSchema = (
+  emails: ReadonlyArray<string>
+): Schema.Struct<{ readonly account_ref: Schema.String; readonly title: Schema.String }> =>
   Schema.Struct({
     account_ref: requiredAccountRefSchema(emails),
     title: Schema.String.annotate({

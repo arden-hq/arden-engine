@@ -1,5 +1,6 @@
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { awaitingApproval } from "./run-wait.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const pendingOnTaskAttempt = (
   sql: SqlClient.SqlClient,
@@ -19,8 +20,13 @@ const openQuestion = (sql: SqlClient.SqlClient) =>
 
 const pendingApproval = (sql: SqlClient.SqlClient) => awaitingApproval(sql, sql`owner.run_id`)
 
-export const hasPendingTaskQuestion = (sql: SqlClient.SqlClient, itemId: Statement.Fragment) =>
+export const hasPendingTaskQuestion = (
+  sql: SqlClient.SqlClient,
+  itemId: Statement.Fragment
+): Statement.Statement<Row> =>
   pendingOnTaskAttempt(sql, itemId, sql`${openQuestion(sql)} OR ${pendingApproval(sql)}`)
 
-export const hasPendingTaskApproval = (sql: SqlClient.SqlClient, itemId: Statement.Fragment) =>
-  pendingOnTaskAttempt(sql, itemId, pendingApproval(sql))
+export const hasPendingTaskApproval = (
+  sql: SqlClient.SqlClient,
+  itemId: Statement.Fragment
+): Statement.Statement<Row> => pendingOnTaskAttempt(sql, itemId, pendingApproval(sql))

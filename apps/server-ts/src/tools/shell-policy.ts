@@ -445,7 +445,7 @@ export const sandboxUnavailableMessage = (gap: CommandSandboxGap): string => {
   }
 }
 
-export const sandboxUnavailable = (gap: CommandSandboxGap) =>
+export const sandboxUnavailable = (gap: CommandSandboxGap): ToolExecutionError =>
   toolRefusal(sandboxUnavailableMessage(gap), "Sandbox unavailable")
 
 export interface ShellInvocation {

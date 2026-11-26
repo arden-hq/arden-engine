@@ -67,10 +67,14 @@ export const RelaySettingsPatchSchema = Schema.Struct({
   keep_awake: Schema.optionalKey(Schema.Boolean)
 })
 
-export const encodeRelayPairDecisionEffect = (value: unknown) =>
+export const encodeRelayPairDecisionEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.encodeUnknownEffect(Schema.fromJsonString(RelayPairDecisionSchema))(value, strict)
 
-export const encodeRelaySettingsPatchEffect = (value: unknown) =>
+export const encodeRelaySettingsPatchEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(RelaySettingsPatchSchema)(value, strict).pipe(
     Effect.map((patch) => JSON.stringify(patch))
   )

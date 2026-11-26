@@ -1,4 +1,5 @@
 import type { SqlClient, Statement } from "effect/unstable/sql"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 interface Walk<Sql = Statement.Fragment> {
   readonly name: string
@@ -9,22 +10,22 @@ interface Walk<Sql = Statement.Fragment> {
   readonly limit?: number
 }
 
-export const sessionDescendants = (sql: SqlClient.SqlClient, walk: Walk) =>
+export const sessionDescendants = (sql: SqlClient.SqlClient, walk: Walk): Statement.Fragment =>
   cte(fragments(sql), walk, steps.sessionDescendants)
 
-export const sessionAncestors = (sql: SqlClient.SqlClient, walk: Walk) =>
+export const sessionAncestors = (sql: SqlClient.SqlClient, walk: Walk): Statement.Fragment =>
   cte(fragments(sql), walk, steps.sessionAncestors)
 
 export const sessionAncestorsText = (walk: Walk<string>): string =>
   cte(text, walk, steps.sessionAncestors)
 
-export const runDescendants = (sql: SqlClient.SqlClient, walk: Walk) =>
+export const runDescendants = (sql: SqlClient.SqlClient, walk: Walk): Statement.Fragment =>
   cte(fragments(sql), walk, steps.runDescendants)
 
-export const runAncestors = (sql: SqlClient.SqlClient, walk: Walk) =>
+export const runAncestors = (sql: SqlClient.SqlClient, walk: Walk): Statement.Fragment =>
   cte(fragments(sql), walk, steps.runAncestors)
 
-export const delegatedLinkSql = (sql: SqlClient.SqlClient) => sql`EXISTS (
+export const delegatedLinkSql = (sql: SqlClient.SqlClient): Statement.Statement<Row> => sql`EXISTS (
   SELECT 1 FROM chat_runs AS delegating_run
   WHERE delegating_run.run_id = child.parent_run_id
     AND delegating_run.session_id = child.parent_session_id)`

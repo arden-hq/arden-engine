@@ -29,7 +29,7 @@ import {
 } from "@arden-hq/protocol/effect/sessions"
 import { Schema } from "effect"
 import { CHAT_OPEN_TIMING_RESPONSE_HEADER } from "@arden-hq/protocol/chat-open-timing"
-import * as Sse from "effect/unstable/encoding/Sse"
+import { Event as SseEvent } from "effect/unstable/encoding/Sse"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 import { OutputSchemaRejected, storeErrors } from "../errors.js"
 import { ChatStreamError } from "../../chat/events.js"
@@ -124,7 +124,7 @@ export class ChatApi extends HttpApiGroup.make("chat", { topLevel: true }).add(
     params: { sessionId: Schema.NonEmptyString },
     success: HttpApiSchema.WithHeaders(
       HttpApiSchema.StreamSse({
-        events: Sse.Event,
+        events: SseEvent,
         error: ChatStreamError
       }),
       { [CHAT_OPEN_TIMING_RESPONSE_HEADER]: Schema.optional(Schema.String) }

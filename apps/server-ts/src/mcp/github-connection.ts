@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import type { GitHubConnectionState, GitHubConnectRequest } from "@arden-hq/protocol/mcp"
 import { Schema } from "effect"
 
@@ -83,7 +84,7 @@ const fetchGitHubLogin = async (token: string): Promise<GitHubUserCheck> => {
     })
     if (response.status === 401) return { kind: "rejected" }
     if (!response.ok) return { kind: "unavailable" }
-    const body: unknown = await response.json()
+    const body: unknown = await parseJsonBody(response)
     return Schema.is(GitHubUserSchema)(body)
       ? { kind: "ok", login: body.login }
       : { kind: "unavailable" }

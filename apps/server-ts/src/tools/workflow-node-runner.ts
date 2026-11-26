@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import { ToolExecutionError, type ToolResult, type Toolset } from "@arden-hq/loop"
@@ -387,10 +388,8 @@ export const makeWorkflowNodeRunner = (
         })
         return completed.text
       }
-      let value: unknown
-      try {
-        value = JSON.parse(completed.text)
-      } catch {
+      const value = parseJsonTextOrUndefined(completed.text)
+      if (value === undefined) {
         correction = "the response was not valid JSON"
         await observer.recordChildAttempt({
           ...completedAttempt,

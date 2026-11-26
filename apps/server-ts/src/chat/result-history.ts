@@ -77,6 +77,8 @@ export const makeResultHistoryProjector = (
   const initialMessageIds = new Set<string>()
   const automationMessages = new Map<string, StoredMessageEnvelope>()
   let rootSourceId: string | null = null
+  const isAutomationMessage = (messageId: string | undefined): boolean =>
+    messageId !== undefined && automationMessages.has(messageId)
 
   for (const message of input.initialMessages) {
     initialMessageIds.add(message.message_id)
@@ -104,7 +106,7 @@ export const makeResultHistoryProjector = (
   ): Result.Result<ReadonlyArray<StoredMessageEnvelope>, ResultHistoryError> => {
     const timestamp = currentIso()
     const visible = source.filter(
-      (message) => message.role !== ROLE.system || automationMessages.has(message.message_id ?? "")
+      (message) => message.role !== ROLE.system || isAutomationMessage(message.message_id)
     )
     const lastIndex = visible.length - 1
     const last = visible[lastIndex]
@@ -215,7 +217,7 @@ export const makeResultHistoryProjector = (
       return Result.fail(error)
     }
     for (const raw of change.messages) {
-      if (raw.role === ROLE.system && !automationMessages.has(raw.message_id ?? "")) continue
+      if (raw.role === ROLE.system && !isAutomationMessage(raw.message_id)) continue
       const sourceId = raw.message_id
       if (!isNonEmptyString(sourceId)) {
         return fail(

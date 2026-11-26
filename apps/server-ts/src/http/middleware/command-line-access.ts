@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { commandLineRoute, type CommandLineRule } from "@arden-hq/protocol/daemon"
 import { Effect, Predicate } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -69,13 +70,8 @@ const commandLineRequirement = (
 }
 
 const jsonBody = (source: string): Readonly<Record<string, unknown>> => {
-  if (source.trim() === "") return {}
-  try {
-    const value: unknown = JSON.parse(source)
-    return Predicate.isObject(value) && !Array.isArray(value) ? value : {}
-  } catch {
-    return {}
-  }
+  const value = parseJsonTextOrUndefined(source)
+  return Predicate.isObject(value) && !Array.isArray(value) ? value : {}
 }
 
 export const commandLineAccess = HttpRouter.middleware(

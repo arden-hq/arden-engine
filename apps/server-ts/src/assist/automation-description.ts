@@ -5,6 +5,10 @@ import type { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { PROMPTS } from "../prompts/catalog.js"
 import { cutText } from "@arden-hq/std/text"
 import type { AutomationId } from "../persistence/automations/model.js"
+import type { Brand } from "effect/Brand"
+import type { Automation } from "@arden-hq/protocol/automations"
+import type { StructuredCompletionError } from "../models/structured-completion.js"
+import type { AutomationStoreError } from "../persistence/automations/store.js"
 
 const AUTOMATION_DESCRIPTION_INPUT_MAX_CHARS = 20_000
 
@@ -13,7 +17,15 @@ export interface AutomationDescriptionDependencies {
   readonly store: AutomationCatalog["Service"]
 }
 
-export const makeAutomationDescription = (dependencies: AutomationDescriptionDependencies) =>
+export const makeAutomationDescription = (
+  dependencies: AutomationDescriptionDependencies
+): ((
+  automationId: string & Brand<"AutomationId">
+) => Effect.Effect<
+  Automation | undefined,
+  StructuredCompletionError | AutomationStoreError,
+  never
+>) =>
   Effect.fn("AutomationDescription.generate")(function* (automationId: AutomationId) {
     const automation = yield* dependencies.store.get(automationId)
     if (automation === null) return undefined

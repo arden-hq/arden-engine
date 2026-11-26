@@ -1,3 +1,4 @@
+import { every } from "@arden-hq/std/timer"
 import { Effect, Schema } from "effect"
 import { ToolExecutionError, type ModelContentBlock } from "@arden-hq/loop"
 import { ComputerKernel } from "../computer/kernel.js"
@@ -48,13 +49,11 @@ export const computerTools = Effect.gen(function* () {
   }
   yield* Effect.acquireRelease(
     Effect.sync(() => {
-      const timer = setInterval(expire, 60_000)
-      timer.unref()
-      return timer
+      return every(60_000, expire, { unref: true })
     }),
     (timer) =>
       Effect.promise(async () => {
-        clearInterval(timer)
+        timer.cancel()
         for (const session of sessions.values()) session.kernel.close()
         sessions.clear()
       })

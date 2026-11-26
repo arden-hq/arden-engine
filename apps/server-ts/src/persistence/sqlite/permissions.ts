@@ -141,8 +141,17 @@ const runRuleHome = Effect.fn("SqlitePermissionStore.runRuleHome")(function* (
   return { list: ownRuleList(authority) ?? { kind: "global" }, spaceName: row.space_name ?? "" }
 })
 
-export const runRuleList = (sql: SqlClient.SqlClient, runId: string) =>
-  runRuleHome(sql, runId).pipe(Effect.map((home) => home?.list))
+export const runRuleList = (
+  sql: SqlClient.SqlClient,
+  runId: string
+): Effect.Effect<
+  | { readonly kind: "global" }
+  | { readonly kind: "space"; readonly spaceId: string }
+  | { readonly kind: "system" }
+  | undefined,
+  PermissionStoreError,
+  never
+> => runRuleHome(sql, runId).pipe(Effect.map((home) => home?.list))
 
 export const connectorUpdatedAt = Effect.fn("SqlitePermissionStore.connectorUpdatedAt")(function* (
   sql: SqlClient.SqlClient,
@@ -225,7 +234,7 @@ export const grantCardRulesInTransaction = (
     readonly list: RuleList
     readonly source: RuleSource
   }
-) =>
+): Effect.Effect<boolean, PermissionStoreError, never> =>
   saveAllowsInTransaction(sql, input).pipe(
     Effect.mapError(storage("run_grants", "Could not store the permission rule"))
   )

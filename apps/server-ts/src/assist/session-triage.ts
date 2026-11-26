@@ -25,6 +25,8 @@ import { PROMPTS } from "../prompts/catalog.js"
 import type { Wiki } from "../wiki/service.js"
 import { createSpaceWithPage } from "../wiki/space-page.js"
 import { conversationLine, newestWithinBudget } from "./conversation.js"
+import type { SessionQueryFailure } from "../persistence/sessions/queries.js"
+import type { SpaceStoreError } from "../persistence/spaces/store.js"
 
 const TRIAGE_MESSAGE_MAX_CHARS = 4_000
 const TRIAGE_TRANSCRIPT_MAX_CHARS = 24_000
@@ -52,7 +54,15 @@ const staleSuggestion = (message = "This suggestion no longer applies") =>
 
 const BUSY_MESSAGE = "Arden is still working in this Chat. File it once the work is done."
 
-export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
+export const makeSessionTriage = (
+  dependencies: SessionTriageDependencies
+): ((
+  sessionId: string
+) => Effect.Effect<
+  SessionTriageDecision | undefined,
+  SessionQueryFailure | StructuredCompletionError | SpaceStoreError | SessionStoreError,
+  never
+>) =>
   Effect.fn("SessionTriage.decide")(function* (sessionId: string) {
     const session = yield* dependencies.sessions.load(sessionId)
     if (session === null) return undefined
@@ -116,7 +126,16 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
     return decision
   })
 
-export const makeSessionTriageAction = (dependencies: SessionTriageDependencies) =>
+export const makeSessionTriageAction = (
+  dependencies: SessionTriageDependencies
+): ((
+  sessionId: string,
+  action: SessionTriageAction
+) => Effect.Effect<
+  SessionTriageDecision | undefined,
+  SessionQueryFailure | SpaceStoreError | SessionStoreError | SessionTriageConflict,
+  never
+>) =>
   Effect.fn("SessionTriage.act")(function* (sessionId: string, action: SessionTriageAction) {
     const session = yield* dependencies.sessions.loadHeaderSnapshot(sessionId)
     if (session === null) return undefined

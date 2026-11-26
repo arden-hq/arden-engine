@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { Reactivity } from "effect/unstable/reactivity"
@@ -172,7 +173,7 @@ const binaryFlag = (value: number, name: string, sessionId: string): boolean => 
 }
 
 const treeSessionIds = (row: CandidateRow): ReadonlyArray<string> => {
-  const ids: unknown = JSON.parse(row.tree_session_ids)
+  const ids: unknown = parseJsonText(row.tree_session_ids)
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
     throw storeError("candidates", "storage", "Stored Session tree is corrupt", row.session_id)
   }

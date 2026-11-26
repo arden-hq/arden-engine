@@ -124,14 +124,7 @@ const unreadable = (change: boolean): ToolExecutionError =>
     "Unreadable answer from the Mac"
   )
 
-const parseJson = (text: string): Option.Option<unknown> => {
-  try {
-    const value: unknown = JSON.parse(text)
-    return Option.some(value)
-  } catch {
-    return Option.none()
-  }
-}
+const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 const lastLine = (text: string): string => text.trimEnd().split("\n").at(-1) ?? ""
 

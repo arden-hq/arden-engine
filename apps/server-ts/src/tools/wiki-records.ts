@@ -13,7 +13,15 @@ export const memorySource = (page: {
   readonly title: string
   readonly use: "read" | "found"
   readonly body?: string
-}) => {
+}): {
+  excerpt?: string
+  provider: string
+  kind: string
+  ref: string
+  title: string
+  use: "read" | "found"
+  href: string
+} => {
   const paragraph = page.body
     ?.split(/\n\s*\n/)
     .map((block) => block.trim())
@@ -36,8 +44,18 @@ export const memorySource = (page: {
   }
 }
 
-export const pageSource = (record: PageRecord, use: "read" | "found") =>
-  memorySource({ path: record.resource.path, title: record.page.title, use })
+export const pageSource = (
+  record: PageRecord,
+  use: "read" | "found"
+): {
+  excerpt?: string
+  provider: string
+  kind: string
+  ref: string
+  title: string
+  use: "read" | "found"
+  href: string
+} => memorySource({ path: record.resource.path, title: record.page.title, use })
 
 export const pageReceipt = ({
   ctx,

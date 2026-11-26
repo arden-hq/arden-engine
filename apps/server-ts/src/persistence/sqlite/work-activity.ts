@@ -14,6 +14,7 @@ import { inTaskWords } from "@arden-hq/protocol/chat"
 import { failureWords, type TaskStopCause } from "./task-next-move.js"
 import { inArdenWords } from "../restart-notice.js"
 import { taskOpenSql } from "./task-status-sql.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 // The unary `+` drops the column's TEXT affinity, which otherwise keeps SQLite off
 // `idx_chat_runs_task_item`.
@@ -26,7 +27,10 @@ import { taskOpenSql } from "./task-status-sql.js"
  * has run (in any generation: a Space setting change bumps every Task's) but
  * nothing will run it again: no next check, nothing queued, nothing asked, no
  * answer on its way. Nothing else would show that state. */
-export const workActivitySql = (sql: SqlClient.SqlClient, task: Statement.Fragment) => sql`CASE
+export const workActivitySql = (
+  sql: SqlClient.SqlClient,
+  task: Statement.Fragment
+): Statement.Statement<Row> => sql`CASE
       WHEN ${task}.status <> 'open' THEN 'idle'
       WHEN ${hasPendingTaskQuestion(sql, sql`${task}.item_id`)} THEN 'needs_you'
       WHEN ${taskHasHold(sql, task)} THEN 'on_hold'

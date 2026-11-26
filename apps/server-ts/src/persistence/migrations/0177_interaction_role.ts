@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
@@ -36,15 +37,39 @@ export const interactionRole: Migration = {
 
 type Json = Record<string, unknown>
 
+const storedJson = (column: unknown): Json => parseJsonText(String(column)) as Json
+
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+const MESSAGE_ROLE = {
+  system: "system",
+  developer: "developer",
+  user: "user",
+  interaction: "interaction",
+  assistant: "assistant",
+  tool: "tool"
+} as const
+type MessageRole = (typeof MESSAGE_ROLE)[keyof typeof MESSAGE_ROLE]
+const isMessageRole = (value: unknown): value is MessageRole =>
+  Object.values<unknown>(MESSAGE_ROLE).includes(value)
+
+const PARTICIPANT_TYPE = { user: "user", agent: "agent" } as const
+type ParticipantType = (typeof PARTICIPANT_TYPE)[keyof typeof PARTICIPANT_TYPE]
+const isParticipant = (value: unknown, type: ParticipantType): value is Json =>
+  isObject(value) && value.type === type
+
+const INTERACTION_KIND = { completion: "completion" } as const
+type InteractionKind = (typeof INTERACTION_KIND)[keyof typeof INTERACTION_KIND]
+const isInteractionKind = (interaction: Json, kind: InteractionKind): boolean =>
+  interaction.kind === kind
 
 const MARKED = `(instr(message_json, '"is_meta"') > 0
   OR instr(message_json, '"interaction"') > 0
   OR instr(message_json, '"automation"') > 0)`
 
 const actor = (from: Json): Json => ({
-  source: from.type === "user" ? "harness" : from.type,
+  source: from.type === PARTICIPANT_TYPE.user ? "harness" : from.type,
   id: from.id,
   ...(typeof from.display_name === "string" ? { name: from.display_name } : {})
 })
@@ -52,12 +77,14 @@ const actor = (from: Json): Json => ({
 const senderOf = (interaction: Json): Json => {
   const from = isObject(interaction.from) ? interaction.from : {}
   const to = interaction.to
-  const fromPerson = from.type === "user"
+  const fromPerson = from.type === PARTICIPANT_TYPE.user
   return {
     from: actor(from),
-    ...(isObject(to) && to.type === "agent" ? { to: { source: "agent", id: to.id } } : {}),
+    ...(isParticipant(to, PARTICIPANT_TYPE.agent) ? { to: { source: "agent", id: to.id } } : {}),
     kind: fromPerson ? "event" : interaction.kind,
-    ...(interaction.kind === "completion" && !fromPerson ? { outcome: interaction.outcome } : {}),
+    ...(isInteractionKind(interaction, INTERACTION_KIND.completion) && !fromPerson
+      ? { outcome: interaction.outcome }
+      : {}),
     ...(typeof interaction.preview === "string" ? { preview: interaction.preview } : {}),
     ...(isObject(interaction.causedBy) ? { caused_by: interaction.causedBy } : {})
   }
@@ -65,8 +92,10 @@ const senderOf = (interaction: Json): Json => {
 
 const convertMessage = (message: Json): Json | undefined => {
   const { is_meta: meta, interaction, ...rest } = message
-  if (rest.role === "developer") return meta === undefined ? undefined : rest
-  if (rest.role === "assistant") {
+  const role = rest.role
+  if (!isMessageRole(role)) return undefined
+  if (role === MESSAGE_ROLE.developer) return meta === undefined ? undefined : rest
+  if (role === MESSAGE_ROLE.assistant) {
     if (meta !== true) return meta === undefined ? undefined : rest
     return {
       ...rest,
@@ -75,7 +104,7 @@ const convertMessage = (message: Json): Json | undefined => {
       kind: "event"
     }
   }
-  if (rest.role !== "user") return undefined
+  if (role !== MESSAGE_ROLE.user) return undefined
   if (isObject(interaction)) {
     const sender = senderOf(interaction)
     const content = typeof interaction.content === "string" ? interaction.content : rest.content
@@ -127,7 +156,7 @@ const convertTranscript = (database: DatabaseSync): void => {
     "UPDATE session_messages SET role = ?, message_json = ? WHERE message_rowid = ?"
   )
   for (const row of rows) {
-    const converted = convertMessage(JSON.parse(String(row.message_json)))
+    const converted = convertMessage(storedJson(row.message_json))
     if (converted === undefined) continue
     update.run(String(converted.role), JSON.stringify(converted), Number(row.message_rowid))
   }
@@ -144,7 +173,7 @@ const convertReceipts = (database: DatabaseSync): void => {
     "UPDATE chat_idempotency_keys SET message_json = ? WHERE session_id = ? AND client_id = ?"
   )
   for (const row of rows) {
-    const converted = convertMessage(JSON.parse(String(row.message_json)))
+    const converted = convertMessage(storedJson(row.message_json))
     if (converted === undefined) continue
     update.run(JSON.stringify(converted), String(row.session_id), String(row.client_id))
   }
@@ -161,7 +190,7 @@ const convertRunStartEvents = (database: DatabaseSync): void => {
     "UPDATE journal_records SET data_json = ? WHERE stream_id = ? AND sequence = ?"
   )
   for (const row of rows) {
-    const event: Json = JSON.parse(String(row.data_json))
+    const event = storedJson(row.data_json)
     const interaction = event.interaction
     if (
       !isObject(interaction) ||

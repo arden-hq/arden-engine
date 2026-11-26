@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "../common/json-text.js"
 import { clipLine } from "@arden-hq/std/text"
 import { toolKindLabel, type StepIconKey } from "./tool-words.js"
 import { isRecord } from "@arden-hq/std/json"
@@ -23,12 +24,8 @@ export interface CallWordsInput {
  *  not an object at all. */
 export function parseCallArgs(args: string | undefined): Record<string, unknown> | null {
   if (!args) return null
-  try {
-    const parsed: unknown = JSON.parse(args)
-    return isRecord(parsed) ? parsed : null
-  } catch {
-    return null
-  }
+  const parsed = parseJsonTextOrUndefined(args)
+  return isRecord(parsed) ? parsed : null
 }
 
 /** Stable per-KIND words — no per-call title, no argument detail — so a run

@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { REQUEST_HASH_VERSION } from "../chat/store.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 // A chat idempotency key holds its message only while the message is not in
 // the transcript (queued input, or a transcript cleared or reverted past it).
@@ -30,7 +31,7 @@ export const insertChatKey = (
     readonly status: "accepted" | "queued" | "running"
     readonly at: string
   }
-) => sql`
+): Statement.Statement<Row> => sql`
   INSERT INTO chat_idempotency_keys (
     session_id, client_id, request_hash, request_hash_version, run_id, message_id, message_json,
     status, created_at, updated_at

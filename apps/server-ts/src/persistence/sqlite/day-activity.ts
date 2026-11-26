@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { DayActivity } from "../automations/day-activity.js"
 import type { PersistenceDeps } from "./deps.js"
+import type { DayTaskEvent, DayItem } from "../automations/day-activity.js"
 
 /** The Task events a day's record keeps. A schedule, a progress note or an edit is not one. */
 const KEPT_TASK_EVENTS = [
@@ -14,7 +15,17 @@ const KEPT_TASK_EVENTS = [
   "cancelled"
 ] as const
 
-export const makeDayActivity = ({ reader }: Pick<PersistenceDeps, "reader">) => {
+export const makeDayActivity = ({
+  reader
+}: Pick<PersistenceDeps, "reader">): {
+  readonly read: (range: {
+    readonly start: string
+    readonly end: string
+  }) => Effect.Effect<
+    { readonly taskEvents: ReadonlyArray<DayTaskEvent>; readonly items: ReadonlyArray<DayItem> },
+    Error
+  >
+} => {
   const sql = reader
   const read: DayActivity["Service"]["read"] = Effect.fn("DayActivity.read")(
     function* ({ start, end }) {

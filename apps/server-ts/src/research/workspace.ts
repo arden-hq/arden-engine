@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { formatBytes } from "@arden-hq/std/count"
 import path from "node:path"
 import { Context, DateTime, Effect, Layer, Option, Schema, Semaphore } from "effect"
@@ -215,17 +216,11 @@ const makeResearchWorkspace = Effect.fn("ResearchWorkspace.make")(function* (roo
       )
     )
     if (file === null) return { paths: resolved, state: emptyResearchState() }
-    let raw: unknown
-    try {
-      raw = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(file.bytes))
-    } catch (cause) {
-      return yield* researchError(
-        "corrupt",
-        "Research state is not valid UTF-8 JSON",
-        workspaceId,
-        cause
-      )
-    }
+    const raw = yield* Effect.try({
+      try: () => parseJsonText(new TextDecoder("utf-8", { fatal: true }).decode(file.bytes)),
+      catch: (cause) =>
+        researchError("corrupt", "Research state is not valid UTF-8 JSON", workspaceId, cause)
+    })
     return { paths: resolved, state: yield* decodeState(workspaceId, raw) }
   })
 
