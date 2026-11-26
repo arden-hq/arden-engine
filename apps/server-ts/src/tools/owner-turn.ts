@@ -7,7 +7,6 @@ import { refusalError } from "./refusal.js"
 import type { ServerRunContext } from "./run-context.js"
 
 interface OwnerTurnRefusalWording {
-  /** Completes "The current Session could not be verified before …". */
   readonly unverifiedBefore: string
   readonly notOwnerTurn: string
 }

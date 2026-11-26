@@ -1,5 +1,5 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js"
+import type { Tool, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js"
 import type { JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import type { ToolDefaultApproval } from "@arden-hq/protocol/tools"
@@ -13,6 +13,15 @@ const MAX_LIST_PAGES = 100
 const MAX_TOOLS = 2_048
 const MAX_CURSOR_BYTES = 64 * 1_024
 const MAX_SCHEMA_BYTES = 128 * 1_024
+
+const TASK_SUPPORT = { forbidden: "forbidden", optional: "optional", required: "required" } as const
+
+type TaskSupport = (typeof TASK_SUPPORT)[keyof typeof TASK_SUPPORT]
+
+const requiresTask = (tool: Tool): boolean => {
+  const support: TaskSupport | undefined = tool.execution?.taskSupport
+  return support === TASK_SUPPORT.required
+}
 
 export interface McpToolBinding {
   readonly serverName: string
@@ -34,15 +43,8 @@ export interface McpToolBinding {
   readonly openWorld: boolean
 }
 
-/**
- * A tool's MCP annotation hints (spec 2025-06-18), each absent or malformed
- * hint read as its cautious default: it may write (`readOnlyHint` false),
- * may destroy (`destructiveHint` true), is not safe to repeat
- * (`idempotentHint` false) and reaches outside services (`openWorldHint`
- * true). The server is untrusted, so only an explicit boolean moves a hint
- * off its default. A read-only tool destroys nothing.
- */
-const toolHints = (
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools
+const cautiousToolHints = (
   annotations: ToolAnnotations | undefined
 ): Pick<McpToolBinding, "readOnly" | "destructive" | "idempotent" | "openWorld"> => {
   const readOnly = annotations?.readOnlyHint === true
@@ -56,7 +58,7 @@ const toolHints = (
 
 const mcpToolContract = (
   inputSchema: Readonly<Record<string, unknown>>,
-  hints: ReturnType<typeof toolHints>,
+  hints: ReturnType<typeof cautiousToolHints>,
   executionIdentity = false
 ): string => sha256Hex(engineOrderedJson({ inputSchema, hints, executionIdentity }))
 
@@ -66,7 +68,6 @@ export interface McpToolCatalogOptions {
   readonly approval: (remoteName: string) => ToolDefaultApproval
 }
 
-/** SDK tools are validated, but its schema aliases disagree under exact optional types. */
 const schemaValidator = <A>(
   validator: AjvJsonSchemaValidator,
   schema: Readonly<Record<string, unknown>>
@@ -101,7 +102,7 @@ export const listMcpTools = async (
       maxTotalTimeout: remaining
     })
     for (const tool of result.tools) {
-      if (tool.execution?.taskSupport === "required") {
+      if (requiresTask(tool)) {
         throw new Error(`MCP tool ${tool.name} requires unsupported task execution`)
       }
       if (tool.name.length === 0 || tool.name.length > 256) {
@@ -113,7 +114,7 @@ export const listMcpTools = async (
       seenNames.add(tool.name)
       seenFullNames.add(fullName)
       const inputSchema = checkedSchema(tool.inputSchema, tool.name)
-      const hints = toolHints(tool.annotations)
+      const hints = cautiousToolHints(tool.annotations)
       const executionIdentity = tool._meta?.["arden/execution"] === true
       const outputSchema =
         tool.outputSchema === undefined ? undefined : checkedSchema(tool.outputSchema, tool.name)

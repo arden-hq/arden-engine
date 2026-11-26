@@ -128,9 +128,6 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
             ${endedDaysAgo === null ? null : ago(endedDaysAgo)}, ${`assistant-${id}`})`
       const append = (streamId: string, events: ReadonlyArray<ReturnType<typeof event>>) =>
         sql.withTransaction(appendInTransaction(sql, streamId, events))
-      // A: an active run sits between two old finished runs.
-      // Old rows: 1 no-run, 2..4503 r1 (4,500 steps), 4504..4506 r2 (active),
-      // 4507..4508 r3, 4509 no-run. Then r4 (recent) 4510..4511, the head.
       yield* session("A")
       yield* run("r1", "A", "completed", 50)
       yield* run("r2", "A", "running", null)
@@ -148,7 +145,6 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
         event("RUN_FINISHED", "r3"),
         event("NOTE")
       ])
-      // B: an old finished run: its step row goes, the head stays.
       yield* session("B")
       yield* run("rb", "B", "completed", 50)
       yield* append("B", [
@@ -156,7 +152,6 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
         event("TEXT", "rb"),
         event("RUN_FINISHED", "rb")
       ])
-      // C: a running run is live work, yet the old finished run is trimmed.
       yield* session("C")
       yield* run("rc1", "C", "completed", 50)
       yield* run("rc2", "C", "running", null)
@@ -166,9 +161,6 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
         event("RUN_FINISHED", "rc1"),
         event("RUN_STARTED", "rc2")
       ])
-      // D: an old active run, then an old ended run, then a
-      // recent run. Event admission reads the newest boundary row at or below
-      // the checkpoint (5): it must still be the ended run's RUN_FINISHED.
       yield* session("D")
       yield* run("rp", "D", "running", null)
       yield* run("rx", "D", "completed", 49)
@@ -180,7 +172,6 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
         event("TEXT", "rx"),
         event("RUN_FINISHED", "rx")
       ])
-      // A row above the checkpoint stays, whatever it is.
       yield* session("F")
       yield* run("rf", "F", "completed", 50)
       yield* append("F", [
@@ -189,17 +180,13 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
         event("TEXT", "rf"),
         event("RUN_FINISHED", "rf")
       ])
-      // E: step rows of a run missing from `chat_runs` are not pinned: they go.
-      // They are the last old rows, so the saved cursor will name a deleted row.
       yield* session("E")
       yield* append("E", [event("TEXT", "ghost"), event("TEXT", "ghost")])
       yield* sql`UPDATE journal_records SET created_at = ${ago(50)}`
-      // The recent rows come last, as they would in a real journal.
       yield* append("A", [event("RUN_STARTED", "r4"), event("RUN_FINISHED", "r4")])
       yield* append("D", [event("RUN_STARTED", "rz")])
       yield* append("E", [event("NOTE")])
       yield* sql`UPDATE journal_records SET created_at = ${ago(1)} WHERE created_at > ${ago(2)}`
-      // Clients have resumed past every old row, except in D, whose checkpoint is 5.
       yield* sql`INSERT INTO session_event_checkpoints (session_id, checkpoint_seq)
         VALUES ('A', 10000), ('B', 10000), ('C', 10000), ('D', 5), ('E', 10000), ('F', 2)`
 
@@ -244,12 +231,9 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
         f: yield* rows("F"),
         e: yield* rows("E")
       }
-      // Everything is now old, and B has two new rows. The saved cursor names a
-      // deleted row; the walk resumes after it and reaches them.
       yield* append("B", [event("TEXT", "rb"), event("TEXT", "rb")])
       yield* sql`UPDATE journal_records SET created_at = ${ago(50)}`
       const again = yield* trimJournals({ writer, policy })
-      // The run ends long ago: its step rows go on the next tick.
       yield* sql`UPDATE chat_runs SET status = 'completed', ended_at = ${ago(49)},
         updated_at = ${ago(49)} WHERE run_id = 'rp'`
       const released = yield* trimJournals({ writer, policy })
@@ -269,7 +253,6 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
   )
   const allA = [2, 4_503, 4_504, 4_505, 4_506, 4_507, 4_508, 4_510, 4_511]
   expect(outcome).toEqual({
-    // A: r1's 4,500 step rows and two no-run rows; one step row each for B, C and D.
     result: { lifecycle: 0, sessions: 4_502 + 1 + 1 + 1 + 1 + 2 },
     admission: [["RUN_FINISHED", "rx"]],
     first: {

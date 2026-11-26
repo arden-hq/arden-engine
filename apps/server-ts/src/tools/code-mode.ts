@@ -11,11 +11,8 @@ import { ScriptStore, type ScriptRecord } from "../persistence/scripts/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { scriptReference } from "../workflows/identity.js"
 import type { ScriptAgentObserver, ScriptAgentRequest } from "../workflows/runtime/contract.js"
-import {
-  executeScript,
-  type ScriptOutcome,
-  type ScriptProgress
-} from "../workflows/runtime/script-runtime.js"
+import { executeScript } from "../workflows/runtime/script-runtime.js"
+import type { ScriptOutcome, ScriptProgress } from "../workflows/runtime/script-outcome.js"
 import type { AdoptedScript } from "../workflows/script-attempt.js"
 import {
   ScriptRunner,

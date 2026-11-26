@@ -28,11 +28,6 @@ const readRulesFile = async (file: string): Promise<string | undefined> => {
   }
 }
 
-/**
- * Moves the rules file at the data root into Memory as the rules page, once: the page is made
- * only while Memory has none, and the file is removed after. A file left behind that holds what
- * the page holds is removed at the next start. A file that cannot be read stays, and runs are told.
- */
 export const rulesMoveLayer = (file: string): Layer.Layer<never, never, Wiki> =>
   Layer.effectDiscard(
     Effect.gen(function* () {
@@ -49,10 +44,6 @@ export const rulesMoveLayer = (file: string): Layer.Layer<never, never, Wiki> =>
     )
   )
 
-/**
- * The rules a run is sent: the rules page. Every start makes it, so a run finds none only when the
- * start could not move the rules file into Memory; that is `failed`, as is a Memory it cannot read.
- */
 export type GlobalInstructionsLoad =
   | { readonly kind: "read"; readonly page: PageRecord }
   | { readonly kind: "failed" }

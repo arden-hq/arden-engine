@@ -1,7 +1,6 @@
 import type { SpaceTaskStatus } from "@arden-hq/protocol/spaces/work"
 import { Statement } from "effect/unstable/sql"
 
-/** A Task that can still take work: open, or deferred to later. */
 export const UNFINISHED_TASK_STATUSES = [
   "open",
   "deferred"

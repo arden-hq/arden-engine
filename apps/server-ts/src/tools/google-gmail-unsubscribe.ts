@@ -15,9 +15,7 @@ import { publicAddress, sendRequest } from "./web-fetch.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { toolRefusal } from "./tool-failure.js"
 
-// `email_unsubscribe`: the sender's own List-Unsubscribe header, used the way
-// RFC 8058 and RFC 2369 define: a one-click HTTPS POST, or a mail to the
-// sender's mailto address. Arden never opens a web page or follows a link.
+// List-Unsubscribe as RFC 2369 and RFC 8058 define it: a one-click HTTPS POST, or a mail to the mailto address.
 
 const MAX_REDIRECTS = 3
 const REQUEST_TIMEOUT_MS = 20_000
@@ -67,11 +65,6 @@ const mailtoTarget = (
   }
 }
 
-/**
- * What the sender's headers allow, best first: a one-click HTTPS POST (only
- * with List-Unsubscribe-Post: List-Unsubscribe=One-Click), else a mailto, else
- * a bare web page Arden leaves alone. Plain http is never used.
- */
 const unsubscribeMethod = (
   listUnsubscribe: string | undefined,
   listUnsubscribePost: string | undefined

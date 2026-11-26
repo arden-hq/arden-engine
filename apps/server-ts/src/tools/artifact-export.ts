@@ -11,7 +11,8 @@ import { RunQueries } from "../persistence/runs/queries.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
-import { ConversationArtifactError, ConversationArtifacts } from "../artifacts/conversation.js"
+import { ConversationArtifactError } from "../artifacts/conversation-model.js"
+import { ConversationArtifacts } from "../artifacts/conversation.js"
 import { mutationReceiptHost } from "../persistence/tools/mutation-receipt.js"
 import {
   policyPathOptions,
@@ -67,7 +68,7 @@ const makeArtifactExportTool = (
         (resource) => resource.session_id
       )
     ]
-    let artifact: import("../artifacts/conversation.js").ConversationArtifact | undefined
+    let artifact: import("../artifacts/conversation-model.js").ConversationArtifact | undefined
     let artifactFailure: unknown
     for (const ownerSessionId of new Set(owners)) {
       try {

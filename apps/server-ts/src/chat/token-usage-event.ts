@@ -1,5 +1,5 @@
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import { contextSize, contextUsage } from "@arden-hq/protocol/chat"
+import { TOKEN_USAGE_SCOPE, contextSize, contextUsage } from "@arden-hq/protocol/chat"
 import type { ChatRunnerContextReport } from "./runner-contract.js"
 
 export const tokenUsageEvent = (
@@ -10,7 +10,7 @@ export const tokenUsageEvent = (
   type: "token_usage",
   run_id: run.runId,
   session_id: run.sessionId,
-  scope: "run",
+  scope: TOKEN_USAGE_SCOPE.run,
   usage: contextUsage(context.usage),
   context: contextSize(context.inputTokens),
   message_count: messageCount

@@ -1,20 +1,11 @@
-/** The fence language an answer block is written in. */
+import type { ComponentName } from "./parts.js"
+
 export const ANSWER_UI_FENCE = "arden:ui"
 
-/** The largest block body, in UTF-8 bytes, that is parsed at all. A body's
- *  references inline into a tree that can double per line, so a few hundred
- *  bytes can already build a huge tree; past this size the block shows as the
- *  code it is. */
 export const ANSWER_UI_MAX_BYTES = 16 * 1024
 
-/** The largest html one block's `App` parts may carry together, in UTF-8
- *  bytes. A string inlines by reference, never by copy, so html written
- *  inline as an `App`'s second argument does not count toward the block cap;
- *  it has this cap of its own. */
 export const ANSWER_UI_APP_MAX_BYTES = 150 * 1024
 
-/** Whether a fence body is small enough to parse and draw: the body without
- *  its inline `App` html within the block cap, and that html within its own. */
 export function answerBlockFits(body: string): boolean {
   if (body.length * 3 <= ANSWER_UI_MAX_BYTES) return true
   if (body.length > ANSWER_UI_MAX_BYTES + ANSWER_UI_APP_MAX_BYTES) return false
@@ -27,18 +18,33 @@ export function answerBlockFits(body: string): boolean {
   )
 }
 
+const APP_PART = "App" satisfies ComponentName
+
+const FENCE_CHAR = {
+  doubleQuote: '"',
+  singleQuote: "'",
+  backslash: "\\",
+  open: "(",
+  comma: ","
+} as const
+type Quote = typeof FENCE_CHAR.doubleQuote | typeof FENCE_CHAR.singleQuote
+const QUOTES: ReadonlySet<string | undefined> = new Set<Quote>([
+  FENCE_CHAR.doubleQuote,
+  FENCE_CHAR.singleQuote
+])
+const isQuote = (char: string | undefined): char is Quote => QUOTES.has(char)
+
 function appHtmlSpans(body: string): ReadonlyArray<readonly [number, number]> {
   const spans: Array<readonly [number, number]> = []
   let i = 0
   while (i < body.length) {
-    const char = body[i]
-    if (char === '"' || char === "'") {
+    if (isQuote(body[i])) {
       i = stringEnd(body, i)
       continue
     }
     const span =
-      char === "A" && body.startsWith("App", i) && !isNameChar(body[i - 1])
-        ? appHtmlAt(body, i + 3)
+      body.startsWith(APP_PART, i) && !isNameChar(body[i - 1])
+        ? appHtmlAt(body, i + APP_PART.length)
         : undefined
     if (span !== undefined) spans.push(span)
     i = span === undefined ? i + 1 : span[1] + 1
@@ -48,11 +54,11 @@ function appHtmlSpans(body: string): ReadonlyArray<readonly [number, number]> {
 
 function appHtmlAt(body: string, from: number): readonly [number, number] | undefined {
   const open = skipSpace(body, from)
-  if (body[open] !== "(") return undefined
+  if (body[open] !== FENCE_CHAR.open) return undefined
   const title = skipSpace(body, open + 1)
   if (!isQuote(body[title])) return undefined
   const comma = skipSpace(body, stringEnd(body, title))
-  if (body[comma] !== ",") return undefined
+  if (body[comma] !== FENCE_CHAR.comma) return undefined
   const start = skipSpace(body, comma + 1)
   return isQuote(body[start]) ? [start + 1, stringEnd(body, start) - 1] : undefined
 }
@@ -61,7 +67,7 @@ function stringEnd(body: string, start: number): number {
   const quote = body[start]
   let i = start + 1
   while (i < body.length) {
-    if (body[i] === "\\") i += 2
+    if (body[i] === FENCE_CHAR.backslash) i += 2
     else if (body[i] === quote) return i + 1
     else i += 1
   }
@@ -74,10 +80,8 @@ function skipSpace(body: string, from: number): number {
   return i
 }
 
-const isQuote = (char: string | undefined) => char === '"' || char === "'"
 const isNameChar = (char: string | undefined) => char !== undefined && /[\w$]/.test(char)
 
-/** The UTF-8 size of `body` between `start` and `end`. */
 export function utf8Bytes(body: string, start = 0, end = body.length): number {
   let bytes = 0
   for (let i = start; i < end; i++) {

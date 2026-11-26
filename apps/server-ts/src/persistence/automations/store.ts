@@ -4,19 +4,23 @@ import type { JobPurpose } from "../job-classification.js"
 import type { HomeLetterInput } from "../home/model.js"
 import type { HandlerItem } from "./handler-item.js"
 import type { AutomationJobPrompt } from "./job-prompt.js"
-import type {
-  AutomationContextMode,
-  AutomationRunOutcome,
-  AutomationRunSkip,
-  AutomationSkippedEvent
+import {
+  AUTOMATION_OCCURRENCE,
+  AUTOMATION_RUN_OUTCOME,
+  type AutomationContextMode,
+  type AutomationOccurrence,
+  type AutomationRunSkip,
+  type AutomationSkippedEvent
 } from "@arden-hq/protocol/automations"
 import type { JobLease } from "@arden-hq/jobs"
 import { Schema } from "effect"
 import type { SystemHandlerId } from "./model.js"
 import type { AutomationId } from "./model.js"
 
-const AUTOMATION_QUEUE_SOURCES = ["scheduled", "manual", "event", "idle", "count", "wake"] as const
-export type AutomationQueueSource = (typeof AUTOMATION_QUEUE_SOURCES)[number]
+export type AutomationQueueSource = Exclude<
+  AutomationOccurrence,
+  typeof AUTOMATION_OCCURRENCE.home | typeof AUTOMATION_OCCURRENCE.coalesced
+>
 
 interface AutomationJobPayloadFields<Prompt> {
   readonly purpose: JobPurpose
@@ -98,12 +102,21 @@ export type AutomationJobPayload = AutomationJobPayloadFields<string> & Automati
 export const jobHandlerItem = (payload: AutomationJobHandler): HandlerItem | undefined =>
   "handlerItem" in payload ? payload.handlerItem : undefined
 
-export type AutomationJobOutcome =
-  | Exclude<AutomationRunOutcome, "interrupted" | "skipped:prefilter" | "skipped:space_review_gate">
-  | "no_input"
+export const AUTOMATION_JOB_OUTCOME = { ...AUTOMATION_RUN_OUTCOME, no_input: "no_input" } as const
+
+export const AUTOMATION_JOB_STATUS = {
+  ended: "ended",
+  deferred: "deferred",
+  skipped: "skipped"
+} as const
+
+export type AutomationJobOutcome = Exclude<
+  (typeof AUTOMATION_JOB_OUTCOME)[keyof typeof AUTOMATION_JOB_OUTCOME],
+  "interrupted" | "skipped:prefilter" | "skipped:space_review_gate"
+>
 
 export interface AutomationJobResult {
-  readonly status: "ended"
+  readonly status: typeof AUTOMATION_JOB_STATUS.ended
   readonly outcome: AutomationJobOutcome
   readonly result: string | null
   readonly error: string | null
@@ -112,7 +125,7 @@ export interface AutomationJobResult {
 }
 
 export interface AutomationJobDeferral {
-  readonly status: "deferred"
+  readonly status: typeof AUTOMATION_JOB_STATUS.deferred
   readonly cause: "session_busy" | "no_model" | "plan_limit"
   readonly reason: string
   readonly retryAt: number
@@ -120,7 +133,7 @@ export interface AutomationJobDeferral {
 }
 
 export interface AutomationJobSkip {
-  readonly status: "skipped"
+  readonly status: typeof AUTOMATION_JOB_STATUS.skipped
   readonly skip: StoredAutomationRunSkip
 }
 

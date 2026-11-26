@@ -4,11 +4,6 @@ import { summaryOf, type ServerTool } from "./define.js"
 import { catalogNameProblems } from "./tool-catalog.js"
 import { toolParametersJsonSchema } from "./tool-json-schema.js"
 
-/**
- * Rules every built-in tool must keep. The registry refuses to start when one
- * breaks, so any test that boots the server catches a new tool that drifts.
- * MCP tools are not checked: their text comes from outside Arden.
- */
 export const checkToolContract = (tools: ReadonlyArray<ServerTool>): Effect.Effect<void> => {
   const problems = toolContractProblems(tools)
   return problems.length === 0
@@ -30,14 +25,11 @@ const toolContractProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<s
   ]
 }
 
-// Scopes treat action "read" as safe to hand to read-only runs, while the
-// approval gate treats any state change as a write. Both must agree.
 const readLabelProblems = (tool: ServerTool): ReadonlyArray<string> =>
   tool.meta.action === "read" && tool.meta.changes_state
     ? [`${tool.definition.name} is labeled read but changes state`]
     : []
 
-// The public tool catalog shows this summary; without one it shows nothing.
 const summaryProblems = (tool: ServerTool): ReadonlyArray<string> => {
   if (tool.meta.internal_catalog) return []
   const summary = summaryOf(tool.definition)
@@ -45,12 +37,6 @@ const summaryProblems = (tool: ServerTool): ReadonlyArray<string> => {
   return summary.trim() === "" ? [`${tool.definition.name} has an empty summary`] : []
 }
 
-// Checks the schema the model receives, not the source. `.annotate` on a field
-// that transforms its input (Trim, a decoding default) or on a checked struct
-// is dropped from that schema; `Schema.annotateEncoded` keeps it. Effect puts
-// a description on a checked field inside allOf and on a shared schema inside
-// $defs, so look through both. A choice field that only picks a variant (such
-// as report's event) passes when the tool description names every choice.
 const parameterProblems = (tool: ServerTool): ReadonlyArray<string> => {
   const entry = tool.entry(toolParametersJsonSchema)
   const properties = entry.parameters["properties"]
@@ -82,13 +68,6 @@ const described = (schema: unknown, definitions: Readonly<Record<string, unknown
   )
 }
 
-/**
- * Every provider takes only an object at a tool's parameter root: OpenAI
- * refuses anything else (`Schema.Struct({})` became `anyOf: [object, array]`
- * and OpenRouter's OpenAI models refused every request that declared it, live
- * on 2026-11-16), while Codex and Claude let it through, so only this check
- * catches it before a person does.
- */
 export const objectRootProblems = (
   tool: string,
   parameters: Readonly<Record<string, unknown>>
@@ -99,8 +78,6 @@ export const objectRootProblems = (
         `${tool} parameters must be type "object" at the root; an empty input is EmptyParametersSchema`
       ]
 
-// Calls in one group run one at a time. A second spelling for the same
-// service (drive_write and google_drive_write) let writes overlap.
 const CONCURRENCY_GROUPS: ReadonlySet<string> = new Set([
   "agent_messages",
   "agent_spawn",
@@ -139,14 +116,6 @@ const groupProblems = (tool: ServerTool): ReadonlyArray<string> => {
       ]
 }
 
-// The model names things by link or slug, never by a hash. It cannot copy 64
-// random characters reliably: in one month wiki_read_change failed on 36% of
-// its calls and task_propose lost offers to a mistyped snapshot. A version
-// check ("did this change since I read it") belongs to the server, per run:
-// the tool that shows a thing records its version in ctx.run.observations and
-// the tool that changes or cites it reads the version back from there.
-// This finds a hash input by its name or description, so a hash hidden in a
-// plainly named field still passes; AGENTS.md states the whole rule.
 const HASH_NAME =
   /^(snapshot|fingerprint|etag|checksum|digest|sha256|hash|revision|revision_ref)$|_(hash|sha256|fingerprint|digest|checksum|etag)$/
 const HASH_TEXT = /\b(hash|sha-?256|fingerprint|digest|checksum|etag)\b/i
@@ -160,7 +129,6 @@ const hashInputProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<stri
 const hashInputs = (tool: ServerTool): ReadonlyArray<string> =>
   hashInputPaths(tool.definition.name, tool.entry(toolParametersJsonSchema).parameters)
 
-/** Every input of one tool, as `tool.field.child`, that asks for a hash. */
 export const hashInputPaths = (
   tool: string,
   parameters: Readonly<Record<string, unknown>>
@@ -186,7 +154,6 @@ export const hashInputPaths = (
   return [...found]
 }
 
-// A fixed choice such as "none" is text the model can copy; free text is not.
 const takesText = (schema: Readonly<Record<string, unknown>>): boolean =>
   schema["type"] === "string" && schema["enum"] === undefined && schema["const"] === undefined
 

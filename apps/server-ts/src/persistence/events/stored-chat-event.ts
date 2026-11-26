@@ -15,7 +15,9 @@ import {
   RUN_CAUSE,
   RUN_USAGE,
   SESSION_NAME,
-  TODO_EXPLANATION
+  TODO_EXPLANATION,
+  TOKEN_USAGE_SCOPE,
+  isTokenUsageScope
 } from "@arden-hq/protocol/chat"
 import { PROVIDER_COST } from "@arden-hq/protocol"
 import {
@@ -318,7 +320,7 @@ const tokenUsage: StoredEventUpgrade = (event) => {
     usage: eventUsage(isJsonObject(usage) ? usage : {}),
     context: "context" in event ? event["context"] : contextSize(event["context_input_tokens"]),
     message_count: countOr(event["message_count"]),
-    scope: textOr(event["scope"], "run")
+    scope: isTokenUsageScope(event["scope"]) ? event["scope"] : TOKEN_USAGE_SCOPE.run
   }
 }
 

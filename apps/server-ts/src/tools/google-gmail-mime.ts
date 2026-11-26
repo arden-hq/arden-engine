@@ -13,6 +13,17 @@ const MAX_EMAIL_MESSAGE_BYTES = 35 * 1_024 * 1_024
 const MAX_THREAD_MESSAGE_BYTES = 16 * 1_024
 const MAX_THREAD_RENDERED_MESSAGE_BYTES = 24 * 1_024
 
+const GMAIL_BODY_MIME = { plain: "text/plain", html: "text/html" } as const
+
+type GmailBodyMime = (typeof GMAIL_BODY_MIME)[keyof typeof GMAIL_BODY_MIME]
+
+const GMAIL_BODY_MIMES: ReadonlySet<string | undefined> = new Set<GmailBodyMime>(
+  Object.values(GMAIL_BODY_MIME)
+)
+
+const isGmailBodyMime = (mime: string | undefined): mime is GmailBodyMime =>
+  GMAIL_BODY_MIMES.has(mime)
+
 interface GmailPayload {
   readonly mimeType?: string
   readonly filename?: string
@@ -80,20 +91,24 @@ export const payloadText = (
 } => {
   if (payload === undefined) return { text: "", attachments: [] }
   const attachments: string[] = []
-  let plain = ""
-  let html = ""
+  const bodies: Record<GmailBodyMime, string> = {
+    [GMAIL_BODY_MIME.plain]: "",
+    [GMAIL_BODY_MIME.html]: ""
+  }
   const visit = (part: GmailPayload): void => {
     if (part.filename) attachments.push(part.filename)
     const data = part.body?.data
     if (data !== undefined && !part.filename) {
       const decoded = decodeBody(data)
-      if (part.mimeType === "text/plain") plain += decoded
-      if (part.mimeType === "text/html") html += decoded
-      if (part.mimeType === undefined && plain === "") plain += decoded
+      if (isGmailBodyMime(part.mimeType)) bodies[part.mimeType] += decoded
+      if (part.mimeType === undefined && bodies[GMAIL_BODY_MIME.plain] === "")
+        bodies[GMAIL_BODY_MIME.plain] += decoded
     }
     for (const child of part.parts ?? []) visit(child)
   }
   visit(payload)
+  const plain = bodies[GMAIL_BODY_MIME.plain]
+  const html = bodies[GMAIL_BODY_MIME.html]
   return {
     text: (plain.trim() || readHtml(html, { format: "text" }).content).slice(0, MAX_BODY_CHARS),
     attachments
@@ -105,7 +120,6 @@ export interface AttachmentPart {
   readonly filename: string
   readonly mimeType: string
   readonly size: number | undefined
-  /** Gmail serves large parts by id; small ones carry `data` (base64url) inline. */
   readonly attachmentId: string | undefined
   readonly data: string | undefined
 }
@@ -355,6 +369,23 @@ const mailboxAddress = (value: string): string | undefined => {
   return bracketed !== undefined && validRecipient(bracketed) ? bracketed : undefined
 }
 
+const MAILBOX_CHAR = {
+  escape: "\\",
+  quote: '"',
+  openAngle: "<",
+  closeAngle: ">",
+  separator: ","
+} as const
+
+type MailboxChar = (typeof MAILBOX_CHAR)[keyof typeof MAILBOX_CHAR]
+
+const MAILBOX_CHARS: ReadonlySet<string | undefined> = new Set<MailboxChar>(
+  Object.values(MAILBOX_CHAR)
+)
+
+const isMailboxChar = (character: string | undefined): character is MailboxChar =>
+  MAILBOX_CHARS.has(character)
+
 export const mailboxAddresses = (value: string | undefined): ReadonlyArray<string> | undefined => {
   if (value === undefined || value.trim() === "") return []
   const tokens: string[] = []
@@ -368,19 +399,26 @@ export const mailboxAddresses = (value: string | undefined): ReadonlyArray<strin
       escaped = false
       continue
     }
-    if (character === "\\" && quoted) {
-      escaped = true
-      continue
-    }
-    if (character === '"') {
-      quoted = !quoted
-      continue
-    }
-    if (!quoted && character === "<") angleDepth += 1
-    if (!quoted && character === ">") angleDepth = Math.max(0, angleDepth - 1)
-    if (!quoted && angleDepth === 0 && character === ",") {
-      tokens.push(value.slice(start, index))
-      start = index + 1
+    if (!isMailboxChar(character)) continue
+    switch (character) {
+      case MAILBOX_CHAR.escape:
+        if (quoted) escaped = true
+        break
+      case MAILBOX_CHAR.quote:
+        quoted = !quoted
+        break
+      case MAILBOX_CHAR.openAngle:
+        if (!quoted) angleDepth += 1
+        break
+      case MAILBOX_CHAR.closeAngle:
+        if (!quoted) angleDepth = Math.max(0, angleDepth - 1)
+        break
+      case MAILBOX_CHAR.separator:
+        if (!quoted && angleDepth === 0) {
+          tokens.push(value.slice(start, index))
+          start = index + 1
+        }
+        break
     }
   }
   if (quoted || angleDepth !== 0) return undefined

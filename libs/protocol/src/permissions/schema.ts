@@ -1,17 +1,29 @@
 import { nonRelativePathSegment } from "../common/routes.js"
 import { SpaceApprovalModeSchema } from "../spaces/schema.js"
 import { Effect, Schema } from "effect"
-import type {
-  CommandSandboxStatus,
-  NewPermissionRule,
-  PermissionRuleItem,
-  PermissionRuleListResponse,
-  PermissionWordsCompiled,
-  NewWordsRule,
-  CompiledRule,
-  PermissionRuleList,
-  SessionPermission,
-  DefaultApprovalMode
+import { AutomationToolScopeSchema } from "../automations/schema.js"
+import {
+  AUTOMATION_APPROVAL,
+  COMMAND_SANDBOX_STATUS,
+  INHERITED_MODE,
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_LIST,
+  PERMISSION_RULE_ORIGIN,
+  PERMISSION_RULE_SUBJECT,
+  PERMISSION_TOOL_OWNER,
+  SESSION_PERMISSION,
+  WORDS_RULE_REPLACES,
+  type CommandSandboxStatus,
+  type NewPermissionRule,
+  type PermissionRuleItem,
+  type PermissionRuleListResponse,
+  type PermissionWordsCompiled,
+  type NewWordsRule,
+  type CompiledRule,
+  type PermissionRuleList,
+  type SessionPermission,
+  type DefaultApprovalMode
 } from "./contracts.js"
 import { withExtras } from "../common/schema.js"
 
@@ -20,51 +32,60 @@ const boundedNonEmpty = (maximum: number) =>
 export const PermissionIdSchema = boundedNonEmpty(128).check(nonRelativePathSegment)
 
 export const CommandSandboxStatusSchema: Schema.Codec<CommandSandboxStatus> = withExtras({
-  status: Schema.Literals(["not_linux", "ready", "missing", "no_namespaces", "failed"])
+  status: Schema.Literals(Object.values(COMMAND_SANDBOX_STATUS))
 })
 
-const RuleDecisionSchema = Schema.Literals(["allow", "ask", "never"])
+const RuleDecisionSchema = Schema.Literals(Object.values(PERMISSION_RULE_DECISION))
 const RuleListSchema: Schema.Codec<PermissionRuleList> = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("global") }),
-  Schema.Struct({ kind: Schema.Literal("system") }),
-  Schema.Struct({ kind: Schema.Literal("space"), space_id: boundedNonEmpty(256) })
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_LIST.global) }),
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_LIST.system) }),
+  Schema.Struct({
+    kind: Schema.Literal(PERMISSION_RULE_LIST.space),
+    space_id: boundedNonEmpty(256)
+  })
 ])
 
 const PermissionRuleSubjectSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("tool"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.tool),
     tool: boundedNonEmpty(256),
     title: boundedNonEmpty(512),
     owner: Schema.Union([
-      Schema.Struct({ kind: Schema.Literal("arden") }),
+      Schema.Struct({ kind: Schema.Literal(PERMISSION_TOOL_OWNER.arden) }),
       Schema.Struct({
-        kind: Schema.Literal("connector"),
+        kind: Schema.Literal(PERMISSION_TOOL_OWNER.connector),
         server: boundedNonEmpty(256),
         title: boundedNonEmpty(512)
       })
     ])
   }),
   Schema.Struct({
-    kind: Schema.Literal("site"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.site),
     tool: boundedNonEmpty(256),
     origin: boundedNonEmpty(512),
     title: boundedNonEmpty(512)
   }),
   Schema.Struct({
-    kind: Schema.Literal("connector"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.connector),
     server: boundedNonEmpty(256),
     title: boundedNonEmpty(512)
   }),
-  Schema.Struct({ kind: Schema.Literal("command"), words: boundedNonEmpty(512) }),
-  Schema.Struct({ kind: Schema.Literal("host_commands") }),
-  Schema.Struct({ kind: Schema.Literal("words"), text: boundedNonEmpty(2000) }),
   Schema.Struct({
-    kind: Schema.Literal("path"),
-    path: boundedNonEmpty(1000),
-    access: Schema.Literals(["read", "change"])
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.command),
+    words: boundedNonEmpty(512)
+  }),
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_SUBJECT.hostCommands) }),
+  Schema.Struct({
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.words),
+    text: boundedNonEmpty(2000)
   }),
   Schema.Struct({
-    kind: Schema.Literal("vault_key"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.path),
+    path: boundedNonEmpty(1000),
+    access: Schema.Literals(Object.values(PERMISSION_PATH_ACCESS))
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.vaultKey),
     name: boundedNonEmpty(64),
     key_id: boundedNonEmpty(64)
   })
@@ -75,8 +96,11 @@ export const PermissionRuleItemSchema: Schema.Codec<PermissionRuleItem> = withEx
   list: RuleListSchema,
   decision: RuleDecisionSchema,
   from: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("standalone") }),
-    Schema.Struct({ kind: Schema.Literal("words"), rule_id: PermissionIdSchema })
+    Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_ORIGIN.standalone) }),
+    Schema.Struct({
+      kind: Schema.Literal(PERMISSION_RULE_ORIGIN.words),
+      rule_id: PermissionIdSchema
+    })
   ]),
   subject: PermissionRuleSubjectSchema
 })
@@ -88,20 +112,31 @@ export const NewPermissionRuleSchema: Schema.Codec<NewPermissionRule> = Schema.S
   list: RuleListSchema,
   decision: RuleDecisionSchema,
   subject: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("tool"), tool: boundedNonEmpty(256) }),
-    Schema.Struct({ kind: Schema.Literal("connector"), server: boundedNonEmpty(256) }),
-    Schema.Struct({ kind: Schema.Literal("command"), command: boundedNonEmpty(512) }),
-    Schema.Struct({ kind: Schema.Literal("host_commands") }),
-    Schema.Struct({ kind: Schema.Literal("words"), text: boundedNonEmpty(2000) }),
     Schema.Struct({
-      kind: Schema.Literal("path"),
+      kind: Schema.Literal(PERMISSION_RULE_SUBJECT.tool),
+      tool: boundedNonEmpty(256)
+    }),
+    Schema.Struct({
+      kind: Schema.Literal(PERMISSION_RULE_SUBJECT.connector),
+      server: boundedNonEmpty(256)
+    }),
+    Schema.Struct({
+      kind: Schema.Literal(PERMISSION_RULE_SUBJECT.command),
+      command: boundedNonEmpty(512)
+    }),
+    Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_SUBJECT.hostCommands) }),
+    Schema.Struct({
+      kind: Schema.Literal(PERMISSION_RULE_SUBJECT.words),
+      text: boundedNonEmpty(2000)
+    }),
+    Schema.Struct({
+      kind: Schema.Literal(PERMISSION_RULE_SUBJECT.path),
       path: boundedNonEmpty(1000),
-      access: Schema.Literals(["read", "change"])
+      access: Schema.Literals(Object.values(PERMISSION_PATH_ACCESS))
     })
   ])
 })
 
-/** `PATCH /permissions/rules/:ruleId` body: the rule's new decision. */
 export const PermissionRuleDecisionPatchSchema = Schema.Struct({ decision: RuleDecisionSchema })
 
 export const encodeSpaceRulesPathEffect = (
@@ -120,8 +155,6 @@ export const encodePermissionRulePathEffect = (
 
 export const ApprovalModeSchema = SpaceApprovalModeSchema
 
-/** `GET`/`PUT /permissions/default-mode`: Settings, Permissions "When no rule
- *  fits", the mode new chats start in and every Space's task workers run in. */
 export const DefaultApprovalModeSchema: Schema.Codec<DefaultApprovalMode> = Schema.Struct({
   approval_mode: ApprovalModeSchema
 })
@@ -131,35 +164,47 @@ export const SessionPermissionPatchRequestSchema = Schema.Struct({
 })
 export const SessionPermissionSchema: Schema.Codec<SessionPermission> = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("chat"),
+    kind: Schema.Literal(SESSION_PERMISSION.chat),
     approval_mode: ApprovalModeSchema
   }),
   Schema.Struct({
-    kind: Schema.Literal("automation"),
+    kind: Schema.Literal(SESSION_PERMISSION.automation),
     automation_id: Schema.String,
-    tool_scope: Schema.String,
+    tool_scope: AutomationToolScopeSchema,
     approval: Schema.Union([
-      Schema.Struct({ kind: Schema.Literal("space"), approval_mode: ApprovalModeSchema }),
-      Schema.Struct({ kind: Schema.Literal("own"), auto_approve: Schema.Boolean })
+      Schema.Struct({
+        kind: Schema.Literal(AUTOMATION_APPROVAL.space),
+        approval_mode: ApprovalModeSchema
+      }),
+      Schema.Struct({ kind: Schema.Literal(AUTOMATION_APPROVAL.own), auto_approve: Schema.Boolean })
     ])
   }),
   Schema.Struct({
-    kind: Schema.Literal("inherited"),
+    kind: Schema.Literal(SESSION_PERMISSION.inherited),
     mode: Schema.Union([
-      Schema.Struct({ kind: Schema.Literal("set"), approval_mode: ApprovalModeSchema }),
-      Schema.Struct({ kind: Schema.Literal("unset") })
+      Schema.Struct({
+        kind: Schema.Literal(INHERITED_MODE.set),
+        approval_mode: ApprovalModeSchema
+      }),
+      Schema.Struct({ kind: Schema.Literal(INHERITED_MODE.unset) })
     ])
   })
 ])
 
 const CompiledSubjectSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("tool"), tool: boundedNonEmpty(256) }),
-  Schema.Struct({ kind: Schema.Literal("connector"), server: boundedNonEmpty(256) }),
-  Schema.Struct({ kind: Schema.Literal("command"), command: boundedNonEmpty(512) }),
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_SUBJECT.tool), tool: boundedNonEmpty(256) }),
   Schema.Struct({
-    kind: Schema.Literal("path"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.connector),
+    server: boundedNonEmpty(256)
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.command),
+    command: boundedNonEmpty(512)
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.path),
     path: boundedNonEmpty(1000),
-    access: Schema.Literals(["read", "change"])
+    access: Schema.Literals(Object.values(PERMISSION_PATH_ACCESS))
   })
 ])
 
@@ -168,7 +213,6 @@ export const CompiledRuleSchema: Schema.Codec<CompiledRule> = withExtras({
   subject: CompiledSubjectSchema
 })
 
-/** `POST /permissions/rules/compile` body: the owner's words, and the list they are for. */
 export const PermissionWordsSchema = Schema.Struct({
   text: boundedNonEmpty(2000),
   list: RuleListSchema
@@ -192,7 +236,7 @@ export const NewWordsRuleSchema: Schema.Codec<NewWordsRule> = withExtras({
   decision: RuleDecisionSchema,
   rules: Schema.Array(CompiledRuleSchema).check(Schema.isMaxLength(16)),
   replaces: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("nothing") }),
-    Schema.Struct({ kind: Schema.Literal("rule"), rule_id: PermissionIdSchema })
+    Schema.Struct({ kind: Schema.Literal(WORDS_RULE_REPLACES.nothing) }),
+    Schema.Struct({ kind: Schema.Literal(WORDS_RULE_REPLACES.rule), rule_id: PermissionIdSchema })
   ])
 })

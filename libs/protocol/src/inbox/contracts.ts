@@ -1,8 +1,8 @@
 import type { JsonRecord } from "../common/json.js"
 import type { RunApproval } from "../runs/approvals.js"
 import type { RunQuestion } from "../runs/questions.js"
+import type { SpaceTaskWaitingOn } from "../spaces/work/contracts.js"
 
-/** Maximum number of items rendered and keys accepted by one read-mark request. */
 export const INBOX_ITEM_LIMIT = 100
 
 export type InboxGroupKind =
@@ -12,13 +12,13 @@ export type InboxGroupKind =
   | "incidents"
   | "failures"
   | "limits"
-export type InboxTaskWaitingOn = "you" | "external"
+export type InboxTaskWaitingOn = SpaceTaskWaitingOn
 
 export const INBOX_SPACE = { loose: "loose", space: "space" } as const
 
 export type InboxSpace =
-  | { readonly kind: "loose" }
-  | { readonly kind: "space"; readonly space_id: string; readonly title: string }
+  | { readonly kind: typeof INBOX_SPACE.loose }
+  | { readonly kind: typeof INBOX_SPACE.space; readonly space_id: string; readonly title: string }
 
 export type InboxReadMark =
   | { readonly kind: "unmarked" }
@@ -45,9 +45,29 @@ export type InboxFailureOrigin =
     }
   | { readonly kind: "task"; readonly run: InboxFailureRun }
 
+export const INBOX_PLAN_LIMIT_LEVEL = {
+  background: "background",
+  arden: "arden",
+  used_up: "used_up"
+} as const
+
 export type InboxPlanLimitReached =
-  | { readonly level: "used_up" }
-  | { readonly level: "background" | "arden"; readonly limit_percent: number }
+  | { readonly level: typeof INBOX_PLAN_LIMIT_LEVEL.used_up }
+  | {
+      readonly level: typeof INBOX_PLAN_LIMIT_LEVEL.background | typeof INBOX_PLAN_LIMIT_LEVEL.arden
+      readonly limit_percent: number
+    }
+
+export const INBOX_ITEM_SOURCE = {
+  blocked_task: "blocked_task",
+  approval: "approval",
+  failure: "failure",
+  question: "question",
+  incident: "incident",
+  plan_limit: "plan_limit"
+} as const
+
+export type InboxItemSource = (typeof INBOX_ITEM_SOURCE)[keyof typeof INBOX_ITEM_SOURCE]
 
 interface InboxItemBase extends JsonRecord {
   readonly key: string
@@ -59,7 +79,7 @@ interface InboxItemBase extends JsonRecord {
 }
 
 export interface InboxBlockedTaskItem extends InboxItemBase {
-  readonly source: "blocked_task"
+  readonly source: typeof INBOX_ITEM_SOURCE.blocked_task
   readonly space: InboxSpace
   readonly item_id: string
   readonly stable_key: string
@@ -70,11 +90,11 @@ export interface InboxBlockedTaskItem extends InboxItemBase {
 }
 
 export interface InboxApprovalItem extends InboxItemBase, RunApproval {
-  readonly source: "approval"
+  readonly source: typeof INBOX_ITEM_SOURCE.approval
 }
 
 export interface InboxFailureGroupItem extends InboxItemBase {
-  readonly source: "failure"
+  readonly source: typeof INBOX_ITEM_SOURCE.failure
   readonly space: InboxSpace
   readonly origin: InboxFailureOrigin
   readonly cause: string
@@ -85,12 +105,12 @@ export interface InboxFailureGroupItem extends InboxItemBase {
 }
 
 export interface InboxQuestionItem extends InboxItemBase {
-  readonly source: "question"
+  readonly source: typeof INBOX_ITEM_SOURCE.question
   readonly question: RunQuestion
 }
 
 export interface InboxIncidentItem extends InboxItemBase {
-  readonly source: "incident"
+  readonly source: typeof INBOX_ITEM_SOURCE.incident
   readonly incident_id: string
   readonly code: "delivery.unroutable"
   readonly summary: string
@@ -99,7 +119,7 @@ export interface InboxIncidentItem extends InboxItemBase {
 }
 
 export interface InboxPlanLimitItem extends InboxItemBase {
-  readonly source: "plan_limit"
+  readonly source: typeof INBOX_ITEM_SOURCE.plan_limit
   readonly reached: InboxPlanLimitReached
   readonly used_percent: number
   readonly window_seconds: number
@@ -152,17 +172,10 @@ export interface MarkInboxItemsReadRequest {
 
 export type MarkInboxReadRequest = MarkAllInboxReadRequest | MarkInboxItemsReadRequest
 
-/** Dismissal hides named items from the Inbox without touching their source:
- *  the task stays blocked, the approval stays pending, the runs stay failed.
- *  An item returns on its own when its `at` moves past the dismissal — new
- *  activity resurfaces it, the way Linear and Slack re-notify a cleared row. */
 export interface DismissAllInboxRequest {
   readonly scope: "all"
 }
 
-/** One group's worth, by the group key the view serves — items past the
- *  render cap included, which is why the client sends the group rather than
- *  the keys it happens to see. */
 export interface DismissInboxGroupRequest {
   readonly scope: "group"
   readonly group_key: string

@@ -3,12 +3,8 @@ import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { PersistenceDeps } from "./deps.js"
 
-/** Sequences scanned per query, so no read walks a whole large stream. */
-const JOURNAL_SCAN_WINDOW = 10_000
+const JOURNAL_SEQUENCES_PER_SCAN = 10_000
 
-/** Read a stream in sequence windows, passing each page to `onPage`. `columns`
- * must include `sequence`; `where` filters the rows. `read` lets a caller run
- * each query in a lane of its own (the writer's, for example). */
 export const scanJournalWindows = Effect.fn("Journal.scanWindows")(function* <Row, E>(input: {
   readonly sql: SqlClient.SqlClient
   readonly streamId: string
@@ -21,7 +17,7 @@ export const scanJournalWindows = Effect.fn("Journal.scanWindows")(function* <Ro
   readonly onPage: (page: ReadonlyArray<Row>) => Effect.Effect<void, E>
 }) {
   const { sql } = input
-  const window = input.window ?? JOURNAL_SCAN_WINDOW
+  const window = input.window ?? JOURNAL_SEQUENCES_PER_SCAN
   const read = input.read ?? ((effect) => effect)
   for (let after = input.afterSequence; after < input.throughSequence; after += window) {
     const page = yield* read(
@@ -37,9 +33,6 @@ export const scanJournalWindows = Effect.fn("Journal.scanWindows")(function* <Ro
   }
 })
 
-/** Delete the given sequences below `beforeSequence` in short write
- * transactions, `batchSize` at a time, pausing between them. `where` is
- * applied again inside each write. The replay floor does not move. */
 export const deleteJournalSequences = Effect.fn("Journal.deleteSequences")(function* (input: {
   readonly writer: PersistenceDeps["writer"]
   readonly streamId: string

@@ -1,10 +1,19 @@
 import { mcpOAuthClientReferences } from "@arden-hq/protocol/mcp"
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js"
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js"
-import { McpOAuthProvider, type McpOAuthCallbacks } from "./oauth.js"
+import { WEB_PROTOCOL } from "@arden-hq/std/url"
+import { isAuthorized, McpOAuthProvider, type McpOAuthCallbacks } from "./oauth.js"
 import { KeyedSerialQueue } from "./serial.js"
 import { clearMcpOAuthCredentials, resolveMcpOAuthClient, type McpOAuthVault } from "./vault.js"
 import { createSameOriginFetch } from "./transport.js"
+
+const GITHUB_HOST = { web: "github.com", copilot: "api.githubcopilot.com" } as const
+
+type GitHubHost = (typeof GITHUB_HOST)[keyof typeof GITHUB_HOST]
+
+const TRUSTED_GITHUB_HOSTS: ReadonlySet<string> = new Set<GitHubHost>(Object.values(GITHUB_HOST))
+
+const GITHUB_WEB_ORIGIN = `${WEB_PROTOCOL.https}//${GITHUB_HOST.web}`
 
 const serverUrl = "https://api.githubcopilot.com/mcp"
 const resourceMetadataUrl = new URL(
@@ -57,10 +66,7 @@ export const makeGitHubOAuth = ({
     (signal?: AbortSignal): FetchLike =>
     (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input))
-      if (
-        url.protocol !== "https:" ||
-        !["github.com", "api.githubcopilot.com"].includes(url.hostname)
-      )
+      if (url.protocol !== WEB_PROTOCOL.https || !TRUSTED_GITHUB_HOSTS.has(url.hostname))
         throw new Error("GitHub sign-in advertised an untrusted endpoint")
       return fetch(input, {
         ...init,
@@ -94,7 +100,7 @@ export const makeGitHubOAuth = ({
           scope: "offline_access",
           fetchFn: trustedFetch()
         })
-        if (result !== "AUTHORIZED") return undefined
+        if (!isAuthorized(result)) return undefined
         return (await persistent.tokens())?.access_token
       }),
     clear: async (): Promise<void> => {
@@ -118,7 +124,7 @@ export const makeGitHubOAuth = ({
       const controller = new AbortController()
       let authorizationUrl: URL | undefined
       const interactive = provider((url) => {
-        if (url.origin !== "https://github.com")
+        if (url.origin !== GITHUB_WEB_ORIGIN)
           throw new Error("GitHub sign-in has an untrusted destination")
         authorizationUrl = url
       }, beforeCommit)

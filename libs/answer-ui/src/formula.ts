@@ -44,19 +44,47 @@ export interface Formula {
   readonly compute: Compute
 }
 
+export const FORMULA_VALUE_KIND = { value: "value", invalid: "invalid" } as const
+
+interface FormulaInvalid {
+  readonly kind: typeof FORMULA_VALUE_KIND.invalid
+  readonly reason: string
+}
+
+export const FORMULA_READ_KIND = {
+  formula: "formula",
+  invalid: FORMULA_VALUE_KIND.invalid
+} as const
+
 export type FormulaRead =
-  | { readonly kind: "formula"; readonly formula: Formula }
-  | { readonly kind: "invalid"; readonly reason: string }
+  | { readonly kind: typeof FORMULA_READ_KIND.formula; readonly formula: Formula }
+  | FormulaInvalid
 
 export type FormulaValue =
-  | { readonly kind: "value"; readonly value: number }
-  | { readonly kind: "invalid"; readonly reason: string }
+  | { readonly kind: typeof FORMULA_VALUE_KIND.value; readonly value: number }
+  | FormulaInvalid
+
+const TOKEN_KIND = { number: "number", name: "name", symbol: "symbol", end: "end" } as const
+
+const FORMULA_SYMBOL = {
+  plus: "+",
+  minus: "-",
+  times: "*",
+  divide: "/",
+  power: "^",
+  open: "(",
+  close: ")",
+  comma: ","
+} as const
+type FormulaSymbol = (typeof FORMULA_SYMBOL)[keyof typeof FORMULA_SYMBOL]
+const FORMULA_SYMBOLS: ReadonlySet<string> = new Set<FormulaSymbol>(Object.values(FORMULA_SYMBOL))
+const isFormulaSymbol = (char: string): char is FormulaSymbol => FORMULA_SYMBOLS.has(char)
 
 type Token =
-  | { readonly kind: "number"; readonly value: number; readonly at: number }
-  | { readonly kind: "name"; readonly name: string; readonly at: number }
-  | { readonly kind: "symbol"; readonly symbol: string; readonly at: number }
-  | { readonly kind: "end"; readonly at: number }
+  | { readonly kind: typeof TOKEN_KIND.number; readonly value: number; readonly at: number }
+  | { readonly kind: typeof TOKEN_KIND.name; readonly name: string; readonly at: number }
+  | { readonly kind: typeof TOKEN_KIND.symbol; readonly symbol: FormulaSymbol; readonly at: number }
+  | { readonly kind: typeof TOKEN_KIND.end; readonly at: number }
 
 class FormulaProblem {
   constructor(readonly reason: string) {}
@@ -64,7 +92,6 @@ class FormulaProblem {
 
 const NUMBER = /^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*/
-const SYMBOLS = "+-*/^(),"
 
 function tokenize(source: string): Token[] {
   const tokens: Token[] = []
@@ -78,37 +105,37 @@ function tokenize(source: string): Token[] {
     }
     const number = NUMBER.exec(rest)
     if (number) {
-      tokens.push({ kind: "number", value: Number(number[0]), at })
+      tokens.push({ kind: TOKEN_KIND.number, value: Number(number[0]), at })
       at += number[0].length
       continue
     }
     const name = NAME.exec(rest)
     if (name) {
-      tokens.push({ kind: "name", name: name[0], at })
+      tokens.push({ kind: TOKEN_KIND.name, name: name[0], at })
       at += name[0].length
       continue
     }
     const char = rest.charAt(0)
-    if (!SYMBOLS.includes(char))
+    if (!isFormulaSymbol(char))
       throw new FormulaProblem(
         `\`${char}\` at character ${at + 1} is not allowed; use numbers, variables, + - * / ^, parentheses and ${FORMULA_FUNCTIONS.join(", ")}`
       )
-    tokens.push({ kind: "symbol", symbol: char, at })
+    tokens.push({ kind: TOKEN_KIND.symbol, symbol: char, at })
     at += 1
   }
-  tokens.push({ kind: "end", at })
+  tokens.push({ kind: TOKEN_KIND.end, at })
   return tokens
 }
 
 const describe = (token: Token): string => {
   switch (token.kind) {
-    case "number":
+    case TOKEN_KIND.number:
       return `\`${token.value}\` at character ${token.at + 1}`
-    case "name":
+    case TOKEN_KIND.name:
       return `\`${token.name}\` at character ${token.at + 1}`
-    case "symbol":
+    case TOKEN_KIND.symbol:
       return `\`${token.symbol}\` at character ${token.at + 1}`
-    case "end":
+    case TOKEN_KIND.end:
       return "the end"
   }
 }
@@ -126,10 +153,11 @@ export function readFormula(source: string): FormulaRead {
 }
 
 function parseFormula(source: string): FormulaRead {
-  if (source.trim().length === 0) return { kind: "invalid", reason: "the formula is empty" }
+  if (source.trim().length === 0)
+    return { kind: FORMULA_READ_KIND.invalid, reason: "the formula is empty" }
   if (source.length > MAX_FORMULA_CHARS)
     return {
-      kind: "invalid",
+      kind: FORMULA_READ_KIND.invalid,
       reason: `the formula is over ${MAX_FORMULA_CHARS} characters; split it into simpler ones`
     }
   try {
@@ -137,15 +165,15 @@ function parseFormula(source: string): FormulaRead {
     const variables: string[] = []
     let index = 0
     let depth = 0
-    const peek = (): Token => tokens[index] ?? { kind: "end", at: source.length }
+    const peek = (): Token => tokens[index] ?? { kind: TOKEN_KIND.end, at: source.length }
     const take = (): Token => {
       const token = peek()
       index += 1
       return token
     }
-    const isSymbol = (token: Token, symbol: string) =>
-      token.kind === "symbol" && token.symbol === symbol
-    const expect = (symbol: string) => {
+    const isSymbol = (token: Token, symbol: FormulaSymbol) =>
+      token.kind === TOKEN_KIND.symbol && token.symbol === symbol
+    const expect = (symbol: FormulaSymbol) => {
       const token = take()
       if (!isSymbol(token, symbol))
         throw new FormulaProblem(`expected \`${symbol}\` but found ${describe(token)}`)
@@ -163,34 +191,40 @@ function parseFormula(source: string): FormulaRead {
       let node = product()
       for (;;) {
         const token = peek()
-        if (!isSymbol(token, "+") && !isSymbol(token, "-")) return node
+        if (!isSymbol(token, FORMULA_SYMBOL.plus) && !isSymbol(token, FORMULA_SYMBOL.minus))
+          return node
         take()
         const left = node
         const right = product()
-        node = isSymbol(token, "+") ? (v) => left(v) + right(v) : (v) => left(v) - right(v)
+        node = isSymbol(token, FORMULA_SYMBOL.plus)
+          ? (v) => left(v) + right(v)
+          : (v) => left(v) - right(v)
       }
     }
     const product = (): Compute => {
       let node = signed()
       for (;;) {
         const token = peek()
-        if (!isSymbol(token, "*") && !isSymbol(token, "/")) return node
+        if (!isSymbol(token, FORMULA_SYMBOL.times) && !isSymbol(token, FORMULA_SYMBOL.divide))
+          return node
         take()
-        if (isSymbol(token, "*") && isSymbol(peek(), "*"))
+        if (isSymbol(token, FORMULA_SYMBOL.times) && isSymbol(peek(), FORMULA_SYMBOL.times))
           throw new FormulaProblem(`write a power with ^, not ** (character ${token.at + 1})`)
         const left = node
         const right = signed()
-        node = isSymbol(token, "*") ? (v) => left(v) * right(v) : (v) => left(v) / right(v)
+        node = isSymbol(token, FORMULA_SYMBOL.times)
+          ? (v) => left(v) * right(v)
+          : (v) => left(v) / right(v)
       }
     }
     const signed = (): Compute => {
       const token = peek()
-      if (isSymbol(token, "-")) {
+      if (isSymbol(token, FORMULA_SYMBOL.minus)) {
         take()
         const inner = nested(signed)
         return (v) => -inner(v)
       }
-      if (isSymbol(token, "+")) {
+      if (isSymbol(token, FORMULA_SYMBOL.plus)) {
         take()
         return nested(signed)
       }
@@ -198,7 +232,7 @@ function parseFormula(source: string): FormulaRead {
     }
     const power = (): Compute => {
       const base = primary()
-      if (!isSymbol(peek(), "^")) return base
+      if (!isSymbol(peek(), FORMULA_SYMBOL.power)) return base
       take()
       const exponent = nested(signed)
       return (v) => base(v) ** exponent(v)
@@ -206,20 +240,22 @@ function parseFormula(source: string): FormulaRead {
     const primary = (): Compute => {
       const token = take()
       switch (token.kind) {
-        case "number": {
+        case TOKEN_KIND.number: {
           const value = token.value
           return () => value
         }
-        case "name":
-          return isSymbol(peek(), "(") ? call(token.name, token.at) : variable(token.name)
-        case "symbol":
-          if (token.symbol === "(") {
+        case TOKEN_KIND.name:
+          return isSymbol(peek(), FORMULA_SYMBOL.open)
+            ? call(token.name, token.at)
+            : variable(token.name)
+        case TOKEN_KIND.symbol:
+          if (token.symbol === FORMULA_SYMBOL.open) {
             const inner = nested(sum)
-            expect(")")
+            expect(FORMULA_SYMBOL.close)
             return inner
           }
           throw new FormulaProblem(`unexpected ${describe(token)}`)
-        case "end":
+        case TOKEN_KIND.end:
           throw new FormulaProblem("the formula ends too early")
       }
     }
@@ -233,18 +269,18 @@ function parseFormula(source: string): FormulaRead {
         throw new FormulaProblem(
           `\`${name}\` at character ${at + 1} is not a function; use one of ${FORMULA_FUNCTIONS.join(", ")}`
         )
-      expect("(")
+      expect(FORMULA_SYMBOL.open)
       const args = nested(() => {
         const read: Compute[] = []
-        if (isSymbol(peek(), ")")) return read
+        if (isSymbol(peek(), FORMULA_SYMBOL.close)) return read
         read.push(sum())
-        while (isSymbol(peek(), ",")) {
+        while (isSymbol(peek(), FORMULA_SYMBOL.comma)) {
           take()
           read.push(sum())
         }
         return read
       })
-      expect(")")
+      expect(FORMULA_SYMBOL.close)
       const [min, max] = def.arity
       if (args.length < min || args.length > max)
         throw new FormulaProblem(
@@ -255,11 +291,15 @@ function parseFormula(source: string): FormulaRead {
 
     const compute = sum()
     const rest = peek()
-    if (rest.kind !== "end") throw new FormulaProblem(`unexpected ${describe(rest)}`)
-    return { kind: "formula", formula: { source, variables, compute } }
+    if (rest.kind !== TOKEN_KIND.end) throw new FormulaProblem(`unexpected ${describe(rest)}`)
+    return { kind: FORMULA_READ_KIND.formula, formula: { source, variables, compute } }
   } catch (error) {
-    if (error instanceof FormulaProblem) return { kind: "invalid", reason: error.reason }
-    return { kind: "invalid", reason: "the formula could not be read; write it more simply" }
+    if (error instanceof FormulaProblem)
+      return { kind: FORMULA_READ_KIND.invalid, reason: error.reason }
+    return {
+      kind: FORMULA_READ_KIND.invalid,
+      reason: "the formula could not be read; write it more simply"
+    }
   }
 }
 
@@ -275,13 +315,17 @@ export function evaluateFormula(
   const values: Record<string, number> = {}
   for (const name of formula.variables) {
     const value = Object.hasOwn(vars, name) ? vars[name] : undefined
-    if (value === undefined) return { kind: "invalid", reason: `\`${name}\` is not in vars` }
+    if (value === undefined)
+      return { kind: FORMULA_VALUE_KIND.invalid, reason: `\`${name}\` is not in vars` }
     if (typeof value !== "number" || !Number.isFinite(value))
-      return { kind: "invalid", reason: `\`${name}\` is not a number` }
+      return { kind: FORMULA_VALUE_KIND.invalid, reason: `\`${name}\` is not a number` }
     values[name] = value
   }
   const value = formula.compute(values)
   return Number.isFinite(value)
-    ? { kind: "value", value }
-    : { kind: "invalid", reason: "the result is not a finite number for these values" }
+    ? { kind: FORMULA_VALUE_KIND.value, value }
+    : {
+        kind: FORMULA_VALUE_KIND.invalid,
+        reason: "the result is not a finite number for these values"
+      }
 }

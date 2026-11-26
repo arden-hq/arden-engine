@@ -16,17 +16,14 @@ const routePathEffect = (value: unknown, action: "" | "/retry" | "/cancel") =>
     appendSearch(`${scriptPath(workflowRef)}${action}`, [["session_id", sessionId]])
   )
 
-/** Encode `GET /scripts/:workflowRef`. */
 export const encodeScriptItemPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> => routePathEffect(value, "")
 
-/** Encode `POST /scripts/:workflowRef/retry`. */
 export const encodeScriptRetryPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> => routePathEffect(value, "/retry")
 
-/** Encode `POST /scripts/:workflowRef/cancel`. */
 export const encodeScriptCancelPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> => routePathEffect(value, "/cancel")

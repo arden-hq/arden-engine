@@ -3,14 +3,17 @@ import { createRequire } from "node:module"
 import { constants } from "node:os"
 import { join } from "node:path"
 
-import type { ShellInvocation } from "../tools/shell-policy.js"
+import type { ShellInvocation } from "../tools/shell-invocation.js"
 import { canDetach, signalProcessGroup, terminate } from "@arden-hq/std/process"
+import type { ToolOutputStream } from "@arden-hq/protocol/chat"
 
-export type OutputStream = "stdout" | "stderr"
+export type OutputStream = ToolOutputStream
+
+export const PROCESS_EXIT = { code: "code", signal: "signal" } as const
 
 export type ProcessExit =
-  | { readonly kind: "code"; readonly code: number }
-  | { readonly kind: "signal"; readonly signal: string }
+  | { readonly kind: typeof PROCESS_EXIT.code; readonly code: number }
+  | { readonly kind: typeof PROCESS_EXIT.signal; readonly signal: string }
 
 export type ProcessInput = "closed" | "pipe"
 
@@ -100,7 +103,6 @@ const spawnPipeProcess = (invocation: ShellInvocation, input: ProcessInput): Liv
   child.stderr?.on("data", (chunk: Buffer) => {
     for (const listener of [...listeners.data]) listener("stderr", chunk)
   })
-  // A process that exits while a writer still holds stdin raises EPIPE here.
   child.stdin?.on("error", () => undefined)
   child.once("error", (cause) => {
     if (!spawned) {
@@ -187,11 +189,6 @@ type PtyModule = typeof import("node-pty")
 
 let ptyModule: PtyModule | null | undefined
 
-/**
- * node-pty stays outside the server bundle: development resolves the
- * workspace copy, a packaged app the one unpacked beside Electron's asar.
- * Without either, commands with open input run on a pipe.
- */
 const loadPty = (): PtyModule | undefined => {
   if (ptyModule !== undefined) return ptyModule ?? undefined
   const require = createRequire(import.meta.url)

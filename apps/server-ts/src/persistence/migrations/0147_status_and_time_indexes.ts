@@ -1,14 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** Indexes for questions asked by status or by time.
- *
- * `idx_chat_runs_active` lists unfinished runs, but SQLite uses a partial
- * index only when the query repeats its condition word for word, and most
- * queries ask `status = 'pending'` or `status IN ('running')`. A plain index
- * on status serves every form. The other two serve "what happened in this
- * time window" for run results, run starts and Task events, which read every
- * row; and "runs with no outcome yet". `row_counts` keeps the number of runs. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE INDEX idx_chat_runs_status ON chat_runs(status, updated_at)`)
   database.exec(
@@ -25,8 +17,6 @@ const up = (database: DatabaseSync): void => {
   database.exec(
     `CREATE INDEX idx_automation_runs_occurrence ON automation_runs(json_extract(origin, '$.occurrence_id')) WHERE task_id IS NOT NULL`
   )
-  // How many runs exist, as a number: the run list shows it, and counting
-  // every run each time grows with the table.
   database.exec(`CREATE TABLE row_counts (
       name TEXT PRIMARY KEY CHECK(length(name) > 0),
       rows INTEGER NOT NULL DEFAULT 0

@@ -26,11 +26,6 @@ import { failureOf, runCommand, type RunOptions } from "./run.js"
 const NOT_INSTALLED =
   "The Arden server is not installed beside this command. Install @arden-hq/server, or set ARDEN_SERVER_ENTRY to its dist/main.js."
 
-/**
- * The server's entry file. The command line does not contain the server: it
- * starts the one named by ARDEN_SERVER_ENTRY, else the installed
- * @arden-hq/server, else the one that sits beside it in Arden's own checkout.
- */
 const serverEntry = (env: Readonly<Record<string, string | undefined>>): string => {
   const explicit = env["ARDEN_SERVER_ENTRY"]?.trim()
   if (explicit !== undefined && explicit.length > 0) return explicit
@@ -43,12 +38,6 @@ const serverEntry = (env: Readonly<Record<string, string | undefined>>): string 
   }
 }
 
-/**
- * Starts a configured server as a child process and waits for its ready line.
- * A start that fails rejects with the server's own last words: its `arden:`
- * line names the settings mistake (exit 2) or the model server that did not
- * answer (exit 3).
- */
 const startServer: StartServer = async ({ config, logFile, env }) => {
   const log = logFile === undefined ? undefined : createWriteStream(logFile, { flags: "a" })
   try {
@@ -199,11 +188,6 @@ export interface ExecOptions {
   readonly run: RunOptions
 }
 
-/**
- * `arden exec`: start a configured server, run one prompt on it as `arden run`
- * does, and stop the server. The server starts only once the prompt and its
- * files are known to be valid, and stops whatever the Run's outcome.
- */
 export const execCommand = async (
   options: ExecOptions,
   dependencies: CliDependencies

@@ -8,18 +8,22 @@ const isObject = (value: unknown): value is Json =>
 const text = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined
 
-const KIND = {
+const DESTINATION_KIND = {
   session: "session",
   settings: "settings",
   automation: "automation",
   memory: "memory",
   work: "work"
 } as const
+type DestinationKind = (typeof DESTINATION_KIND)[keyof typeof DESTINATION_KIND]
+const isDestinationKind = (value: unknown): value is DestinationKind =>
+  Object.values<unknown>(DESTINATION_KIND).includes(value)
 
 const todayDestination = (destination: Json): Json => {
   const { kind } = destination
+  if (!isDestinationKind(kind)) return destination
   switch (kind) {
-    case KIND.session: {
+    case DESTINATION_KIND.session: {
       if (isObject(destination["turn"])) return destination
       const { turn_id, ...rest } = destination
       const turn = text(turn_id)
@@ -28,7 +32,7 @@ const todayDestination = (destination: Json): Json => {
         turn: turn === undefined ? { kind: "latest" } : { kind: "turn", turn_id: turn }
       }
     }
-    case KIND.settings: {
+    case DESTINATION_KIND.settings: {
       if (isObject(destination["tab"])) return destination
       const tab = text(destination["tab"])
       return {
@@ -36,7 +40,7 @@ const todayDestination = (destination: Json): Json => {
         tab: tab === undefined ? { kind: "general" } : { kind: "tab", tab_id: tab }
       }
     }
-    case KIND.automation: {
+    case DESTINATION_KIND.automation: {
       if (isObject(destination["target"])) return destination
       const { task_id, ...rest } = destination
       const id = text(task_id)
@@ -45,7 +49,7 @@ const todayDestination = (destination: Json): Json => {
         target: id === undefined ? { kind: "list" } : { kind: "automation", task_id: id }
       }
     }
-    case KIND.memory: {
+    case DESTINATION_KIND.memory: {
       if (isObject(destination["target"])) return destination
       const { path, ...rest } = destination
       const page = text(path)
@@ -54,12 +58,10 @@ const todayDestination = (destination: Json): Json => {
         target: page === undefined ? { kind: "index" } : { kind: "page", path: page }
       }
     }
-    case KIND.work: {
+    case DESTINATION_KIND.work: {
       const item = text(destination["item_id"])
       return item === undefined ? { kind: "home" } : { kind: "task", item_id: item }
     }
-    default:
-      return destination
   }
 }
 

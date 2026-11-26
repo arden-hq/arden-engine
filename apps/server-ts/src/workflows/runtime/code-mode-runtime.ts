@@ -14,12 +14,6 @@ const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 const MEGABYTE = 1024 * 1024
 const MEMORY_LIMIT_BYTES = 256 * MEGABYTE
 const MIN_MEMORY_LIMIT_BYTES = 64 * MEGABYTE
-/**
- * Every runtime in the process allocates from one WebAssembly memory (the
- * shared QuickJS module), which is capped at 2 GB and never shrinks. A runtime
- * gets the full limit while few are live and a smaller share as they pile up,
- * so concurrent scripts cannot starve each other of heap.
- */
 const SHARED_HEAP_BUDGET_BYTES = 1024 * MEGABYTE
 let liveRuntimes = 0
 const memoryLimitBytes = (): number =>
@@ -109,12 +103,6 @@ const safeJson = (value: unknown): string => {
   return json
 }
 
-/**
- * A guest error crosses `context.dump` as a plain `{ name, message, stack }`
- * object, not an Error; read its fields (a host call may reject with a plain
- * object too). A script with a syntax error (an
- * unescaped quote in a long string) once reached the model as "[object Object]".
- */
 const guestErrorMessage = (dumped: unknown): string => {
   if (Predicate.hasProperty(dumped, "message") && Predicate.isString(dumped.message)) {
     return Predicate.hasProperty(dumped, "name") && Predicate.isString(dumped.name)
@@ -124,11 +112,6 @@ const guestErrorMessage = (dumped: unknown): string => {
   return JSON.stringify(dumped) ?? String(dumped)
 }
 
-/**
- * QuickJS reports an exhausted heap as the bare text "out of memory" (with the
- * error name in front when a script prints it). A tool's own message that
- * merely mentions memory is left alone.
- */
 export const readableRuntimeError = (message: string): string =>
   /^(?:InternalError: )?(?:out of memory|string too long)$/i.test(message.trim())
     ? "Result too large: the script ran out of memory. Fetch or read less data, narrow it before parsing, or process it in pieces."
@@ -317,7 +300,6 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
       deferreds.add(deferred)
       void hostCall(context.getString(nameHandle), context.getString(argsHandle)).then((json) => {
         if (finished) return
-        // A string the heap cannot hold must not throw out of here: the
         const settle = (text: string): void => {
           const handle = context.newString(text)
           try {
@@ -333,9 +315,7 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
             settle(
               safeJson({ ok: false, error: { message: "out of memory" } } satisfies HostEnvelope)
             )
-          } catch {
-            // Not even the short answer fits: the script's own timeout ends it.
-          }
+          } catch {}
         }
         deferreds.delete(deferred)
         deferred.dispose()

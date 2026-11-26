@@ -5,8 +5,6 @@ import type { MemoryCaptureBatchIdentity } from "../persistence/memory/store.js"
 import { mapRevisionError, type WikiError } from "./errors.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-// Version 2 names the batch by its chat, its start and end positions and the message at its
-// end, which tells a batch apart from a later one that reuses its numbers after a revert.
 export const captureBatchKey = (identity: MemoryCaptureBatchIdentity): string =>
   `memory-capture-final:${sha256Hex(
     JSON.stringify({
@@ -19,10 +17,6 @@ export const captureBatchKey = (identity: MemoryCaptureBatchIdentity): string =>
     })
   )}`
 
-/**
- * A Capture save is keyed by its run and its exact tool arguments: the same arguments again in
- * the same run land once, and any other save is a new one.
- */
 export const captureSaveKey = (runId: string, request: unknown): string =>
   `memory-capture-save:${sha256Hex(JSON.stringify({ run_id: runId, request }))}`
 
@@ -30,7 +24,6 @@ export interface WikiCaptureMethods {
   readonly finalizeCaptureBatch: (
     batch: MemoryCaptureBatchIdentity
   ) => Effect.Effect<void, WikiError>
-  /** Whether the Capture write that `key` names landed. */
   readonly hasCaptureReceipt: (key: string) => Effect.Effect<boolean, WikiError>
 }
 

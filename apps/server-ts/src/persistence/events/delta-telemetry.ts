@@ -1,5 +1,9 @@
 import { Buffer } from "node:buffer"
-import type { ChatProjectionEvent } from "@arden-hq/protocol"
+import {
+  SERVER_EVENT_TYPE,
+  type ChatProjectionEvent,
+  type ServerEventType
+} from "@arden-hq/protocol"
 
 const WINDOW_MS = 30_000
 const BUCKET_MS = 1_000
@@ -8,13 +12,29 @@ const SNAPSHOT_INTERVAL_MS = 5_000
 const BURST_EVENTS = 2_000
 const BURST_BYTES = 1024 * 1024
 
+const deltaEventTypes: ReadonlySet<ServerEventType> = new Set([
+  SERVER_EVENT_TYPE.textMessageContent,
+  SERVER_EVENT_TYPE.reasoningMessageContent,
+  SERVER_EVENT_TYPE.toolCallArgs,
+  SERVER_EVENT_TYPE.toolCallOutputDelta
+])
+
+type DeltaEvent = Extract<
+  ChatProjectionEvent,
+  {
+    readonly type:
+      | typeof SERVER_EVENT_TYPE.textMessageContent
+      | typeof SERVER_EVENT_TYPE.reasoningMessageContent
+      | typeof SERVER_EVENT_TYPE.toolCallArgs
+      | typeof SERVER_EVENT_TYPE.toolCallOutputDelta
+  }
+>
+
+const isDeltaEvent = (event: ChatProjectionEvent): event is DeltaEvent =>
+  deltaEventTypes.has(event.type)
+
 export const deltaEventBytes = (event: ChatProjectionEvent): number | undefined =>
-  event.type === "TEXT_MESSAGE_CONTENT" ||
-  event.type === "REASONING_MESSAGE_CONTENT" ||
-  event.type === "TOOL_CALL_ARGS" ||
-  event.type === "TOOL_CALL_OUTPUT_DELTA"
-    ? Buffer.byteLength(event.delta, "utf8")
-    : undefined
+  isDeltaEvent(event) ? Buffer.byteLength(event.delta, "utf8") : undefined
 
 interface DeltaObservation {
   readonly events: number

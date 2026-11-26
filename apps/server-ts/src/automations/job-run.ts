@@ -24,11 +24,6 @@ import { JOB_RETRY_LADDER_MS } from "../persistence/automations/retry-ladders.js
 
 const COLLISION_RETRY_DELAY_MS = 1_000
 
-/**
- * The one failure rule for every Automation run: a run that failed on a transient error and wrote
- * nothing is tried again after each delay of `JOB_RETRY_LADDER_MS`; anything else ends it. `again`
- * starts try number `tries` and waits for its end, or answers undefined when it could not start.
- */
 export const retried = Effect.fn("Automation.retried")(function* <
   Ended extends TerminalAutomationChatRun,
   E
@@ -49,10 +44,6 @@ export const retried = Effect.fn("Automation.retried")(function* <
   return observed
 })
 
-/**
- * Starts a handler's one run in `run.sessionId`, or takes the run the job recorded, and waits for
- * its end by the failure rule; each retry is a new run in the same session.
- */
 export const runByRule = Effect.fn("Automation.runByRule")(function* (
   services: {
     readonly chat: Pick<ChatMessage["Service"], "startAutomation">

@@ -1,4 +1,4 @@
-import type { CommandAckMessage } from "@arden-hq/relay-protocol"
+import { COMMAND_ACK_STATE, COMMAND_KIND, type CommandAckState } from "@arden-hq/relay-protocol"
 import { QUESTION_TEXT } from "@arden-hq/protocol/runs"
 import {
   ANSWER_SHAPE,
@@ -20,16 +20,18 @@ import type { Loopback, LoopbackResponse } from "./ports.js"
 import type { Command } from "./routes.js"
 
 export type CommandOutcome = {
-  readonly state: CommandAckMessage["state"]
+  readonly state: CommandAckState
   readonly result: Schema.Json | undefined
 }
 
 const ok = (response: LoopbackResponse): boolean => response.status >= 200 && response.status < 300
 
 export const rejected = (message: string): CommandOutcome => ({
-  state: "rejected",
+  state: COMMAND_ACK_STATE.rejected,
   result: { message }
 })
+
+const CHAT_MESSAGE_PATH = "/chat/message"
 
 export const FALLBACK_FAILURE = "Your Mac couldn't do that."
 
@@ -54,7 +56,7 @@ export const failureMessage = (input: {
     return body.detail
   switch (input.response.status) {
     case 503:
-      return input.path === "/chat/message"
+      return input.path === CHAT_MESSAGE_PATH
         ? "Arden has no model set up on your Mac right now."
         : FALLBACK_FAILURE
     case 409:
@@ -106,17 +108,20 @@ const settled = (call: Call): CommandOutcome =>
 export const runCommand = async (
   loopback: Loopback,
   cid: string,
-  command: Exclude<Command, { readonly kind: "register_push" | "set_keep_awake" }>
+  command: Exclude<
+    Command,
+    { readonly kind: typeof COMMAND_KIND.register_push | typeof COMMAND_KIND.set_keep_awake }
+  >
 ): Promise<CommandOutcome> => {
   const post = async (path: string, body: Schema.Json): Promise<Call> => ({
     path,
     response: await loopback.request({ method: "POST", path, body })
   })
   switch (command.kind) {
-    case "send":
+    case COMMAND_KIND.send:
       return settled(
         await post(
-          "/chat/message",
+          CHAT_MESSAGE_PATH,
           messageBody({
             sessionId: command.args.session_id,
             text: command.args.text,
@@ -127,7 +132,7 @@ export const runCommand = async (
           })
         )
       )
-    case "answer": {
+    case COMMAND_KIND.answer: {
       const choice = command.args.option_id
       const choices = command.args.option_ids
       const words = command.args.text.trim()
@@ -152,7 +157,7 @@ export const runCommand = async (
         })
       )
     }
-    case "decide":
+    case COMMAND_KIND.decide:
       return settled(
         await post("/tools/result", {
           run_id: command.args.run_id,
@@ -174,16 +179,19 @@ export const runCommand = async (
           command: { kind: RELAY_COMMAND.command, id: cid }
         })
       )
-    case "stop": {
+    case COMMAND_KIND.stop: {
       const call = await post("/cancel", {
         kind: CANCEL_TARGET.session,
         session_id: command.args.session_id,
         hold_queue: false
       })
-      if (ok(call.response)) return { state: "stopping", result: call.response.body }
-      return call.response.status === 404 ? { state: "done", result: null } : refusal(call)
+      if (ok(call.response))
+        return { state: COMMAND_ACK_STATE.stopping, result: call.response.body }
+      return call.response.status === 404
+        ? { state: COMMAND_ACK_STATE.done, result: null }
+        : refusal(call)
     }
-    case "capture": {
+    case COMMAND_KIND.capture: {
       const created = await post("/sessions", { space_id: command.args.space_id ?? null })
       const body = created.response.body
       const sessionId =
@@ -192,7 +200,7 @@ export const runCommand = async (
           : undefined
       if (typeof sessionId !== "string") return refusal(created)
       const sent = await post(
-        "/chat/message",
+        CHAT_MESSAGE_PATH,
         messageBody({
           sessionId,
           text: command.args.text,
@@ -203,7 +211,7 @@ export const runCommand = async (
         })
       )
       return ok(sent.response)
-        ? { state: "done", result: { session_id: sessionId } }
+        ? { state: COMMAND_ACK_STATE.done, result: { session_id: sessionId } }
         : refusal(sent)
     }
   }

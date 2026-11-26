@@ -1,4 +1,7 @@
-import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
+import {
+  AUTOMATION_OCCURRENCE,
+  type AutomationTriggerContext
+} from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { AutomationQueueSource } from "../automations/store.js"
@@ -13,15 +16,15 @@ export const triggerContextForClaim = (options: {
     return options.context.trigger_context_snapshot
   const queued_at = options.createdAt
   switch (options.source) {
-    case "manual":
+    case AUTOMATION_OCCURRENCE.manual:
       return { source: "manual", queued_at }
-    case "wake":
+    case AUTOMATION_OCCURRENCE.wake:
       return { source: "wake", queued_at }
-    case "scheduled":
+    case AUTOMATION_OCCURRENCE.scheduled:
       return options.context.scheduled_for === null
         ? undefined
         : { source: "scheduled", queued_at, scheduled_for: options.context.scheduled_for }
-    case "idle":
+    case AUTOMATION_OCCURRENCE.idle:
       return options.context.home_letter_input === undefined
         ? undefined
         : {
@@ -30,22 +33,25 @@ export const triggerContextForClaim = (options: {
             window_id: options.context.home_letter_input.snapshot.window.id,
             fingerprint: options.context.home_letter_input.snapshot.fingerprint
           }
-    case "count":
-    case "event":
+    case AUTOMATION_OCCURRENCE.count:
+    case AUTOMATION_OCCURRENCE.event:
       return undefined
   }
 }
 
 const occurrenceCauses = (
   context: QueueContext
-): ReadonlyArray<Exclude<AutomationTriggerContext, { source: "coalesced" }>> => {
+): ReadonlyArray<
+  Exclude<AutomationTriggerContext, { source: typeof AUTOMATION_OCCURRENCE.coalesced }>
+> => {
   const snapshot = context.trigger_context_snapshot
   if (snapshot === undefined) return []
-  return snapshot.source === "coalesced" ? snapshot.causes : [snapshot]
+  return snapshot.source === AUTOMATION_OCCURRENCE.coalesced ? snapshot.causes : [snapshot]
 }
 
 export const answersSchedule = (context: QueueContext, source: AutomationQueueSource): boolean =>
-  source === "scheduled" || occurrenceCauses(context).some((cause) => cause.source === "scheduled")
+  source === AUTOMATION_OCCURRENCE.scheduled ||
+  occurrenceCauses(context).some((cause) => cause.source === AUTOMATION_OCCURRENCE.scheduled)
 
 export const consumeIdleInput = Effect.fn("AutomationOccurrence.consumeIdleInput")(
   function* (options: {
@@ -54,7 +60,7 @@ export const consumeIdleInput = Effect.fn("AutomationOccurrence.consumeIdleInput
     readonly context: QueueContext
   }) {
     const sequences = occurrenceCauses(options.context).flatMap((cause) =>
-      cause.source === "idle" ? [cause.input_sequence] : []
+      cause.source === AUTOMATION_OCCURRENCE.idle ? [cause.input_sequence] : []
     )
     if (sequences.length === 0) return
     yield* options.sql`UPDATE automation_idle_state

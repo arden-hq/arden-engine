@@ -230,8 +230,7 @@ export const makeRunQueries = ({
       SELECT totals.total_retained, active_runs.*
       FROM (${
         runId === undefined
-          ? // Kept as a number by triggers (row_counts): counting every run grows with the table.
-            sql`SELECT COALESCE((SELECT rows FROM row_counts WHERE name = 'chat_runs'), 0) AS total_retained`
+          ? sql`SELECT COALESCE((SELECT rows FROM row_counts WHERE name = 'chat_runs'), 0) AS total_retained`
           : sql`SELECT COUNT(*) AS total_retained FROM chat_runs WHERE run_id = ${runId}`
       }) AS totals
       LEFT JOIN active_runs ON TRUE
@@ -264,9 +263,6 @@ export const makeRunQueries = ({
     return { totalRetained, runs }
   })
 
-  /** A page of Runs in start order. It starts at the cursor through the index
-   * on start time (or at one chat's Runs, or the Runs still going), so it
-   * reads the page it returns, never every Run. */
   const list = Effect.fn("SqliteRunQueries.list")(function* (input: RunListInput) {
     const failed = (cause: unknown) => queryError("active", "Could not list runs", cause)
     const after = input.after ?? { startedAt: "", runId: "" }

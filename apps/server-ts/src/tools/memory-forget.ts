@@ -13,12 +13,10 @@ import { chatLinkOf } from "./call-receipt.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { requireOwnerTurn } from "./owner-turn.js"
 import type { ServerRunContext } from "./run-context.js"
-import { wikiFailure } from "./wiki.js"
+import { wikiFailure } from "./wiki-access.js"
 import { memoryLocation } from "./wiki-identity.js"
 
-/** One approval card lists every line; past this many it stops being readable. */
 const MAX_LINES = 50
-/** Each line's start in the card's page counts; its whole text is in the diff. */
 const LINE_PREVIEW_CHARS = 60
 const MAX_LINE_CHARS = 2_000
 

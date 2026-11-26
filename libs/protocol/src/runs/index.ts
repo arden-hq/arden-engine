@@ -43,20 +43,35 @@ export * from "./contracts.js"
 export type { RunList } from "./schema.js"
 export * from "./status.js"
 export * from "./end.js"
-export { MODEL_CALL_KINDS, usageGroup, type ModelCallKind, type UsageGroup } from "./usage.js"
 export {
+  MODEL_CALL_KIND,
+  USAGE_GROUP,
+  USAGE_ORIGIN,
+  usageGroup,
+  type ModelCallKind,
+  type UsageGroup,
+  type UsageOrigin
+} from "./usage.js"
+export {
+  ANSWER_WITHDRAWAL_REASON,
+  CONTRACT_PROPOSAL_CHANGE,
+  FOCUS_CHOICE_OFFER,
   OFFER_SAVED,
   OFFER_TOOL,
   QUESTION_PART,
   QUESTION_RESOLUTION,
   QUESTION_TEXT,
+  RULE_SAVED_IN,
+  RUN_QUESTION_ANSWER,
+  RUN_QUESTION_CONTINUATION,
   RUN_QUESTION_STATUS,
+  RUN_QUESTION_TIMER_STATUS,
   answerSaid,
   answerWords,
   isRuleSavedIn,
   settledQuestionDrawn
 } from "./questions.js"
-export type { RuleSavedIn } from "./questions.js"
+export type { AnswerWithdrawalReason, RuleSavedIn, RunQuestionStatus } from "./questions.js"
 
 export const runDecoders = {
   homePresence: decoderFor(HomePresenceResponseSchema, "Invalid Home presence response"),

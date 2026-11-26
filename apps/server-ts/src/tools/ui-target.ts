@@ -2,20 +2,30 @@ import { clipLine } from "@arden-hq/std/text"
 import { Option, Schema } from "effect"
 import type { JsonObject } from "../persistence/json.js"
 
+export const UI_TARGET = {
+  element: "element",
+  selector: "selector",
+  unresolved: "unresolved"
+} as const
+
 const UiTargetSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("element"),
+    kind: Schema.Literal(UI_TARGET.element),
     ref: Schema.String,
     label: Schema.String,
     near: Schema.NullOr(Schema.String)
   }),
   Schema.Struct({
-    kind: Schema.Literal("selector"),
+    kind: Schema.Literal(UI_TARGET.selector),
     by: Schema.String,
     value: Schema.String,
     name: Schema.NullOr(Schema.String)
   }),
-  Schema.Struct({ kind: Schema.Literal("unresolved"), ref: Schema.String, why: Schema.String })
+  Schema.Struct({
+    kind: Schema.Literal(UI_TARGET.unresolved),
+    ref: Schema.String,
+    why: Schema.String
+  })
 ])
 export type UiTarget = typeof UiTargetSchema.Type
 

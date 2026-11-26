@@ -30,7 +30,5 @@ const MainLayer = Layer.unwrap(
   }).pipe(Effect.provide(layerFromEnv))
 )
 
-// `--config <file>` starts with every setting of the file in place; without
-// it the server reads its few options from the environment, as before.
 if (configFlag === -1) Layer.launch(MainLayer).pipe(NodeRuntime.runMain)
 else void runConfigured(process.argv[configFlag + 1], startServerWithLocalAccess)

@@ -1,11 +1,5 @@
-import type { PermissionRuleDecision } from "./contracts.js"
+import type { PermissionPathAccess, PermissionRuleDecision } from "./contracts.js"
 
-/**
- * Every word Arden uses for a permission decision, and the action sentences a
- * rule names, in one place. The desktop, the server's cards and the prompts all read
- * them from here; a lint rule (`noDecisionLiterals`) and `check:decision-words`
- * keep a second spelling out.
- */
 export const DECISION_WORD = {
   allow: "Allow",
   ask: "Ask",
@@ -18,35 +12,34 @@ export const DECISION_WORD = {
   denied: "Denied"
 } as const
 
-/** A rule's decision as its row, its menu and its group name it. */
-export const RULE_DECISION_WORD: Record<PermissionRuleDecision, string> = {
+export type DecisionWord = (typeof DECISION_WORD)[keyof typeof DECISION_WORD]
+
+export const RULE_DECISION_WORD: Record<PermissionRuleDecision, DecisionWord> = {
   allow: DECISION_WORD.allow,
   ask: DECISION_WORD.ask,
   never: DECISION_WORD.deny
 }
 
-/** A rule's decision as a question offering to keep it: "Always deny …?". */
-export const STANDING_DECISION_WORD: Record<PermissionRuleDecision, string> = {
+export const STANDING_DECISION_WORD: Record<PermissionRuleDecision, DecisionWord> = {
   allow: DECISION_WORD.alwaysAllow,
   ask: DECISION_WORD.alwaysAsk,
   never: DECISION_WORD.alwaysDeny
 }
 
-/** What a rule does, as its sentence starts: "Use GitHub", "Run git push". */
 export const RULE_ACTION = {
   use: "Use",
   run: "Run",
   hostCommands: "Run commands on your Mac"
 } as const
 
-/** What a folder rule does with the folder's files, as a rule sentence starts. */
-export const PATH_ACTION: Record<"read" | "change", string> = {
+export type RuleAction = (typeof RULE_ACTION)[keyof typeof RULE_ACTION]
+
+export const PATH_ACTION: Record<PermissionPathAccess, string> = {
   read: "Read files in",
   change: "Change files in"
 }
 
-/** The same, as a question asks it: "Always allow reading files in ~/x?". */
-export const PATH_DOING: Record<"read" | "change", string> = {
+export const PATH_DOING: Record<PermissionPathAccess, string> = {
   read: "reading files in",
   change: "changing files in"
 }

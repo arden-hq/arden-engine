@@ -55,7 +55,6 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
             Effect.map((sources) => ({ ...row, sources }))
           )
         )
-        // The owner's No: an offer rejected, or left to expire, keeps its own status.
         const refusedProposals = yield* sql<{
           readonly proposal_id: string
           readonly status: "rejected" | "expired"
@@ -66,7 +65,6 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
       FROM task_proposals
       WHERE space_id = ${spaceId} AND status IN ${refusedProposalStatusList}
       ORDER BY proposal_id LIMIT 1001`
-        // An inferred Task the owner stopped, whether it came from an offer or not.
         const stoppedTasks = yield* sql<{
           readonly proposal_id: string | null
           readonly item_id: string
@@ -290,8 +288,6 @@ export const assertMainProposalAdmission = Effect.fn("Work.admitMainProposal")(f
   )
 })
 
-/** Every cited chat turn has finished, in one of the owner's chats (see `citedTurnFinished`).
- * Propose, revise and retire all check chat evidence here. */
 export const assertCitedTurnsFinished = Effect.fn("Work.citedTurnsFinished")(function* (
   sql: SqlClient.SqlClient,
   sources: ReadonlyArray<TaskSourceRecord>

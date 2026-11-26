@@ -32,7 +32,6 @@ import {
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 
-/** Every Codex model id starts with this, so no other group's id may (`model_taken`). */
 export const CODEX_MODEL_PREFIX = "openai-codex/"
 const PROVIDER = Object.freeze({ id: "openai-codex", name: "OpenAI Codex" })
 const CATALOG_TIMEOUT_MS = 5_000
@@ -233,9 +232,6 @@ const fetchUsage = async (
   return parseJsonBody(response)
 }
 
-/** Codex desktop's dictation: one multipart `file` part, answered with `{ text }`.
- *  It goes over node:http: ChatGPT's edge answers global fetch's request with a
- *  Cloudflare 403 and the same request over node:http with 200 (2026-10-26). */
 const transcribe = async (
   options: OpenAiCodexRuntimeOptions,
   baseUrl: string,
@@ -354,7 +350,6 @@ export const makeOpenAiCodexRuntime = async (
           steering: "boundary",
           hostedTools: ["web_search"],
           structuredOutput: "native",
-          // Codex uses client-executed tool_search on this backend (codex-rs tools/src/tool_search.rs).
           toolSearch: "client",
           imageInput: { limits: OPENAI_IMAGE_INPUT }
         }),

@@ -6,13 +6,12 @@ export type VisualizationLibrary = (typeof VISUALIZATION_LIBRARIES)[number]
 
 export const VISUALIZATION_KIND = { html: "html", image: "image", file: "file" } as const
 
-export type VisualizationKind = "html" | "image" | "file"
+export type VisualizationKind = (typeof VISUALIZATION_KIND)[keyof typeof VISUALIZATION_KIND]
 
-export type VisualizationMode = "normal" | "wide"
+export const VISUALIZATION_MODE = { normal: "normal", wide: "wide" } as const
 
-/** What an artifact is for: an `output` was made for the owner (a saved
- *  file, a visualization); `working` material only served a step (a
- *  command's spilled output, a browser screenshot). */
+export type VisualizationMode = (typeof VISUALIZATION_MODE)[keyof typeof VISUALIZATION_MODE]
+
 export const ARTIFACT_ROLES = ["output", "working"] as const
 
 export type ArtifactRole = (typeof ARTIFACT_ROLES)[number]
@@ -50,5 +49,7 @@ interface ManifestFacts {
 }
 
 export type VisualizationManifest =
-  | (ManifestFacts & { readonly kind: "html" | "image" })
-  | (ManifestFacts & { readonly kind: "file"; readonly filename: string })
+  | (ManifestFacts & {
+      readonly kind: typeof VISUALIZATION_KIND.html | typeof VISUALIZATION_KIND.image
+    })
+  | (ManifestFacts & { readonly kind: typeof VISUALIZATION_KIND.file; readonly filename: string })

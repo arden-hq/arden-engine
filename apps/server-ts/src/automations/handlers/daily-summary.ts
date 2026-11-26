@@ -15,7 +15,7 @@ import { PROMPTS } from "../../prompts/catalog.js"
 import { markdownValue } from "../../prompts/format.js"
 import type { Wiki } from "../../wiki/service.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../wiki/authority.js"
-import { automationOrigin } from "../../wiki/commit.js"
+import { automationOrigin } from "../../wiki/origin.js"
 import { pageKind, producingAutomation, recordFolders } from "../../wiki/collections.js"
 import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
@@ -40,9 +40,6 @@ YYYY-MM-DD.md uses the machine's local calendar date. Read its observation perio
 const EVIDENCE_EXCERPTS = 30
 const EVIDENCE_CHARS = 16_000
 const EXCERPT_CHARS = 2_000
-/** The part of `EVIDENCE_CHARS` kept for Tasks and for items, so a busy chat cannot crowd them
- *  out; what they leave unused goes to the chats. On three sampled days of the owner's data every
- *  Task change and every item fit these (2026-11-17). */
 const TASK_SHARE = { count: 8, chars: 3_000, each: 400 } as const
 const ITEM_SHARE = { count: 10, chars: 2_000, each: 250 } as const
 const SESSION_PAGE = 100
@@ -54,23 +51,15 @@ const nextDay = (day: string, days = 1): string =>
 const dayStart = (day: string, timezone: string): DateTime.Zoned =>
   DateTime.makeZonedUnsafe(`${day}T00:00:00`, { timeZone: timezone, adjustForTimeZone: true })
 
-/** The day before the last ended day: where the position starts, so the first job after an
- * update, or after the owner resumes Daily Summary, writes only the last ended day's page. */
 const dailyStartPosition = (nowMs: number, timezone: string): string =>
   nextDay(localDayOf(nowMs, timezone), -2)
 
 export interface ChatExcerpt {
   readonly ref: string
   readonly text: string
-  /** The owner's own words, not Arden's reply. */
   readonly owner: boolean
 }
 
-/**
- * Picks the day's chat excerpts so every chat is heard: the owner's own messages first, then
- * Arden's replies, each taken one chat at a time and newest first, since a day's outcome is
- * said late. The picked excerpts keep their chat and time order.
- */
 export const pickChatExcerpts = (
   chats: ReadonlyArray<ReadonlyArray<ChatExcerpt>>,
   limit: { readonly excerpts: number; readonly chars: number }
@@ -111,7 +100,6 @@ export const pickChatExcerpts = (
   }
 }
 
-/** Failed and waiting Tasks first, then finished ones, then new ones. */
 const TASK_EVENT_RANK: Readonly<Record<string, number>> = {
   failed: 0,
   stalled: 0,
@@ -145,7 +133,6 @@ const cut = (
   return { lines: kept, shortened }
 }
 
-/** One excerpt for each Task that changed, with its changes in time order. */
 export const taskExcerpts = (events: ReadonlyArray<DayTaskEvent>): Excerpts => {
   const tasks = new Map<string, Array<DayTaskEvent>>()
   for (const event of events) tasks.set(event.itemId, [...(tasks.get(event.itemId) ?? []), event])
@@ -264,8 +251,6 @@ const makeDailySummaryRunner = (
             break
           before = first.sequence
         }
-        // A message with the user role is also how a worker's result, a Task notice or a
-        // skill's text is stored: only what the owner wrote is their words.
         const owners = yield* services.transcripts.ownerWordsIn(
           session.sessionId,
           found.filter((message) => message.owner).map((message) => message.messageId)

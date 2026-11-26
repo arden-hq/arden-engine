@@ -1,4 +1,5 @@
 import {
+  AUTOMATION_CONDITION,
   CONDITION_OPERATOR,
   type AutomationComparisonCondition,
   type AutomationCondition,
@@ -13,17 +14,17 @@ export const conditionIssue = (
   condition: AutomationCondition
 ): string | null => {
   switch (condition.kind) {
-    case "and":
-    case "or": {
+    case AUTOMATION_CONDITION.and:
+    case AUTOMATION_CONDITION.or: {
       for (const child of condition.conditions) {
         const issue = conditionIssue(entry, child)
         if (issue !== null) return issue
       }
       return null
     }
-    case "not":
+    case AUTOMATION_CONDITION.not:
       return conditionIssue(entry, condition.condition)
-    case "compare": {
+    case AUTOMATION_CONDITION.compare: {
       const field = entry.fields.find((candidate) => candidate.field === condition.field)
       if (field === undefined)
         return `Unknown ${entry.event_type} condition field: ${condition.field}`
@@ -103,27 +104,27 @@ const compare = (
     return condition.value.some((candidate) => jsonEqual(actual, candidate))
   const expected = condition.value
   switch (condition.op) {
-    case "eq":
+    case CONDITION_OPERATOR.eq:
       return jsonEqual(actual, expected)
-    case "ne":
+    case CONDITION_OPERATOR.ne:
       return !jsonEqual(actual, expected)
-    case "gt":
+    case CONDITION_OPERATOR.gt:
       return typeof actual === "number" && typeof expected === "number" && actual > expected
-    case "gte":
+    case CONDITION_OPERATOR.gte:
       return typeof actual === "number" && typeof expected === "number" && actual >= expected
-    case "lt":
+    case CONDITION_OPERATOR.lt:
       return typeof actual === "number" && typeof expected === "number" && actual < expected
-    case "lte":
+    case CONDITION_OPERATOR.lte:
       return typeof actual === "number" && typeof expected === "number" && actual <= expected
-    case "contains":
+    case CONDITION_OPERATOR.contains:
       return contains(actual, expected)
-    case "starts_with":
+    case CONDITION_OPERATOR.starts_with:
       return (
         typeof actual === "string" &&
         typeof expected === "string" &&
         actual.toLocaleLowerCase().startsWith(expected.toLocaleLowerCase())
       )
-    case "ends_with":
+    case CONDITION_OPERATOR.ends_with:
       return (
         typeof actual === "string" &&
         typeof expected === "string" &&
@@ -137,13 +138,13 @@ export const conditionMatches = (
   context: EventContext
 ): boolean => {
   switch (condition.kind) {
-    case "and":
+    case AUTOMATION_CONDITION.and:
       return condition.conditions.every((child) => conditionMatches(child, context))
-    case "or":
+    case AUTOMATION_CONDITION.or:
       return condition.conditions.some((child) => conditionMatches(child, context))
-    case "not":
+    case AUTOMATION_CONDITION.not:
       return !conditionMatches(condition.condition, context)
-    case "compare":
+    case AUTOMATION_CONDITION.compare:
       return compare(readField(context, condition.field), condition)
   }
 }

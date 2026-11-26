@@ -51,18 +51,14 @@ const modelLines = (model: PresetModel): ReadonlyArray<string> => {
   ]
 }
 
-/**
- * The router's `--models-preset` INI (llama.cpp tools/server README, "Model
- * presets"): one section per installed model, named by its manifest id, which
- * is what requests send as `model`. `fit = off` skips the ~9 s memory-fit pass
- * at every child start. Paths are absolute.
- */
+const SKIP_SLOW_MEMORY_FIT_AT_CHILD_START = "fit = off"
+
 export const renderModelsPreset = (models: ReadonlyArray<PresetModel>): string =>
   [
     "version = 1",
     "",
     "[*]",
-    "fit = off",
+    SKIP_SLOW_MEMORY_FIT_AT_CHILD_START,
     ...models.flatMap((model) => ["", `[${model.manifest.id}]`, ...modelLines(model)]),
     ""
   ].join("\n")

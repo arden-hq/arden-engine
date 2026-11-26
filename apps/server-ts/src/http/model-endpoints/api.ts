@@ -13,7 +13,6 @@ import {
 } from "@arden-hq/protocol/effect/model-endpoints"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from "effect/unstable/httpapi"
 
-/** Not found: no saved model server has the id. */
 const errors = [
   HttpApiError.BadRequestNoContent,
   HttpApiError.NotFoundNoContent,
@@ -28,8 +27,6 @@ export class ModelEndpointsApi extends HttpApiGroup.make("modelEndpoints", { top
     success: ModelEndpointsResponseSchema,
     error: errors
   }),
-  // The model servers are a collection under `/model-endpoints/chat`. Its
-  // static `check` segment wins over `:kind/check`, and `check` is never an id.
   HttpApiEndpoint.post("addChat", "/model-endpoints/chat", {
     payload: ChatEndpointDraftRequestSchema,
     success: ChatEndpointSaveResponseSchema,

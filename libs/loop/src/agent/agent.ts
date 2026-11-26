@@ -18,29 +18,21 @@ import type { AgentCostGetter, AgentWiring, Emit } from "./run-state.js"
 import type { AgentOutputOptions } from "./structured-output.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
+const NODE_ENVIRONMENT = { production: "production" } as const
+type NodeEnvironment = (typeof NODE_ENVIRONMENT)[keyof typeof NODE_ENVIRONMENT]
+const isProduction = (value: string | undefined): value is NodeEnvironment =>
+  value === NODE_ENVIRONMENT.production
+
 export interface AgentOptions {
   readonly provider: ModelProvider
   readonly toolset: Toolset
   readonly hooks?: AgentHooks
   readonly budget?: RunBudget
   readonly costCalculator?: (response: CompletionResponse) => number
-  /** Reads a host-owned aggregate cost tracker. */
   readonly costGetter?: AgentCostGetter
-  /** Monotonic milliseconds used for run and tool timing. */
   readonly clock?: () => number
-  /**
-   * The host fields a started tool call keeps in history, read from the
-   * tool's host metadata. They are written beside the loop's own call fields;
-   * without this hook the loop persists none.
-   */
   readonly persistHost?: (host: Metadata) => JsonObject
-  /** Ranks deferred tools for client-side search; defaults to `defaultToolSearchStrategy`. */
   readonly toolSearchStrategy?: ToolSearchStrategy
-  /**
-   * Deferred tools this conversation should start with loaded. The loop
-   * records them once, in history, so they stay loaded for the whole
-   * conversation without changing the declared tool list.
-   */
   readonly preloadTools?: ReadonlyArray<string>
 }
 
@@ -72,10 +64,6 @@ const deepFreeze = (value: unknown): void => {
 const isResult = (event: AgentStreamEvent): event is Result =>
   !Object.prototype.hasOwnProperty.call(event, "_tag") && "stop_reason" in event
 
-/**
- * Build an agent for Promise/AsyncIterable consumers. Synchronous: invalid
- * configuration throws InvalidAgentConfigError immediately.
- */
 export const makeAgent = (input: AgentConfigInput, options: AgentOptions): Agent => {
   if (options?.provider === undefined || options?.toolset === undefined) {
     throw new TypeError("makeAgent requires provider and toolset")
@@ -103,7 +91,7 @@ export const makeAgent = (input: AgentConfigInput, options: AgentOptions): Agent
       : { toolSearchStrategy: options.toolSearchStrategy }),
     ...(options.preloadTools === undefined ? {} : { preloadTools: options.preloadTools })
   }
-  const assertImmutable = process.env.NODE_ENV !== "production"
+  const assertImmutable = !isProduction(process.env.NODE_ENV)
 
   const stream: Agent["stream"] = (messages, invocationOptions) => {
     const sourceMessages = structuredClone(messages)

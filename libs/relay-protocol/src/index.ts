@@ -12,27 +12,44 @@ export {
   decodeFrame,
   encodeFrame,
   FRAME_VERSION,
+  KEEPALIVE,
   MAX_FRAME_BYTES,
-  MAX_HEADER_BYTES
+  MAX_HEADER_BYTES,
+  RELAY_PATH
 } from "./frame.js"
-export type { DecodedFrame, FrameError } from "./frame.js"
+export type { DecodedFrame, FrameError, Keepalive, RelayPath } from "./frame.js"
 export {
+  APNS_ENVIRONMENT,
+  APNS_REASON,
+  AWAKE_STATE,
   CloseCode,
+  HEADER_TAG,
   isDeviceId,
+  isPresenceState,
+  isRole,
   MAX_PUSH_PAYLOAD_BYTES,
+  PRESENCE_STATE,
+  PUSH_PRIORITY,
+  PUSH_STATUS,
+  RELAY_ERROR_CODE,
+  ROLE,
+  UNDELIVERABLE_REASON,
   parseClientHeader,
   parseRelayHeader
 } from "./headers.js"
 export type {
   AddDeviceHeader,
   ApnsEnvironment,
+  ApnsReason,
   AuthHeader,
+  AwakeState,
   ChallengeHeader,
   ClientHeader,
   DeviceAddedHeader,
   DeviceLeftHeader,
   DeviceRemovedHeader,
   ErrorHeader,
+  HeaderTag,
   LeaveHeader,
   LeftHeader,
   MsgInHeader,
@@ -49,6 +66,9 @@ export type {
   PresenceState,
   PushedHeader,
   PushHeader,
+  PushOutcome,
+  PushPriority,
+  PushStatus,
   QackHeader,
   QueuedInHeader,
   QueuedOutHeader,
@@ -88,20 +108,27 @@ export {
 } from "./crypto/session.js"
 export type { CryptoFailure, SessionKeys, X25519KeyPair } from "./crypto/session.js"
 export {
+  APP_MESSAGE_TAG,
+  COMMAND_ACK_STATE,
+  COMMAND_KIND,
   decodeHandshake,
   decodeMacMessage,
   decodePhoneMessage,
   encodeAppMessage,
+  HTTP_METHOD,
   MAX_MESSAGE_BYTES,
   PART_BYTES,
   PART_THRESHOLD,
   PartAssembler,
+  RESET_REASON,
   uuidv7
 } from "./app.js"
 export type {
   AckMessage,
+  AppMessageTag,
   CancelMessage,
   CommandAckMessage,
+  CommandAckState,
   CommandKind,
   CommandMessage,
   EventMessage,
@@ -112,6 +139,7 @@ export type {
   PhoneMessage,
   RequestMessage,
   ResetMessage,
+  ResetReason,
   ResponseMessage,
   ResumeMessage,
   SubscribeMessage,

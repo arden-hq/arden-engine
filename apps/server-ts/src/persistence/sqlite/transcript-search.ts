@@ -111,8 +111,6 @@ const searchIn = Effect.fn("SqliteTranscriptQueries.search")(function* (
       limit: query.limit,
       offset: query.offset
     })
-  // The query is FTS5 syntax, so OR, NEAR and phrases work. One that does not
-  // parse (a bare "foo-bar", stray punctuation) is searched as its quoted words.
   const found = yield* ranked(query.query).pipe(
     Effect.map((rows) => ({ rows, match: query.query })),
     Effect.catchIf(
@@ -181,13 +179,9 @@ interface ChatSearchRow {
 }
 
 const CHAT_SEARCH_MIN_CHARS = 2
-/** Chats whose name matches, listed before the chats whose messages match. */
-const CHAT_SEARCH_NAMED = 5
-/** Matches read per query. Larger than a page of chats: a match only inside a link
- * target is read and dropped, and words common in links ("https") have many. */
-const CHAT_SEARCH_BATCH = 100
+const CHAT_SEARCH_NAME_MATCHES_FIRST = 5
+const CHAT_SEARCH_MATCHES_PER_QUERY = 100
 
-/** The owner's own chats: not archived, not a fork, an agent or a channel. */
 const ownerChatSql = (searchSql: SqlClient.SqlClient, alias: string) => searchSql`
     ${searchSql(alias)}.archived_at IS NULL
     AND ${searchSql(alias)}.session_type = 'chat'
@@ -195,11 +189,6 @@ const ownerChatSql = (searchSql: SqlClient.SqlClient, alias: string) => searchSq
     AND ${searchSql(alias)}.parent_message_id IS NULL
   `
 
-// Names are matched in code, not in SQL: SQLite folds case for ASCII only.
-// wordStartRanges matches words the way the message index does. The owner has
-// thousands of chats at most. idx_sessions_owner_chats holds exactly the
-// owner's chats (ownerChatSql word for word); it is named because SQLite would
-// otherwise pick idx_sessions_list and read every forked chat too.
 export const ownerNamedChats = (
   searchSql: SqlClient.SqlClient
 ): Statement.Statement<NamedChatRow> => searchSql<NamedChatRow>`
@@ -227,19 +216,11 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
     return ranges === undefined ? [] : [{ row, ranges }]
   })
   const namedMatches = namedAll.length
-  const named = namedAll.slice(0, CHAT_SEARCH_NAMED)
+  const named = namedAll.slice(0, CHAT_SEARCH_NAME_MATCHES_FIRST)
   const indexing = yield* catchUpTranscriptSearch(searchSql).pipe(
     Effect.mapError((cause) => searchError("storage", "Transcript search is not ready", cause))
   )
   if (indexing) yield* noteIndexing
-  // Newest first, in the index's own rowid order: SQLite walks the matches
-  // from the newest and stops at the limit, so no match is ranked or sorted
-  // (bm25 over every match took 0.1–0.6 s on the owner's 190k rows). A match
-  // outside the owner's chats (most of them: agent runs) is dropped against
-  // the set of their message rowids, read from the (session_id, seq) index,
-  // before its message row is read; the unary + keeps that set from driving
-  // the index lookup. Each chat keeps its newest match: a chat already found
-  // is left out of the next batches, so one long chat cannot use up the walk.
   const newest = new Map<string, ChatSearchRow & { readonly marked: string }>()
   const namedIds = new Set(named.map(({ row }) => row.session_id))
   const messageChats = () => [...newest.keys()].filter((id) => !namedIds.has(id)).length
@@ -278,7 +259,7 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
       ${unseen}
       ${cursor}
     ORDER BY session_messages_fts.rowid DESC
-    LIMIT ${CHAT_SEARCH_BATCH}
+    LIMIT ${CHAT_SEARCH_MATCHES_PER_QUERY}
     `.pipe(
       Effect.mapError((cause) =>
         isMalformedFtsQuery(cause)
@@ -297,11 +278,9 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
       newest.set(row.session_id, { ...row, marked })
       if (messageChats() > input.limit) break
     }
-    if (batch.length < CHAT_SEARCH_BATCH) break
+    if (batch.length < CHAT_SEARCH_MATCHES_PER_QUERY) break
     beforeRowId = batch.at(-1)?.message_rowid
   }
-  // A chat that matches only by name shows its newest message, so every row has
-  // the same two lines.
   const previews = new Map<string, ChatSearchRow>()
   for (const { row: chat } of named) {
     if (newest.has(chat.session_id)) continue
@@ -395,8 +374,6 @@ const makeTranscriptSearch = (searchSql: SqlClient.SqlClient) => (input: Transcr
   )
 
 const makeChatSearch = (searchSql: SqlClient.SqlClient, conversation: Statement.Fragment) => {
-  // The chat search page has no field for it yet, so a search that ran on a
-  // part-filled index is only logged, once.
   let noted = false
   const noteIndexing = Effect.suspend(() => {
     if (noted) return Effect.void
@@ -427,8 +404,6 @@ const makeConversationFind = (sql: SqlClient.SqlClient, conversation: Statement.
   ): Effect.fn.Return<ConversationFind, TranscriptQueryError | TranscriptDataCorruptionError> {
     const needle = query.trim()
     if (needle.length === 0) return { hits: [], truncated: false }
-    // SQLite folds case for ASCII only. A plain-ASCII query is narrowed in SQL
-    // first; any other is matched below alone, so "ПРИВЕТ" still finds "привет".
     const narrow = ASCII_ONLY.test(needle)
       ? sql`instr(lower(m.search_text), ${needle.toLowerCase()}) > 0 AND`
       : sql``

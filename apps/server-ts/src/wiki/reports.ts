@@ -1,4 +1,5 @@
-import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
+import { PATH_SEGMENT } from "@arden-hq/revisions/effect"
+import { WIKI_REPORT_FIELDS, WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
@@ -7,7 +8,8 @@ import type { SpaceStore } from "../persistence/spaces/store.js"
 import { markedProducer, recordFolders } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { automationOrigin, publishReport } from "./commit.js"
+import { publishReport } from "./commit.js"
+import { automationOrigin } from "./origin.js"
 import { wikiError, type WikiError } from "./errors.js"
 import type { WikiChanges } from "./page-change.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
@@ -53,7 +55,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
   if (
     canonicalWikiPath(content.path) === undefined ||
     !content.path.endsWith(".md") ||
-    directory === "." ||
+    directory === PATH_SEGMENT.current ||
     isReadme(content.path)
   ) {
     return yield* wikiError(
@@ -94,7 +96,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
       if (
         current !== undefined &&
         (current.resource.path !== content.path ||
-          current.page.lifecycle !== "active" ||
+          current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active ||
           markedProducer(current.page) !== input.producerAutomationId)
       ) {
         return yield* wikiError("create", "blocked", "The report path belongs to another record")

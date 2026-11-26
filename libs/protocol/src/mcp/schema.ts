@@ -1,10 +1,32 @@
-import { publicWebUrl, serverUrlIssue, type ServerUrlIssue } from "@arden-hq/std/url"
+import {
+  PUBLIC_WEB_URL,
+  WEB_PROTOCOL,
+  WEB_URL_ISSUE,
+  publicWebUrl,
+  serverUrlIssue,
+  type ServerUrlIssue
+} from "@arden-hq/std/url"
+import { strict } from "../common/boundary.js"
 import { Effect, Schema } from "effect"
-import { MCP_CONNECTION_STATUSES } from "./status.js"
+import { MCP_CONNECTION_STATUS } from "./status.js"
 import {
   GITHUB_CONNECTION,
+  GITHUB_CONNECTION_SOURCE,
+  MCP_ACCOUNT,
+  MCP_AUTH,
+  MCP_DIAGNOSTICS,
+  MCP_EVENT_DELIVERY,
+  MCP_FOLDER,
+  MCP_OAUTH_CLIENT,
   MCP_OAUTH_START,
+  MCP_OFFER_DECLINE,
+  MCP_OFFER_OUTCOME,
+  MCP_PRESET_AUTH,
+  MCP_PRESET_ID,
+  MCP_SERVER_DETAIL,
   MCP_SERVER_PRESET,
+  MCP_TOOL_TITLE,
+  MCP_TRANSPORT,
   type GitHubConnectionState,
   type McpOAuthStartResponse,
   type McpPresetInstallResponse,
@@ -15,20 +37,13 @@ import {
   type McpTool
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
 const collectionPath = "/mcp/servers"
 
 export const McpServerNameSchema = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]{0,31}$/))
 
 const McpRemoteToolNameSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
 
-export const McpPresetIdSchema = Schema.Literals([
-  "github",
-  "linear",
-  "notion",
-  "slack",
-  "vercel"
-] as const)
+export const McpPresetIdSchema = Schema.Literals(Object.values(MCP_PRESET_ID))
 
 const McpPresetTitleSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128))
 
@@ -68,7 +83,6 @@ const McpCommandSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMax
 
 const McpArgumentSchema = Schema.String.check(Schema.isMaxLength(8_192))
 
-/** A local server's working folder: an absolute path. */
 const McpFolderSchema = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(4_096),
@@ -90,19 +104,19 @@ const McpUrlSchema = Schema.String.check(
   })
 )
 
-/** A page the person opens to set a server up: a web page over HTTPS. */
 const McpSetupUrlSchema = Schema.String.check(
   Schema.isMaxLength(4_096),
   Schema.makeFilter((value) => {
     const page = publicWebUrl(value)
-    if (page.kind === "refused" && page.issue === "invalid") return "must be an absolute HTTPS URL"
-    return page.kind === "ok" && page.url.protocol === "https:"
+    if (page.kind === PUBLIC_WEB_URL.refused && page.issue === WEB_URL_ISSUE.invalid)
+      return "must be an absolute HTTPS URL"
+    return page.kind === PUBLIC_WEB_URL.ok && page.url.protocol === WEB_PROTOCOL.https
       ? undefined
       : "must be a public HTTPS URL"
   })
 )
 
-const McpAuthSchema = Schema.Literals(["none", "oauth", "headers"] as const)
+const McpAuthSchema = Schema.Literals(Object.values(MCP_AUTH))
 
 const SortedUniqueScopesSchema = Schema.Array(McpOAuthScopeSchema).check(
   Schema.isMaxLength(128),
@@ -136,11 +150,11 @@ export const McpPresetSchema = Schema.Struct({
   ),
   auth: Schema.Union([
     Schema.Struct({
-      type: Schema.Literal("oauth"),
-      client_type: Schema.Literals(["confidential", "dynamic"] as const),
+      type: Schema.Literal(MCP_PRESET_AUTH.oauth),
+      client_type: Schema.Literals(Object.values(MCP_OAUTH_CLIENT)),
       scopes: SortedUniqueScopesSchema
     }),
-    Schema.Struct({ type: Schema.Literal("token") })
+    Schema.Struct({ type: Schema.Literal(MCP_PRESET_AUTH.token) })
   ])
 })
 
@@ -157,25 +171,25 @@ export const McpPresetListResponseSchema = Schema.Struct({
 })
 
 export const McpStdioTransportInputSchema = Schema.Struct({
-  type: Schema.Literal("stdio"),
+  type: Schema.Literal(MCP_TRANSPORT.stdio),
   command: McpCommandSchema,
   args: Schema.Array(McpArgumentSchema).check(Schema.isMaxLength(128)),
   environment: McpSecretPatchSchema,
   cwd: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("keep") }),
-    Schema.Struct({ kind: Schema.Literal("home") }),
-    Schema.Struct({ kind: Schema.Literal("folder"), path: McpFolderSchema })
+    Schema.Struct({ kind: Schema.Literal(MCP_FOLDER.keep) }),
+    Schema.Struct({ kind: Schema.Literal(MCP_FOLDER.home) }),
+    Schema.Struct({ kind: Schema.Literal(MCP_FOLDER.folder), path: McpFolderSchema })
   ])
 })
 
 export const McpHttpTransportInputSchema = Schema.Struct({
-  type: Schema.Literal("http"),
+  type: Schema.Literal(MCP_TRANSPORT.http),
   url: McpUrlSchema,
   auth: McpAuthSchema,
   headers: McpSecretPatchSchema
 }).check(
   Schema.makeFilter((transport) =>
-    transport.auth === "headers" ||
+    transport.auth === MCP_AUTH.headers ||
     (Object.keys(transport.headers.set).length === 0 && transport.headers.retain.length === 0)
       ? undefined
       : { path: ["headers"], issue: "requires header authentication" }
@@ -198,7 +212,6 @@ export const McpUpdateServerRequestSchema = Schema.Struct({
 
 export const McpSetEnabledRequestSchema = Schema.Struct({ enabled: Schema.Boolean })
 
-/** "Not now" on one connection card: the chat that showed it, and the call that offered it. */
 export const McpOfferDeclineRequestSchema = Schema.Struct({
   session_id: Schema.NonEmptyString,
   tool_call_id: Schema.NonEmptyString
@@ -208,17 +221,17 @@ export const McpOfferListSchema = Schema.Struct({
   offers: Schema.Array(
     Schema.Struct({
       tool_call_id: Schema.NonEmptyString,
-      outcome: Schema.Literals(["open", "connected", "declined", "expired"] as const),
+      outcome: Schema.Literals(Object.values(MCP_OFFER_OUTCOME)),
       offered_at: Schema.NonEmptyString
     })
   )
 })
 
 export const McpOfferDeclineReceiptSchema = Schema.Struct({
-  outcome: Schema.Literals(["declined", "already_answered"] as const)
+  outcome: Schema.Literals(Object.values(MCP_OFFER_DECLINE))
 })
 
-const McpConnectionStatusSchema = Schema.Literals(MCP_CONNECTION_STATUSES)
+const McpConnectionStatusSchema = Schema.Literals(Object.values(MCP_CONNECTION_STATUS))
 
 const SortedUniqueNamesSchema = Schema.Array(McpSecretNameSchema).check(
   Schema.makeFilter((names) => {
@@ -230,18 +243,18 @@ const SortedUniqueNamesSchema = Schema.Array(McpSecretNameSchema).check(
 )
 
 export const McpStdioTransportSchema = Schema.Struct({
-  type: Schema.Literal("stdio"),
+  type: Schema.Literal(MCP_TRANSPORT.stdio),
   command: McpCommandSchema,
   args: Schema.Array(McpArgumentSchema).check(Schema.isMaxLength(128)),
   environment_keys: SortedUniqueNamesSchema,
   cwd: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("home") }),
-    Schema.Struct({ kind: Schema.Literal("folder"), path: McpFolderSchema })
+    Schema.Struct({ kind: Schema.Literal(MCP_FOLDER.home) }),
+    Schema.Struct({ kind: Schema.Literal(MCP_FOLDER.folder), path: McpFolderSchema })
   ])
 })
 
 export const McpHttpTransportSchema = Schema.Struct({
-  type: Schema.Literal("http"),
+  type: Schema.Literal(MCP_TRANSPORT.http),
   url: McpUrlSchema,
   auth: McpAuthSchema,
   header_keys: SortedUniqueNamesSchema
@@ -253,9 +266,9 @@ export const McpToolSchema = Schema.Struct({
   name: McpRemoteToolNameSchema,
   full_name: McpQualifiedToolNameSchema,
   title: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("untitled") }),
+    Schema.Struct({ kind: Schema.Literal(MCP_TOOL_TITLE.untitled) }),
     Schema.Struct({
-      kind: Schema.Literal("titled"),
+      kind: Schema.Literal(MCP_TOOL_TITLE.titled),
       text: Schema.String.check(Schema.isMaxLength(512))
     })
   ]),
@@ -265,36 +278,36 @@ export const McpToolSchema = Schema.Struct({
 export const McpEventSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
   description: Schema.String.check(Schema.isMaxLength(32_768)),
-  delivery: Schema.Array(Schema.Literals(["poll", "push", "webhook"] as const)),
+  delivery: Schema.Array(Schema.Literals(Object.values(MCP_EVENT_DELIVERY))),
   input_schema: Schema.Record(Schema.String, Schema.Unknown)
 })
 
 export const McpServerSchema = Schema.Struct({
   name: McpServerNameSchema,
   preset: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("custom") }),
-    Schema.Struct({ kind: Schema.Literal("preset"), id: McpPresetIdSchema })
+    Schema.Struct({ kind: Schema.Literal(MCP_SERVER_PRESET.custom) }),
+    Schema.Struct({ kind: Schema.Literal(MCP_SERVER_PRESET.preset), id: McpPresetIdSchema })
   ]),
   enabled: Schema.Boolean,
   status: McpConnectionStatusSchema,
   detail: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("quiet") }),
+    Schema.Struct({ kind: Schema.Literal(MCP_SERVER_DETAIL.quiet) }),
     Schema.Struct({
-      kind: Schema.Literal("shown"),
+      kind: Schema.Literal(MCP_SERVER_DETAIL.shown),
       text: Schema.String.check(Schema.isMaxLength(1_000))
     })
   ]),
   diagnostics: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("clean") }),
+    Schema.Struct({ kind: Schema.Literal(MCP_DIAGNOSTICS.clean) }),
     Schema.Struct({
-      kind: Schema.Literal("captured"),
+      kind: Schema.Literal(MCP_DIAGNOSTICS.captured),
       text: Schema.String.check(Schema.isMaxLength(8_192))
     })
   ]),
   account: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("unknown") }),
+    Schema.Struct({ kind: Schema.Literal(MCP_ACCOUNT.unknown) }),
     Schema.Struct({
-      kind: Schema.Literal("identified"),
+      kind: Schema.Literal(MCP_ACCOUNT.identified),
       identity: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
     })
   ]),
@@ -356,11 +369,11 @@ export const McpPresetInstallResponseSchema = Schema.Struct({
 export const McpOAuthStartResponseSchema = Schema.Union([
   Schema.Struct({
     name: McpServerNameSchema,
-    status: Schema.Literals(["connected", "authorized"] as const)
+    status: Schema.Literals([MCP_OAUTH_START.connected, MCP_OAUTH_START.authorized])
   }),
   Schema.Struct({
     name: McpServerNameSchema,
-    status: Schema.Literal("pending"),
+    status: Schema.Literal(MCP_OAUTH_START.pending),
     authorization_url: McpUrlSchema
   })
 ])
@@ -384,7 +397,7 @@ const mapPreset = (preset: typeof McpPresetSchema.Type) => ({
   setupUrl: preset.setup_url,
   servers: preset.servers,
   auth:
-    preset.auth.type === "token"
+    preset.auth.type === MCP_PRESET_AUTH.token
       ? { type: preset.auth.type }
       : {
           type: preset.auth.type,
@@ -394,7 +407,7 @@ const mapPreset = (preset: typeof McpPresetSchema.Type) => ({
 })
 
 const mapTransport = (transport: typeof McpTransportSchema.Type) =>
-  transport.type === "stdio"
+  transport.type === MCP_TRANSPORT.stdio
     ? {
         type: transport.type,
         command: transport.command,
@@ -493,17 +506,15 @@ export const encodeMcpPresetPathEffect = (
 
 export const GitHubConnectionStateSchema = Schema.Struct({
   connection: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("disconnected") }),
+    Schema.Struct({ kind: Schema.Literal(GITHUB_CONNECTION.disconnected) }),
     Schema.Struct({
-      kind: Schema.Literal("connected"),
+      kind: Schema.Literal(GITHUB_CONNECTION.connected),
       read_only: Schema.Boolean,
-      source: Schema.Literals(["token", "app"])
+      source: Schema.Literals(Object.values(GITHUB_CONNECTION_SOURCE))
     })
   ])
 })
 
-/** A pasted token is one opaque word: GitHub's `ghp_`/`github_pat_` tokens
- *  and classic 40-hex ones all fit. */
 const GitHubTokenSchema = Schema.String.check(
   Schema.isMinLength(20),
   Schema.isMaxLength(512),

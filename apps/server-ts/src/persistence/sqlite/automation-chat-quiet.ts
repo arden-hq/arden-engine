@@ -1,6 +1,10 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatActivitySql } from "./person-written-sql.js"
-import type { AutomationCountThrough, EventAutomationTrigger } from "@arden-hq/protocol/automations"
+import {
+  AUTOMATION_OCCURRENCE,
+  type AutomationCountThrough,
+  type EventAutomationTrigger
+} from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
@@ -104,15 +108,15 @@ export const armChatQuiet = Effect.fn("SqliteAutomationStore.armChatQuiet")(func
 export const triggerChangeText = Effect.fn("SqliteAutomationStore.triggerChangeText")(function* (
   sql: SqlClient.SqlClient,
   trigger:
-    | { readonly source: "idle"; readonly input_at: string }
+    | { readonly source: typeof AUTOMATION_OCCURRENCE.idle; readonly input_at: string }
     | {
-        readonly source: "count"
+        readonly source: typeof AUTOMATION_OCCURRENCE.count
         readonly session_id: string
         readonly through: AutomationCountThrough
         readonly every_n: number
       }
 ) {
-  if (trigger.source === "idle") {
+  if (trigger.source === AUTOMATION_OCCURRENCE.idle) {
     return `## Why this run\nThe user has written nothing since ${trigger.input_at}. Anything they said before then is already known; nothing new has arrived since.`
   }
   const rows = yield* sql<{ readonly public_ref: string; readonly name: string | null }>`

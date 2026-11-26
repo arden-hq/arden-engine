@@ -5,32 +5,10 @@ import type {
 } from "../persistence/automations/space-review.js"
 import { UNFINISHED_TASK_STATUSES } from "../persistence/sqlite/task-status-sql.js"
 
-/**
- * What changed since the Space's last review, each read from one owner:
- * - `chat_turn`: an owner chat turn the review has not seen (`reads.chats`).
- * - `memory_page`: a page the review reads for this Space changed, or a source left it.
- *   It never starts a review; a page-only verdict is `nothing_to_act_on`.
- * - `task`: a Task of the Space was added, removed or changed in any field.
- * - `space_settings`: the Space instructions or inference policy changed, or there is no
- *   earlier review to compare with.
- */
 export type ReviewChange = "chat_turn" | "memory_page" | "task" | "space_settings"
 
-/**
- * What the Space holds that a review can act on:
- * - `unfinished_tasks`: an open or deferred Task, which it may comment on or ask about.
- * - `open_offers`: an offered Task proposal, which it may revise or retire.
- * - `nothing`: neither; a review can then only offer new work.
- */
 export type ReviewHold = "nothing" | "unfinished_tasks" | "open_offers"
 
-/**
- * Whether a review starts for one change while the Space holds one thing. A review starts
- * when any cell it is in says so. With nothing held a review can only offer new work, and an
- * offer needs a chat turn, a mail item or new Space settings behind it: a page or Task change
- * alone gives it nothing to comment on, ask about or retire. A page change alone starts nothing
- * whatever the Space holds.
- */
 const STARTS: Record<ReviewChange, Record<ReviewHold, boolean>> = {
   chat_turn: { nothing: true, unfinished_tasks: true, open_offers: true },
   space_settings: { nothing: true, unfinished_tasks: true, open_offers: true },
@@ -44,17 +22,11 @@ export interface SpaceReviewVerdict {
   readonly holds: ReadonlySet<ReviewHold>
 }
 
-/** The part of a review input the check reads: the Space's rows and the changes against the checkpoint. */
 export interface ReviewState {
   readonly semantic: string
   readonly reads: SpaceReviewReads
 }
 
-/**
- * The one admission check for a Space review, with no model call: start only when something
- * the review can act on changed since its last review, or when the owner asked for it
- * (a proposal recheck or a manual run).
- */
 export const spaceReviewAdmission = (
   current: ReviewState,
   reviewed: { readonly semantic: string } | undefined,
@@ -97,7 +69,6 @@ const SemanticSchema = Schema.fromJsonString(
 
 const UNFINISHED: ReadonlySet<string> = new Set(UNFINISHED_TASK_STATUSES)
 
-/** The Space's settings and Tasks from the input's `semantic` rows, in every shape it was stored in. */
 const rows = (semantic: string) => {
   const decoded = Schema.decodeUnknownSync(SemanticSchema)(semantic)
   const space = Schema.decodeUnknownSync(SpaceRowSchema)(decoded.space)

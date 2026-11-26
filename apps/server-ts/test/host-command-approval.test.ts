@@ -6,13 +6,12 @@ import { mentionsArdenData } from "../src/tools/arden-data-mention.js"
 import { cardRuleSubjects } from "../src/persistence/sqlite/permissions.js"
 import {
   approvalPrompt,
-  sandboxDenialNote,
   commandGrantPlan,
   withHelperRule,
   commandSkipsCard,
-  shellRuntime,
   type ResolvedShell
 } from "../src/tools/shell-policy.js"
+import { sandboxDenialNote, shellRuntime } from "../src/tools/shell-invocation.js"
 
 const host: ResolvedShell = {
   cwd: "/Users/me/project",

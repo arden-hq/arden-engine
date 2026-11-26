@@ -1,13 +1,4 @@
 import { parseJsonText } from "../common/json-text.js"
-/** One readable line from an assistant message, for a row that glances at it.
- *
- *  Rows never render Markdown: they show words. So this takes the message
- *  apart the way the transcript would and keeps only what a person would
- *  read — a heading and its paragraph, list items, table cells, the label of a
- *  link, the title of a visualization — joined with the house separator and
- *  cut to one row's width. Everything that is only markup or only a machine's
- *  (code fences, comments, images, the typed reference the visualize tool
- *  places in prose) leaves. */
 
 import { cutText } from "@arden-hq/std/text"
 import { answerBlockTitle, replaceAnswerBlocks } from "./answer-blocks.js"
@@ -31,28 +22,44 @@ const visualizationTitle = (line: string): string | undefined => {
   }
 }
 
-/** The JSON value a text opens with, and whatever follows it — a workflow's
- *  return is its structured value plus a source-manifest trailer, so a
- *  whole-string parse fails while the value itself is fine. String-aware
- *  bracket matching finds the end; anything that does not parse is text. */
+const JSON_CHAR = {
+  openObject: "{",
+  closeObject: "}",
+  openArray: "[",
+  closeArray: "]",
+  quote: '"',
+  escape: "\\"
+} as const
+
+type JsonChar = (typeof JSON_CHAR)[keyof typeof JSON_CHAR]
+
+const JSON_OPENERS: ReadonlySet<string | undefined> = new Set<JsonChar>([
+  JSON_CHAR.openObject,
+  JSON_CHAR.openArray
+])
+const JSON_CLOSERS: ReadonlySet<string | undefined> = new Set<JsonChar>([
+  JSON_CHAR.closeObject,
+  JSON_CHAR.closeArray
+])
+
 export const splitLeadingJson = (
   text: string
 ): { readonly json: string; readonly value: unknown; readonly rest: string } | null => {
   const trimmed = text.trimStart()
   const open = trimmed[0]
-  if (open !== "{" && open !== "[") return null
+  if (!JSON_OPENERS.has(open)) return null
   let depth = 0
   let inString = false
   for (let index = 0; index < trimmed.length; index += 1) {
     const char = trimmed[index]
     if (inString) {
-      if (char === "\\") index += 1
-      else if (char === '"') inString = false
+      if (char === JSON_CHAR.escape) index += 1
+      else if (char === JSON_CHAR.quote) inString = false
       continue
     }
-    if (char === '"') inString = true
-    else if (char === "{" || char === "[") depth += 1
-    else if (char === "}" || char === "]") {
+    if (char === JSON_CHAR.quote) inString = true
+    else if (JSON_OPENERS.has(char)) depth += 1
+    else if (JSON_CLOSERS.has(char)) {
       depth -= 1
       if (depth === 0) {
         const json = trimmed.slice(0, index + 1)
@@ -90,10 +97,14 @@ const SILENT_KEYS = new Set([
   "type"
 ])
 
+const WORKFLOW_BRANCH_KIND = "workflow_branch"
+const BRANCH_NAME_KEY = "name"
+
 const isWorkflowBranch = (value: unknown): boolean =>
   typeof value === "object" &&
   value !== null &&
-  (value as Record<string, unknown>)["kind"] === "workflow_branch"
+  "kind" in value &&
+  value.kind === WORKFLOW_BRANCH_KIND
 
 const namedBranches = (value: unknown): unknown[] | undefined => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
@@ -118,7 +129,7 @@ const firstSentence = (value: unknown): string | null => {
   if (typeof value === "object" && value !== null) {
     const record = value as Record<string, unknown>
     const silent = (key: string): boolean =>
-      SILENT_KEYS.has(key) || (key === "name" && isWorkflowBranch(record))
+      SILENT_KEYS.has(key) || (key === BRANCH_NAME_KEY && isWorkflowBranch(record))
     const keys = [
       ...LEADING_KEYS.filter((key) => key in record),
       ...Object.keys(record).filter((key) => !LEADING_KEYS.includes(key) && !silent(key))
@@ -210,11 +221,11 @@ const inlineWords = (line: string): string => {
     .trim()
 }
 
-// The closing alternative is `(?![\s\S])`, not `$`: under /m a bare `$`
-// matches the end of the OPENING line, so the body captures empty and the
-// refs survive into the preview as raw addresses.
-const ROWS_FENCE =
-  /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*arden:rows[ \t]*\n([\s\S]*?)(?:\n[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*$|(?![\s\S]))/gm
+const END_OF_INPUT_UNDER_MULTILINE = String.raw`(?![\s\S])`
+const ROWS_FENCE = new RegExp(
+  String.raw`^[ \t]{0,3}(?:\x60{3,}|~{3,})[ \t]*arden:rows[ \t]*\n([\s\S]*?)(?:\n[ \t]{0,3}(?:\x60{3,}|~{3,})[ \t]*$|${END_OF_INPUT_UNDER_MULTILINE})`,
+  "gm"
+)
 
 const ROWS_NOUN: Record<string, readonly [string, string]> = {
   task: ["task", "tasks"],
@@ -237,12 +248,10 @@ const rowsFenceWords = (_match: string, body: string): string => {
   return `\n\n${kinds.length} ${kinds.length === 1 ? noun[0] : noun[1]}\n\n`
 }
 
+const HTML_COMMENT_UNCLOSED_RUNS_TO_END = /<!--[\s\S]*?(?:-->|$)/g
+
 const SOURCE_TRAILER = /(?:^|\n)[ \t]*Source manifest: \{[\s\S]*$/
 
-/** One source line read as words: `starts` says it opens its own segment
- *  (a heading, a list item, a table row) rather than running on the line
- *  above it; `null` is a break (a blank line, a visualization without a
- *  title). */
 interface LineWords {
   readonly text: string
   readonly starts: boolean
@@ -255,8 +264,7 @@ const readLines = (markdown: string, words: (line: string) => string): (LineWord
   )
     .replace(ROWS_FENCE, rowsFenceWords)
     .replace(/```[\s\S]*?(?:```|$)/g, "\n\n")
-    // A comment never closed runs to the end, as Markdown reads it.
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, " ")
+    .replace(HTML_COMMENT_UNCLOSED_RUNS_TO_END, " ")
   const lines = source.split("\n")
   const rows = tableRows(lines)
   return lines.flatMap((raw, index) => {
@@ -292,25 +300,15 @@ const runOn = (segments: readonly string[]): string => segments.join(" ")
 const messageText = (markdown: string): string =>
   unwrapSummary(stripCitationMarkers(markdown).replace(SOURCE_TRAILER, "").trim())
 
-const FENCE_MARK = /^[ \t]{0,3}(?:`{3,}|~{3,}).*$/gm
+const FENCE_MARK = /^[ \t]{0,3}(?:\x60{3,}|~{3,}).*$/gm
 
-/** Markdown down to the words a person reads, on one line and not cut: block
- *  and inline markup off, a link's label and code's text kept, and every
- *  character the writer typed inside a word (`file_name`, `a|b`) kept. The one
- *  way any surface turns Markdown into plain text (a hover card, a quote, an
- *  excerpt); it cuts the result to its own width. */
 export const markdownWords = (markdown: string): string =>
   flatten(markdown, inlineWords, runOn) ||
   flatten(markdown.replace(FENCE_MARK, ""), inlineWords, runOn)
 
-/** Each readable line of a Markdown text with its block markup off and its
- *  inline markup kept (links, code, emphasis), for a surface that picks one
- *  line and draws it with `InlineMarkup`. */
 export const markdownLines = (markdown: string): string[] =>
   readLines(markdown, (words) => words).flatMap((line) => (line === null ? [] : [line.text]))
 
-/** Plain words only, cut to one row: for places that cannot draw a link (a
- *  native notification, a menu, a window title, the clipboard). */
 export const previewLine = (markdown: string | null): string | null => {
   if (markdown === null) return null
   const line = flatten(messageText(markdown), inlineWords)
@@ -318,9 +316,6 @@ export const previewLine = (markdown: string | null): string | null => {
   return cutText(line, ROW_WIDTH)
 }
 
-/** The same one line with its inline markup kept (links, code, emphasis), for
- *  a row that draws links as links. Not cut: the row cuts by visible words,
- *  since a link's address takes no room on screen. */
 export const previewMarkup = (markdown: string | null): string | null => {
   if (markdown === null) return null
   const line = flatten(messageText(markdown), (words) => words)

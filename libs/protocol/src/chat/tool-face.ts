@@ -1,22 +1,45 @@
 import { Schema } from "effect"
+import { TOOL_EXECUTION, type ToolExecution } from "@arden-hq/std/message-vocabulary"
 import type { Agrees, Assert } from "../common/type-agreement.js"
 import type { JsonRecord } from "../common/json.js"
 import { GmailSendReceiptSchema } from "./gmail-receipt.js"
 import type { GmailSendReceipt } from "./history.js"
 
-export const TOOL_EXECUTIONS = ["runtime", "provider"] as const
-export type ToolExecution = (typeof TOOL_EXECUTIONS)[number]
-export const TOOL_EXECUTION = { runtime: "runtime", provider: "provider" } as const
+export { TOOL_EXECUTION, type ToolExecution } from "@arden-hq/std/message-vocabulary"
 
-export const TOOL_PRESENTATIONS = ["work", "conversation", "status"] as const
-export type ToolPresentation = (typeof TOOL_PRESENTATIONS)[number]
 export const TOOL_PRESENTATION = {
   work: "work",
   conversation: "conversation",
   status: "status"
 } as const
+export type ToolPresentation = (typeof TOOL_PRESENTATION)[keyof typeof TOOL_PRESENTATION]
 
-export const DEFAULT_TOOL_KIND = "tool"
+export const TOOL_KIND = {
+  tool: "tool",
+  agent: "agent",
+  browser: "browser",
+  code: "code",
+  computer: "computer",
+  filesystem: "filesystem",
+  mcp: "mcp",
+  research: "research",
+  shell: "shell",
+  skill: "skill",
+  todo: "todo",
+  web: "web"
+} as const
+export type ToolKind = (typeof TOOL_KIND)[keyof typeof TOOL_KIND]
+export const ToolKindSchema = Schema.Literals(Object.values(TOOL_KIND))
+
+const TOOL_KINDS: ReadonlyArray<ToolKind> = Object.values(TOOL_KIND)
+
+export const isToolKind = (value: unknown): value is ToolKind =>
+  TOOL_KINDS.some((kind) => kind === value)
+
+export const DEFAULT_TOOL_KIND = TOOL_KIND.tool
+
+export const toolKindOf = (value: unknown): ToolKind =>
+  isToolKind(value) ? value : DEFAULT_TOOL_KIND
 
 export const TOOL_PARENT = { root: "root", child: "child" } as const
 export type ToolParent =
@@ -47,7 +70,7 @@ export interface ToolFace {
   readonly parent: ToolParent
   readonly display_name: string
   readonly title: ToolTitle
-  readonly kind: string
+  readonly kind: ToolKind
   readonly icon: ToolIcon
   readonly noun: ToolNoun
   readonly source: ToolSource
@@ -76,7 +99,7 @@ export type GmailSend =
 const tagged = <const Tag extends string>(kind: Tag) =>
   Schema.Struct({ kind: Schema.Literal(kind) })
 
-export const ToolExecutionSchema = Schema.Literals(TOOL_EXECUTIONS)
+export const ToolExecutionSchema = Schema.Literals(Object.values(TOOL_EXECUTION))
 
 export const ToolFaceFields = {
   parent: Schema.Union([
@@ -88,7 +111,7 @@ export const ToolFaceFields = {
     tagged(TOOL_TITLE.untitled),
     Schema.Struct({ kind: Schema.Literal(TOOL_TITLE.titled), text: Schema.String })
   ]),
-  kind: Schema.String,
+  kind: ToolKindSchema,
   icon: Schema.Union([
     tagged(TOOL_ICON.plain),
     Schema.Struct({ kind: Schema.Literal(TOOL_ICON.icon), name: Schema.String })
@@ -101,7 +124,7 @@ export const ToolFaceFields = {
     tagged(TOOL_SOURCE.unsourced),
     Schema.Struct({ kind: Schema.Literal(TOOL_SOURCE.source), name: Schema.String })
   ]),
-  presentation: Schema.Literals(TOOL_PRESENTATIONS),
+  presentation: Schema.Literals(Object.values(TOOL_PRESENTATION)),
   execution: ToolExecutionSchema
 }
 

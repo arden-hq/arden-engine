@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 
+import { BROWSER_TOOL, type BrowserToolName } from "../../browser/service.js"
 import { isJsonObject, jsonText, type JsonObject } from "../json.js"
 import {
   PAGE_TEXT_MAX_CHARS,
@@ -30,7 +31,7 @@ export interface CondensedBrowserRun {
   readonly condensed: ProcedureEvidenceCondensed
 }
 
-const ACTIONS = new Set(["browser_act", "browser_open"])
+const ACTIONS: ReadonlySet<string> = new Set<BrowserToolName>([BROWSER_TOOL.act, BROWSER_TOOL.open])
 const PAGE_START = "--- PAGE CONTENT"
 const PAGE_END = "--- END PAGE CONTENT"
 const STRUCTURE_ROLES = new Set([
@@ -180,7 +181,7 @@ const buildVisits = (calls: ReadonlyArray<ProcedureEvidenceCall>): ReadonlyArray
   calls.forEach((call, index) => {
     const key = visitKey(call) ?? visits.at(-1)?.key ?? ""
     const current = visits.at(-1)
-    if (current !== undefined && current.key === key && call.name !== "browser_open")
+    if (current !== undefined && current.key === key && call.name !== BROWSER_TOOL.open)
       current.calls.push(index)
     else visits.push({ key, calls: [index] })
   })

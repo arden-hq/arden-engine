@@ -5,6 +5,7 @@ import path from "node:path"
 import { PROMPTS } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 import type { SessionPathPolicy } from "../storage/local-paths.js"
+import { LOCAL_TARGET_KIND, type LocalTargetKind } from "../execution/local-target.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
 const FILE_NAMES = ["AGENTS.override.md", "AGENTS.md"] as const
@@ -57,15 +58,17 @@ export const localInstructionManifest = (
 export const loadLocalInstructions = async ({
   policy,
   target,
-  targetKind = "directory"
+  targetKind = LOCAL_TARGET_KIND.directory
 }: {
   readonly policy: SessionPathPolicy
   readonly target?: string
-  readonly targetKind?: "directory" | "file"
+  readonly targetKind?: LocalTargetKind
 }): Promise<LocalInstructionSnapshot | undefined> => {
   const requested = target ?? policy.cwd
   if (requested === null || requested === undefined) return undefined
-  const directory = await realpath(targetKind === "file" ? path.dirname(requested) : requested)
+  const directory = await realpath(
+    targetKind === LOCAL_TARGET_KIND.file ? path.dirname(requested) : requested
+  )
   const root = [...policy.localRoots]
     .filter((candidate) => isWithin(candidate, directory))
     .sort((a, b) => b.length - a.length)[0]

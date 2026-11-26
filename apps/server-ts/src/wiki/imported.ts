@@ -1,3 +1,5 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
+import { PATH_SEGMENT } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
@@ -5,7 +7,9 @@ import { posix } from "node:path"
 import type { WikiLocationAuthority } from "./authority.js"
 import { IMPORTED_DIRECTORY, isImportedPath } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
-import { createPage, updatePage, type WikiCommitIdentity, type WikiWrite } from "./commit.js"
+import { createPage, updatePage } from "./commit.js"
+import { type WikiWrite } from "./commit-write-types.js"
+import { type WikiCommitIdentity } from "./origin.js"
 import { directoryContract, directoryTitle } from "./directories.js"
 import { type WikiError, wikiError } from "./errors.js"
 import { writerOf, type WikiChanges } from "./page-change.js"
@@ -156,7 +160,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
     const contract = directoryContract(directory.contract) ?? directory.contract
     const parent = posix.dirname(directory.path)
     if (
-      parent !== "." &&
+      parent !== PATH_SEGMENT.current &&
       !known.has(normal(parent)) &&
       !byPath.has(normal(`${parent}/README.md`))
     ) {
@@ -174,7 +178,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
       create(readme, directoryTitle(directory.path), contract)
       continue
     }
-    if (current.page.lifecycle !== "active") {
+    if (current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
       return yield* wikiError("create", "blocked", `Imported directory is a redirect: ${readme}`, {
         pageId: current.page.pageId
       })
@@ -204,7 +208,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
       }
       create(page.path, page.title, page.body)
       created.push(page.path)
-    } else if (current.page.lifecycle !== "active") {
+    } else if (current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
       return yield* wikiError("create", "blocked", `Imported page is a redirect: ${page.path}`, {
         pageId: current.page.pageId
       })

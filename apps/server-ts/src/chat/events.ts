@@ -1,15 +1,8 @@
-import type {
-  FramedChatProjectionEvent,
-  SnapshotProjectionEvent,
-  StreamLiveEvent,
-  StreamOverflowEvent,
-  StreamSnapshotEvent
-} from "@arden-hq/protocol"
-import { HISTORY_WINDOW, type HistoryResponse } from "@arden-hq/protocol/chat"
+import type { SnapshotProjectionEvent } from "@arden-hq/protocol"
+import { HISTORY_WINDOW } from "@arden-hq/protocol/chat"
 import { randomUUID } from "node:crypto"
 import {
   Context,
-  DateTime,
   Cause,
   type Duration,
   Effect,
@@ -42,6 +35,15 @@ import {
   type ChatOpenTimingPhase,
   type ChatOpenTimer
 } from "./open-timing.js"
+import {
+  chatEventFrame,
+  eventRecordToSse,
+  keepaliveEvent,
+  liveEvent,
+  overflowEvent,
+  snapshotEvent,
+  snapshotProtocolEvent
+} from "./event-frames.js"
 
 const KEEPALIVE_INTERVAL = "5 seconds"
 const RESUME_SNAPSHOT_CAPACITY_BYTES = 8 * 1024 * 1024
@@ -155,7 +157,6 @@ interface ResumeSnapshotBudget {
   readonly occupiedSequences: ReadonlySet<number>
 }
 
-/** What one read of the database and the in-memory projection gives. */
 type ResumeRead =
   | {
       readonly kind: "overflow"
@@ -173,14 +174,8 @@ type ResumeRead =
       readonly durable: ReadonlyArray<SessionEventRecord>
     }
 
-/**
- * Whether the projection must be shown to agree with the database read.
- * "checked" for a snapshot beside the write queue; "trusted" inside the write
- * queue, where every commit has been applied before the read starts.
- */
 type ResumeCoverage = "checked" | "trusted"
 
-/** The in-memory projection disagreed with the snapshot's commit point. */
 class ResumeSnapshotStale extends Schema.TaggedError<ResumeSnapshotStale>()("ResumeSnapshotStale", {
   appliedSequence: Schema.Int,
   checkpointSequence: Schema.Int,
@@ -188,32 +183,19 @@ class ResumeSnapshotStale extends Schema.TaggedError<ResumeSnapshotStale>()("Res
   trimFloor: Schema.Int
 }) {}
 
-// A commit is applied to the projection right after COMMIT, so a stale
-// snapshot is current again within milliseconds: three more tries over about
-// 35 ms, then the write-queue read.
+const projectionCoversSnapshot = (
+  projection: { readonly publishedThrough: number; readonly trimFloor: number },
+  snapshot: { readonly appliedSequence: number; readonly checkpointSequence: number }
+): boolean =>
+  projection.publishedThrough >= snapshot.appliedSequence &&
+  projection.trimFloor <= snapshot.checkpointSequence
+
 const resumeSnapshotRetry = {
   times: 3,
   schedule: Schedule.exponential("5 millis"),
   while: (error: unknown) => error instanceof ResumeSnapshotStale
 }
 
-/**
- * Opening a chat sends one snapshot and then the live tail, with every
- * journal sequence in exactly one of them. The follower subscribes first.
- * Then one read transaction on a reader connection (`Persistence.snapshot`)
- * reads history, run, approvals, the journal head A and the checkpoint C at
- * one commit point, without waiting for the writer. The handover point P is
- * that A: the snapshot holds the transaction's rows plus the in-memory
- * projection's records in (C, P], and the tail drops every follower record at
- * or below P. The projection is not part of the transaction, so the snapshot
- * counts only when it agrees with A and C: it has applied every commit
- * through P (`publishedThrough >= P`, else live-only records at or below P
- * would be in neither part) and has dropped no record above C (`trimFloor <=
- * C`, else a run that ended or restarted after the transaction began took
- * records the transaction still needs). A disagreement is retried; if it
- * persists, the capture runs inside the write queue (`consistentRead`), where
- * the projection and the database agree by construction.
- */
 const openResumeStream = Effect.fn("ChatEventStream.openResume")(function* (
   options: OpenResumeStreamInput
 ): Effect.fn.Return<Stream.Stream<SseEvent, ChatStreamError>, ChatStreamError, Scope.Scope> {
@@ -328,8 +310,6 @@ const captureResumeProjection = Effect.fn("ChatEventStream.captureResumeProjecti
   return { kind: "complete", appliedSequence: captured.appliedSequence, snapshotData: encoded.data }
 })
 
-/** Every database statement here runs on a reader: inside `Persistence.snapshot`
- * a statement on the writer would run outside the transaction and wait for it. */
 const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
   readonly events: ChatEventStore["Service"]
   readonly history: ChatHistory["Service"]
@@ -341,7 +321,6 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
   ChatHistoryFailure | ChatEventStoreError | ChatStreamError | ResumeSnapshotStale
 > {
   const { events, sessionId, timer } = input
-  // Time spent waiting for a snapshot permit, or for the write queue.
   timer?.mark("resume_capture_queue")
   const loaded = yield* input.history.read({ sessionId, ...RESUME_HISTORY })
   timer?.mark("resume_history")
@@ -356,7 +335,7 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
   timer?.mark("resume_active_projection")
   if (
     input.coverage === "checked" &&
-    (active.publishedThrough < appliedSequence || active.trimFloor > checkpointSequence)
+    !projectionCoversSnapshot(active, { appliedSequence, checkpointSequence })
   ) {
     return yield* new ResumeSnapshotStale({
       appliedSequence,
@@ -375,9 +354,6 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
     }
   }
 
-  // An estimate that bounds the durable read: the snapshot's envelope and the
-  // context budget, which joins after the transaction, are counted only by the
-  // final check on the encoded snapshot.
   const projectedActive = active.records.map(eventRecordToProjectionEvent)
   const initialBytes = snapshotJsonBytes(history) + snapshotJsonBytes(projectedActive)
   timer?.mark("resume_initial_projection")
@@ -477,12 +453,6 @@ const eventRecordToProjectionEvent = (record: SessionEventRecord): SnapshotProje
   replay: true
 })
 
-const chatEventFrame = (record: SessionEventRecord) => ({
-  session_id: record.sessionId,
-  seq: record.sequence,
-  timestamp: DateTime.toEpochMillis(record.createdAt)
-})
-
 const resumeDeliveryToSse = (
   delivery: ChatEventDelivery,
   sessionId: string,
@@ -536,82 +506,6 @@ export const withKeepalives = <E>(
       )
     )
   )
-
-const eventRecordToSse = (record: SessionEventRecord, replay = false): SseEvent => {
-  const payload: FramedChatProjectionEvent = { ...record.event, ...chatEventFrame(record), replay }
-  return {
-    _tag: "Event",
-    id: String(record.sequence),
-    event: record.event.type,
-    data: JSON.stringify(payload)
-  }
-}
-
-const snapshotEvent = (appliedSequence: number, data: string): SseEvent => ({
-  _tag: "Event",
-  id: String(appliedSequence),
-  event: "stream_snapshot",
-  data
-})
-
-const snapshotProtocolEvent = (
-  sessionId: string,
-  appliedSequence: number,
-  history: HistoryResponse,
-  activeEvents: ReadonlyArray<SnapshotProjectionEvent>
-): StreamSnapshotEvent => ({
-  type: "stream_snapshot",
-  session_id: sessionId,
-  seq: appliedSequence,
-  snapshot: {
-    version: 1,
-    applied_seq: appliedSequence,
-    history,
-    active_events: activeEvents
-  }
-})
-
-const liveEvent = (sessionId: string, caughtUpThrough: number): SseEvent =>
-  protocolEventToSse({
-    type: "stream_live",
-    session_id: sessionId,
-    seq: caughtUpThrough,
-    caught_up_through: caughtUpThrough
-  })
-
-const overflowEvent = (
-  sessionId: string,
-  cursor: number,
-  reason: StreamOverflowEvent["reason"]
-): SseEvent =>
-  protocolEventToSse({
-    type: "stream_overflow",
-    session_id: sessionId,
-    seq: cursor,
-    cursor,
-    reason
-  })
-
-const protocolEventToSse = (
-  event: StreamSnapshotEvent | StreamLiveEvent | StreamOverflowEvent
-): SseEvent => ({
-  _tag: "Event",
-  id: String(event.seq),
-  event: event.type,
-  data: JSON.stringify(event)
-})
-
-const keepaliveEvent = (sessionId: string, sequence: number): SseEvent => ({
-  _tag: "Event",
-  id: String(sequence),
-  event: "stream_keepalive",
-  data: JSON.stringify({
-    type: "stream_keepalive",
-    session_id: sessionId,
-    seq: sequence,
-    latest_seq: sequence
-  })
-})
 
 const toStreamError = (cause: unknown): ChatStreamError =>
   new ChatStreamError({

@@ -1,11 +1,6 @@
 import { unsavedTaskRevision } from "../persistence/work/inference.js"
 import { observedKey, type ServerRunContext } from "./run-context.js"
 
-/**
- * The words that name a Task for later calls. Showing them also records which
- * version of the Task this run saw, so a later proposal that cites the Task is
- * checked against it without the model carrying a version.
- */
 export const taskHandle = (
   run: Pick<ServerRunContext, "observations">,
   task: {

@@ -11,17 +11,22 @@ export type TaskItemId = typeof TaskItemId.Type
 export const SpaceId = Schema.NonEmptyString.pipe(Schema.brand("SpaceId"))
 export type SpaceId = typeof SpaceId.Type
 
+export const JOB_SUBJECT_KIND = {
+  task: "task",
+  spaceReview: "space_review",
+  automation: "automation"
+} as const
 export const TaskSubjectSchema = Schema.Struct({
-  kind: Schema.Literal("task"),
+  kind: Schema.Literal(JOB_SUBJECT_KIND.task),
   itemId: TaskItemId
 })
 
 export const SpaceReviewSubjectSchema = Schema.Struct({
-  kind: Schema.Literal("space_review"),
+  kind: Schema.Literal(JOB_SUBJECT_KIND.spaceReview),
   spaceId: SpaceId
 })
 
 export const AutomationSubjectSchema = Schema.Struct({
-  kind: Schema.Literal("automation"),
+  kind: Schema.Literal(JOB_SUBJECT_KIND.automation),
   automationId: AutomationId
 })

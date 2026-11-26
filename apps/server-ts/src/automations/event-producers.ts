@@ -1,5 +1,5 @@
 import {
-  AUTOMATION_EVENT_TYPES,
+  AUTOMATION_EVENT_TYPE,
   AUTOMATION_EVENTS,
   TRIGGER_STATE,
   type AutomationEventCatalogEntry,
@@ -53,8 +53,9 @@ const producers: { readonly [T in AutomationEventType]: AutomationEventProducer<
   }
 }
 
-export const automationEventProducers: ReadonlyArray<AutomationEventProducer> =
-  AUTOMATION_EVENT_TYPES.map((type): AutomationEventProducer => producers[type])
+export const automationEventProducers: ReadonlyArray<AutomationEventProducer> = Object.values(
+  AUTOMATION_EVENT_TYPE
+).map((type): AutomationEventProducer => producers[type])
 
 export const eventsFromJournal = Effect.fnUntraced(function* (
   record: JournalRecord,

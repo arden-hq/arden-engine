@@ -38,7 +38,6 @@ export interface JobCompleteInput<Result> extends JobLeaseRef {
 export interface JobFailInput extends JobLeaseRef {
   readonly failedAt: number
   readonly error: string
-  /** Null is terminal. */
   readonly retryAt: number | null
 }
 
@@ -46,7 +45,6 @@ export interface JobReleaseInput extends JobLeaseRef {
   readonly releasedAt: number
 }
 
-/** Durable consumer seam. Every mutation after claim must fence on token. */
 export interface JobDriver<Payload, Result> {
   recoverExpired(now: number): MaybePromise<number>
   claim(input: JobClaimInput): MaybePromise<ReadonlyArray<JobLease<Payload>>>
@@ -54,10 +52,6 @@ export interface JobDriver<Payload, Result> {
   complete(input: JobCompleteInput<Result>): MaybePromise<void>
   fail(input: JobFailInput): MaybePromise<void>
   release(input: JobReleaseInput): MaybePromise<void>
-  /** The earliest instant strictly after `now` at which a job that is not
-   *  claimable now becomes claimable by time alone (a retry, a schedule, a
-   *  hold); undefined when no job waits on time. Early is harmless, late
-   *  delays the job until the next wake. */
   nextDueAt(now: number): MaybePromise<number | undefined>
 }
 
@@ -84,19 +78,12 @@ export interface JobWorkerOptions<Payload, Result> {
   readonly driver: JobDriver<Payload, Result>
   readonly execute: JobExecutor<Payload, Result>
   readonly workerId?: string
-  /** A live resolver is read before each claim, including when all slots are occupied. */
   readonly concurrency?: number | (() => MaybePromise<number>)
-  /** The longest the worker sleeps between admissions, and the bound on how
-   *  late work can start when a wake is missed, the clock jumps, or the host
-   *  sleeps through a timer (macOS timers do not advance while asleep). */
   readonly idleTimeoutMs?: number
   readonly leaseDurationMs?: number
   readonly maxAttempts?: number
   readonly retryDelayMs?: (attempt: number) => number
-  /** The host's clock. No default: a worker that reads the machine's time disagrees with
-   *  the host's stored times, so the host names its clock. */
   readonly now: () => number
-  /** Resolves after `durationMs`, rejects once `signal` aborts. */
   readonly sleep?: (durationMs: number, signal: AbortSignal) => Promise<void>
   readonly onError?: (error: unknown) => MaybePromise<void>
 }
@@ -107,7 +94,6 @@ export interface JobWorkerSnapshot {
   readonly capacity: number | undefined
   readonly lastAdmitAt: number | undefined
   readonly lastClaimAt: number | undefined
-  /** When the idle worker admits again without a wake; undefined while it works. */
   readonly nextWakeAt: number | undefined
   readonly activeJobIds: ReadonlyArray<string>
 }
@@ -117,7 +103,6 @@ export interface JobWorker {
   readonly running: boolean
   snapshot(): JobWorkerSnapshot
   start(): void
-  /** Refuse new claims while active executions keep their leases and settle. */
   quiesce(): void
   stop(): Promise<void>
   wake(): void
@@ -146,7 +131,6 @@ const abortError = (): DOMException => new DOMException("The job was cancelled",
 const defaultRetryDelay = (attempt: number): number =>
   backoffDelayMs({ initialMs: 1_000, maxMs: 60_000 }, attempt)
 
-/** Make one in-process worker around a durable driver. */
 export const makeJobWorker = <Payload, Result>(
   options: JobWorkerOptions<Payload, Result>
 ): JobWorker => {

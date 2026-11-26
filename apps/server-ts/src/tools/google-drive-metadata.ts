@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 
 import type { GoogleToolConnections } from "./google-accounts.js"
-import { parseFileRef } from "./google-drive.js"
+import { parseFileRef } from "./google-drive-support.js"
 import { decodeGoogle, googleCall } from "./google-request.js"
 import { toolRefusal } from "./tool-failure.js"
 

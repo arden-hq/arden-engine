@@ -1,16 +1,36 @@
 import type { AutomationEvent } from "@arden-hq/protocol"
 import { Schema } from "effect"
 
+export const INTERNAL_LIFECYCLE_EVENT = {
+  runSettled: "run_settled",
+  runFenced: "run_fenced",
+  limitCrossed: "limit_crossed",
+  approvalWaiting: "approval_waiting",
+  decisionRouteChanged: "decision_route_changed",
+  captureArrived: "capture_arrived",
+  automationQueued: "automation_queued",
+  automationChanged: "automation_changed",
+  taskHistoryAdded: "task_history_added"
+} as const
+
+export const RUN_SETTLED_STATUS = {
+  completed: "completed",
+  interrupted: "interrupted",
+  error: "error",
+  failed: "failed",
+  cancelled: "cancelled"
+} as const
+
 const cause = {
   produced_by: Schema.NullOr(Schema.NonEmptyString),
   chain_depth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 }
 
 export const RunSettledEventSchema = Schema.Struct({
-  type: Schema.Literal("run_settled"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.runSettled),
   run_id: Schema.NonEmptyString,
   session_id: Schema.NonEmptyString,
-  status: Schema.Literals(["completed", "interrupted", "error", "failed", "cancelled"] as const),
+  status: Schema.Literals(Object.values(RUN_SETTLED_STATUS)),
   final_message_id: Schema.NonEmptyString,
   personal: Schema.Boolean,
   ...cause
@@ -18,7 +38,7 @@ export const RunSettledEventSchema = Schema.Struct({
 type RunSettledEvent = typeof RunSettledEventSchema.Type
 
 export const LimitCrossedEventSchema = Schema.Struct({
-  type: Schema.Literal("limit_crossed"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.limitCrossed),
   level: Schema.Literals(["background", "arden", "used_up"] as const),
   used_percent: Schema.Number,
   limit_percent: Schema.NullOr(Schema.Number),
@@ -29,7 +49,7 @@ export const LimitCrossedEventSchema = Schema.Struct({
 type LimitCrossedEvent = typeof LimitCrossedEventSchema.Type
 
 export const ApprovalWaitingEventSchema = Schema.Struct({
-  type: Schema.Literal("approval_waiting"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.approvalWaiting),
   run_id: Schema.NonEmptyString,
   session_id: Schema.NonEmptyString,
   tool_call_id: Schema.NonEmptyString,
@@ -39,7 +59,7 @@ export const ApprovalWaitingEventSchema = Schema.Struct({
 type ApprovalWaitingEvent = typeof ApprovalWaitingEventSchema.Type
 
 export const DecisionRouteChangedEventSchema = Schema.Struct({
-  type: Schema.Literal("decision_route_changed"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.decisionRouteChanged),
   transition: Schema.Literals(["opened", "closed"] as const),
   viewer_session_id: Schema.NonEmptyString,
   source_session_id: Schema.NonEmptyString,
@@ -58,7 +78,7 @@ export const DecisionRouteChangedEventSchema = Schema.Struct({
 type DecisionRouteChangedEvent = typeof DecisionRouteChangedEventSchema.Type
 
 export const CaptureArrivedEventSchema = Schema.Struct({
-  type: Schema.Literal("capture_arrived"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.captureArrived),
   session_id: Schema.NonEmptyString,
   client_id: Schema.NonEmptyString,
   via: Schema.Literals(["screenshot", "quick", "phone"] as const),
@@ -69,7 +89,7 @@ export const CaptureArrivedEventSchema = Schema.Struct({
 export type CaptureArrivedEvent = typeof CaptureArrivedEventSchema.Type
 
 export const AutomationQueuedEventSchema = Schema.Struct({
-  type: Schema.Literal("automation_queued"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.automationQueued),
   event_type: Schema.NonEmptyString,
   event_key: Schema.NonEmptyString,
   queued: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -78,14 +98,14 @@ export const AutomationQueuedEventSchema = Schema.Struct({
 type AutomationQueuedEvent = typeof AutomationQueuedEventSchema.Type
 
 export const AutomationChangedEventSchema = Schema.Struct({
-  type: Schema.Literal("automation_changed"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.automationChanged),
   task_id: Schema.NonEmptyString,
   ...cause
 })
 type AutomationChangedEvent = typeof AutomationChangedEventSchema.Type
 
 export const TaskHistoryAddedEventSchema = Schema.Struct({
-  type: Schema.Literal("task_history_added"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.taskHistoryAdded),
   item_id: Schema.NonEmptyString,
   event_id: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   ...cause
@@ -93,7 +113,7 @@ export const TaskHistoryAddedEventSchema = Schema.Struct({
 type TaskHistoryAddedEvent = typeof TaskHistoryAddedEventSchema.Type
 
 export const RunFencedEventSchema = Schema.Struct({
-  type: Schema.Literal("run_fenced"),
+  type: Schema.Literal(INTERNAL_LIFECYCLE_EVENT.runFenced),
   run_id: Schema.NonEmptyString,
   session_id: Schema.NonEmptyString,
   ...cause
@@ -123,18 +143,10 @@ export const InternalLifecycleEventSchema: Schema.Codec<InternalLifecycleEvent> 
   TaskHistoryAddedEventSchema
 ])
 
-const internalTypes: Readonly<Record<InternalLifecycleEvent["type"], true>> = {
-  run_settled: true,
-  run_fenced: true,
-  limit_crossed: true,
-  approval_waiting: true,
-  decision_route_changed: true,
-  capture_arrived: true,
-  automation_queued: true,
-  automation_changed: true,
-  task_history_added: true
-}
+const INTERNAL_LIFECYCLE_TYPES: ReadonlySet<string> = new Set(
+  Object.values(INTERNAL_LIFECYCLE_EVENT)
+)
 
 export const isInternalLifecycleEvent = (
   event: AutomationEvent | InternalLifecycleEvent
-): event is InternalLifecycleEvent => Object.hasOwn(internalTypes, event.type)
+): event is InternalLifecycleEvent => INTERNAL_LIFECYCLE_TYPES.has(event.type)

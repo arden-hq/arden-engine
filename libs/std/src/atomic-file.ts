@@ -10,23 +10,17 @@ import {
 } from "node:fs"
 import { chmod, open, rename, rm } from "node:fs/promises"
 import path from "node:path"
+import { onWindows } from "./process.js"
 
 export interface AtomicWriteOptions {
-  /** File mode of the written file. Default `0o600`. */
   readonly mode?: number
 }
 
 const temporaryPathFor = (target: string): string =>
   path.join(path.dirname(target), `.${path.basename(target)}-${randomUUID()}.tmp`)
 
-const SYNCS_DIRECTORIES = process.platform !== "win32"
+const SYNCS_DIRECTORIES = !onWindows
 
-/**
- * `target` replaced by `content` in one step: written and synced to a sibling
- * temporary file, renamed over `target`, chmodded to `mode`, and the folder
- * synced. A reader sees the old file or the new one, never half of it. The
- * temporary file is removed when any step fails.
- */
 export const writeAtomic = async (
   target: string,
   content: string | Uint8Array,
@@ -58,7 +52,6 @@ export const writeAtomic = async (
   }
 }
 
-/** `writeAtomic` for a caller that cannot await. */
 export const writeAtomicSync = (
   target: string,
   content: string | Uint8Array,

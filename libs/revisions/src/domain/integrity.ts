@@ -1,7 +1,15 @@
 import { Effect } from "effect"
 
 import type { ResourceSnapshot } from "./change-set.js"
-import { Commit, ResourceVersion, makeVersion } from "./model.js"
+import {
+  CHANGE_ACTION,
+  Commit,
+  RESOURCE_STATE,
+  ResourceVersion,
+  isActive,
+  makeVersion,
+  type ChangeAction
+} from "./model.js"
 import { CorruptRepositoryError } from "./errors.js"
 import { compareCodePoints } from "@arden-hq/std/json"
 
@@ -23,13 +31,35 @@ const changeResourceId = (change: {
   readonly after: ResourceVersion | null
 }): string | null => change.after?.resourceId ?? change.before?.resourceId ?? null
 
+type Transition = (before: ResourceVersion, after: ResourceVersion) => boolean
+
+const VALID_TRANSITION: Readonly<
+  Record<Exclude<ChangeAction, typeof CHANGE_ACTION.create>, Transition>
+> = {
+  update: (before, after) =>
+    isActive(before) &&
+    isActive(after) &&
+    before.path === after.path &&
+    before.blobId !== after.blobId,
+  move: (before, after) =>
+    isActive(before) &&
+    isActive(after) &&
+    (before.path !== after.path || before.blobId !== after.blobId),
+  archive: (before, after) =>
+    isActive(before) &&
+    after.state === RESOURCE_STATE.archived &&
+    before.path === after.path &&
+    before.blobId === after.blobId,
+  restore: (_before, after) => isActive(after)
+}
+
 const validChangeAction = (change: {
-  readonly action: string
+  readonly action: ChangeAction
   readonly before: ResourceVersion | null
   readonly after: ResourceVersion | null
 }): boolean => {
   const { before, after } = change
-  if (change.action === "create") return before === null && after !== null
+  if (change.action === CHANGE_ACTION.create) return before === null && after !== null
   if (
     before === null ||
     after === null ||
@@ -37,31 +67,7 @@ const validChangeAction = (change: {
     versionsEqual(before, after)
   )
     return false
-  if (change.action === "update") {
-    return (
-      before.state === "active" &&
-      after.state === "active" &&
-      before.path === after.path &&
-      before.blobId !== after.blobId
-    )
-  }
-  if (change.action === "move") {
-    return (
-      before.state === "active" &&
-      after.state === "active" &&
-      (before.path !== after.path || before.blobId !== after.blobId)
-    )
-  }
-  if (change.action === "archive") {
-    return (
-      before.state === "active" &&
-      after.state === "archived" &&
-      before.path === after.path &&
-      before.blobId === after.blobId
-    )
-  }
-  if (change.action === "restore") return after.state === "active"
-  return false
+  return VALID_TRANSITION[change.action](before, after)
 }
 
 export const validateSnapshotTransition = Effect.fn("Revision.validateSnapshotTransition")(
@@ -142,9 +148,7 @@ export const validateActivePaths = Effect.fn("Revision.validateActivePaths")(fun
   snapshot: ResourceSnapshot
 ): Effect.fn.Return<void, CorruptRepositoryError> {
   const activePaths = new Set(
-    [...snapshot.values()]
-      .filter((version) => version.state === "active")
-      .map((version) => version.path)
+    [...snapshot.values()].filter(isActive).map((version) => version.path)
   )
   for (const path of activePaths) {
     for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {

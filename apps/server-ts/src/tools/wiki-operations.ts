@@ -1,6 +1,4 @@
 import { countOf } from "@arden-hq/std/count"
-import { ToolExecutionError } from "@arden-hq/loop"
-import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -13,176 +11,25 @@ import { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
 import { STANDING_LIMIT_NOTE } from "../memory/core-memory.js"
 import { activeRunPages, type PageRecord } from "../wiki/snapshot.js"
-import {
-  WIKI_LINK_ANCHOR,
-  WIKI_LINK_LABEL,
-  WIKI_LINK_STATUS,
-  type WikiLink
-} from "@arden-hq/protocol/wiki"
-import {
-  activePage,
-  changePages,
-  keptPage,
-  readablePage,
-  loadSnapshot,
-  pageData,
-  pageNotFound,
-  wikiFailure,
-  writtenPageData
-} from "./wiki.js"
+import { activePage, readablePage, loadSnapshot, pageNotFound, wikiFailure } from "./wiki-access.js"
+import { changePages, keptPage } from "./wiki-page-writes.js"
+import { pageData, writtenPageData } from "./wiki-render.js"
 import { loadPageAges } from "../wiki/page-age.js"
 import { makeWikiRetireTools } from "./wiki-retire.js"
-import { MergedWikiPathSchema, makeWikiPageHistoryTools } from "./wiki-page-history.js"
+import { makeWikiPageHistoryTools } from "./wiki-page-history.js"
 import { MAX_PAGE_SOURCES, directoryReceipt, pageSource, requireObserved } from "./wiki-records.js"
 import { searchPages } from "./wiki-search.js"
 import { readChangeCall } from "../lib/memory-link.js"
-import { MAX_WIKI_CONTENT_CHARS, WIKI_PAGE_BUDGET_CHARS } from "./wiki-schemas.js"
-import { WikiPathSchema } from "./wiki-schemas.js"
-
-const MAX_LINKS = 500
-const MAX_SEARCH_RESULTS = 20
-const MAX_CHANGE_OFFSET = 10_000
-const MAX_CHANGE_ENTRIES = 200
-
-const ActiveWikiPathSchema = WikiPathSchema.annotate({
-  description: "Exact relative POSIX .md path of an active page returned by Wiki search or listing."
-})
-
-const SearchParametersSchema = Schema.Struct({
-  query: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512)).pipe(
-    Schema.annotateEncoded({
-      description: "What to look for: a few words, a name, a path, or an exact phrase."
-    })
-  ),
-  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_RESULTS }))
-    .annotate({
-      description: `Maximum matches to return, from 1 to ${MAX_SEARCH_RESULTS}. Defaults to 8.`
-    })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(8)))
-})
-
-const ListChangesSinceSchema = Schema.String.pipe(
-  Schema.annotateEncoded({
-    description: "Inclusive ISO-8601 timestamp with an explicit zone."
-  }),
-  Schema.decodeTo(IsoDateTimeStringSchema)
-)
-
-const ListChangesParametersSchema = Schema.Struct({
-  since: ListChangesSinceSchema,
-  offset: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_CHANGE_OFFSET }))
-    .annotate({ description: "Zero-based commit offset. Defaults to 0." })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(0))),
-  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_CHANGE_ENTRIES }))
-    .annotate({
-      description: `Maximum commits to return, from 1 to ${MAX_CHANGE_ENTRIES}. Defaults to 100.`
-    })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(100)))
-})
-
-const CreateDirectoryParametersSchema = Schema.Struct({
-  path: Schema.NonEmptyString.check(Schema.isMaxLength(4_096)).annotate({
-    description:
-      "Relative POSIX directory path without a trailing slash, such as 'people' or 'projects/research'."
-  }),
-  body: Schema.NonEmptyString.check(Schema.isMaxLength(MAX_WIKI_CONTENT_CHARS)).annotate({
-    description:
-      "Complete Markdown contract containing exact ## Purpose, ## Producers, ## Consumers, ## Boundaries, and ## Retention headings with nonempty sections. Add ## Records to describe filenames, dates/timezone, source pointers and lookup conventions."
-  })
-})
-
-const LinksParametersSchema = Schema.Struct({
-  path: MergedWikiPathSchema,
-  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_LINKS }))
-    .annotate({
-      description: `Maximum links to return in each list (outgoing and backlinks), from 1 to ${MAX_LINKS}. Defaults to 100.`
-    })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(100)))
-})
-
-const PatchParametersSchema = Schema.Struct({
-  path: ActiveWikiPathSchema,
-  old_text: Schema.NonEmptyString.check(Schema.isMaxLength(MAX_WIKI_CONTENT_CHARS)).annotate({
-    description: "Exact current body text to replace. It must occur exactly once."
-  }),
-  new_text: Schema.String.check(Schema.isMaxLength(MAX_WIKI_CONTENT_CHARS)).annotate({
-    description: "Literal replacement text. Empty removes the matched text."
-  })
-})
-
-const MoveParametersSchema = Schema.Struct({
-  path: ActiveWikiPathSchema,
-  new_path: Schema.NonEmptyString.check(Schema.isMinLength(4), Schema.isMaxLength(4_096)).annotate({
-    description:
-      "New relative POSIX .md path. Page identity, title, aliases, metadata, and body stay unchanged."
-  })
-})
-
-const exactOccurrences = (body: string, text: string): number => body.split(text).length - 1
-
-const patchedBody = (
-  record: PageRecord,
-  input: { readonly old_text: string; readonly new_text: string }
-): string => {
-  const occurrences = exactOccurrences(record.page.body, input.old_text)
-  if (occurrences !== 1) {
-    throw new ToolExecutionError(
-      occurrences === 0
-        ? "old_text was not found in the current Memory page body."
-        : `old_text matches ${occurrences} places in the current Memory page body.`,
-      { preview: "Patch not applied", retryable: false }
-    )
-  }
-  const body = record.page.body.replace(input.old_text, () => input.new_text)
-  if (body.trim().length === 0) {
-    throw new ToolExecutionError(
-      "A Memory page must retain content. Archive it to remove the page.",
-      {
-        preview: "Patch not applied",
-        retryable: false
-      }
-    )
-  }
-  return body
-}
-
-const directoryOutcome = (
-  directory: string,
-  pagePath: string,
-  changed: boolean,
-  adopted: boolean
-): { readonly result: string; readonly preview: string } => {
-  if (!changed) {
-    return {
-      result: `Wiki directory ${directory}/ already has the requested contract.`,
-      preview: "Wiki directory unchanged"
-    }
-  }
-  if (adopted) {
-    return {
-      result: `Opened ${directory}.md as ${pagePath} with the same page identity and history.`,
-      preview: "Wiki directory opened"
-    }
-  }
-  return {
-    result: `Created Wiki directory ${directory}/ with contract ${pagePath}.`,
-    preview: "Wiki directory created"
-  }
-}
-
-const linkData = (link: WikiLink, paths: ReadonlyMap<string, string>) => {
-  const targetPageId = link.status === WIKI_LINK_STATUS.resolved ? link.targetPageId : null
-  return {
-    source_page_id: link.sourcePageId,
-    source_path: paths.get(link.sourcePageId) ?? null,
-    target: link.target,
-    alias: link.label.kind === WIKI_LINK_LABEL.alias ? link.label.alias : null,
-    heading: link.anchor.kind === WIKI_LINK_ANCHOR.heading ? link.anchor.heading : null,
-    status: link.status,
-    target_page_id: targetPageId,
-    target_path: targetPageId === null ? null : (paths.get(targetPageId) ?? null)
-  }
-}
+import { WIKI_PAGE_BUDGET_CHARS } from "./wiki-schemas.js"
+import {
+  CreateDirectoryParametersSchema,
+  LinksParametersSchema,
+  ListChangesParametersSchema,
+  MoveParametersSchema,
+  PatchParametersSchema,
+  SearchParametersSchema
+} from "./wiki-operation-parameters.js"
+import { directoryOutcome, linkData, patchedBody } from "./wiki-operation-results.js"
 
 interface WikiOperationDeps {
   readonly wiki: Wiki["Service"]
@@ -218,7 +65,6 @@ const makeWikiOperationTools = ({
     },
     execute: async (input, ctx) => {
       const snapshot = await loadSnapshot(wiki, ctx.signal)
-      // Search by meaning is extra: when it is off or fails, words and phrases still find pages.
       const semantic = await Effect.runPromise(
         embeddings.search(snapshot, input.query).pipe(Effect.catchCause(() => Effect.succeed([]))),
         { signal: ctx.signal }

@@ -1,6 +1,5 @@
 import type { Migration } from "./index.js"
 
-/** When a user Automation paused by its provider is tried again, and how many tries it has had. */
 export const automationAutoResume: Migration = {
   version: 173,
   name: "automation_auto_resume",

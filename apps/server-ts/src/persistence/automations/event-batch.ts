@@ -88,8 +88,11 @@ export const screenedBatch = (
   }
 }
 
+export const RUN_EVENTS_SOURCE = { thisRun: "this_run", latestInChat: "latest_in_chat" } as const
+type RunEventsSource = (typeof RUN_EVENTS_SOURCE)[keyof typeof RUN_EVENTS_SOURCE]
+
 export interface RunEvents {
-  readonly run: "this_run" | "latest_in_chat"
+  readonly run: RunEventsSource
   readonly startedAt: string
   readonly events: ReadonlyArray<BatchedEvent>
 }

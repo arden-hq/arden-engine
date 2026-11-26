@@ -7,8 +7,8 @@ import { AutomationStoreError } from "../automations/store.js"
 import type { AutomationDiagnostics, QueueRow, ScheduleRow } from "../automations/diagnostics.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { decodeOwner, hasOwner, ownerJoin, ownerJson, type WorkOwner } from "./automation-rows.js"
-import { internalRef } from "./space-jobs.js"
-import { spaceJobId } from "../space-job-id.js"
+import { internalRef } from "./space-job-types.js"
+import { JOB_SUBJECT_KIND, spaceJobId } from "../space-job-id.js"
 
 const shownOwner = (
   owner: WorkOwner,
@@ -18,7 +18,7 @@ const shownOwner = (
   "automation_ref" | "name" | "enabled" | "held_by_worker_since" | "session_id"
 > => {
   switch (owner.kind) {
-    case "automation":
+    case JOB_SUBJECT_KIND.automation:
       return {
         automation_ref: owner.authored.ref,
         name: owner.authored.name,
@@ -26,7 +26,7 @@ const shownOwner = (
         held_by_worker_since: owner.state.heldSince,
         session_id: owner.authored.chatId
       }
-    case "space_review":
+    case JOB_SUBJECT_KIND.spaceReview:
       return {
         automation_ref: internalRef(owner.key),
         name: owner.name,
@@ -34,7 +34,7 @@ const shownOwner = (
         held_by_worker_since: holdStartedAt,
         session_id: owner.chatId
       }
-    case "task":
+    case JOB_SUBJECT_KIND.task:
       return {
         automation_ref: internalRef(owner.key),
         name: owner.text,

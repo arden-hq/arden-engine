@@ -1,10 +1,16 @@
-import type { WikiArchiveResponse, WikiPage } from "@arden-hq/protocol/wiki"
+import { RESOURCE_STATE } from "@arden-hq/revisions/effect"
+import {
+  WIKI_PAGE_LIFECYCLE,
+  type WikiArchiveResponse,
+  type WikiPage
+} from "@arden-hq/protocol/wiki"
 import { type Array as Arr, Effect, Semaphore } from "effect"
 import { randomUUID } from "node:crypto"
 
 import type { PersistedSpace, SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
 import type { WikiLocationAuthority } from "./authority.js"
-import { archivePage, mergePage, newPage, type WikiCommitIdentity, updatePage } from "./commit.js"
+import { archivePage, mergePage, newPage, updatePage } from "./commit.js"
+import { type WikiCommitIdentity } from "./origin.js"
 import {
   ensureWikiSpacePage,
   logNoSpacePage,
@@ -25,7 +31,6 @@ interface WikiPageEdit {
 }
 
 interface WikiUpdateInput {
-  /** Saved in one commit: every page or none. */
   readonly edits: Arr.NonEmptyReadonlyArray<WikiPageEdit>
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
@@ -73,7 +78,6 @@ export interface WikiMutationMethods {
     { readonly space: PersistedSpace; readonly created: WikiPage | undefined } | undefined,
     WikiError
   >
-  /** Gives every active Space a page, and counts what that took. */
   readonly ensureSpacePages: () => Effect.Effect<SpacePageCounts, WikiError>
   readonly restoreSpace: (
     spaceId: string
@@ -212,7 +216,7 @@ export const makeWikiMutationMethods = (
           return commit === undefined ||
             archived === undefined ||
             archived === null ||
-            archived.state !== "archived"
+            archived.state !== RESOURCE_STATE.archived
             ? wikiError("archive", "corrupt", "Archive commit did not contain the page", {
                 pageId: input.pageId
               })
@@ -234,7 +238,8 @@ export const makeWikiMutationMethods = (
           const current = yield* pageIn("merge", snapshot, input.pageId)
           const target = snapshot.wholeSet.find(
             (record) =>
-              record.page.pageId === input.targetPageId && record.page.lifecycle === "active"
+              record.page.pageId === input.targetPageId &&
+              record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
           )
           if (target === undefined || target.page.pageId === input.pageId) {
             return yield* wikiError(

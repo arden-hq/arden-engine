@@ -1,77 +1,105 @@
 import { Schema } from "effect"
+import {
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_LIST,
+  PERMISSION_RULE_SUBJECT
+} from "@arden-hq/protocol/permissions"
+import { TOOL_APPROVAL_OVERRIDE } from "@arden-hq/protocol/tools"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
 import { CommandPolicyRuleSchema, type CommandPolicyRule } from "./command-policy.js"
-import { RuleSubjectSchema, type RuleDecision, type RuleList, type RuleSubject } from "./rules.js"
+import { RULE_REMOVAL, RuleSubjectSchema, type RuleList, type RuleSubject } from "./rules.js"
+
+const OFFER_CHOICE = {
+  chat: "chat",
+  space: "space",
+  automation: "automation",
+  system: "system",
+  everywhere: "everywhere"
+} as const
 
 export const OfferChoiceSchema = Schema.Struct({
-  id: Schema.Literals(["chat", "space", "automation", "system", "everywhere"]),
+  id: Schema.Literals(Object.values(OFFER_CHOICE)),
   principal: Schema.NullOr(Schema.String),
   label: Schema.String,
   detail: Schema.String
 })
 export type OfferChoice = typeof OfferChoiceSchema.Type
 
+export const PERMISSION_CHANGE = {
+  tool: "tool",
+  site: "site",
+  connector: "connector",
+  mode: "mode",
+  command: "command",
+  words: "words",
+  path: "path",
+  rule: "rule"
+} as const
+
+const RuleDecisionSchema = Schema.Literals(Object.values(PERMISSION_RULE_DECISION))
+
 export const PermissionChangeSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("tool"),
+    kind: Schema.Literal(PERMISSION_CHANGE.tool),
     tool: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
-    decision: Schema.Literals(["approve", "ask", "deny"])
+    decision: Schema.Literals(Object.values(TOOL_APPROVAL_OVERRIDE))
   }),
   Schema.Struct({
-    kind: Schema.Literal("site"),
+    kind: Schema.Literal(PERMISSION_CHANGE.site),
     tool: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
     origin: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
   }),
   Schema.Struct({
-    kind: Schema.Literal("connector"),
+    kind: Schema.Literal(PERMISSION_CHANGE.connector),
     server: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
   }),
-  Schema.Struct({ kind: Schema.Literal("mode"), mode: ApprovalModeSchema }),
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_CHANGE.mode), mode: ApprovalModeSchema }),
   Schema.Struct({
-    kind: Schema.Literal("command"),
+    kind: Schema.Literal(PERMISSION_CHANGE.command),
     rules: Schema.Array(CommandPolicyRuleSchema).check(
       Schema.isMinLength(1),
       Schema.isMaxLength(16)
     )
   }),
   Schema.Struct({
-    kind: Schema.Literal("words"),
+    kind: Schema.Literal(PERMISSION_CHANGE.words),
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
-    decision: Schema.Literals(["allow", "ask", "never"]),
+    decision: RuleDecisionSchema,
     rules: Schema.optionalKey(
       Schema.Array(
         Schema.Struct({
           subject: RuleSubjectSchema,
-          decision: Schema.Literals(["allow", "ask", "never"])
+          decision: RuleDecisionSchema
         })
       ).check(Schema.isMaxLength(16))
     )
   }),
   Schema.Struct({
-    kind: Schema.Literal("path"),
+    kind: Schema.Literal(PERMISSION_CHANGE.path),
     path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
-    access: Schema.Literals(["read", "change"]),
-    decision: Schema.Literals(["allow", "never"])
+    access: Schema.Literals(Object.values(PERMISSION_PATH_ACCESS)),
+    decision: Schema.Literals([PERMISSION_RULE_DECISION.allow, PERMISSION_RULE_DECISION.never])
   }),
   Schema.Struct({
-    kind: Schema.Literal("rule"),
+    kind: Schema.Literal(PERMISSION_CHANGE.rule),
     ruleId: Schema.NonEmptyString,
-    decision: Schema.Literals(["allow", "ask", "never", "remove"])
+    decision: Schema.Literals([...Object.values(PERMISSION_RULE_DECISION), RULE_REMOVAL])
   })
 ])
 export type PermissionChange = typeof PermissionChangeSchema.Type
 
 export const changeJson = (change: PermissionChange): string => {
   switch (change.kind) {
-    case "tool":
+    case PERMISSION_CHANGE.tool:
       return JSON.stringify({ kind: change.kind, tool: change.tool, decision: change.decision })
-    case "site":
+    case PERMISSION_CHANGE.site:
       return JSON.stringify({ kind: change.kind, tool: change.tool, origin: change.origin })
-    case "connector":
+    case PERMISSION_CHANGE.connector:
       return JSON.stringify({ kind: change.kind, server: change.server })
-    case "mode":
+    case PERMISSION_CHANGE.mode:
       return JSON.stringify({ kind: change.kind, mode: change.mode })
-    case "command":
+    case PERMISSION_CHANGE.command:
       return JSON.stringify({
         kind: change.kind,
         rules: change.rules.map((rule) => ({
@@ -80,16 +108,16 @@ export const changeJson = (change: PermissionChange): string => {
           display_prefix: rule.display_prefix
         }))
       })
-    case "words":
+    case PERMISSION_CHANGE.words:
       return JSON.stringify({
         kind: change.kind,
         text: change.text,
         decision: change.decision,
         rules: change.rules
       })
-    case "rule":
+    case PERMISSION_CHANGE.rule:
       return JSON.stringify({ kind: change.kind, ruleId: change.ruleId, decision: change.decision })
-    case "path":
+    case PERMISSION_CHANGE.path:
       return JSON.stringify({
         kind: change.kind,
         path: change.path,
@@ -103,7 +131,7 @@ export const commandSubjects = (
   rules: ReadonlyArray<CommandPolicyRule>
 ): ReadonlyArray<RuleSubject> =>
   rules.map((rule) => ({
-    kind: "command",
+    kind: PERMISSION_RULE_SUBJECT.command,
     executable: rule.executable_path,
     argumentPrefix: rule.argument_prefix
   }))
@@ -113,46 +141,48 @@ export const allowSubjects = (
   serverName: string | null
 ): ReadonlyArray<RuleSubject> | undefined => {
   switch (change.kind) {
-    case "tool":
-      return change.decision === "approve"
-        ? [{ kind: "tool", tool: change.tool, server: serverName }]
+    case PERMISSION_CHANGE.tool:
+      return change.decision === TOOL_APPROVAL_OVERRIDE.approve
+        ? [{ kind: PERMISSION_RULE_SUBJECT.tool, tool: change.tool, server: serverName }]
         : undefined
-    case "site":
-      return [{ kind: "site", tool: change.tool, origin: change.origin }]
-    case "connector":
-      return [{ kind: "connector", server: change.server }]
-    case "command":
+    case PERMISSION_CHANGE.site:
+      return [{ kind: PERMISSION_RULE_SUBJECT.site, tool: change.tool, origin: change.origin }]
+    case PERMISSION_CHANGE.connector:
+      return [{ kind: PERMISSION_RULE_SUBJECT.connector, server: change.server }]
+    case PERMISSION_CHANGE.command:
       return commandSubjects(change.rules)
-    case "path":
-      return change.decision === "allow"
-        ? [{ kind: "path", path: change.path, access: change.access }]
+    case PERMISSION_CHANGE.path:
+      return change.decision === PERMISSION_RULE_DECISION.allow
+        ? [{ kind: PERMISSION_RULE_SUBJECT.path, path: change.path, access: change.access }]
         : undefined
-    case "mode":
-    case "words":
-    case "rule":
+    case PERMISSION_CHANGE.mode:
+    case PERMISSION_CHANGE.words:
+    case PERMISSION_CHANGE.rule:
       return undefined
   }
 }
 
 export const offerChoiceList = (choice: OfferChoice): RuleList | undefined => {
   switch (choice.id) {
-    case "everywhere":
-      return { kind: "global" }
-    case "system":
-      return { kind: "system" }
-    case "space":
+    case OFFER_CHOICE.everywhere:
+      return { kind: PERMISSION_RULE_LIST.global }
+    case OFFER_CHOICE.system:
+      return { kind: PERMISSION_RULE_LIST.system }
+    case OFFER_CHOICE.space:
       return choice.principal?.startsWith("space:") === true
-        ? { kind: "space", spaceId: choice.principal.slice("space:".length) }
+        ? { kind: PERMISSION_RULE_LIST.space, spaceId: choice.principal.slice("space:".length) }
         : undefined
-    case "chat":
-    case "automation":
+    case OFFER_CHOICE.chat:
+    case OFFER_CHOICE.automation:
       return undefined
   }
 }
 
-export type RuleChange = RuleDecision | "remove"
+export const OFFER_SOURCE = { message: "message", approvals: "approvals" } as const
 
-export type OfferSource = { readonly kind: "message" } | { readonly kind: "approvals" }
+export type OfferSource =
+  | { readonly kind: typeof OFFER_SOURCE.message }
+  | { readonly kind: typeof OFFER_SOURCE.approvals }
 
 export interface PermissionOfferRecord {
   readonly change: PermissionChange

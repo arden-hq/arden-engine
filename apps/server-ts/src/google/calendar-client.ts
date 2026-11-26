@@ -37,14 +37,28 @@ export const CalendarListSchema = Schema.Struct({
   nextPageToken: Schema.optionalKey(Schema.String)
 })
 
+const CALENDAR_ACCESS_ROLE = {
+  freeBusyReader: "freeBusyReader",
+  reader: "reader",
+  writer: "writer",
+  owner: "owner"
+} as const
+
+type CalendarAccessRole = (typeof CALENDAR_ACCESS_ROLE)[keyof typeof CALENDAR_ACCESS_ROLE]
+
+const WRITE_ROLES: ReadonlySet<string | undefined> = new Set<CalendarAccessRole>([
+  CALENDAR_ACCESS_ROLE.owner,
+  CALENDAR_ACCESS_ROLE.writer
+])
+
 export const canWriteCalendar = (accessRole: string | undefined): boolean =>
-  accessRole === "owner" || accessRole === "writer"
+  WRITE_ROLES.has(accessRole)
 
 export const isWatchedCalendar = (entry: CalendarListEntry): boolean =>
   entry.primary !== true &&
   entry.deleted !== true &&
   entry.selected === true &&
-  (canWriteCalendar(entry.accessRole) || entry.accessRole === "reader")
+  (canWriteCalendar(entry.accessRole) || entry.accessRole === CALENDAR_ACCESS_ROLE.reader)
 
 export interface CalendarEventListQuery {
   readonly timeMin: string
@@ -116,18 +130,21 @@ const CalendarEventSchema = Schema.Struct({
 })
 export type CalendarListedEvent = (typeof CalendarEventSchema)["Type"]
 
+const CALENDAR_EVENT_STATUS = {
+  confirmed: "confirmed",
+  tentative: "tentative",
+  cancelled: "cancelled"
+} as const
+
+export const isCancelledStatus = (
+  status: string | undefined
+): status is typeof CALENDAR_EVENT_STATUS.cancelled => status === CALENDAR_EVENT_STATUS.cancelled
+
 export const CalendarEventListSchema = Schema.Struct({
   items: Schema.optionalKey(Schema.Array(CalendarEventSchema)),
   nextPageToken: Schema.optionalKey(Schema.String)
 })
 
-/**
- * One page of incremental sync. Without `syncToken` it is the first full read
- * from `timeMin`; with it, only what changed since that token, cancelled
- * events included. Google refuses `timeMin`, `orderBy` and the other filters
- * next to a sync token, so neither request sets more than the first read's
- * lower bound; a recurring series comes as one event, not expanded.
- */
 export const calendarSyncUrl = (
   query: ({ readonly syncToken: string } | { readonly timeMin: string }) & {
     readonly pageToken: string | undefined

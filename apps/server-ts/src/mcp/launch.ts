@@ -1,20 +1,15 @@
 import { access, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
+import { CLI_TOOLS_PATH_SOURCE } from "@arden-hq/protocol/cli-tools"
+import { MCP_TRANSPORT } from "@arden-hq/protocol/mcp"
 
 import type { McpStoredTransport } from "../persistence/mcp/store.js"
 import { withSafeGit } from "../runtime/git-environment.js"
 import { mergePath } from "../runtime/login-shell-path.js"
 import { locateExecutable } from "../runtime/which.js"
-import { McpStartFailure } from "./failure.js"
+import { MCP_FAILURE_REASON, McpStartFailure } from "./failure.js"
 
-/**
- * The only variables a local server inherits from Arden: who and where the
- * person is, their locale and temp folder (npx and uv keep caches there), and
- * the CA bundles and the system-certificate switch a corporate proxy needs
- * (the desktop sets NODE_USE_SYSTEM_CA for the server). Never Arden's own settings or
- * provider keys. The server's saved environment comes on top.
- */
 const INHERITED_VARIABLES = [
   "HOME",
   "LOGNAME",
@@ -31,10 +26,12 @@ const INHERITED_VARIABLES = [
   "NODE_USE_SYSTEM_CA"
 ] as const
 
-/** Keeps npm from printing update notices around a server's JSON-RPC stream. */
-const QUIET_VARIABLES = { NO_UPDATE_NOTIFIER: "1", npm_config_update_notifier: "false" } as const
+const QUIET_VARIABLES: McpStdioLaunch["environment"] = {
+  NO_UPDATE_NOTIFIER: "1",
+  npm_config_update_notifier: "false"
+}
 
-type StdioTransport = Extract<McpStoredTransport, { readonly type: "stdio" }>
+type StdioTransport = Extract<McpStoredTransport, { readonly type: typeof MCP_TRANSPORT.stdio }>
 
 export interface McpStdioLaunch {
   readonly executable: string
@@ -58,7 +55,8 @@ export const prepareMcpStdioLaunch = async ({
   readonly home?: string
 }): Promise<McpStdioLaunch> => {
   const cwd = transport.cwd ?? home
-  if (!(await isFolder(cwd))) throw new McpStartFailure({ reason: "bad_folder", folder: cwd })
+  if (!(await isFolder(cwd)))
+    throw new McpStartFailure({ reason: MCP_FAILURE_REASON.badFolder, folder: cwd })
   const searchPath = secrets["PATH"] ?? mergePath(loginPath, inherited["PATH"])
   const command = transport.command.includes("/")
     ? resolve(cwd, transport.command)
@@ -74,11 +72,6 @@ export const prepareMcpStdioLaunch = async ({
   }
 }
 
-/**
- * The allowlisted variables, then the saved secrets, then a PATH that starts
- * with the program's own folder, so `npx`'s `#!/usr/bin/env node` finds the
- * Node it was installed with (nvm, volta, fnm, asdf).
- */
 const mcpStdioEnvironment = ({
   inherited,
   searchPath,
@@ -115,11 +108,14 @@ const missingCommand = async (
     : false
   return new McpStartFailure(
     exists
-      ? { reason: "not_executable", path: resolved }
+      ? { reason: MCP_FAILURE_REASON.notExecutable, path: resolved }
       : {
-          reason: "command_not_found",
+          reason: MCP_FAILURE_REASON.commandNotFound,
           command,
-          pathSource: loginPath === undefined ? "process" : "login_shell"
+          pathSource:
+            loginPath === undefined
+              ? CLI_TOOLS_PATH_SOURCE.process
+              : CLI_TOOLS_PATH_SOURCE.loginShell
         }
   )
 }

@@ -101,7 +101,6 @@ export function readHtml(
     image.setAttribute("alt", title ?? "")
     document.body.insertBefore(image, document.body.firstChild)
   }
-  // Normalize bare/whitespace-prefixed pre blocks to Turndown's fenced-code rule.
   for (const node of Array.from(document.querySelectorAll("pre"))) {
     const code = document.createElement("code")
     const language = node.querySelector("code")?.getAttribute("class")

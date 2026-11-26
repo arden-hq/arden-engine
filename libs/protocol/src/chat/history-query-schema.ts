@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { withExtras } from "../common/schema.js"
-import { HISTORY_WINDOW } from "./contracts.js"
+import { HISTORY_WINDOW, TURN_WORK_VIEW } from "./contracts.js"
 
 const historyLimitSchema = Schema.NumberFromString.check(
   Schema.isInt(),
@@ -29,7 +29,7 @@ export const HistoryQuerySchema = Schema.Union(
   )
 )
 
-export const TurnWorkViewSchema = Schema.Literals(["full", "compact"] as const)
+export const TurnWorkViewSchema = Schema.Literals(Object.values(TURN_WORK_VIEW))
 
 export const TurnWorkQuerySchema = Schema.Union(
   turnWorkWindowQueries.map((window) =>

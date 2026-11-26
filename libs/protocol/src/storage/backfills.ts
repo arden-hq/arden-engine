@@ -2,7 +2,6 @@ import { Schema } from "effect"
 import { decoderFor } from "../common/boundary.js"
 import { NonNegativeIntSchema } from "../common/schema.js"
 
-/** One background data backfill: rows converted so far and rows still in the old shape. */
 export interface StorageBackfill {
   readonly name: string
   readonly converted: number

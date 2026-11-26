@@ -52,7 +52,6 @@ const ownerLines = (
 
 const clipped = (text: string): string => cutText(text, MAX_MESSAGE_CHARS, { suffix: " [… cut]" })
 
-/** The recital of the owner's latest words among `messages`, `owned` naming which those are. */
 export const renderOwnerInstructions = (
   messages: ReadonlyArray<ChatMessage>,
   owned: ReadonlySet<string>

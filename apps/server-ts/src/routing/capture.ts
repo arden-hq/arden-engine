@@ -12,21 +12,23 @@ import {
   type RouterCandidates
 } from "./candidates.js"
 
+export const ROUTER_DECISION = { move: "move", space: "space", keep: "keep" } as const
+
 export type RouterDecision =
   | {
-      readonly kind: "move"
+      readonly kind: typeof ROUTER_DECISION.move
       readonly sessionId: string
       readonly name: string
       readonly line: string
     }
   | {
-      readonly kind: "space"
+      readonly kind: typeof ROUTER_DECISION.space
       readonly spaceId: string
       readonly spaceName: string
       readonly line: string
       readonly later: ReadonlyArray<{ readonly spaceId: string; readonly spaceName: string }>
     }
-  | { readonly kind: "keep" }
+  | { readonly kind: typeof ROUTER_DECISION.keep }
 
 const decideRoute = (value: string, candidates: RouterCandidates): RouterDecision => {
   const line = "Added your screenshot."

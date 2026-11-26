@@ -27,10 +27,6 @@ export interface ContextExperiments {
   readonly report: (sessionId: string) => ContextExperimentReport
 }
 
-/**
- * `base` is what a run takes into its prompt when its chat has no selection of
- * its own: everything, unless the server was started with Memory off.
- */
 export const makeContextExperiments = (
   clock: () => number = () => performance.now(),
   base: ContextSelection = fullContext
@@ -121,7 +117,6 @@ export const ContextExperiments = Context.Reference<ReturnType<typeof makeContex
   "@arden-hq/server/ContextExperiments",
   { defaultValue: () => makeContextExperiments() }
 )
-/** `memory: false` keeps Memory recall and related chats out of every prompt. */
 export const contextExperimentsLayer = (memory: boolean): Layer.Layer<never, never, never> =>
   Layer.sync(ContextExperiments, () =>
     makeContextExperiments(

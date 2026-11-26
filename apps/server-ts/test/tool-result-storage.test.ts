@@ -4,8 +4,7 @@ import type { ToolResult } from "@arden-hq/loop"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { mkdtemp, readdir, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it } from "vitest"
@@ -13,13 +12,11 @@ import { describe, expect, it } from "vitest"
 import { ConversationArtifacts } from "../src/artifacts/conversation.js"
 import { ManagedOutputs } from "../src/artifacts/managed-output/managed-output.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
-import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { makeToolResultObjects } from "../src/persistence/managed-output/tool-result-objects.js"
 import { ToolResultObjects } from "../src/persistence/managed-output/tool-result-objects.js"
 import { computerStepStates } from "../src/persistence/migrations/0192_computer_step_states.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
-import { SessionStore } from "../src/persistence/sessions/store.js"
 import { deleteSessionTree } from "../src/persistence/sqlite/session-tree-deletion.js"
 import { readScriptExecutions } from "../src/persistence/sqlite/script-executions.js"
 import { settleTerminalToolsInTransaction } from "../src/persistence/sqlite/tool-terminal.js"
@@ -30,72 +27,16 @@ import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-laye
 import { SessionFileCleanup } from "../src/storage/session-file-cleanup.js"
 import { inUnitOfWork } from "./fixtures/unit-of-work.js"
 
-const IMAGE = {
-  type: "image",
-  media_type: "image/png",
-  data: "iVBORw0KGgo".repeat(2_000)
-} as const
-
-const sqlFields = {
-  applied_change: {
-    type: "file_edit",
-    patch: `+${"line\n".repeat(700)}`,
-    truncated: false
-  },
-  attachment_id: "attachment-1",
-  automation_ref: "automation-1",
-  comment: { comment_id: "comment-1", body: "c".repeat(3_000) },
-  decision: "propose",
-  exit_code: 0,
-  final_url: "https://example.com/final",
-  finish_check: { item_id: "item-1", closed: 0, note: "n".repeat(3_000) },
-  outcome: "done",
-  proposal: { proposal_id: "proposal-1", body: "p".repeat(3_000) },
-  requested_url: "https://example.com/start",
-  source_refs: Array.from({ length: 40 }, (_, index) => ({
-    ref: `https://example.com/${index}`,
-    title: "t".repeat(100)
-  }))
-}
-
-const largeResult: ToolResult = {
-  content: `${"Résumé of the page, line by line.\n".repeat(1_500)}🙂 end`,
-  preview: "Read the page",
-  is_error: false,
-  retryable: null,
-  data: { ...sqlFields, text: "x".repeat(30_000), small: 1 },
-  host: {
-    refusal: { reason: "r".repeat(3_000) },
-    mutation_receipt: { outcome: "applied", detail: "d".repeat(3_000) }
-  },
-  model_content: [IMAGE]
-}
-
-const smallResult: ToolResult = {
-  content: "Done",
-  preview: "Done",
-  is_error: false,
-  data: { exit_code: 0 }
-}
-
-interface Rig {
-  readonly directory: string
-  readonly filename: string
-  readonly outputs: string
-}
-
-const withRig = async (body: (rig: Rig) => Promise<void>): Promise<void> => {
-  const directory = await mkdtemp(path.join(tmpdir(), "arden-tool-results-"))
-  try {
-    await body({
-      directory,
-      filename: path.join(directory, "arden.db"),
-      outputs: path.join(directory, "managed-outputs")
-    })
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-}
+import {
+  IMAGE,
+  identityOf,
+  largeResult,
+  smallResult,
+  sqlFields,
+  startRun,
+  withRig,
+  type Rig
+} from "./tool-result-storage-fixtures.js"
 
 const storage = (rig: Rig, { slim }: { readonly slim: boolean }) =>
   Layer.merge(
@@ -106,47 +47,6 @@ const storage = (rig: Rig, { slim }: { readonly slim: boolean }) =>
     }).pipe(Layer.provide(PersistenceWriteQueue.layer)),
     SqliteClient.layer({ filename: rig.filename })
   )
-
-const startRun = Effect.gen(function* () {
-  const chat = yield* ChatWriteStore
-  const sessions = yield* SessionStore
-  const session = yield* sessions.create({ name: "Tool results" })
-  const started = yield* chat.start({
-    sessionId: session.sessionId,
-    clientId: "client-1",
-    requestHash: "hash-1",
-    assistantMessageId: "assistant-1",
-    message: {
-      message_id: "client-1",
-      client_id: "client-1",
-      role: ROLE.user,
-      content: "Read the page",
-      created_at: "2026-11-13T00:00:00.000Z"
-    }
-  })
-  if (started._tag !== "Started") return yield* Effect.die("run did not start")
-  const sql = yield* SqlClient.SqlClient
-  const turns = yield* sql<{ readonly turn_id: string }>`
-    SELECT json_extract(metadata_json, '$.turn_id') AS turn_id FROM chat_runs
-    WHERE run_id = ${started.runId}`
-  return {
-    sessionId: session.sessionId,
-    runId: started.runId,
-    turnId: turns[0]?.turn_id ?? ""
-  }
-})
-
-const identityOf = (
-  run: { readonly sessionId: string; readonly runId: string },
-  toolCallId: string
-): ToolExecutionIdentity => ({
-  runId: run.runId,
-  sessionId: run.sessionId,
-  toolCallId,
-  toolName: "web_fetch",
-  arguments: { url: "https://example.com/start" },
-  changesState: false
-})
 
 const settle = (identity: ToolExecutionIdentity, result: ToolResult) =>
   Effect.gen(function* () {

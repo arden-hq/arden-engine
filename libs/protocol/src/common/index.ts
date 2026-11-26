@@ -1,5 +1,6 @@
 export type { Agrees, Assert } from "./type-agreement.js"
 export { parseJsonBody, parseJsonText, parseJsonTextOrUndefined } from "./json-text.js"
+export { isRelativePathSegment, QUERY_BOOLEAN, queryFlag, type QueryBoolean } from "./routes.js"
 export {
   AUTOMATION_DESTINATION,
   MEMORY_DESTINATION,

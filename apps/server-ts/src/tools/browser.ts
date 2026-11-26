@@ -1,25 +1,15 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { PermissionRules } from "../persistence/permissions/rules.js"
 import { Effect, Option, Schema } from "effect"
-import {
-  actApprovalPresentation,
-  approvalTarget,
-  decodeTargetSeen,
-  targetLabel
-} from "./browser-card.js"
 
-import type { BrowserElement } from "./action-targets.js"
 import { bodyFields } from "./code-mode-result.js"
 import { DataRoot } from "../runtime/data-root.js"
-import type { JsonObject } from "../persistence/json.js"
-import { splitUiTarget } from "./ui-target.js"
 import { defineServerTool, type ServerTool, type ServerToolMetadataInput } from "./define.js"
 import { waivesRequirement } from "../execution/decide.js"
 import { withBrowserProcedures } from "../browser/procedures/discovery.js"
 import { BrowserProcedures } from "../browser/procedures/service.js"
 import { PAGE_TEXT_MAX_CHARS } from "../persistence/browser-procedures/model.js"
 import { INERT, OUTWARD } from "../execution/impact.js"
-import { actImpact } from "./input-impact.js"
 import { BrowserClient, type BrowserOutput } from "../browser/service.js"
 import { ConversationArtifacts } from "../artifacts/conversation.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
@@ -28,44 +18,22 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import type { LocalPathServices } from "../storage/local-paths.js"
 import { localPages } from "./browser-local-page.js"
 import { preserveBrowserScreenshot } from "./browser-screenshot.js"
-import { readPage, withPageAfter, withPageRead } from "./browser-page.js"
-import type { BrowserObservationRegistry, ServerRunContext } from "./run-context.js"
+import { readPage, withPageRead } from "./browser-page.js"
+import { browserOutput, runBrowserForRun, TabRefSchema } from "./browser-support.js"
 import {
-  browserOutput,
-  claimObservedRevision,
-  requireObservedRevision,
-  runBrowserForRun,
-  TabRefSchema
-} from "./browser-support.js"
-import {
-  ActParametersSchema,
   EmptyParametersSchema,
   OpenParametersSchema,
   ScreenshotParametersSchema,
   SnapshotParametersSchema,
   WaitParametersSchema
 } from "./browser-parameters.js"
-
-const isActionApproval = Schema.is(
-  Schema.Struct({
-    tab_ref: Schema.String,
-    profile_ref: Schema.String,
-    origin: Schema.String,
-    action: Schema.String,
-    expected_revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-  })
-)
+import { makeBrowserActTool } from "./browser-act.js"
+import type { BrowserObservationRegistry, ServerRunContext } from "./run-context.js"
 
 const OpenedTabSchema = Schema.Struct({ tab: Schema.Struct({ tab_ref: Schema.String }) })
 
 const openedTab = (output: BrowserOutput): string | undefined =>
   Option.getOrUndefined(Schema.decodeUnknownOption(OpenedTabSchema)(output.data))?.tab.tab_ref
-
-const mayNavigate = (input: typeof ActParametersSchema.Type): boolean =>
-  input.action === "click" ||
-  input.action === "dblclick" ||
-  input.action === "select" ||
-  (input.action === "press" && /enter$/iu.test(input.value ?? ""))
 
 const OPEN_METADATA = {
   effect: "external",
@@ -311,129 +279,7 @@ const makeBrowserTools = ({
           imageInput: ctx.run.imageInput
         })
     }),
-    defineServerTool({
-      name: "browser_act",
-      summary: "Clicks, types and scrolls on a browser page.",
-      discovery: { group: "web_browser" },
-      description: [
-        "Perform exactly one browser action authorized by the latest interactive snapshot of the same tab.",
-        "To enter a password, fill with secret (a name from browser_ask_secret), never value. A saved card is typed only by vault_checkout, never with value.",
-        "The tab's profile and origin must still match; once an approved action begins, its snapshot is consumed even if execution fails.",
-        "It returns the page after the action as a fresh interactive snapshot, which authorizes the next browser_act; do not take another one.",
-        "If the outcome is unknown, inspect before retrying."
-      ].join(" "),
-      parameters: Schema.toStandardSchemaV1(ActParametersSchema),
-      impact: actImpact,
-      site: (input) => input.origin,
-      metadata: {
-        effect: "external",
-        display_name: "Use browser",
-        kind: "browser",
-        action: "execute",
-        approval_preview: "Perform this browser action.",
-        source: "_browser",
-        changes_state: true,
-        target: "reported",
-        concurrency_group: "browser",
-        destructive: false,
-        default_approval: "ask",
-        refuse_unattended: true,
-        policy_scope: "external",
-        open_world: true,
-        idempotent: false
-      },
-      approvalPrompt: async (input, ctx) => {
-        const state = observations(ctx.run)
-        const nodeRef = input.target?.node_ref
-        const described = nodeRef === undefined ? undefined : state.describe(input.tab_ref, nodeRef)
-        const seen =
-          nodeRef === undefined
-            ? undefined
-            : await runBrowserForRun(
-                browser,
-                ctx,
-                { type: "target", tabRef: input.tab_ref, nodeRef },
-                ctx.signal
-              ).then(
-                (output) => Option.getOrUndefined(decodeTargetSeen(output.data)),
-                () => undefined
-              )
-        return {
-          presentation: actApprovalPresentation(input, targetLabel(described), seen),
-          data: {
-            tab_ref: input.tab_ref,
-            profile_ref: input.profile_ref,
-            origin: input.origin,
-            action: input.action,
-            expected_revision: claimObservedRevision(
-              state,
-              input.tab_ref,
-              input.snapshot_ref,
-              ctx.toolCallId
-            ),
-            ...approvalTarget(input, described, seen)
-          }
-        }
-      },
-      execute: async (input, ctx, effects) => {
-        const element = actElement(input, ctx)
-        const approved = ctx.approval?.data
-        const approvedRevision =
-          isActionApproval(approved) &&
-          approved.tab_ref === input.tab_ref &&
-          approved.profile_ref === input.profile_ref &&
-          approved.origin === input.origin &&
-          approved.action === input.action
-            ? approved.expected_revision
-            : undefined
-        const expectedRevision =
-          ctx.approval === undefined
-            ? claimObservedRevision(
-                observations(ctx.run),
-                input.tab_ref,
-                input.snapshot_ref,
-                ctx.toolCallId
-              )
-            : requireObservedRevision(approvedRevision)
-        const target =
-          input.target === undefined
-            ? undefined
-            : {
-                ...(input.target.node_ref === undefined ? {} : { nodeRef: input.target.node_ref }),
-                ...(input.target.kind === undefined ? {} : { kind: input.target.kind }),
-                ...(input.target.value === undefined ? {} : { value: input.target.value }),
-                ...(input.target.name === undefined ? {} : { name: input.target.name }),
-                exact: input.target.exact ?? false
-              }
-        const acted = await runBrowserForRun(
-          browser,
-          ctx,
-          {
-            type: "act",
-            tabRef: input.tab_ref,
-            profileRef: input.profile_ref,
-            origin: input.origin,
-            expectedRevision,
-            action: input.action,
-            ...(target === undefined ? {} : { target }),
-            ...(input.value === undefined ? {} : { value: input.value }),
-            ...(input.secret === undefined ? {} : { secret: input.secret }),
-            ...(input.values === undefined ? {} : { values: input.values }),
-            ...(input.direction === undefined ? {} : { direction: input.direction }),
-            ...(input.amount === undefined ? {} : { amount: input.amount })
-          },
-          ctx.signal,
-          { effects, ...(element === undefined ? {} : { element }) }
-        )
-        return browserOutput(
-          await withPageAfter(browser, ctx, acted, {
-            tabRef: input.tab_ref,
-            after: input.snapshot,
-            navigates: mayNavigate(input)
-          })
-        )
-      }
-    }),
+    makeBrowserActTool(browser),
     defineServerTool({
       name: "browser_wait",
       summary: "Waits for a browser page to load, change, show something, or finish a download.",
@@ -497,20 +343,6 @@ const makeBrowserTools = ({
       }
     })
   ]
-}
-
-const actElement = (
-  input: typeof ActParametersSchema.Type,
-  ctx: { readonly run: ServerRunContext; readonly approval?: { readonly data?: JsonObject } }
-): BrowserElement | undefined => {
-  const target = input.target
-  if (target?.node_ref === undefined) return undefined
-  const carded = splitUiTarget(ctx.approval?.data).target
-  const label =
-    carded?.kind === "element"
-      ? carded.label
-      : ctx.run.browserObservations.describe(input.tab_ref, target.node_ref)
-  return targetLabel(label)
 }
 
 export const browserTools = Effect.gen(function* () {

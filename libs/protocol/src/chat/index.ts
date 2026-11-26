@@ -6,7 +6,18 @@ export type {
   ChangeEntryPlace,
   ChangeEntryTitle
 } from "./change-evidence.js"
-export { CHANGE_ENTRY_LINK, CHANGE_ENTRY_PLACE, CHANGE_ENTRY_TITLE } from "./change-evidence.js"
+export {
+  CHANGE_ENTRY_COMPARISON,
+  CHANGE_ENTRY_DOMAIN,
+  CHANGE_ENTRY_LINK,
+  CHANGE_ENTRY_OUTCOME,
+  CHANGE_ENTRY_PLACE,
+  CHANGE_ENTRY_TITLE,
+  CHANGE_ENTRY_VERSION,
+  type ChangeEntryComparison,
+  type ChangeEntryDomain,
+  type ChangeEntryOutcome
+} from "./change-evidence.js"
 import {
   decoderFor,
   makeEncoder,
@@ -82,6 +93,9 @@ export * from "./contracts.js"
 export {
   ACTIVE_WORK,
   ACTOR_NAME,
+  CHAT_SENT_FROM,
+  CONNECTION_ARRIVAL,
+  IMAGE_MEDIA_TYPE,
   INTERACTION_PREVIEW,
   INTERACTION_REFERENCE,
   SENDER_ADDRESS,
@@ -115,6 +129,7 @@ export {
 export type * from "./history-message.js"
 export { CONTEXT_LIMIT, CONTEXT_MODEL } from "./history.js"
 export type { ToolResultValueResponse } from "./schema.js"
+export { TOOL_RESULT_VALUE, TOOL_RESULT_VALUE_GAP } from "./schema.js"
 export * from "./runtime.js"
 export {
   reduceRunActivity,
@@ -124,6 +139,7 @@ export {
   type RunActivityProjection
 } from "./activity.js"
 export type * from "./communication.js"
+export { ARRIVAL_EVENT, COMMUNICATION_DOOR, UPDATE_WEIGHT } from "./communication.js"
 export { answeredInTurn } from "./answered-in-turn.js"
 export {
   markdownLines,
@@ -150,18 +166,25 @@ export {
   type SplitAttachedFiles
 } from "./attached-files.js"
 export {
+  FAILURE_SURFACE,
   failureSentence,
   inTaskWords,
   isRequestInvalid,
   providerSentence,
   runFailureText,
   RUN_FAILURE_TEXT,
+  type FailureSurface,
   type RunFailureText
 } from "./run-failure.js"
 export { RESTART_INTERRUPTION } from "./restart-words.js"
 export { MAX_TOOL_DISPLAY_TITLE_LENGTH, TOOL_DISPLAY_TITLE_ARGUMENT } from "./tool-display.js"
 export {
   DEFAULT_TOOL_KIND,
+  isToolKind,
+  toolKindOf,
+  TOOL_KIND,
+  ToolKindSchema,
+  type ToolKind,
   GMAIL_SEND,
   TOOL_DATA,
   TOOL_EXECUTION,
@@ -196,7 +219,9 @@ export {
   type ToolDuration
 } from "./history-tool-call.js"
 export {
+  APPROVAL_ATTACHMENT,
   APPROVAL_PRESENTATION_LIMITS,
+  COMMAND_BODY_LABEL,
   IMAGE_RING,
   INLINE_IMAGE_PATTERN,
   NEEDS_GRANT,
@@ -220,15 +245,21 @@ export type {
   PresentationText,
   PreviousValue
 } from "./approval-presentation.js"
+export { CAPABILITY_CANDIDATE } from "./capability-proposal.js"
 export type { CapabilityCandidate, CapabilityProposal } from "./capability-proposal.js"
+export { TOOL_OUTPUT_STREAM, type ToolOutputStream } from "./events/tool.js"
+export { DECISION_ROUTE_SOURCE, type DecisionRouteSource } from "./events/approval.js"
+export { INTERACTION_KIND } from "@arden-hq/std/message-vocabulary"
 export type { ChatRunErrorCode, RunTerminalEvent, TransientRunErrorCode } from "./events/run.js"
-export { isLastingRunError, TRANSIENT_RUN_ERROR_CODES } from "./events/run.js"
+export { CHAT_RUN_ERROR_CODE, isLastingRunError, TRANSIENT_RUN_ERROR_CODES } from "./events/run.js"
 export {
   AUTOMATION_PROMPT,
   CONTEXT_SIZE,
   contextSize,
   contextUsage,
   RUN_ACTIVITY_TARGET,
+  TOKEN_USAGE_SCOPE,
+  isTokenUsageScope,
   RUN_CAUSE,
   RUN_USAGE,
   SESSION_NAME,
@@ -241,7 +272,6 @@ export {
 } from "./events/run.js"
 export { endsReadingMessage, isRunTerminalEvent } from "./events/run.js"
 
-/** Plain response decoders for the current Chat boundary. */
 export const chatDecoders = {
   changeEvidence: decoderFor(ChangeEvidenceSchema, "Invalid change evidence", strict),
   receipt: projectedDecoderFor(ChatReceiptResponseSchema, mapChatReceipt, "Invalid chat receipt"),
@@ -302,7 +332,6 @@ const enqueueRequest = makeEncoder<EnqueueChatMessageInput>(
   "Invalid queued-message request"
 )
 
-/** Plain reusable JSON bodies. Message bodies contain a private retry identity. */
 export const chatRequests = {
   message(input: ChatMessageInput): PreparedChatMessage {
     return runBoundary(
@@ -321,7 +350,6 @@ export const chatRequests = {
   enqueue: enqueueRequest
 } as const
 
-/** Validated paths for live Chat, history, read, and cancellation routes. */
 export const chatRoutes = {
   message: "/chat/message",
   toolResult: "/tools/result",
@@ -358,7 +386,6 @@ export const chatRoutes = {
   events(sessionId: string): string {
     return runBoundary(encodeEventPathEffect({ sessionId }), "Invalid chat event route", "encode")
   },
-  /** The Session queue path serves GET and POST. */
   queue(sessionId: string): string {
     return runBoundary(
       encodeQueuePathEffect({ sessionId }),
@@ -378,6 +405,7 @@ export const chatRoutes = {
 export {
   APPROVAL_FIELD_LABEL,
   canDenyApprovalByReply,
+  VERIFY_OUTCOME_ACTION,
   EDITABLE_KIND
 } from "./approval-presentation.js"
 export {
@@ -389,4 +417,9 @@ export {
   type MessageClosure,
   type StreamRecord
 } from "./events/text.js"
-export { TODO_EXPLANATION, type TodoExplanation } from "./events/session.js"
+export {
+  COMPACTION_OUTCOME,
+  TODO_EXPLANATION,
+  type CompactionOutcome,
+  type TodoExplanation
+} from "./events/session.js"

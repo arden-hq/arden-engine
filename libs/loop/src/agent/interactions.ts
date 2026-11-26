@@ -2,6 +2,7 @@ import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/messag
 import { isRecord } from "@arden-hq/std/json"
 import type { InteractionMessage, InteractionSource, Metadata } from "../contracts/messages.js"
 import { isAgentMail } from "../contracts/interactions.js"
+import { INTERACTION_FORM, type InteractionForm } from "../contracts/provider.js"
 
 const agentMessageType = (message: InteractionMessage): string => {
   if (message.kind === INTERACTION_KIND.assignment) return "NEW_TASK"
@@ -16,8 +17,6 @@ const blockText = (block: Metadata): ReadonlyArray<string> => {
 
 const contentText = (content: InteractionMessage["content"]): string =>
   typeof content === "string" ? content : content.flatMap(blockText).join("\n\n")
-
-export type InteractionForm = "native" | "text"
 
 type MailSource = Exclude<InteractionSource, "automation" | "harness">
 
@@ -68,7 +67,7 @@ const nativeMail = (message: InteractionMessage): string => {
 }
 
 export const renderInteraction = (message: InteractionMessage, form: InteractionForm): string => {
-  if (form === "native" && isAgentMail(message)) return nativeMail(message)
+  if (form === INTERACTION_FORM.native && isAgentMail(message)) return nativeMail(message)
   switch (message.from.source) {
     case INTERACTION_SOURCE.agent:
     case INTERACTION_SOURCE.workflow:
@@ -80,7 +79,6 @@ export const renderInteraction = (message: InteractionMessage, form: Interaction
   }
 }
 
-/** Structural envelope shared by durable history and decoded Loop messages. */
 export interface InputEnvelope {
   readonly role: string
   readonly from?: unknown

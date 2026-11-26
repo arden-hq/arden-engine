@@ -1,3 +1,4 @@
+import { AUTOMATION_EVENT_TYPE, AUTOMATION_OCCURRENCE } from "@arden-hq/protocol/automations"
 import { Clock, Effect, Schema } from "effect"
 
 import type { AutomationJobLeaseRef } from "../automations/store.js"
@@ -14,13 +15,16 @@ import { isUserAutomationPurpose } from "../job-classification.js"
 
 const ForkSourceSchema = Schema.Union([
   Schema.Struct({
-    source: Schema.Literal("event"),
-    event_type: Schema.Literal("chat.quiet"),
+    source: Schema.Literal(AUTOMATION_OCCURRENCE.event),
+    event_type: Schema.Literal(AUTOMATION_EVENT_TYPE.chat_quiet),
     context: Schema.Struct({
       chat: Schema.Struct({ session_id: Schema.NonEmptyString })
     })
   }),
-  Schema.Struct({ source: Schema.Literal("count"), session_id: Schema.NonEmptyString })
+  Schema.Struct({
+    source: Schema.Literal(AUTOMATION_OCCURRENCE.count),
+    session_id: Schema.NonEmptyString
+  })
 ])
 
 const forkSource = (run: {
@@ -33,7 +37,7 @@ const forkSource = (run: {
     run.trigger_json ?? ""
   )
   if (trigger._tag === "None") return undefined
-  return trigger.value.source === "count"
+  return trigger.value.source === AUTOMATION_OCCURRENCE.count
     ? trigger.value.session_id
     : trigger.value.context.chat.session_id
 }

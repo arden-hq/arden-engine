@@ -1,8 +1,8 @@
 import {
   MARK_COLOUR_CHOICE,
   SPACE_MARK,
-  SPACE_MARK_COLOURS,
-  SPACE_MARK_MEDIA,
+  SPACE_MARK_COLOUR,
+  SPACE_MARK_MEDIUM,
   type SpaceMark,
   type SpaceMarkColour,
   type SpaceMarkMedium
@@ -20,8 +20,8 @@ export interface StoredMarkLook {
 const unit = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 
 const StoredMarkLookCurrentSchema = Schema.Struct({
-  colour: Schema.NullOr(Schema.Literals(SPACE_MARK_COLOURS)),
-  medium: Schema.Literals(SPACE_MARK_MEDIA),
+  colour: Schema.NullOr(Schema.Literals(Object.values(SPACE_MARK_COLOUR))),
+  medium: Schema.Literals(Object.values(SPACE_MARK_MEDIUM)),
   zoom: unit,
   aberration: unit,
   focus: unit
@@ -32,9 +32,9 @@ const LEGACY_MEDIUM = { ink: "ink" } as const
 
 const legacyMarkLook = Schema.Struct({
   colour: Schema.NullOr(
-    Schema.Literals([...SPACE_MARK_COLOURS, LEGACY_COLOUR.white, LEGACY_COLOUR.black] as const)
+    Schema.Literals([LEGACY_COLOUR.white, LEGACY_COLOUR.black, ...Object.values(SPACE_MARK_COLOUR)])
   ),
-  medium: Schema.Literals([...SPACE_MARK_MEDIA, LEGACY_MEDIUM.ink] as const),
+  medium: Schema.Literals([LEGACY_MEDIUM.ink, ...Object.values(SPACE_MARK_MEDIUM)]),
   zoom: unit,
   aberration: unit,
   focus: unit

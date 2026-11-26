@@ -1,8 +1,11 @@
-import { readFileSync } from "node:fs"
+import { globSync, readFileSync } from "node:fs"
 import { relative, resolve } from "node:path"
+import { readJsonFileSync } from "./json-edge.mjs"
+import { allowedComment, noCommentsMessage } from "./lint-comments.mjs"
+import { ESTREE_NODE, FLAG, OPERATOR, SYNTAX_NAME } from "./value-tables.mjs"
 
 const repoRoot = resolve(import.meta.dirname, "..")
-const countAll = process.env.ARDEN_BASELINE_COUNT === "1"
+const countAll = process.env.ARDEN_BASELINE_COUNT === FLAG.on
 
 const listenersFor = (pairs, context) => {
   const listeners = {}
@@ -18,7 +21,7 @@ const listenersFor = (pairs, context) => {
 }
 
 const stringText = (node) =>
-  node.type === "TemplateLiteral"
+  node.type === ESTREE_NODE.TemplateLiteral
     ? node.quasis.map((quasi) => quasi.value.raw).join("${}")
     : node.value
 const textListeners = (pattern, message) => {
@@ -58,63 +61,40 @@ const restrictedSyntax = {
     )
 }
 
-const scriptFile = /\.(?:js|mjs|cjs)$/
-const typeTag = /^@(?:type|typedef|param|returns?|template|satisfies|import|property|prop|callback|overload|this|enum|extends|implements)\b/
-const citesSource = /https?:\/\/(?!localhost|127\.0\.0\.1|\[::1\])\S+|\b[\w.-]+\/[\w.-]+#\d+\b|\bcrbug\s+\d+|\bRFC\s?\d+\b/
-const licenseHeader = /^(?:\*\s*)?(?:@license|SPDX-License-Identifier:|Copyright\b)/
-const formatterIgnore = /^(?:prettier|oxfmt)-ignore\b/
-
-const allowedComment = (comment, filename) => {
-  const text = comment.value.trim()
-  if (citesSource.test(text) || licenseHeader.test(text) || formatterIgnore.test(text)) return true
-  if (/^(?:oxlint|eslint)-(?:disable|enable)\S*\s.*\s--\s+\S/.test(text)) return true
-  if (/^@ts-expect-error\s+\S/.test(text)) return true
-  if (comment.type === "Line" && /^\/\s*<reference(?:\s+(?:types|path|lib|no-default-lib|preserve|resolution-mode)=(["'])[^"']*\1)+\s*\/>\s*$/.test(comment.value)) return true
-  if (comment.type !== "Block" || !comment.value.startsWith("*") || !scriptFile.test(filename)) return false
-  const lines = comment.value
-    .split("\n")
-    .map((line) => line.replace(/^\s*\*?\s?/, "").trim())
-    .filter((line) => line !== "")
-  let depth = 0
-  for (const line of lines) {
-    if (depth === 0 && !typeTag.test(line)) return false
-    depth += (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0)
-  }
-  return lines.length > 0
-}
-
-const noCommentsMessage =
-  "No comments in code: put the reason in the commit message or the PR. Allowed: a comment that cites its source (an issue, RFC or vendor link) for a constraint code cannot express, a license header, `prettier-ignore`, `oxlint-disable… -- reason`, `@ts-expect-error reason`, and JSDoc type tags in .js/.mjs/.cjs files"
 const noStringCompareMessage =
   "Compare with a named constant from the value's owner (an `as const` list or object, or its type guard), not a bare string"
 
-const unwrap = (node) =>
-  ["TSAsExpression", "TSSatisfiesExpression", "TSNonNullExpression", "TSTypeAssertion", "ParenthesizedExpression"].includes(node.type)
-    ? unwrap(node.expression)
-    : node
+const wrapperKinds = new Set([
+  ESTREE_NODE.TSAsExpression,
+  ESTREE_NODE.TSSatisfiesExpression,
+  ESTREE_NODE.TSNonNullExpression,
+  ESTREE_NODE.TSTypeAssertion,
+  ESTREE_NODE.ParenthesizedExpression
+])
+const unwrap = (node) => (wrapperKinds.has(node.type) ? unwrap(node.expression) : node)
 const isStringLiteral = (wrapped) => {
   const node = unwrap(wrapped)
   return (
-    (node.type === "Literal" && typeof node.value === "string" && node.value !== "") ||
-    (node.type === "TemplateLiteral" && node.expressions.length === 0 && node.quasis[0].value.cooked !== "")
+    (node.type === ESTREE_NODE.Literal && typeof node.value === "string" && node.value !== "") ||
+    (node.type === ESTREE_NODE.TemplateLiteral && node.expressions.length === 0 && node.quasis[0].value.cooked !== "")
   )
 }
 const isTypeof = (wrapped) => {
   const node = unwrap(wrapped)
-  return node.type === "UnaryExpression" && node.operator === "typeof"
+  return node.type === ESTREE_NODE.UnaryExpression && node.operator === OPERATOR.typeof
 }
-const compareOperators = new Set(["===", "!==", "==", "!="])
+const compareOperators = new Set([OPERATOR.strictEqual, OPERATOR.strictNotEqual, "==", "!="])
 const timingCalls = new Set(["useEffect", "useLayoutEffect", "setTimeout", "setInterval", "requestAnimationFrame", "requestIdleCallback"])
 const timingHosts = new Set(["window", "globalThis", "self", "React"])
 const memberName = (member) => {
   if (!member.computed) return member.property.name
   const property = unwrap(member.property)
-  return property.type === "Literal" && typeof property.value === "string" ? property.value : undefined
+  return property.type === ESTREE_NODE.Literal && typeof property.value === "string" ? property.value : undefined
 }
 const isTimingCall = (callee, aliases) =>
-  (callee.type === "Identifier" && (timingCalls.has(callee.name) || aliases.has(callee.name))) ||
-  (callee.type === "MemberExpression" &&
-    callee.object.type === "Identifier" &&
+  (callee.type === ESTREE_NODE.Identifier && (timingCalls.has(callee.name) || aliases.has(callee.name))) ||
+  (callee.type === ESTREE_NODE.MemberExpression &&
+    callee.object.type === ESTREE_NODE.Identifier &&
     timingHosts.has(callee.object.name) &&
     timingCalls.has(memberName(callee)))
 const sources = "{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
@@ -141,13 +121,13 @@ const idEdges = [
 const idLikeName = /(^id$|Id$|_id$|^ref$|Ref$|^key$|Key$|^index$|Index$)/
 const objectName = (node) => {
   const target = unwrap(node)
-  if (target.type === "Identifier") return target.name
-  if (target.type === "MemberExpression" && !target.computed) return target.property.name
+  if (target.type === ESTREE_NODE.Identifier) return target.name
+  if (target.type === ESTREE_NODE.MemberExpression && !target.computed) return target.property.name
   return undefined
 }
 const isNumberLiteral = (wrapped) => {
   const node = unwrap(wrapped)
-  return node.type === "Literal" && typeof node.value === "number"
+  return node.type === ESTREE_NODE.Literal && typeof node.value === "number"
 }
 const cutsToLength = (method, args) =>
   ["slice", "substring", "substr"].includes(method) &&
@@ -157,7 +137,7 @@ const cutsToLength = (method, args) =>
   isNumberLiteral(args[1])
 const cleansCharacters = (method, args) => {
   const pattern = args.length === 2 ? unwrap(args[0]) : undefined
-  return method === "replace" && pattern?.type === "Literal" && pattern.regex?.flags.includes("g") === true
+  return method === SYNTAX_NAME.replace && pattern?.type === ESTREE_NODE.Literal && pattern.regex?.flags.includes("g") === true
 }
 const idMethods = new Set(["startsWith", "endsWith", "split", "slice", "substring", "substr", "indexOf", "lastIndexOf", "match", "replace"])
 const isMadeUpDefault = (node) => {
@@ -165,49 +145,105 @@ const isMadeUpDefault = (node) => {
   const name = objectName(node.left)
   if (name === undefined || !idLikeName.test(name)) return false
   return (
-    (right.type === "Literal" && (right.value === "" || right.value === 0)) ||
-    (right.type === "TemplateLiteral" && right.expressions.length === 0 && right.quasis[0].value.cooked === "") ||
-    (right.type === "UnaryExpression" && right.operator === "-" && right.argument.type === "Literal" && right.argument.value === 1)
+    (right.type === ESTREE_NODE.Literal && (right.value === "" || right.value === 0)) ||
+    (right.type === ESTREE_NODE.TemplateLiteral && right.expressions.length === 0 && right.quasis[0].value.cooked === "") ||
+    (right.type === ESTREE_NODE.UnaryExpression &&
+      right.operator === OPERATOR.minus &&
+      right.argument.type === ESTREE_NODE.Literal &&
+      right.argument.value === 1)
   )
 }
-const isFunction = (node) => node !== null && (node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression")
+const isFunction = (node) =>
+  node !== null && (node.type === ESTREE_NODE.ArrowFunctionExpression || node.type === ESTREE_NODE.FunctionExpression)
 const testEscapes = new Set(["only", "skip", "todo", "skipIf", "runIf", "fails", "failing", "if"])
 const testNames = new Set(["it", "test", "describe", "suite", "bench"])
 const testRoot = (node) => {
   const target = unwrap(node)
-  if (target.type === "Identifier") return testNames.has(target.name)
-  if (target.type === "MemberExpression") return testRoot(target.object)
-  if (target.type === "CallExpression") return testRoot(target.callee)
+  if (target.type === ESTREE_NODE.Identifier) return testNames.has(target.name)
+  if (target.type === ESTREE_NODE.MemberExpression) return testRoot(target.object)
+  if (target.type === ESTREE_NODE.CallExpression) return testRoot(target.callee)
   return false
 }
 const platformGates = new Set(["skipIf", "runIf"])
 const isProcessPlatform = (wrapped) => {
   const node = unwrap(wrapped)
-  return node.type === "MemberExpression" && !node.computed && objectName(node.object) === "process" && node.property.name === "platform"
+  return (
+    node.type === ESTREE_NODE.MemberExpression &&
+    !node.computed &&
+    objectName(node.object) === SYNTAX_NAME.process &&
+    node.property.name === SYNTAX_NAME.platform
+  )
 }
 const isPlatformCheck = (wrapped) => {
   const node = unwrap(wrapped)
-  if (node.type !== "BinaryExpression" || (node.operator !== "===" && node.operator !== "!==")) return false
+  if (node.type !== ESTREE_NODE.BinaryExpression || (node.operator !== OPERATOR.strictEqual && node.operator !== OPERATOR.strictNotEqual)) return false
   return (isProcessPlatform(node.left) && isStringLiteral(node.right)) || (isProcessPlatform(node.right) && isStringLiteral(node.left))
 }
 const isPlatformGate = (node) => {
   const call = node.parent
   return (
     platformGates.has(memberName(node)) &&
-    call?.type === "CallExpression" &&
+    call?.type === ESTREE_NODE.CallExpression &&
     call.callee === node &&
     call.arguments.length === 1 &&
     isPlatformCheck(call.arguments[0])
   )
 }
+
+let tableSources
+const typeSourceTables = () => {
+  if (tableSources !== undefined) return tableSources
+  const files = globSync("{apps,libs}/*/**/*.{ts,tsx,mts}", {
+    cwd: repoRoot,
+    exclude: ["**/{node_modules,dist,build,.local,.wrangler,.arden-tmp}"]
+  })
+  const names = new Set()
+  for (const file of files) {
+    const text = readFileSync(resolve(repoRoot, file), "utf8")
+    for (const match of text.matchAll(/\btypeof\s+([A-Za-z_$][\w$]*)/g)) names.add(match[1])
+    for (const call of text.matchAll(/\bSchema\.Literals?\(([^)]*)\)/g))
+      for (const name of call[1].matchAll(/\b([A-Za-z_$][\w$]*)\.[A-Za-z_$][\w$]*\b|\b([A-Z][A-Z0-9_]+)\b/g)) names.add(name[1] ?? name[2])
+  }
+  tableSources = names
+  return names
+}
+const isStringTable = (declaration) => {
+  if (declaration.id.type !== ESTREE_NODE.Identifier || declaration.init === null) return false
+  const wrapped = declaration.init.type === ESTREE_NODE.TSSatisfiesExpression ? declaration.init.expression : declaration.init
+  if (wrapped.type !== ESTREE_NODE.TSAsExpression) return false
+  const init = unwrap(declaration.init)
+  return (
+    init.type === ESTREE_NODE.ObjectExpression &&
+    init.properties.length > 0 &&
+    init.properties.every((property) => property.type === ESTREE_NODE.Property && isStringLiteral(property.value))
+  )
+}
 const longFileLines = 500
 const allowsUndefined = (node) => {
   const annotation = node.typeAnnotation?.typeAnnotation
-  return annotation?.type === "TSUnionType" && annotation.types.some((member) => member.type === "TSUndefinedKeyword")
+  return annotation?.type === ESTREE_NODE.TSUnionType && annotation.types.some((member) => member.type === ESTREE_NODE.TSUndefinedKeyword)
 }
 const optionalSchemas = new Set(["optional", "optionalKey", "optionalWith", "NullOr", "UndefinedOr"])
 
 export const baselinedRules = [
+  {
+    rule: "no-orphan-table",
+    files: [`**/*.${sources}`],
+    ignores: testFiles,
+    baseline: "tooling/baselines/orphan-tables.json",
+    message: "A table of string values is the source of a type: use `typeof TABLE` in the union that holds its values (`type Name = (typeof TABLE)[keyof typeof TABLE]`, or `typeof TABLE.key` for one value), or feed it to Schema.Literal(s)",
+    description: "A top-level as-const string table is the source of a type.",
+    collect: (context, found) => ({
+      "Program:exit": (program) => {
+        for (const statement of program.body) {
+          const declaration = statement.type === ESTREE_NODE.ExportNamedDeclaration ? statement.declaration : statement
+          if (declaration?.type !== ESTREE_NODE.VariableDeclaration) continue
+          for (const item of declaration.declarations)
+            if (isStringTable(item) && !typeSourceTables().has(item.id.name)) found.push({ node: item })
+        }
+      }
+    })
+  },
   {
     rule: "no-comments",
     files: [`**/*.${sources}`],
@@ -225,7 +261,7 @@ export const baselinedRules = [
   },
   {
     rule: "no-string-compare",
-    files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
+    files: [`**/*.${sources}`],
     ignores: testFiles,
     baseline: "tooling/baselines/string-compares.json",
     message: noStringCompareMessage,
@@ -244,7 +280,7 @@ export const baselinedRules = [
   },
   {
     rule: "no-raw-timing",
-    files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
+    files: [`**/*.${sources}`],
     ignores: ["libs/std/src/**", ...testFiles],
     baseline: "tooling/baselines/raw-timing.json",
     message: "Raw timers and effects live only in @arden-hq/std (libs/std/src). Use its helpers, such as sleep, or add one there",
@@ -253,7 +289,7 @@ export const baselinedRules = [
       const aliases = new Set()
       return {
         ImportSpecifier: (node) => {
-          const imported = node.imported.type === "Identifier" ? node.imported.name : node.imported.value
+          const imported = node.imported.type === ESTREE_NODE.Identifier ? node.imported.name : node.imported.value
           if (timingCalls.has(imported)) aliases.add(node.local.name)
         },
         CallExpression: (node) => {
@@ -264,24 +300,24 @@ export const baselinedRules = [
   },
   {
     rule: "no-raw-json",
-    files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
-    ignores: ["apps/server-ts/src/persistence/sqlite/json.ts", "libs/std/src/json-text.ts", ...testFiles],
+    files: [`**/*.${sources}`],
+    ignores: ["tooling/json-edge.mjs", "apps/server-ts/src/persistence/sqlite/json.ts", "libs/std/src/json-text.ts", ...testFiles],
     baseline: "tooling/baselines/raw-json.json",
     message: "Outside data is decoded once, at the edge, with a Schema: decodeJson (persistence/sqlite/json.ts) or Schema.decodeUnknownSync(Schema.fromJsonString(schema))",
     description: "Outside data is parsed once, at the edge.",
     collect: (_context, found) => ({
       CallExpression: (node) => {
         const callee = node.callee
-        if (callee.type !== "MemberExpression") return
-        const isParse = objectName(callee.object) === "JSON" && memberName(callee) === "parse"
-        const isBodyJson = memberName(callee) === "json" && node.arguments.length === 0
+        if (callee.type !== ESTREE_NODE.MemberExpression) return
+        const isParse = objectName(callee.object) === SYNTAX_NAME.JSON && memberName(callee) === SYNTAX_NAME.parse
+        const isBodyJson = memberName(callee) === SYNTAX_NAME.json && node.arguments.length === 0
         if (isParse || isBodyJson) found.push({ node })
       }
     })
   },
   {
     rule: "no-id-parsing",
-    files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
+    files: [`**/*.${sources}`],
     ignores: idEdges,
     baseline: "tooling/baselines/id-parsing.json",
     message: "Ids carry no meaning: never read a prefix or a part out of an id or ref. Keep the fact in its own typed field",
@@ -289,7 +325,7 @@ export const baselinedRules = [
     collect: (context, found) => ({
       CallExpression: (node) => {
         const callee = node.callee
-        if (callee.type !== "MemberExpression" || callee.computed || !idMethods.has(callee.property.name)) return
+        if (callee.type !== ESTREE_NODE.MemberExpression || callee.computed || !idMethods.has(callee.property.name)) return
         if (cutsToLength(callee.property.name, node.arguments) || cleansCharacters(callee.property.name, node.arguments)) return
         const name = objectName(callee.object)
         if (name !== undefined && idName.test(name)) found.push({ node })
@@ -306,14 +342,14 @@ export const baselinedRules = [
   },
   {
     rule: "no-made-up-default",
-    files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
+    files: [`**/*.${sources}`],
     ignores: [],
     baseline: "tooling/baselines/made-up-defaults.json",
     message: "Don't invent an id, key or index for missing data (`id ?? ''`, `index ?? -1`): handle the missing case, or make the field required",
     description: "No invented fallbacks.",
     collect: (_context, found) => ({
       LogicalExpression: (node) => {
-        if ((node.operator === "??" || node.operator === "||") && isMadeUpDefault(node)) found.push({ node })
+        if ((node.operator === OPERATOR.nullish || node.operator === OPERATOR.or) && isMadeUpDefault(node)) found.push({ node })
       }
     })
   },
@@ -351,14 +387,14 @@ export const baselinedRules = [
         },
         CallExpression: (node) => {
           const callee = node.callee
-          if (callee.type === "MemberExpression" && objectName(callee.object) === "Schema" && optionalSchemas.has(memberName(callee))) found.push({ node })
+          if (callee.type === ESTREE_NODE.MemberExpression && objectName(callee.object) === SYNTAX_NAME.Schema && optionalSchemas.has(memberName(callee))) found.push({ node })
         }
       }
     }
   },
   {
     rule: "no-import-star",
-    files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
+    files: [`**/*.${sources}`],
     ignores: [],
     baseline: "tooling/baselines/import-star.json",
     message: "Import the names you use, not the whole module (`import * as`)",
@@ -371,30 +407,35 @@ export const baselinedRules = [
   },
   {
     rule: "no-untyped-export",
-    files: [`apps/*/src/**/*.{ts,tsx,mts,cts}`, `libs/*/src/**/*.{ts,tsx,mts,cts}`],
+    files: [`**/*.{ts,tsx,mts,cts}`],
     ignores: [],
     baseline: "tooling/baselines/untyped-exports.json",
-    message: "An exported function states its return type",
+    message: "An exported function states its return type in writing: a typeof of a local binding states nothing",
     description: "Exported functions declare return types.",
     collect: (_context, found) => ({
       ExportDefaultDeclaration: (node) => {
         const declaration = node.declaration
-        if ((declaration.type === "FunctionDeclaration" || isFunction(declaration)) && declaration.returnType == null) found.push({ node: declaration })
+        if ((declaration.type === ESTREE_NODE.FunctionDeclaration || isFunction(declaration)) && declaration.returnType == null) found.push({ node: declaration })
       },
       ExportNamedDeclaration: (node) => {
         const declaration = node.declaration
         if (declaration === null) return
-        if (declaration.type === "FunctionDeclaration" && declaration.returnType == null) found.push({ node: declaration.id ?? declaration })
-        if (declaration.type !== "VariableDeclaration") return
+        if (declaration.type === ESTREE_NODE.FunctionDeclaration && declaration.returnType == null) found.push({ node: declaration.id ?? declaration })
+        if (declaration.type !== ESTREE_NODE.VariableDeclaration) return
         for (const declarator of declaration.declarations)
+        {
+          const annotated = declarator.id.typeAnnotation?.typeAnnotation
+          const onlyTypeof = annotated?.type === ESTREE_NODE.TSTypeQuery && annotated.exprName.type === ESTREE_NODE.Identifier
           if (isFunction(declarator.init) && declarator.init.returnType == null && declarator.id.typeAnnotation == null) found.push({ node: declarator.id })
+          else if (onlyTypeof) found.push({ node: declarator.id })
+        }
       }
     })
   },
   {
     rule: "no-long-file",
-    files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
-    ignores: [],
+    files: [`**/*.${sources}`],
+    ignores: ["apps/server-ts/src/persistence/migrations/**"],
     baseline: "tooling/baselines/long-files.json",
     message: `A file stays under ${longFileLines} non-blank lines, one report per extra line: split it by responsibility (the hard limit is 800)`,
     description: "Files stay under 500 lines.",
@@ -419,9 +460,9 @@ export const baselinedRules = [
       CallExpression: (node) => {
         if (!testRoot(node.callee)) return
         for (const argument of node.arguments)
-          if (argument.type === "ObjectExpression")
+          if (argument.type === ESTREE_NODE.ObjectExpression)
             for (const property of argument.properties)
-              if (property.type === "Property" && ["retry", "repeats"].includes(property.key.type === "Identifier" ? property.key.name : property.key.value)) found.push({ node: property })
+              if (property.type === ESTREE_NODE.Property && ["retry", "repeats"].includes(property.key.type === ESTREE_NODE.Identifier ? property.key.name : property.key.value)) found.push({ node: property })
       }
     })
   }
@@ -433,7 +474,7 @@ export const baselinedOverrides = baselinedRules.flatMap(({ rule, files, ignores
 ])
 
 const baselinedRule = ({ baseline, message, description, collect }) => {
-  const counts = JSON.parse(readFileSync(resolve(repoRoot, baseline), "utf8"))
+  const counts = readJsonFileSync(resolve(repoRoot, baseline))
   return {
     meta: { type: "suggestion", docs: { description: `${description} Old cases stay in ${baseline} until removed.` } },
     create: (context) => {

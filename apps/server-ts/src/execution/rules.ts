@@ -1,3 +1,10 @@
+import {
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_LIST,
+  PERMISSION_RULE_SUBJECT,
+  type PermissionPathAccess
+} from "@arden-hq/protocol/permissions"
 import { isWithin } from "@arden-hq/std/paths"
 import { Effect } from "effect"
 import type {
@@ -8,28 +15,35 @@ import type {
   RuleList,
   RuleSubject
 } from "../persistence/permissions/rules.js"
-import { approvalSources, rootOf, type RunAuthority } from "./authority.js"
+import { ACTOR, rootOf, type RunAuthority } from "./authority.js"
+import { APPROVAL_SOURCE, approvalSources } from "./approval-source.js"
 import { firstAnswer, type Rung } from "./ladder.js"
 
 export const ownRuleList = (authority: RunAuthority): RuleList | undefined => {
-  if (authority.owns.space_id !== null) return { kind: "space", spaceId: authority.owns.space_id }
+  if (authority.owns.space_id !== null)
+    return { kind: PERMISSION_RULE_LIST.space, spaceId: authority.owns.space_id }
   const systemJob = approvalSources(authority.approval.follows).some(
-    (source) => source.kind === "automation"
+    (source) => source.kind === APPROVAL_SOURCE.automation
   )
-  return systemJob ? { kind: "system" } : undefined
+  return systemJob ? { kind: PERMISSION_RULE_LIST.system } : undefined
 }
 
 export const isSystemJobRun = (authority: RunAuthority): boolean =>
-  rootOf(authority.actor) === "automation" && ownRuleList(authority)?.kind === "system"
+  rootOf(authority.actor) === ACTOR.automation &&
+  ownRuleList(authority)?.kind === PERMISSION_RULE_LIST.system
 
 const holdsSystemCommandAllow = (run: RunRules): boolean =>
   run.rules.some(
     (rule) =>
-      rule.list.kind === "system" && rule.decision === "allow" && rule.subject.kind === "command"
+      rule.list.kind === PERMISSION_RULE_LIST.system &&
+      rule.decision === PERMISSION_RULE_DECISION.allow &&
+      rule.subject.kind === PERMISSION_RULE_SUBJECT.command
   )
 
 export const jobHoldsShell = (authority: RunAuthority, run: RunRules): boolean =>
-  authority.actor.kind === "automation" && isSystemJobRun(authority) && holdsSystemCommandAllow(run)
+  authority.actor.kind === ACTOR.automation &&
+  isSystemJobRun(authority) &&
+  holdsSystemCommandAllow(run)
 
 const readListRules = (
   store: PermissionRules["Service"],
@@ -42,8 +56,12 @@ export const readCommandViews = Effect.fn("PermissionRules.readCommandViews")(fu
   authority: RunAuthority
 ) {
   const run = yield* readRunRules(store, authority)
-  const system = yield* readListRules(store, { kind: "system" })
-  return { run, system, alwaysAsk: ruleDecision(run, matchesHostCommands) === "ask" }
+  const system = yield* readListRules(store, { kind: PERMISSION_RULE_LIST.system })
+  return {
+    run,
+    system,
+    alwaysAsk: ruleDecision(run, matchesHostCommands) === PERMISSION_RULE_DECISION.ask
+  }
 })
 
 export const readJobShell = (
@@ -57,7 +75,8 @@ export const readJobShell = (
 
 export const ruleListsOf = (authority: RunAuthority): ReadonlyArray<RuleList> => {
   const own = ownRuleList(authority)
-  return own === undefined ? [{ kind: "global" }] : [own, { kind: "global" }]
+  const global: RuleList = { kind: PERMISSION_RULE_LIST.global }
+  return own === undefined ? [global] : [own, global]
 }
 
 export interface RunRules {
@@ -67,7 +86,10 @@ export interface RunRules {
 
 export const sameList = (left: RuleList, right: RuleList): boolean => {
   if (left.kind !== right.kind) return false
-  return left.kind !== "space" || (right.kind === "space" && left.spaceId === right.spaceId)
+  return (
+    left.kind !== PERMISSION_RULE_LIST.space ||
+    (right.kind === PERMISSION_RULE_LIST.space && left.spaceId === right.spaceId)
+  )
 }
 
 const RANK: Record<RuleDecision, number> = { allow: 0, ask: 1, never: 2 }
@@ -88,7 +110,10 @@ type RuleStage = Rung<MatchedRules, RuleDecision>
 
 const globalNeverIsAFloor: RuleStage = {
   name: "global_never_is_a_floor",
-  answer: ({ global }) => (global.some((rule) => rule.decision === "never") ? "never" : undefined)
+  answer: ({ global }) =>
+    global.some((rule) => rule.decision === PERMISSION_RULE_DECISION.never)
+      ? PERMISSION_RULE_DECISION.never
+      : undefined
 }
 
 const ownListDecides: RuleStage = {
@@ -115,7 +140,7 @@ export const ruleDecision = (
   const own = run.own
   return firstAnswer(RULE_STAGES, {
     own,
-    global: matched.filter((rule) => rule.list.kind === "global"),
+    global: matched.filter((rule) => rule.list.kind === PERMISSION_RULE_LIST.global),
     ownRules: own === undefined ? [] : matched.filter((rule) => sameList(rule.list, own))
   })
 }
@@ -128,26 +153,25 @@ export const matchesTool =
   }): ((subject: RuleSubject) => boolean) =>
   (subject: RuleSubject): boolean => {
     switch (subject.kind) {
-      case "tool":
+      case PERMISSION_RULE_SUBJECT.tool:
         return subject.tool === call.tool
-      case "site":
+      case PERMISSION_RULE_SUBJECT.site:
         return subject.tool === call.tool && subject.origin === call.site
-      case "connector":
+      case PERMISSION_RULE_SUBJECT.connector:
         return call.server !== null && subject.server === call.server
-      case "command":
-      case "host_commands":
-      case "words":
-      case "path":
-      case "vault_key":
+      case PERMISSION_RULE_SUBJECT.command:
+      case PERMISSION_RULE_SUBJECT.hostCommands:
+      case PERMISSION_RULE_SUBJECT.words:
+      case PERMISSION_RULE_SUBJECT.path:
+      case PERMISSION_RULE_SUBJECT.vaultKey:
         return false
     }
   }
 
-/** A rule about one saved key, by its id in the Vault (a re-added key with the same name is another key). */
 export const matchesVaultKey =
   (keyId: string): ((subject: RuleSubject) => boolean) =>
   (subject: RuleSubject): boolean =>
-    subject.kind === "vault_key" && subject.keyId === keyId
+    subject.kind === PERMISSION_RULE_SUBJECT.vaultKey && subject.keyId === keyId
 
 export const matchesCommand =
   (call: {
@@ -155,12 +179,12 @@ export const matchesCommand =
     readonly arguments: ReadonlyArray<string>
   }): ((subject: RuleSubject) => boolean) =>
   (subject: RuleSubject): boolean =>
-    subject.kind === "command" &&
+    subject.kind === PERMISSION_RULE_SUBJECT.command &&
     subject.executable === call.executable &&
     subject.argumentPrefix.every((part, index) => call.arguments[index] === part)
 
 export const matchesHostCommands = (subject: RuleSubject): boolean =>
-  subject.kind === "host_commands"
+  subject.kind === PERMISSION_RULE_SUBJECT.hostCommands
 
 export interface WordsRule {
   readonly text: string
@@ -170,14 +194,14 @@ export interface WordsRule {
 export const wordsRules = (run: RunRules): ReadonlyArray<WordsRule> => {
   const words = (inList: (list: RuleList) => boolean) =>
     run.rules.flatMap((rule) =>
-      rule.subject.kind === "words" && inList(rule.list)
+      rule.subject.kind === PERMISSION_RULE_SUBJECT.words && inList(rule.list)
         ? [{ text: rule.subject.text, decision: rule.decision }]
         : []
     )
   const own = run.own
   return [
     ...(own === undefined ? [] : words((list) => sameList(list, own))),
-    ...words((list) => list.kind === "global")
+    ...words((list) => list.kind === PERMISSION_RULE_LIST.global)
   ]
 }
 
@@ -189,7 +213,7 @@ export const readRunRules = (
     .inLists(ruleListsOf(authority))
     .pipe(Effect.map((rules) => ({ own: ownRuleList(authority), rules })))
 
-export type PathAccess = "read" | "change"
+export type PathAccess = PermissionPathAccess
 
 export interface PathTarget {
   readonly lexical: string
@@ -206,27 +230,31 @@ export const pathDecision = (
   foldCase: boolean
 ): RuleDecision | undefined => {
   const paths = run.rules.flatMap((rule) =>
-    rule.subject.kind === "path"
+    rule.subject.kind === PERMISSION_RULE_SUBJECT.path
       ? [{ rule, path: rule.subject.path, access: rule.subject.access }]
       : []
   )
   const governs = (held: PathAccess, decision: RuleDecision) =>
     held === access ||
-    (access === "read" && held === "change" && decision === "allow") ||
-    (access === "change" && held === "read" && decision === "never")
+    (access === PERMISSION_PATH_ACCESS.read &&
+      held === PERMISSION_PATH_ACCESS.change &&
+      decision === PERMISSION_RULE_DECISION.allow) ||
+    (access === PERMISSION_PATH_ACCESS.change &&
+      held === PERMISSION_PATH_ACCESS.read &&
+      decision === PERMISSION_RULE_DECISION.never)
   const never = paths.some(
     ({ rule, path, access: held }) =>
-      rule.decision === "never" &&
-      governs(held, "never") &&
+      rule.decision === PERMISSION_RULE_DECISION.never &&
+      governs(held, PERMISSION_RULE_DECISION.never) &&
       (within(path, target.lexical, foldCase) || within(path, target.real, foldCase))
   )
-  if (never) return "never"
+  if (never) return PERMISSION_RULE_DECISION.never
   const own = run.own
   const rank = (rule: PermissionRule) => (own !== undefined && sameList(rule.list, own) ? 1 : 0)
   const held = paths
     .filter(
       ({ rule, path, access: kind }) =>
-        rule.decision !== "never" &&
+        rule.decision !== PERMISSION_RULE_DECISION.never &&
         governs(kind, rule.decision) &&
         within(path, target.real, false)
     )

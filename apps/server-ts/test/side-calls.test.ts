@@ -15,10 +15,6 @@ import { ModelStore } from "../src/persistence/models/store.js"
 import { UsageStore } from "../src/persistence/usage/store.js"
 import { partialService } from "./kit.js"
 
-/**
- * A provider that answers every request with `answer` and records what it was
- * asked. `outputLimit: "omitted"` is a route that never sends the limit (Codex).
- */
 const recording = (answer: string, outputLimit: ModelCapabilities["outputLimit"] = undefined) => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
@@ -73,7 +69,6 @@ const host = (reasoningEfforts: ReadonlyArray<string>, outputCap?: number): Mode
   }
 })
 
-/** What a helper side call put on the provider request, for a model and its assignment. */
 const helperRequest = async (
   call: (completion: StructuredCompletion["Service"]) => Effect.Effect<unknown, unknown>,
   {
@@ -118,7 +113,6 @@ const helperRequest = async (
   await Effect.runPromise(
     Effect.gen(function* () {
       const completion = yield* StructuredCompletion
-      // Only the request matters here; a worker that never finishes fails after it.
       yield* Effect.exit(call(completion))
     }).pipe(Effect.provide(layer))
   )
@@ -141,7 +135,6 @@ const name = (completion: StructuredCompletion["Service"]) =>
 
 describe("a side call's effort and output limit", () => {
   it("turns thinking off where the model declares the switch, and keeps the answer budget", async () => {
-    // llama.cpp offers `none` for every model; OpenRouter where reasoning is optional.
     expect(await helperRequest(name, { efforts: ["none"], assigned: null })).toEqual({
       maxOutputTokens: 80,
       reasoningEffort: "none"
@@ -162,18 +155,15 @@ describe("a side call's effort and output limit", () => {
   })
 
   it("leaves room for thinking at an assigned effort or the model's default", async () => {
-    // A Codex model always carries its default effort, so its helper calls keep it.
     const medium = await helperRequest(name, {
       efforts: ["low", "medium", "high"],
       assigned: "medium"
     })
     expect(medium.reasoningEffort).toBe("medium")
     expect(medium.maxOutputTokens).toBeGreaterThan(80)
-    // OpenRouter lists models whose reasoning is mandatory without any effort.
     const mandatory = await helperRequest(name, { efforts: [], assigned: null })
     expect(mandatory.reasoningEffort).toBeUndefined()
     expect(mandatory.maxOutputTokens).toBeGreaterThan(80)
-    // An effort chosen for the helper wins, `none` included.
     expect(await helperRequest(name, { efforts: ["none", "high"], assigned: "none" })).toEqual({
       maxOutputTokens: 80,
       reasoningEffort: "none"
@@ -203,9 +193,6 @@ describe("a side call's effort and output limit", () => {
   })
 
   it("keeps a route that sends no output limit at the model's own effort", async () => {
-    // Codex never sends the limit (`omitMaxOutputTokens`), so thinking cannot cut the answer
-    // short there and an unset helper effort stays the server's default, as before side calls
-    // chose efforts, even for a model that lists `none`.
     expect(
       await helperRequest(name, {
         efforts: ["none", "low"],
@@ -216,7 +203,6 @@ describe("a side call's effort and output limit", () => {
   })
 
   it("never asks for more output than the model's own cap", async () => {
-    // OpenRouter's `top_provider.max_completion_tokens`.
     expect(await helperRequest(name, { efforts: [], assigned: null, outputCap: 1_024 })).toEqual({
       maxOutputTokens: 1_024,
       reasoningEffort: undefined
@@ -260,7 +246,6 @@ describe("a side call's effort and output limit", () => {
           sourceChars: 131_072 - 1_500 - REASONING_ALLOWANCE_TOKENS - 2_000
         }
       ])
-      // On an 8k window the thinking room no longer has to fit in the handoff's quarter.
       expect(await summary({ reasoningEffort: "high", contextWindow: 8_192 })).toEqual([
         {
           limit: 1_500 + REASONING_ALLOWANCE_TOKENS,

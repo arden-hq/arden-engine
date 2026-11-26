@@ -1,9 +1,9 @@
+import { AUTOMATION_TRIGGER_SOURCE } from "@arden-hq/protocol/effect/automations"
 import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
 import { Schema } from "effect"
 import { RUNS_ALONE } from "./event-batch.js"
 import type { SpaceReviewSnapshot } from "./job-prompt.js"
 
-/** The Task fields a Space review compares with its checkpoint, in checkpoint order. */
 export const REVIEWED_TASK_FIELDS = [
   "text",
   "body",
@@ -14,6 +14,14 @@ export const REVIEWED_TASK_FIELDS = [
   "due_at",
   "next_attempt_at"
 ] as const
+
+export const SPACE_REVIEW_DISPOSITION = {
+  no_change: "no_change",
+  changed: "changed",
+  proposed: "proposed",
+  reconciled: "reconciled",
+  needs_user: "needs_user"
+} as const
 
 const SummarySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)).pipe(
   Schema.annotateEncoded({
@@ -28,26 +36,26 @@ const ProposalIdsSchema = IdsSchema(
 
 export const SpaceReviewDispositionSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("no_change"),
+    kind: Schema.Literal(SPACE_REVIEW_DISPOSITION.no_change),
     summary: SummarySchema
   }),
   Schema.Struct({
-    kind: Schema.Literal("changed"),
+    kind: Schema.Literal(SPACE_REVIEW_DISPOSITION.changed),
     summary: SummarySchema,
     task_ids: IdsSchema("Every Task this Run changed, commented on, or saved a result to.")
   }),
   Schema.Struct({
-    kind: Schema.Literal("proposed"),
+    kind: Schema.Literal(SPACE_REVIEW_DISPOSITION.proposed),
     summary: SummarySchema,
     proposal_ids: ProposalIdsSchema
   }),
   Schema.Struct({
-    kind: Schema.Literal("reconciled"),
+    kind: Schema.Literal(SPACE_REVIEW_DISPOSITION.reconciled),
     summary: SummarySchema,
     proposal_ids: ProposalIdsSchema
   }),
   Schema.Struct({
-    kind: Schema.Literal("needs_user"),
+    kind: Schema.Literal(SPACE_REVIEW_DISPOSITION.needs_user),
     summary: SummarySchema,
     question_ids: IdsSchema("Every active question this Run created for the user.")
   })
@@ -66,7 +74,8 @@ export const canonicalProposalId = (id: string): string => {
 export const canonicalDisposition = (
   disposition: SpaceReviewDisposition
 ): SpaceReviewDisposition =>
-  disposition.kind === "proposed" || disposition.kind === "reconciled"
+  disposition.kind === SPACE_REVIEW_DISPOSITION.proposed ||
+  disposition.kind === SPACE_REVIEW_DISPOSITION.reconciled
     ? { ...disposition, proposal_ids: disposition.proposal_ids.map(canonicalProposalId) }
     : disposition
 
@@ -117,13 +126,13 @@ const SpaceReviewReadsSchema = Schema.Struct({
 })
 export type SpaceReviewReads = typeof SpaceReviewReadsSchema.Type
 
-/**
- * Whether the review starts, from `spaceReviewAdmission`:
- * - `changed`: something it can act on changed, or the owner asked; the review runs.
- * - `unchanged`: nothing changed since the last review; no run.
- * - `nothing_to_act_on`: something changed, but nothing the review can act on; no run.
- */
-const SpaceReviewAdmissionSchema = Schema.Literals(["changed", "unchanged", "nothing_to_act_on"])
+const SPACE_REVIEW_ADMISSION = {
+  changed: "changed",
+  unchanged: "unchanged",
+  nothingToActOn: "nothing_to_act_on"
+} as const
+
+const SpaceReviewAdmissionSchema = Schema.Literals(Object.values(SPACE_REVIEW_ADMISSION))
 export type SpaceReviewAdmission = typeof SpaceReviewAdmissionSchema.Type
 
 export const SpaceReviewInputSchema = Schema.Struct({
@@ -149,15 +158,12 @@ export interface SpaceReviewEvidence {
   readonly openProposals: ReadonlyArray<string>
   readonly space: SpaceReviewSnapshot | undefined
   readonly reviewed?: SpaceReviewInput
-  /** The owner asked for this review: `askedByOwner` of the run's trigger. */
   readonly asked: boolean
 }
 
-/** The one answer to "did the owner ask for this review": a manual run or a
- * proposal recheck among the run's causes, alone or folded into a coalesced
- * trigger with other waiting rows. */
 export const askedByOwner = (trigger: AutomationTriggerContext): boolean =>
-  (trigger.source === "coalesced" ? trigger.causes : [trigger]).some(
+  (trigger.source === AUTOMATION_TRIGGER_SOURCE.coalesced ? trigger.causes : [trigger]).some(
     (cause) =>
-      cause.source === "manual" || (cause.source === "event" && cause.event_type === RUNS_ALONE)
+      cause.source === AUTOMATION_TRIGGER_SOURCE.manual ||
+      (cause.source === AUTOMATION_TRIGGER_SOURCE.event && cause.event_type === RUNS_ALONE)
   )

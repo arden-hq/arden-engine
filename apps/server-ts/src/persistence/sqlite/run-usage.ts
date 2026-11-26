@@ -12,12 +12,6 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 type Usage = StoredRunUsage
 const empty: Usage = { prompt: 0, completion: 0, total: 0, cache_read: 0, cache_write: 0 }
 
-/**
- * A source's reported cost: dollars, `unknown` once a call it counts reported
- * none, or `absent` when the source has counted nothing yet (no samples, no
- * final result, never accounted). Unknown is sticky: a Run accounted once
- * with an unpriced call stays unknown.
- */
 type Cost = number | "unknown" | "absent"
 
 const costOf = (recorded: boolean, usage: Usage): Cost =>
@@ -29,7 +23,6 @@ const unionCost = (costs: ReadonlyArray<Cost>): Cost => {
   return known.length === 0 ? "absent" : Math.max(...known)
 }
 
-/** The samples' cost: their sum when every one has a cost, else unknown. */
 const samplesCost = (
   sampled:
     | { readonly calls: number; readonly priced: number; readonly spent: number | null }
@@ -53,10 +46,6 @@ const union = (left: Usage, right: Usage): Usage => {
   }
 }
 
-/**
- * A day's cost after adding one more contribution: unknown (NULL) as soon as
- * either side is, as `addCost` sums in the loop.
- */
 export const DAILY_COST_SUM = `cost = CASE
         WHEN usage_daily.cost IS NULL OR excluded.cost IS NULL THEN NULL
         ELSE usage_daily.cost + excluded.cost

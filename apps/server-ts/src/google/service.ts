@@ -2,22 +2,19 @@ import { parseJsonBody } from "@arden-hq/protocol/common"
 import { accountReadyFor } from "@arden-hq/protocol/google"
 import type {
   GoogleClientConfigured,
-  GoogleOAuthClient,
   GoogleAccount,
-  GoogleAccountListResponse,
-  GoogleDisconnectReceipt,
-  GoogleGrant,
-  GoogleOAuthStartResponse,
   GoogleServiceId
 } from "@arden-hq/protocol/google"
-import { GOOGLE_GRANTS, sameGoogleClient } from "@arden-hq/protocol/google"
+import {
+  GOOGLE_AUTHORIZATION_STATUS,
+  GOOGLE_GRANTS,
+  sameGoogleClient
+} from "@arden-hq/protocol/google"
 import { createGoogleClientConfiguration } from "./client-configuration.js"
 export type { GoogleOAuthClient } from "@arden-hq/protocol/google"
 import { Context, Effect, Layer } from "effect"
 import { sleep } from "@arden-hq/std/sleep"
 
-import type { CredentialVault } from "../credentials/vault.js"
-import { VaultError } from "../credentials/vault.js"
 import {
   makeGoogleAccountStore,
   publicAccount,
@@ -25,111 +22,32 @@ import {
   accountId,
   validEmail
 } from "./account-store.js"
-import { GoogleConnectionError } from "./errors.js"
 import {
-  decodeUserInfo,
-  DEFAULT_GOOGLE_ENDPOINTS,
-  GOOGLE_SCOPES,
-  type GoogleEndpoints,
-  makeGoogleOAuth,
-  type UserInfoSchema
-} from "./oauth.js"
+  GOOGLE_API_ERROR_REASON,
+  GOOGLE_CONNECTION_REASON,
+  googleAuthorizationError,
+  GoogleConnectionError
+} from "./errors.js"
+import { decodeUserInfo, makeGoogleOAuth, type UserInfoSchema } from "./oauth.js"
 import {
   GOOGLE_API_MAX_ATTEMPTS,
   GOOGLE_RETRY_MAX_DELAY_MS,
   googleApiDiagnostic,
   googleApiErrorMessage,
-  googleRetryDelayMs
+  googleRetryDelayMs,
+  isRetrySafeMethod
 } from "./request-policy.js"
+import { DEFAULT_GOOGLE_ENDPOINTS, GOOGLE_SCOPES, type GoogleEndpoints } from "./oauth-endpoints.js"
 import { currentMillis } from "../runtime/clock.js"
+import {
+  GOOGLE_RESPONSE_MODE,
+  type GoogleAccountAccess,
+  type GoogleApiRequest
+} from "./api-request.js"
 import { googleBinaryResponse } from "./binary-response.js"
+import { type GoogleConnectionsShape, type GoogleServiceOptions } from "./service-contract.js"
 
 const ACCESS_TOKEN_SKEW_MS = 60_000
-
-export interface GoogleServiceOptions {
-  readonly vault?: CredentialVault | undefined
-  readonly oauthClient?: GoogleOAuthClient | undefined
-  readonly endpoints?: Partial<GoogleEndpoints>
-  readonly now?: () => number
-  readonly random?: () => number
-  readonly retrySleep?: (delayMs: number, signal: AbortSignal | undefined) => Promise<void>
-}
-
-const googleAuthorizationError = (cause: unknown): GoogleConnectionError => {
-  if (cause instanceof GoogleConnectionError) return cause
-  if (cause instanceof VaultError) {
-    return new GoogleConnectionError({
-      reason: "storage",
-      message: "Google credentials are unavailable",
-      cause
-    })
-  }
-  return new GoogleConnectionError({
-    reason: "provider",
-    message: "Google authorization failed",
-    cause
-  })
-}
-
-interface GoogleAccountAccess {
-  readonly allowedAccountIds: () => Promise<ReadonlyArray<string> | null>
-}
-
-interface GoogleApiRequest {
-  readonly service: GoogleServiceId
-  readonly url: string
-  readonly init?: RequestInit | undefined
-  readonly accountRef?: string | undefined
-  readonly access?: GoogleAccountAccess | undefined
-  readonly response?: { readonly kind: "binary"; readonly maxBytes: number }
-}
-
-interface GoogleConnectionsShape {
-  readonly cancelOAuth: () => Effect.Effect<{ readonly status: "cancelled" }, GoogleConnectionError>
-  readonly prepareClientReplacement: (disconnectAccounts: boolean) => Effect.Effect<
-    | { readonly status: "ready" }
-    | {
-        readonly status: "blocked"
-        readonly reason: "accounts_connected" | "authorization_pending"
-      },
-    GoogleConnectionError
-  >
-  readonly configureClient: (
-    client: GoogleOAuthClient
-  ) => Effect.Effect<GoogleClientConfigured, GoogleConnectionError>
-  readonly list: () => Effect.Effect<GoogleAccountListResponse, GoogleConnectionError>
-  readonly accounts: () => ReadonlyArray<GoogleAccount>
-  readonly startOAuth: (
-    service: GoogleServiceId
-  ) => Effect.Effect<GoogleOAuthStartResponse, GoogleConnectionError>
-  readonly startGrantOAuth: (
-    grant: GoogleGrant,
-    accountId: string
-  ) => Effect.Effect<GoogleOAuthStartResponse, GoogleConnectionError>
-  readonly disconnect: (
-    service: GoogleServiceId,
-    accountId: string
-  ) => Effect.Effect<GoogleDisconnectReceipt, GoogleConnectionError>
-  readonly accessToken: (input: {
-    readonly service: GoogleServiceId
-    readonly accountRef?: string
-    readonly forceRefresh?: boolean
-  }) => Effect.Effect<
-    { readonly account: GoogleAccount; readonly token: string },
-    GoogleConnectionError
-  >
-  readonly verify: (
-    service: GoogleServiceId,
-    accountRef?: string
-  ) => Effect.Effect<GoogleAccount, GoogleConnectionError>
-  readonly request: (
-    request: GoogleApiRequest
-  ) => Effect.Effect<
-    { readonly account: GoogleAccount; readonly value: unknown },
-    GoogleConnectionError
-  >
-  readonly close: () => Promise<void>
-}
 
 export class GoogleConnections extends Context.Service<GoogleConnections, GoogleConnectionsShape>()(
   "@arden-hq/server/google/GoogleConnections"
@@ -218,8 +136,7 @@ const makeGoogleConnections = (options: GoogleServiceOptions): GoogleConnections
     response: responseMode
   }: GoogleApiRequest): Promise<{ readonly account: GoogleAccount; readonly value: unknown }> => {
     const signal = init.signal ?? undefined
-    const method = (init.method ?? "GET").toUpperCase()
-    const safeToRetry = method === "GET" || method === "HEAD"
+    const safeToRetry = isRetrySafeMethod((init.method ?? "GET").toUpperCase())
     const waitForRetry = async (
       attempt: number,
       retryAfterMs: number | undefined
@@ -263,7 +180,7 @@ const makeGoogleConnections = (options: GoogleServiceOptions): GoogleConnections
       if (response.status !== 204) {
         try {
           value =
-            response.ok && responseMode?.kind === "binary"
+            response.ok && responseMode?.kind === GOOGLE_RESPONSE_MODE.binary
               ? await googleBinaryResponse(response, responseMode.maxBytes)
               : await parseJsonBody(response)
         } catch (cause) {
@@ -272,7 +189,7 @@ const makeGoogleConnections = (options: GoogleServiceOptions): GoogleConnections
             throw new GoogleConnectionError({
               reason: "invalid_response",
               message:
-                responseMode?.kind === "binary" && cause instanceof Error
+                responseMode?.kind === GOOGLE_RESPONSE_MODE.binary && cause instanceof Error
                   ? cause.message
                   : "Google API returned invalid data",
               cause,
@@ -293,7 +210,10 @@ const makeGoogleConnections = (options: GoogleServiceOptions): GoogleConnections
         }
         const diagnostic = googleApiDiagnostic(response, value, now(), safeToRetry)
         const error = new GoogleConnectionError({
-          reason: diagnostic.reason === "auth" ? "auth_required" : "provider",
+          reason:
+            diagnostic.reason === GOOGLE_API_ERROR_REASON.auth
+              ? GOOGLE_CONNECTION_REASON.authRequired
+              : GOOGLE_CONNECTION_REASON.provider,
           message: googleApiErrorMessage(diagnostic),
           diagnostic
         })
@@ -349,7 +269,7 @@ const makeGoogleConnections = (options: GoogleServiceOptions): GoogleConnections
     if (
       account === undefined ||
       authorization === undefined ||
-      authorization.status !== "ready" ||
+      authorization.status !== GOOGLE_AUTHORIZATION_STATUS.ready ||
       GOOGLE_SCOPES[service].some((scope) => !authorization.scopes.includes(scope))
     ) {
       throw new GoogleConnectionError({

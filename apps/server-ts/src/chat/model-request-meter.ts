@@ -20,7 +20,6 @@ interface ModelRequestMeter {
   ) => Promise<A>
 }
 
-/** One response's usage as a Run records it, with the cost its provider reported, if any. */
 export const responseUsage = (response: CompletionResponse): RunUsage => {
   const prompt = response.usage.prompt_tokens ?? 0
   const completion = response.usage.completion_tokens ?? 0
@@ -106,7 +105,6 @@ export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
             if (item._tag === "ProviderStreamRetry") {
               retries += 1
               scheduledBackoffMs += item.delayMs ?? 0
-              // A retry costs the run wall time; without this line a stall leaves no trace.
               Effect.runSync(
                 Effect.logWarning("Model stream retry", {
                   model: request.model,

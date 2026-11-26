@@ -1,37 +1,22 @@
-import { Context, Layer, Schema } from "effect"
+import { Context, Layer, Schema, type SchemaAST } from "effect"
 
-/**
- * The agent's side of the Vault. The keys, passwords, contact details and cards live in the
- * desktop's main process; this server asks it, over the credential broker, for names, addresses,
- * user names, fake values, contact details and cards' safe fields only (`VaultKeyBroker`). A
- * key's value, a password, a card number or a security code never reaches this process.
- */
-
-/** The tool whose card is "Use your Todoist key?"; its "Always allow" saves a `vault_key` rule. */
 export const VAULT_USE_KEY_TOOL = "vault_use_key"
 
-/** The approval data a key's card carries: the key it asks about. */
 export const VaultKeyApprovalDataSchema = Schema.Struct({
   vault_key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
-  /** The key's id in the Vault: a rule about it ends when the key is deleted. */
   vault_key_id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
 })
 
-/** Which of this machine's services a command may reach through the key proxy. */
 type KeyProxyReach = "all" | "remote"
 
-/** The three Vault operations the desktop answers (`credential-vault-broker.cjs`). */
 export interface VaultKeyBroker {
   readonly listVault: () => Promise<unknown>
   readonly keyEnvironment: (request: {
     readonly runId: string
-    /** The keys' ids in the Vault, as the run was allowed them. */
     readonly ids: ReadonlyArray<string>
     readonly reach: KeyProxyReach
   }) => Promise<unknown>
-  /** Where saved keys and passwords appear in the text: [start, end) ranges, never values. */
   readonly findSecrets: (text: string) => Promise<unknown>
-  /** The run ended: its proxy token and stand-ins stop working. */
   readonly endKeySession: (runId: string) => Promise<unknown>
 }
 
@@ -44,7 +29,6 @@ const VaultListSchema = Schema.Struct({
   passwords: Schema.Array(
     Schema.Struct({ site: Text, name: Text, userName: Schema.optionalKey(Text) })
   ),
-  /** Contact details, values included: they are not secret. A desktop without them sends none. */
   contacts: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
@@ -60,10 +44,6 @@ const VaultListSchema = Schema.Struct({
       })
     )
   ),
-  /**
-   * Payment cards by their safe fields only. Strict like the rest: a card that carried its number
-   * or security code would be refused, not read. A desktop without cards sends none.
-   */
   cards: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
@@ -72,7 +52,6 @@ const VaultListSchema = Schema.Struct({
         last4: Text.check(Schema.isPattern(/^[0-9]{4}$/)),
         expiry: Text.check(Schema.isPattern(/^[0-9]{2}\/[0-9]{2}$/)),
         nameOnCard: Text,
-        /** The name on the billing address's contact details, from the same list. */
         billingName: Schema.optionalKey(Text)
       })
     )
@@ -92,25 +71,18 @@ export type KeyEnvironment = typeof KeyEnvironmentSchema.Type
 const Offset = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 const FoundSchema = Schema.Struct({ ranges: Schema.Array(Schema.Tuple([Offset, Offset])) })
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const decodeList = Schema.decodeUnknownSync(VaultListSchema)
 const decodeEnvironment = Schema.decodeUnknownSync(KeyEnvironmentSchema)
 const decodeFound = Schema.decodeUnknownSync(FoundSchema)
 
-/**
- * The scrub sends output in windows that fit one broker message (JSON may spend 6 bytes on a
- * character), overlapping by more than the longest saved value, so a secret across a window's
- * edge is still found whole.
- */
 const SCRUB_WINDOW = 65_536
 const SCRUB_OVERLAP = 8_192
 const SECRET_MARK = "[saved secret]"
 
-/** Asks for a key or password the agent may make in one chat in a window: Claude's limit. */
 const ASKS_PER_WINDOW = 5
 const ASK_WINDOW_MS = 5 * 60 * 1_000
-/** The runs whose granted keys are kept; the oldest is forgotten first. */
-const MAX_RUNS = 1_000
+const MAX_RUNS_HOLDING_GRANTS = 1_000
 
 class VaultUnavailableError extends Error {
   constructor() {
@@ -120,28 +92,12 @@ class VaultUnavailableError extends Error {
 }
 
 export interface VaultKeysService {
-  /** Names, kinds, addresses and user names; never a value. */
   readonly list: () => Promise<VaultList>
-  /**
-   * The run may now use this key in its commands (the user allowed it, or a rule does), by the
-   * key's id: a key deleted and added again under its name is another key.
-   */
   readonly grant: (runId: string, keyId: string) => void
-  /** The ids of the keys a run may use, in the order they were allowed. */
   readonly granted: (runId: string) => ReadonlyArray<string>
-  /** Fake values, proxy and certificate details for a run's keys; undefined when it has none. */
   readonly environment: (runId: string, reach: KeyProxyReach) => Promise<KeyEnvironment | undefined>
-  /** Command output with every saved key and password replaced. Throws when it cannot check. */
   readonly redact: (text: string) => Promise<string>
-  /**
-   * The run's runner ended: its grants are forgotten here, and the desktop drops its proxy token
-   * and stand-ins. Never throws.
-   */
   readonly end: (runId: string) => Promise<void>
-  /**
-   * Counts one ask for a secret in a chat, once per tool call; false once the chat asked 5
-   * times in 5 minutes.
-   */
   readonly takeAsk: (sessionId: string, toolCallId: string) => boolean
 }
 
@@ -172,7 +128,7 @@ export const makeVaultKeys = (
       grants.delete(runId)
       grants.set(runId, held.includes(keyId) ? held : [...held, keyId])
       const oldest = grants.keys().next().value
-      if (grants.size > MAX_RUNS && oldest !== undefined) grants.delete(oldest)
+      if (grants.size > MAX_RUNS_HOLDING_GRANTS && oldest !== undefined) grants.delete(oldest)
     },
     granted,
     environment: async (runId, reach) => {
@@ -181,8 +137,6 @@ export const makeVaultKeys = (
       const listed = decodeList(await requireBroker().listVault(), strict)
       const saved = ids.filter((id) => listed.keys.some((key) => key.id === id))
       if (saved.length === 0) return undefined
-      // By id, never by name: a key deleted and added again under its name is another key, which
-      // this run was not allowed.
       return decodeEnvironment(
         await requireBroker().keyEnvironment({ runId, ids: saved, reach }),
         strict
@@ -220,7 +174,6 @@ export const makeVaultKeys = (
   }
 }
 
-/** The text with each range (merged where they overlap) replaced by SECRET_MARK. */
 const replaceRanges = (text: string, ranges: ReadonlyArray<readonly [number, number]>): string => {
   const sorted = [...ranges].sort((left, right) => left[0] - right[0])
   const merged: Array<[number, number]> = []
@@ -238,18 +191,15 @@ const replaceRanges = (text: string, ranges: ReadonlyArray<readonly [number, num
   return `${out}${text.slice(at)}`
 }
 
-/** The environment variables a command gets for its run's keys, beside its own. */
 export const keyVariables = (environment: KeyEnvironment): Readonly<Record<string, string>> => ({
   ...environment.variables,
   HTTPS_PROXY: environment.proxyUrl,
   https_proxy: environment.proxyUrl,
   HTTP_PROXY: environment.proxyUrl,
   http_proxy: environment.proxyUrl,
-  // Every request goes through the proxy, local ones included: it lets through what a key does
-  // not cover, untouched, and a local address on a key's list gets the key.
   NO_PROXY: "",
   no_proxy: "",
-  // Node 24 reads the proxy variables only when asked to.
+  // https://nodejs.org/api/cli.html#node_use_env_proxy1
   NODE_USE_ENV_PROXY: "1",
   NODE_EXTRA_CA_CERTS: environment.caFile,
   SSL_CERT_FILE: environment.caBundleFile,
@@ -258,10 +208,6 @@ export const keyVariables = (environment: KeyEnvironment): Readonly<Record<strin
   GIT_SSL_CAINFO: environment.caBundleFile
 })
 
-/**
- * Whether text the agent wrote (a reason on a card) looks like a secret: a known key prefix, a
- * pasted credential pair, or a long random token. A card never carries one.
- */
 export const looksLikeSecret = (text: string): boolean =>
   SECRET_PATTERNS.some((pattern) => pattern.test(text)) ||
   (text.match(/[A-Za-z0-9_\-+/=]{24,}/g) ?? []).some(randomToken)

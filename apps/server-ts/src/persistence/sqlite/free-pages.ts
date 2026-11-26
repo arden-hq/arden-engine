@@ -18,8 +18,6 @@ const freelistCount = (sql: SqlClient.SqlClient) =>
     Effect.map((row) => row.freelist_count)
   )
 
-/** The free-page half of the storage store: what the free-space worker in
- * `storage/free-space.ts` drives. */
 export const makeFreePages = ({
   writer
 }: {
@@ -34,8 +32,6 @@ export const makeFreePages = ({
       Effect.map((row) => ({ free: row.free, pageSize: row.page_size })),
       Effect.mapError(failed("Could not inspect reusable database pages"))
     ),
-  // Every write goes through the one write queue on one connection, so no
-  // other write lands between the count, the release and the recount here.
   releaseFreePages: ({ pages, reservePages }) =>
     writer.run(
       Effect.gen(function* () {

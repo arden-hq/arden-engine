@@ -7,15 +7,6 @@ import { expect, it } from "vitest"
 import { ArdenApi } from "../../src/http/api.js"
 import { startServer, type ServerHandle } from "../../src/index.js"
 
-// The scan check sees only statements that some test runs. Screens read
-// through GET routes, and many had no test, so their queries were never
-// planned. This calls every GET route the API declares, on an empty database:
-// a query's plan does not depend on the rows, so one call is enough for the
-// check to see it. A new route is covered the day it is added.
-//
-// Jobs on a timer (log trim, file cleanup, stranded-run sweep) start minutes
-// after launch. ARDEN_TIMERS_AT_ONCE makes each run within a quarter second,
-// so the check sees their queries too.
 it(
   "every GET route runs once, so the scan check plans its queries",
   { timeout: 120_000 },
@@ -46,12 +37,14 @@ it(
           const abort = new AbortController()
           const timer = setTimeout(() => abort.abort(), 3_000)
           try {
-            const response = await server.fetch(url, { signal: abort.signal })
-            // An event stream never ends: its first frame is enough.
-            await response.body?.getReader().read()
-            answered.push(route)
-          } catch {
-            // A route that needs more input, or a stream cut by the timer.
+            const firstFrameRead = await server
+              .fetch(url, { signal: abort.signal })
+              .then(async (response) => {
+                await response.body?.getReader().read()
+                return true
+              })
+              .catch(() => false)
+            if (firstFrameRead) answered.push(route)
           } finally {
             clearTimeout(timer)
             abort.abort()

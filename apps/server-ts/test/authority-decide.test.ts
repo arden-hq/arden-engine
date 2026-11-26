@@ -1,60 +1,25 @@
-import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   authorityScopes,
-  deriveAuthority,
-  narrow,
   takesAnswersMidRun,
-  type AdmissionFacts,
   type RunAuthority
 } from "../src/execution/authority.js"
+import { narrow } from "../src/execution/delegation.js"
+import { boundary, decide, refusalPath, type CallFacts } from "../src/execution/decide.js"
 import {
-  boundary,
-  decide,
-  refusalPath,
-  type CallFacts,
-  type Decision,
-  type LiveSettings
-} from "../src/execution/decide.js"
-import type { RunPolicy } from "../src/execution/policy.js"
-import { toolFacts } from "../src/tools/approval-decision.js"
-import { CONTAINED, defaultImpact, INERT, OUTWARD } from "../src/execution/impact.js"
-import { defineServerTool, type ServerTool } from "../src/tools/define.js"
+  admitted,
+  automation,
+  call,
+  live,
+  person,
+  policy,
+  tool,
+  verdict,
+  write
+} from "./authority-decide-kit.js"
 
-const policy: RunPolicy = {
-  budget_id: "budget",
-  budget_generation: 0,
-  execution: { mode: "inline", observe: false },
-  capabilities: ["all"],
-  auto_approve: false,
-  google_accounts: null,
-  space: {
-    space_id: "space-a",
-    generation: 1,
-    inference: { enabled: false }
-  }
-}
-
-const admitted = (overrides: Partial<AdmissionFacts>): RunAuthority =>
-  deriveAuthority({
-    sessionId: "chat-1",
-    context: { origin: { kind: "chat", session_id: "chat-1", turn_id: "t1" }, task: null },
-    policy,
-    originOwner: null,
-    chatOwner: null,
-    ...overrides
-  })
-
-const person = admitted({})
 const personInAutomationChat = admitted({
   chatOwner: { kind: "automation", key: "auto-1", purpose: "user_automation", handler: null }
-})
-const automation = admitted({
-  context: {
-    origin: { kind: "automation", automation_id: "auto-1", occurrence_id: "o1" },
-    task: null
-  },
-  originOwner: { kind: "automation", key: "auto-1", purpose: "user_automation", handler: null }
 })
 const automationInOwnChat = admitted({
   context: {
@@ -85,79 +50,6 @@ const delegateOf = (parent: RunAuthority): RunAuthority => {
   return child.authority
 }
 
-const tool = (
-  name: string,
-  metadata: {
-    readonly action: "read" | "write"
-    readonly effect?: "none" | "run_record" | "arden_db"
-    readonly default_approval?: "approve" | "ask"
-    readonly self_gated?: boolean
-    readonly always_ask?: boolean
-    readonly approval_bypass?: boolean
-    readonly refuse_unattended?: boolean
-    readonly requirement?: "boundary"
-  },
-  perCall = false
-): ServerTool =>
-  defineServerTool({
-    name,
-    description: name,
-    parameters: Schema.toStandardSchemaV1(Schema.Struct({})),
-    metadata: {
-      display_name: name,
-      kind: "tool",
-      action: metadata.action,
-      source: "_test",
-      effect: metadata.effect ?? (metadata.action === "read" ? "none" : "arden_db"),
-      changes_state: metadata.action === "write",
-      ...(metadata.action === "write" ? { target: "reported" as const } : {}),
-      default_approval: metadata.default_approval ?? "approve",
-      concurrency_group: null,
-      destructive: false,
-      ...(metadata.self_gated === true ? { read_only_mode: "self_gated" as const } : {}),
-      ...(metadata.always_ask === true ? { always_ask: true } : {}),
-      ...(metadata.approval_bypass === true ? { approval_bypass: true } : {}),
-      ...(metadata.refuse_unattended === true ? { refuse_unattended: true } : {}),
-      ...(metadata.requirement === undefined ? {} : { requirement: metadata.requirement })
-    },
-    ...(perCall ? { approvalRequirement: async () => undefined } : {}),
-    ...(metadata.always_ask === true ? { approvalPrompt: async () => ({ preview: name }) } : {}),
-    execute: async () => "done"
-  })
-
-const live = (overrides: Partial<LiveSettings> = {}): LiveSettings => ({
-  state: "active",
-  mode: "ask",
-  rule: undefined,
-  ...overrides
-})
-
-const call = (target: ServerTool, overrides: Partial<CallFacts> = {}): CallFacts => ({
-  tool: toolFacts(target.definition),
-  impact: defaultImpact(toolFacts(target.definition)),
-  available: true,
-  unattended_scope: false,
-  floor: undefined,
-  target: undefined,
-  requirement: false,
-  user_only: false,
-  reads_only: true,
-  approved: false,
-  ...overrides
-})
-
-const verdict = (decision: Decision) => {
-  switch (decision.kind) {
-    case "allow":
-      return { allow: decision.by }
-    case "ask":
-      return { ask: decision.reason, ...decision.presentation }
-    case "deny":
-      return { deny: decision.rule, instead: decision.instead.map((path) => path.kind) }
-  }
-}
-
-const write = tool("space_task_update", { action: "write" })
 const outcome = tool("run_no_change", { action: "write", effect: "run_record" })
 const archive = tool("space_archive", { action: "write", always_ask: true })
 const shell = tool("exec_command", { action: "write", self_gated: true }, true)
@@ -549,110 +441,5 @@ describe("decide: one row per case", () => {
       ).map(([each, agentChat]) => takesAnswersMidRun(each.actor, agentChat))
     ).toEqual([true, false, true, false])
     expect(refusalPath(automation.actor).map((path) => path.kind)).not.toContain("tool")
-  })
-})
-
-describe("the locked list (plan, Appendix B decision 3)", () => {
-  const act = tool("browser_act", { action: "write", refuse_unattended: true }, true)
-  const password = (overrides: Partial<CallFacts> = {}) =>
-    call(act, { impact: { kind: "locked", category: "passwords" }, ...overrides })
-  const connector = tool("mcp__bank__transfer", { action: "write", default_approval: "ask" })
-
-  it("asks the owner above every rule, mode and Helper; only a never or the floor refuses", () => {
-    expect({
-      "an allow rule, Auto": verdict(
-        decide(person, live({ mode: "safe", rule: "allow" }), password())
-      ),
-      "Never ask": verdict(decide(person, live({ mode: "allow" }), password())),
-      "its own card in Auto, not the owner's alone": verdict(
-        decide(person, live({ mode: "safe" }), password({ requirement: true }))
-      ),
-      "a read in Read only": verdict(
-        decide(
-          person,
-          live({ mode: "read_only" }),
-          call(tool("read", { action: "read" }), {
-            impact: { kind: "locked", category: "passwords" }
-          })
-        )
-      ),
-      "a write in Read only": verdict(decide(person, live({ mode: "read_only" }), password())),
-      "unattended, can wait": verdict(
-        decide(
-          automation,
-          live({ mode: "allow" }),
-          call(write, { impact: { kind: "locked", category: "move_money" } })
-        )
-      ),
-      "unattended, cannot wait": verdict(decide(automation, live({ mode: "safe" }), password())),
-      "approved on its card": verdict(
-        decide(person, live({ mode: "ask" }), password({ approved: true }))
-      ),
-      "a never rule": verdict(decide(person, live({ mode: "allow", rule: "never" }), password())),
-      "a destructive command": verdict(
-        decide(person, live({ mode: "allow" }), password({ floor: "destructive_command" }))
-      ),
-      "the same tool, no password": verdict(
-        decide(person, live({ mode: "safe", rule: "allow" }), call(act))
-      ),
-      "a connector tool with no category, Never ask": verdict(
-        decide(person, live({ mode: "allow" }), call(connector))
-      ),
-      "a connector tool with no category, Auto": verdict(
-        decide(person, live({ mode: "safe" }), call(connector))
-      )
-    }).toEqual({
-      "an allow rule, Auto": { ask: "locked", helper: false, delivery: "pause" },
-      "Never ask": { ask: "locked", helper: false, delivery: "pause" },
-      "its own card in Auto, not the owner's alone": {
-        ask: "locked",
-        helper: false,
-        delivery: "pause"
-      },
-      "a read in Read only": { ask: "locked", helper: false, delivery: "pause" },
-      "a write in Read only": { deny: "read_only", instead: ["ask_user"] },
-      "unattended, can wait": { ask: "locked", helper: false, delivery: "chat" },
-      "unattended, cannot wait": { ask: "locked", helper: false, delivery: "refuse" },
-      "approved on its card": { allow: "user" },
-      "a never rule": { deny: "user_deny", instead: ["ask_user"] },
-      "a destructive command": { deny: "floor", instead: ["ask_user"] },
-      "the same tool, no password": { allow: "grant" },
-      "a connector tool with no category, Never ask": { allow: "mode" },
-      "a connector tool with no category, Auto": { ask: "default", helper: true, delivery: "pause" }
-    })
-  })
-})
-
-describe("code settles a call by its impact; only an outward one reaches the reviewer", () => {
-  const act = tool("browser_act", { action: "write", default_approval: "ask" })
-  const at = (mode: LiveSettings["mode"], impact: CallFacts["impact"], overrides = {}) =>
-    verdict(decide(person, live({ mode, ...overrides }), call(act, { impact })))
-
-  it("decides each impact in each mode", () => {
-    expect({
-      "inert, Ask every time": at("ask", INERT),
-      "inert, Auto": at("safe", INERT),
-      "inert, Never ask": at("allow", INERT),
-      "inert, Read only": at("read_only", INERT),
-      "contained, Ask every time": at("ask", CONTAINED),
-      "contained, Auto": at("safe", CONTAINED),
-      "contained, Never ask": at("allow", CONTAINED),
-      "outward, Ask every time": at("ask", OUTWARD),
-      "outward, Auto": at("safe", OUTWARD),
-      "outward, Never ask": at("allow", OUTWARD),
-      "outward, Auto, an allow rule": at("safe", OUTWARD, { rule: "allow" })
-    }).toEqual({
-      "inert, Ask every time": { allow: "mode" },
-      "inert, Auto": { allow: "mode" },
-      "inert, Never ask": { allow: "mode" },
-      "inert, Read only": { deny: "read_only", instead: ["ask_user"] },
-      "contained, Ask every time": { ask: "default", helper: false, delivery: "pause" },
-      "contained, Auto": { allow: "mode" },
-      "contained, Never ask": { allow: "mode" },
-      "outward, Ask every time": { ask: "default", helper: false, delivery: "pause" },
-      "outward, Auto": { ask: "default", helper: true, delivery: "pause" },
-      "outward, Never ask": { allow: "mode" },
-      "outward, Auto, an allow rule": { allow: "grant" }
-    })
   })
 })

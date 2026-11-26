@@ -1,6 +1,13 @@
 import { Schema } from "effect"
 import { withExtras } from "../common/schema.js"
-import type { ToolCatalogEntry, ToolCatalogResponse, ToolPolicy } from "./contracts.js"
+import {
+  TOOL_ACTION,
+  TOOL_APPROVAL_OVERRIDE,
+  TOOL_SCOPE,
+  type ToolCatalogEntry,
+  type ToolCatalogResponse,
+  type ToolPolicy
+} from "./contracts.js"
 import { ToolDisplayWireSchema, toToolDisplay } from "./display.js"
 
 const nonEmptyText = Schema.String.check(Schema.isMinLength(1))
@@ -12,17 +19,19 @@ const toolName = Schema.String.check(
   )
 )
 
-export const ToolActionSchema = Schema.Literals(["read", "draft", "write", "execute"] as const)
-export const ToolScopeSchema = Schema.Literals(["internal", "external"] as const)
-export const ToolApprovalOverrideSchema = Schema.Literals(["approve", "ask", "deny"] as const)
-export const ToolDefaultApprovalSchema = Schema.Literals(["approve", "ask"] as const)
+export const ToolActionSchema = Schema.Literals(Object.values(TOOL_ACTION))
+export const ToolScopeSchema = Schema.Literals(Object.values(TOOL_SCOPE))
+export const ToolApprovalOverrideSchema = Schema.Literals(Object.values(TOOL_APPROVAL_OVERRIDE))
+export const ToolDefaultApprovalSchema = Schema.Literals([
+  TOOL_APPROVAL_OVERRIDE.approve,
+  TOOL_APPROVAL_OVERRIDE.ask
+])
 const ToolPermissionListSchema = Schema.Array(nonEmptyText).check(
   Schema.makeFilter((permissions) =>
     new Set(permissions).size === permissions.length ? undefined : "contains duplicate permissions"
   )
 )
 
-/** Effective wire policy mapped to the public camel-case contract. */
 export const ToolPolicySchema = withExtras({
   action: ToolActionSchema,
   scope: ToolScopeSchema,

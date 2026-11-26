@@ -203,7 +203,6 @@ export const makeSpaceReads = (
         FROM automation_event_queue
         WHERE task_id = ${workerAutomationId} AND claimed_at IS NULL
       `
-      // Today's runs only, through idx_automation_runs_task_day.
       const runsToday = yield* reader<{ readonly count: number }>`
         SELECT COUNT(*) AS count
         FROM automation_runs

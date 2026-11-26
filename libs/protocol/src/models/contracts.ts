@@ -1,10 +1,12 @@
 import type { JsonRecord } from "../common/json.js"
 
-export type ModelRole = "background" | "helper"
+export const MODEL_ROLE = { background: "background", helper: "helper" } as const
 
-/** What "Restore defaults" on one page puts back: the chat model and its
- *  remembered efforts, or the background and helper models. */
-export type ModelResetScope = "chat" | "roles"
+export type ModelRole = (typeof MODEL_ROLE)[keyof typeof MODEL_ROLE]
+
+export const MODEL_RESET_SCOPE = { chat: "chat", roles: "roles" } as const
+
+export type ModelResetScope = (typeof MODEL_RESET_SCOPE)[keyof typeof MODEL_RESET_SCOPE]
 
 export interface ModelOption extends JsonRecord {
   readonly id: string
@@ -18,7 +20,6 @@ export interface ModelProvider extends JsonRecord {
   readonly models: ReadonlyArray<ModelOption>
 }
 
-/** Models selectable in the desktop, grouped by provider. */
 export interface ModelCatalog extends JsonRecord {
   readonly providers: ReadonlyArray<ModelProvider>
 }
@@ -28,20 +29,14 @@ export interface ModelAssignment extends JsonRecord {
   readonly reasoningEffort: string | null
 }
 
-/** Model-owned projection of the otherwise broad `GET /config` response. */
 export interface ModelSettings {
   readonly chat: ModelAssignment
   readonly roles: Readonly<Record<ModelRole, ModelAssignment>>
 }
 
-/** Consumer projection decoded from the broad `GET /config` response. */
 export interface ModelSettingsResponse extends ModelSettings {
-  /** Supported efforts for the selected Chat model. */
   readonly chatReasoningEfforts: ReadonlyArray<string>
-  /** Remembered per-model effort choices, including currently unselected models. */
   readonly reasoningByModel: Readonly<Record<string, string>>
-  /** Stored settings equal the bundled host's factory defaults. Only the
-   *  server knows those, so it says so; `POST /config/models/reset` restores one scope of them. */
   readonly atDefaults: Readonly<Record<ModelResetScope, boolean>>
 }
 
@@ -55,30 +50,30 @@ export const MODEL_SETTINGS_CHANGE = {
 } as const
 
 export type ReasoningTarget =
-  | { readonly kind: "default" }
-  | { readonly kind: "effort"; readonly effort: string }
+  | { readonly kind: typeof REASONING_TARGET.default }
+  | { readonly kind: typeof REASONING_TARGET.effort; readonly effort: string }
 
 export type ModelSettingsChange =
   | {
-      readonly kind: "chat_model"
+      readonly kind: typeof MODEL_SETTINGS_CHANGE.chatModel
       readonly model:
-        | { readonly kind: "none" }
-        | { readonly kind: "model"; readonly modelId: string }
+        | { readonly kind: typeof MODEL_TARGET.none }
+        | { readonly kind: typeof MODEL_TARGET.model; readonly modelId: string }
     }
   | {
-      readonly kind: "model_reasoning"
+      readonly kind: typeof MODEL_SETTINGS_CHANGE.modelReasoning
       readonly modelId: string
       readonly reasoning: ReasoningTarget
     }
   | {
-      readonly kind: "role_model"
+      readonly kind: typeof MODEL_SETTINGS_CHANGE.roleModel
       readonly role: ModelRole
       readonly model:
-        | { readonly kind: "chat" }
-        | { readonly kind: "model"; readonly modelId: string }
+        | { readonly kind: typeof MODEL_TARGET.chat }
+        | { readonly kind: typeof MODEL_TARGET.model; readonly modelId: string }
     }
   | {
-      readonly kind: "role_reasoning"
+      readonly kind: typeof MODEL_SETTINGS_CHANGE.roleReasoning
       readonly role: ModelRole
       readonly reasoning: ReasoningTarget
     }

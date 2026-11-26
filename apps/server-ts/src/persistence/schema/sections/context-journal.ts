@@ -19,8 +19,7 @@ export const contextJournalSchemaSection = {
   triggers: [],
   statements: [
     ...journalSqliteSchema.statements,
-    // Question reads find each question's latest change among these records;
-    // they repeat this WHERE so SQLite can use the partial index.
+    // Question reads repeat this WHERE to use the partial index: https://www.sqlite.org/partialindex.html#queries_using_partial_indexes
     `CREATE INDEX idx_journal_question_changes
       ON journal_records(stream_id, event_type, sequence)
       WHERE event_type = 'question_changed'`,
@@ -28,8 +27,6 @@ export const contextJournalSchemaSection = {
       session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
       checkpoint_seq INTEGER NOT NULL CHECK(checkpoint_seq >= 0)
     )`,
-    // Journal retention: where each walk over the journal stopped, and the runs
-    // whose rows it skipped while they were pinned.
     `CREATE TABLE journal_retention_cursors (
       name TEXT PRIMARY KEY CHECK(length(name) > 0),
       after_rowid INTEGER NOT NULL CHECK(after_rowid >= 0),

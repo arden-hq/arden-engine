@@ -48,10 +48,16 @@ export type StructuredCompletionRole = "helper" | { readonly chat: string }
 const roleLabel = (role: StructuredCompletionRole): string =>
   role === "helper" ? "Helper" : "Chat"
 
+export const STRUCTURED_COMPLETION_FAILURE = {
+  unavailable: "unavailable",
+  provider: "provider",
+  invalid_output: "invalid_output"
+} as const
+
 export class StructuredCompletionError extends Schema.TaggedError<StructuredCompletionError>()(
   "StructuredCompletionError",
   {
-    reason: Schema.Literals(["unavailable", "provider", "invalid_output"] as const),
+    reason: Schema.Literals(Object.values(STRUCTURED_COMPLETION_FAILURE)),
     message: Schema.String,
     cause: Schema.optionalKey(Schema.Defect())
   }
@@ -110,16 +116,12 @@ interface ResolvedAssignment {
   readonly assignment: ModelAssignment
   readonly label: string
   readonly model: string
-  /** The model's declared efforts, which decide how its side calls think. */
   readonly efforts: ReadonlyArray<string>
-  /** The model's `context.outputCap`. */
   readonly outputCap: number | undefined
-  /** The route's capabilities for the model. */
   readonly capabilities: ModelCapabilities
   readonly route: ModelRoute
 }
 
-/** One agent per side call, its effort and output limit chosen in `side-call.ts`. */
 const agentFor = (
   { assignment, model, efforts, outputCap, capabilities, route }: ResolvedAssignment,
   {

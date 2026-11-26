@@ -69,17 +69,12 @@ export interface SpaceBindingRow {
   readonly page_path: string | null
 }
 
-/** A page a Space is to be bound to. */
 export interface SpacePageBinding {
   readonly pageId: string
   readonly pagePath: string
 }
 
 declare const checkedFree: unique symbol
-/**
- * A page no other active Space holds or overlaps. Only `freeSpacePage` in wiki/space-index.ts
- * makes one.
- */
 export type FreeSpacePage = SpacePageBinding & { readonly [checkedFree]: true }
 
 export const spaceChoices = (
@@ -170,7 +165,6 @@ export class SpaceStore extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<string>, SpaceStoreError>
     readonly overview: () => Effect.Effect<SpacesOverview, SpaceStoreError>
     readonly setPinned: (spaceIds: ReadonlyArray<string>) => Effect.Effect<void, SpaceStoreError>
-    /** The page columns of the active Spaces that have one or both set. */
     readonly activeBindings: () => Effect.Effect<ReadonlyArray<SpaceBindingRow>, SpaceStoreError>
   }
 >()("@arden-hq/server/persistence/spaces/SpaceStore") {}

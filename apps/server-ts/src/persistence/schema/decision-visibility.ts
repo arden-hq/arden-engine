@@ -1,3 +1,5 @@
+import { DECISION_ROUTE_SOURCE, type DecisionRouteSource } from "@arden-hq/protocol/chat"
+import { DECISION_SOURCE_TABLE } from "./decision-visibility-released.js"
 import { sessionAncestorsText } from "../sqlite/tree-walk.js"
 import { disposableForkSql } from "./fork-disposition.js"
 
@@ -16,7 +18,7 @@ export const decisionLineageSql = (sourceId: "NEW.session_id" | "?"): string => 
     ) THEN 1 ELSE 0 END AS edge_valid
   FROM lineage JOIN sessions AS node ON node.session_id = lineage.session_id`
 
-const creatorRoute = (kind: "run" | "deferred") => `UNION ALL
+const creatorRoute = (kind: DecisionRouteSource) => `UNION ALL
       SELECT creator.session_id, 'automation_creator_v1'
       FROM chat_runs AS asking
       JOIN scheduled_tasks AS automation ON automation.task_id = COALESCE(
@@ -31,18 +33,17 @@ const creatorRoute = (kind: "run" | "deferred") => `UNION ALL
           json_extract(creating.metadata_json, '$.run_policy.authority_session_id'),
           creating.session_id)
         AND creator.session_type = 'chat'
-      WHERE asking.run_id = NEW.run_id${kind === "run" ? " AND NEW.kind = 'tool_approval'" : ""}
+      WHERE asking.run_id = NEW.run_id${kind === DECISION_ROUTE_SOURCE.run ? " AND NEW.kind = 'tool_approval'" : ""}
         AND creator.session_id NOT IN (
           SELECT session_id FROM (${decisionLineageSql("NEW.session_id")}))`
 
-const insertRecipients = (source: "tool_approvals" | "deferred_tool_calls") => {
-  const kind = source === "tool_approvals" ? "run" : "deferred"
-  const approvalRun = kind === "run" ? "NEW.run_id" : "NULL"
-  const approvalCall = kind === "run" ? "NEW.tool_call_id" : "NULL"
-  const deferredRun = kind === "deferred" ? "NEW.run_id" : "NULL"
-  const deferredCall = kind === "deferred" ? "NEW.tool_call_id" : "NULL"
+const insertRecipients = (kind: DecisionRouteSource) => {
+  const approvalRun = kind === DECISION_ROUTE_SOURCE.run ? "NEW.run_id" : "NULL"
+  const approvalCall = kind === DECISION_ROUTE_SOURCE.run ? "NEW.tool_call_id" : "NULL"
+  const deferredRun = kind === DECISION_ROUTE_SOURCE.deferred ? "NEW.run_id" : "NULL"
+  const deferredCall = kind === DECISION_ROUTE_SOURCE.deferred ? "NEW.tool_call_id" : "NULL"
   const sideOutcome =
-    kind === "run"
+    kind === DECISION_ROUTE_SOURCE.run
       ? `UNION ALL
       SELECT parent.session_id, 'side_outcome_recovery_v1'
       FROM (${decisionLineageSql("NEW.session_id")}) AS lineage
@@ -77,14 +78,14 @@ const validateLineage = `SELECT RAISE(ABORT, 'Invalid decision agent lineage')
     FROM (${decisionLineageSql("NEW.session_id")}))
   WHERE nodes = 0 OR roots = 0 OR invalid_edges > 0`
 
-const recipientTriggers = (source: "tool_approvals" | "deferred_tool_calls") => {
-  const kind = source === "tool_approvals" ? "run" : "deferred"
+const recipientTriggers = (kind: DecisionRouteSource) => {
+  const source = DECISION_SOURCE_TABLE[kind]
   return [
     `CREATE TRIGGER pending_decision_visibility_${kind}_insert
       AFTER INSERT ON ${source} WHEN NEW.status = 'pending'
-      BEGIN ${validateLineage}; ${insertRecipients(source)}; END`,
+      BEGIN ${validateLineage}; ${insertRecipients(kind)}; END`,
     `CREATE TRIGGER pending_decision_visibility_${kind}_update
-      AFTER UPDATE OF status, session_id${kind === "run" ? ", kind" : ""} ON ${source}
+      AFTER UPDATE OF status, session_id${kind === DECISION_ROUTE_SOURCE.run ? ", kind" : ""} ON ${source}
       BEGIN
         DELETE FROM pending_decision_visibility
           WHERE source_kind = '${kind}' AND run_id = OLD.run_id
@@ -93,13 +94,13 @@ const recipientTriggers = (source: "tool_approvals" | "deferred_tool_calls") => 
           WHERE source_kind = '${kind}' AND run_id = OLD.run_id
             AND tool_call_id = OLD.tool_call_id;
         ${validateLineage.replace("WHERE nodes = 0 OR roots = 0 OR invalid_edges > 0", "WHERE NEW.status = 'pending' AND (nodes = 0 OR roots = 0 OR invalid_edges > 0)")};
-        ${insertRecipients(source)};
+        ${insertRecipients(kind)};
       END`
   ] as const
 }
 
-const sourceTriggers = (source: "tool_approvals" | "deferred_tool_calls") => {
-  const kind = source === "tool_approvals" ? "run" : "deferred"
+const sourceTriggers = (kind: DecisionRouteSource) => {
+  const source = DECISION_SOURCE_TABLE[kind]
   return [
     `CREATE TRIGGER pending_decision_visibility_${kind}_immutable_identity
       BEFORE UPDATE OF run_id, tool_call_id ON ${source}
@@ -189,13 +190,13 @@ export const decisionVisibilityStatements = [
         OLD.parent_run_id IS NOT NEW.parent_run_id OR
         OLD.parent_tool_call_id IS NOT NEW.parent_tool_call_id))
     BEGIN SELECT RAISE(ABORT, 'Agent delegation is immutable'); END`,
-  ...recipientTriggers("tool_approvals"),
-  ...sourceTriggers("tool_approvals"),
-  ...recipientTriggers("deferred_tool_calls"),
-  ...sourceTriggers("deferred_tool_calls")
+  ...recipientTriggers(DECISION_ROUTE_SOURCE.run),
+  ...sourceTriggers(DECISION_ROUTE_SOURCE.run),
+  ...recipientTriggers(DECISION_ROUTE_SOURCE.deferred),
+  ...sourceTriggers(DECISION_ROUTE_SOURCE.deferred)
 ] as const
 
 export const decisionRecipientTriggers = [
-  ...recipientTriggers("tool_approvals"),
-  ...recipientTriggers("deferred_tool_calls")
+  ...recipientTriggers(DECISION_ROUTE_SOURCE.run),
+  ...recipientTriggers(DECISION_ROUTE_SOURCE.deferred)
 ] as const

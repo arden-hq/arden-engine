@@ -4,27 +4,20 @@ import type { ReviewPlans } from "./review-plans.js"
 
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import type { ServerToolRun } from "../chat/runner-contract.js"
-import type { OfferOutcome, PermissionsView, OfferRequest } from "./permission-offer.js"
+import type { OfferOutcome, PermissionsView } from "./permission-offer.js"
+import type { OfferRequest } from "./permission-offer-facts.js"
 import type { CodeModeHost, ScriptHost } from "../workflows/runtime/contract.js"
 import type { BrowserObservationCheckpoint, BrowserPageView } from "../browser/observation.js"
 export type { BrowserPageView } from "../browser/observation.js"
 export type { ChatSendReceipt as SentReceipt } from "../persistence/chat/send-contracts.js"
 
-/**
- * What this run has read, and at which version. A tool that must know "did
- * this change since the run read it" asks here; the model never carries a
- * version or a hash from one call to the next.
- */
 export interface ObservationRegistry {
   readonly observeHead: (head: string) => void
   readonly observedHead: () => string | undefined
   readonly observe: (id: string, version: string) => void
-  /** Records `version` only when the run has not read `id` yet: a version read earlier is kept. */
   readonly observeIfUnseen: (id: string, version: string) => void
   readonly observed: (id: string) => string | undefined
-  /** Everything this run has read, oldest first, to carry into a call it asked approval for. */
   readonly snapshot: () => ObservationSnapshot
-  /** Takes what a run had read when it asked; what this toolset read itself is kept. */
   readonly adopt: (snapshot: ObservationSnapshot) => void
 }
 
@@ -35,7 +28,6 @@ export const ObservationSnapshotSchema = Schema.Struct({
 
 type ObservationSnapshot = typeof ObservationSnapshotSchema.Type
 
-/** Names for what a run read that is not a Memory page; a page uses its page id. */
 export const observedKey = {
   task: (itemId: string): string => `task:${itemId}`,
   skill: (name: string, resource: string | undefined): string =>

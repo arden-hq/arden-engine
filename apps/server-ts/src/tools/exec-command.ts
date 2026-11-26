@@ -1,42 +1,25 @@
-import { countOf } from "@arden-hq/std/count"
-import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
+import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 
 import { commandTarget } from "./action-targets.js"
-import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
+import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { PermissionRules } from "../persistence/permissions/rules.js"
 import { COMMAND_TOOL } from "../persistence/permissions/command-policy.js"
-import {
-  matchesHostCommands,
-  isSystemJobRun,
-  readRunRules,
-  ruleDecision,
-  type RunRules
-} from "../execution/rules.js"
-import { sharedResourceSessions, type RunAuthority } from "../execution/authority.js"
 import { ConversationArtifacts } from "../artifacts/conversation.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
-import { changesNothing, isReadOnlyCommand } from "./bash-safe-commands.js"
-import { parseCommandSegments, type HostCommandGrantPlan } from "./bash-permissions.js"
+import { changesNothing } from "./bash-safe-commands.js"
+import { commandCard, namesArdenData } from "./command-card.js"
 import { refuseNeverPaths } from "./command-paths.js"
+import { approvalPrompt, commandGrantPlan, networkReach, workingDirectory } from "./shell-policy.js"
 import {
-  approvalPrompt,
-  commandGrantPlan,
-  commandSkipsCard,
-  hostCommandNeed,
-  approvalRule,
-  networkReach,
-  type ResolvedShell,
-  ShellAccessSchema,
+  keyProxyFor,
   shellRuntime,
   type ShellRuntime,
-  type ShellRuntimeOptions,
-  type TypedInto,
-  workingDirectory
-} from "./shell-policy.js"
+  type ShellRuntimeOptions
+} from "./shell-invocation.js"
 import {
   EMPTY_LINE,
   INTERRUPT,
@@ -44,105 +27,37 @@ import {
   typedInputJudged,
   typedInputRefused,
   typeInto,
-  type TypedCommands,
   type TypedLine
 } from "./typed-input.js"
 import { sessionPathPolicy } from "../storage/local-paths.js"
-import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
-import { ardenDataRoots, mentionsArdenData } from "./arden-data-mention.js"
 import { ServerConfig } from "../config/service.js"
 import { DataRoot } from "../runtime/data-root.js"
 import { resolveCommandSandbox } from "../runtime/command-sandbox.js"
-import {
-  CommandInterrupted,
-  type CommandExited,
-  MAX_CAPTURE_BYTES,
-  runCommandUntil
-} from "./shell-run.js"
-import type { LocalPathServices } from "../storage/local-paths.js"
+import { CommandInterrupted, runCommandUntil } from "./shell-run.js"
 import { TerminalSessions } from "../terminals/service.js"
-import type { TerminalInfo, TerminalStore } from "../terminals/store.js"
-import { spawnLiveProcess, type ProcessExit } from "../terminals/live-process.js"
-import type { ServerRunContext } from "./run-context.js"
+import type { TerminalInfo } from "../terminals/store.js"
+import { spawnLiveProcess } from "../terminals/live-process.js"
 import { refusalPath } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
 import { toolRefusal } from "./tool-failure.js"
-import { keyVariables, VaultKeys, type VaultKeysService } from "../credentials/vault-keys.js"
-import type { KeyProxy } from "./shell-policy.js"
-
-const DEFAULT_YIELD_MS = 10_000
-const MAX_EXEC_YIELD_MS = 30_000
-const DEFAULT_WRITE_YIELD_MS = 1_000
-const MIN_POLL_YIELD_MS = 5_000
-const MAX_YIELD_INPUT_MS = 300_000
-const MIN_YIELD_MS = 250
-
-const yieldTime = (description: string) =>
-  Schema.optionalKey(
-    Schema.Number.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(MIN_YIELD_MS),
-      Schema.isLessThanOrEqualTo(MAX_YIELD_INPUT_MS)
-    ).annotate({ description })
-  )
-
-/**
- * Longest command, in characters. Bash takes the source as one argument, and
- * Linux refuses a single argument above 128 KiB, so a higher number would only
- * move the refusal from here to the operating system.
- */
-const MAX_COMMAND_LENGTH = 128_000
-
-const ExecParametersSchema = Schema.Struct({
-  cmd: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_COMMAND_LENGTH)).annotate({
-    description:
-      "Bash source passed to /bin/bash -c (1-128,000 characters). Each call starts a fresh process: quote paths and include all shell state the command needs."
-  }),
-  workdir: Schema.optionalKey(
-    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
-      description:
-        "Directory to run in. Defaults to the current Local folder, must be inside allowed roots, and is required when no Local folder is set."
-    })
-  ),
-  access: Schema.optionalKey(
-    ShellAccessSchema.annotate({
-      description:
-        'Where the command runs. "sandbox" (the code-agent default): reads everything except secret folders, writes only the Local folder and temp, no network. "network": the same sandbox plus connections to other machines (not localhost or local sockets), for downloads, package installs, git over https and remote APIs; it follows the approval mode. "host" (the ordinary-Chat default): no sandbox, as the user would, behind approval; use it for ssh, saved logins or keys, and changes outside the Local folder.'
-    })
-  ),
-  tty: Schema.optionalKey(
-    Schema.Boolean.annotate({
-      description:
-        "Run the command in a terminal with its input open, so write_stdin can answer its prompts and interactive tools behave as they would for a person. Defaults to false: input is closed, and a command that asks a question reads an empty answer."
-    })
-  ),
-  yield_time_ms: yieldTime(
-    "How long to wait for the command to finish before returning its session ID, in ms. Defaults to 10,000; waits at least 250 and at most 30,000, and larger values are cut to 30,000. The command keeps running after that."
-  )
-})
-
-const WriteParametersSchema = Schema.Struct({
-  session_id: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)).annotate({
-    description: "The session ID exec_command returned for a command that was still running."
-  }),
-  chars: Schema.optionalKey(
-    Schema.String.check(Schema.isMaxLength(8_000)).annotate({
-      description:
-        'Characters to type, such as "y\\n". "\\u0003" sends Ctrl-C. Empty or omitted only reads new output.'
-    })
-  ),
-  yield_time_ms: yieldTime(
-    "How long to wait for output. Defaults to 1,000 after typing and 5,000 for a read; waits at most 30,000, and a read at least 5,000. Returns early when the process ends."
-  )
-})
-
-interface ShellToolServices extends LocalPathServices {
-  readonly rules: PermissionRules["Service"]
-  readonly vault: VaultKeysService
-  readonly artifacts?: ConversationArtifacts["Service"]
-  readonly terminals: TerminalStore
-  readonly commandSandbox?: boolean
-}
+import { VaultKeys } from "../credentials/vault-keys.js"
+import {
+  DEFAULT_WRITE_YIELD_MS,
+  DEFAULT_YIELD_MS,
+  ExecParametersSchema,
+  MAX_EXEC_YIELD_MS,
+  MIN_POLL_YIELD_MS,
+  WriteParametersSchema,
+  type ShellToolServices
+} from "./exec-command-parameters.js"
+import {
+  exitPreview,
+  exitedResult,
+  processState,
+  reachableTerminal,
+  terminalShell,
+  typedCard
+} from "./exec-command-support.js"
 
 const makeExecCommandTool = (
   services: ShellToolServices,
@@ -336,52 +251,6 @@ const makeExecCommandTool = (
   return tool
 }
 
-const exitedResult = async (
-  outcome: CommandExited,
-  {
-    cwd,
-    access,
-    preserveOutput,
-    ctx
-  }: {
-    readonly cwd: string
-    readonly access: string
-    readonly preserveOutput: (bytes: Buffer, truncated: boolean) => Promise<string | undefined>
-    readonly ctx: ToolContext<ServerRunContext>
-  }
-) => {
-  const artifactRef =
-    outcome.fullOutput !== undefined &&
-    (outcome.fullOutput.length > MAX_CAPTURE_BYTES || outcome.exitCode !== 0)
-      ? await preserveOutput(outcome.fullOutput, outcome.fullOutputTruncated)
-      : undefined
-  const artifactNote =
-    artifactRef === undefined
-      ? ""
-      : `\n\n${outcome.fullOutputTruncated ? "Output head and tail (middle omitted)" : "Full output"}: artifact_ref ${artifactRef}. To read it, copy it to a file with artifact_export, then use file_read.`
-  if (outcome.exitCode !== 0) {
-    throw toolRefusal(`${outcome.output}${artifactNote}`, `Exit ${outcome.exitCode}`)
-  }
-  const lines = outcome.output.split("\n").length
-  return {
-    result: `${outcome.output}${artifactNote}`,
-    preview: `${countOf(lines, "output line")}`,
-    data: {
-      cwd,
-      access,
-      state: "exited",
-      ...(ctx.approval?.grantStanding === true && approvalRule(ctx.approval.data) !== undefined
-        ? { approval_rule: approvalRule(ctx.approval.data) }
-        : {}),
-      exit_code: outcome.exitCode,
-      stdout_bytes: outcome.stdoutBytes,
-      stderr_bytes: outcome.stderrBytes,
-      ...(artifactRef === undefined ? {} : { artifact_ref: artifactRef }),
-      output_artifact_truncated: outcome.fullOutputTruncated
-    }
-  }
-}
-
 const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
   const pendingLines = new Map<number, { readonly toolCallId: string; readonly line: TypedLine }>()
   services.terminals.subscribe((event) => {
@@ -551,148 +420,6 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
     }
   })
 }
-
-const terminalShell = async (
-  services: ShellToolServices,
-  terminal: TerminalInfo,
-  ctx: { readonly run: ServerRunContext; readonly signal: AbortSignal }
-): Promise<Pick<ResolvedShell, "cwd" | "access" | "codeAgent">> => {
-  const session = await sessionPathPolicy(services, {
-    sessionId: ctx.run.sessionId,
-    runId: ctx.run.runId,
-    signal: ctx.signal
-  })
-  return {
-    cwd: terminal.cwd,
-    access: terminal.access,
-    codeAgent: session.sandbox === "code_agent"
-  }
-}
-
-const typedCard = (terminal: TerminalInfo, chars: string, commands: TypedCommands) => ({
-  command: terminal.command,
-  toolCallId: terminal.toolCallId,
-  input: chars,
-  shown: commands.kind === "lines" ? commands.shown : chars,
-  unknown: commands.kind === "lines" && commands.unknown
-})
-
-const reachableTerminal = (
-  terminals: TerminalStore,
-  id: number,
-  run: ServerRunContext
-): TerminalInfo | undefined => {
-  const terminal = terminals.get(id)
-  if (terminal === undefined || terminal.sessionId === run.sessionId) return terminal
-  return sharedResourceSessions(run.authority, "agent_code").some(
-    (resource) => resource.session_id === terminal.sessionId
-  )
-    ? terminal
-    : undefined
-}
-
-const namesArdenData = (
-  services: ShellToolServices,
-  command: string,
-  resolved: Pick<ResolvedShell, "cwd" | "access">
-): boolean =>
-  resolved.access === "host" &&
-  mentionsArdenData({ command, cwd: resolved.cwd, roots: ardenDataRoots(services.dataDir) })
-
-const commandCard = async (
-  services: ShellToolServices,
-  input: {
-    readonly command: string
-    readonly resolved: Pick<ResolvedShell, "cwd" | "access" | "codeAgent">
-    readonly mode: ChatApprovalMode
-    readonly authority: RunAuthority
-    readonly plan?: (rules: RunRules) => Promise<HostCommandGrantPlan | undefined>
-    readonly typedInto?: TypedInto
-  }
-): Promise<ServerApprovalPrompt | undefined> => {
-  const { command, resolved } = input
-  if (resolved.access === "sandbox") return undefined
-  const ardenData = namesArdenData(services, command, resolved)
-  const rules = await Effect.runPromise(readRunRules(services.rules, input.authority)).catch(
-    () => undefined
-  )
-  const alwaysAsk = rules === undefined || ruleDecision(rules, matchesHostCommands) === "ask"
-  const skips = commandSkipsCard({
-    access: resolved.access,
-    mode: input.mode,
-    alwaysAsk,
-    readsOnly:
-      input.typedInto?.unknown !== true &&
-      isReadOnlyCommand(parseCommandSegments(command), resolved.cwd),
-    codeAgent: resolved.codeAgent,
-    ardenData
-  })
-  const plan = rules === undefined ? undefined : await input.plan?.(rules)
-  const need = hostCommandNeed({
-    hostAsk: alwaysAsk,
-    rule: plan?.rule,
-    modeSkips: skips,
-    systemJob: isSystemJobRun(input.authority)
-  })
-  if (need === "refuse")
-    throw toolRefusal(
-      `The user's rule says Arden never runs ${plan?.displayPrefixes.join(", ") ?? "this command"} on their Mac. Do not try another way; say what you needed instead.`,
-      "A rule refuses this command"
-    )
-  if (need === "unlisted")
-    throw toolRefusal(
-      "No rule for Arden's own jobs allows this command, so it was not run. Do not try another way; say which command you needed and that the owner can allow it for Arden's own jobs.",
-      "No rule allows this command"
-    )
-  if (need === "none" || input.mode === "read_only") return undefined
-  return approvalPrompt({
-    command,
-    resolved,
-    plan,
-    ardenData,
-    userOnly: need === "owner_card",
-    typedInto: input.typedInto
-  })
-}
-
-/**
- * The run's keys for a command: stand-in values, the proxy and its certificate. None for a
- * sandboxed command, which has no network to send them on. A run that was allowed a key and
- * cannot get its stand-in does not run the command: it would go out without the key at best.
- */
-const keyProxyFor = async (
-  vault: VaultKeysService,
-  runId: string,
-  access: "sandbox" | "network" | "host"
-): Promise<KeyProxy | undefined> => {
-  if (access === "sandbox" || vault.granted(runId).length === 0) return undefined
-  const environment = await vault
-    .environment(runId, access === "host" ? "all" : "remote")
-    .catch(() => {
-      throw toolRefusal(
-        "Arden could not prepare this run's saved keys, so the command did not run. Try again in a moment.",
-        "Keys unavailable"
-      )
-    })
-  if (environment === undefined) return undefined
-  const port = Number(new URL(environment.proxyUrl).port)
-  if (!Number.isInteger(port) || port < 1)
-    throw toolRefusal(
-      "Arden's key proxy is not running, so the command did not run.",
-      "Keys unavailable"
-    )
-  return { variables: keyVariables(environment), port }
-}
-
-const processState = (id: number, exit: ProcessExit | undefined): string => {
-  if (exit === undefined) return `Process running with session ID ${id}.`
-  return exit.kind === "code"
-    ? `Process ${id} exited with code ${exit.code}.`
-    : `Process ${id} was stopped (${exit.signal}).`
-}
-
-const exitPreview = (exit: ProcessExit): string =>
-  exit.kind === "code" ? `Exit ${exit.code}` : "Stopped"
 
 export const shellTools = Effect.gen(function* () {
   const services: ShellToolServices = {

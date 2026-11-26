@@ -1,42 +1,25 @@
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
-import {
-  automationPermissionChat,
-  type Automation,
-  type AutomationChatChoice
-} from "@arden-hq/protocol/automations"
-import {
-  AutomationModelSchema,
-  AutomationSchema,
-  SystemAutomationChatSchema
-} from "@arden-hq/protocol/effect/automations"
 import { randomUUID } from "node:crypto"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { assertAppEvents } from "./automation-app-events.js"
 import { McpConnections } from "../mcp/service.js"
-import type { AutomationRuntime } from "../automations/runtime.js"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { AutomationId } from "../persistence/automations/model.js"
 import { AutomationQueue } from "../persistence/automations/queue.js"
-import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
+import { SessionQueries } from "../persistence/sessions/queries.js"
 import { SessionStore } from "../persistence/sessions/store.js"
-import { ModelStore, type ModelStoreError } from "../persistence/models/store.js"
+import { ModelStore } from "../persistence/models/store.js"
 import { LimitSettingsStore } from "../persistence/settings/store.js"
-import { setAutomationLimits } from "./automation-limits.js"
-import {
-  ApprovalPolicyStore,
-  sessionApprovalMode,
-  type ApprovalPolicyError
-} from "../persistence/permissions/approval-policy.js"
+import { ApprovalPolicyStore } from "../persistence/permissions/approval-policy.js"
 import {
   CreateParametersSchema,
   EmptyParametersSchema,
   RefParametersSchema,
-  RunsParametersSchema,
-  UpdateParametersSchema
+  RunsParametersSchema
 } from "./automation-tool-schema.js"
-import { requireResult, toolFailure } from "./tool-failure.js"
+import { requireResult } from "./tool-failure.js"
 import {
   CREATE_APPROVAL_EDITS,
   createCardOf,
@@ -45,127 +28,32 @@ import {
   promptWriterOf
 } from "./automation-create-card.js"
 import {
-  SYSTEM_ACCEPTS,
   chatLabel,
   formatAutomation,
-  droppedTriggerLines,
   modelLabel,
   historyLabel,
   scheduleStatus,
   automationRunLines,
-  systemLines,
-  triggersLabel,
-  type AutomationModelInfo
+  triggersLabel
 } from "./automation-tool-text.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { updateCard } from "./automation-update-card.js"
-import { createRequestOf, updateRequestOf, updateTriggersOf } from "./automation-tool-requests.js"
-import { automationData, historyOf, isRunning, nextRunAt } from "./automation-tool-data.js"
+import { createRequestOf } from "./automation-tool-requests.js"
+import { automationData, isRunning, nextRunAt } from "./automation-tool-data.js"
 import { appliedReceipt } from "./call-receipt.js"
 import {
   automationResource,
   deletedAutomationResource,
   lastAutomationVersion,
   resolveAutomation,
-  resolveChatRef,
   storeFailure
 } from "./automation-records.js"
-
-interface AutomationToolServices {
-  readonly store: AutomationCatalog["Service"]
-  readonly runNow: AutomationRuntime["Service"]["runNow"]
-  readonly sessions: SessionQueries["Service"]
-  readonly sessionStore: SessionStore["Service"]
-  readonly models: ModelStore["Service"]
-  readonly policy: ApprovalPolicyStore["Service"]
-  readonly limits: LimitSettingsStore["Service"]
-  readonly apps: McpConnections["Service"]["snapshot"]
-}
-
-const automationGuards = AutomationSchema.guards
-const chatGuards = SystemAutomationChatSchema.guards
-
-const sessionFailure = (error: SessionQueryFailure): ToolExecutionError =>
-  toolFailure(
-    { reason: error.reason, message: `Could not read the Automation's chat: ${error.message}` },
-    "Chat unavailable"
-  )
-
-const modelFailure = (error: ModelStoreError): ToolExecutionError =>
-  toolFailure(error, "Model unavailable")
-
-const policyFailure = (error: ApprovalPolicyError): ToolExecutionError =>
-  toolFailure(error, "Chat permissions unavailable")
-
-const automationModelInfo = async (
-  automation: Automation,
-  services: AutomationToolServices,
-  signal: AbortSignal
-): Promise<AutomationModelInfo> => {
-  const chat = automation.chat
-  const runChat = chatGuards.none(chat)
-    ? null
-    : await Effect.runPromise(
-        services.sessions.loadHistoryHeader(chat.session_id).pipe(Effect.mapError(sessionFailure)),
-        { signal }
-      )
-  const permissionChat = automationPermissionChat(automation)
-  const permission =
-    permissionChat === null
-      ? null
-      : await Effect.runPromise(
-          services.policy.session(permissionChat).pipe(Effect.mapError(policyFailure)),
-          { signal }
-        )
-  const context = {
-    chat_ref: chatGuards.yours(chat) ? (runChat?.publicRef ?? null) : null,
-    action_mode: permission && sessionApprovalMode(permission)
-  }
-  if (automationGuards.system(automation) && !automation.settings.settable.includes("model")) {
-    return { ...context, model_source: "source_chat", effective_model: null }
-  }
-  if (AutomationModelSchema.guards.chosen(automation.model)) {
-    return { ...context, model_source: "override", effective_model: automation.model.model_id }
-  }
-  if (chatGuards.yours(chat) && historyOf(automation) === "chat") {
-    if (runChat === null) return { ...context, model_source: "unknown", effective_model: null }
-    const selection = await Effect.runPromise(
-      services.models.selection(runChat.sessionId).pipe(Effect.mapError(modelFailure)),
-      { signal }
-    )
-    return { ...context, model_source: "chat", effective_model: selection.modelId }
-  }
-  const settings = await Effect.runPromise(
-    services.models.snapshot().pipe(Effect.mapError(modelFailure)),
-    { signal }
-  )
-  return {
-    ...context,
-    model_source: "background",
-    effective_model: settings.roleOverrides.background.modelId
-  }
-}
-
-const chosenChat = async (
-  choice: { readonly where: "current" | "own" | undefined; readonly chat_ref: string | undefined },
-  services: AutomationToolServices,
-  currentSessionId: string,
-  signal: AbortSignal
-): Promise<AutomationChatChoice> => {
-  if (choice.chat_ref === undefined) {
-    return choice.where === "own"
-      ? { kind: "own" }
-      : { kind: "yours", session_id: currentSessionId }
-  }
-  if (choice.where === "own") {
-    throw new ToolExecutionError("Choose chat=own or a chat_ref, not both", {
-      preview: "Conflicting chat",
-      retryable: false
-    })
-  }
-  const target = await resolveChatRef(services.sessionStore, choice.chat_ref, signal)
-  return { kind: "yours", session_id: target.sessionId }
-}
+import {
+  type AutomationToolServices,
+  automationGuards,
+  automationModelInfo,
+  chosenChat
+} from "./automation-tool-support.js"
+import { makeAutomationUpdateTool } from "./automation-update-tool.js"
 
 const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<ServerTool> => {
   const createCard = createCardOf({ models: services.models })
@@ -356,228 +244,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
         }
       }
     }),
-    defineServerTool({
-      name: "automation_update",
-      summary: "Changes an automation’s instructions or schedule.",
-      discovery: { group: "automations" },
-      description: [
-        "Load the automation-design Skill before revising an Automation's instructions or schedule.",
-        "Update one Automation by exact automation_ref.",
-        "Use chat=current, chat=own or chat_ref to move future runs to another chat; history chooses whether each run starts fresh or reads that chat. Runs act with the action mode of their chat, or of their own chat when they start fresh in one of the user's. Four changes each go in a call of their own: action_mode, the plan limits (pause_at_percent and max_tokens_per_run together), reset_to_default, and a model change when the runs read one of the user's chats. Other changes edit instructions, model, triggers or schedule. Sending triggers replaces the list: send each trigger to keep with its id (t1, t2) from the Automation's text; a field you leave out keeps its stored value, such as an old field condition, and null clears it.",
-        `${SYSTEM_ACCEPTS} Use reset_to_default to undo one of its changed settings.`,
-        "To add an installed tool to a built-in Automation: look the tool up if unsure what it is, check its command exists, offer that command with permission_offer (permission.command) (its card has Arden's own jobs; a built-in runs only commands that list allows), then change its prompt here to use it, and tell the person reset_to_default prompt restores the shipped one."
-      ].join(" "),
-      parameters: Schema.toStandardSchemaV1(UpdateParametersSchema, {
-        parseOptions: { onExcessProperty: "error" }
-      }),
-      metadata: {
-        display: [{ fact: "refresh", value: "automations" }],
-        effect: "arden_db",
-        display_name: "Update Automation",
-        standing: "always",
-        kind: "tool",
-        action: "write",
-        approval_preview: "Update this Automation.",
-        source: "_automations",
-        changes_state: true,
-        target: "reported",
-        concurrency_group: "automations",
-        destructive: true,
-        default_approval: "ask",
-        permissions: ["automation"],
-        idempotent: false
-      },
-      approvalPrompt: async (input, ctx) => {
-        const current = await resolveAutomation(services.store, input.automation_ref, ctx.signal)
-        return {
-          preview: `Update ${current.name}.`,
-          presentation: updateCard(current, input.changes)
-        }
-      },
-      execute: async (input, ctx, effects) => {
-        const current = await resolveAutomation(services.store, input.automation_ref, ctx.signal)
-        const {
-          chat: where,
-          chat_ref,
-          action_mode,
-          pause_at_percent,
-          max_tokens_per_run,
-          reset_to_default,
-          ...changes
-        } = input.changes
-        await assertAppEvents(changes.triggers, services.apps, { creating: false })
-        if (automationGuards.system(current)) {
-          const accepted: ReadonlyArray<string> = [
-            ...current.settings.settable,
-            "pause_at_percent",
-            "max_tokens_per_run",
-            "reset_to_default"
-          ]
-          const locked = Object.keys(input.changes).filter((field) => !accepted.includes(field))
-          if (locked.length > 0) {
-            throw new ToolExecutionError(
-              `${current.name} is a system Automation and cannot change ${locked.join(", ")}. It accepts only ${accepted.join(", ")}.`,
-              { preview: "Fixed by the system", retryable: false }
-            )
-          }
-        }
-        if (reset_to_default !== undefined) {
-          if (Object.keys(input.changes).length > 1) {
-            throw new ToolExecutionError("Reset a setting in a separate automation_update call", {
-              preview: "Separate reset",
-              retryable: false
-            })
-          }
-          if (automationGuards.user(current)) {
-            throw new ToolExecutionError("Only a system Automation has defaults to reset", {
-              preview: "No default",
-              retryable: false
-            })
-          }
-          const reset = requireResult(
-            "reset",
-            await recordApplied(
-              effects,
-              Effect.runPromise(
-                services.store
-                  .resetSystemSetting(AutomationId.make(current.task_id), reset_to_default)
-                  .pipe(Effect.mapError(storeFailure)),
-                { signal: ctx.signal }
-              )
-            )
-          )
-          const modelInfo = await automationModelInfo(reset, services, ctx.signal)
-          return {
-            result: [
-              `Reset ${reset_to_default} of ${reset.name} to its default`,
-              "Triggers:",
-              triggersLabel(reset, "  "),
-              `Schedule: ${scheduleStatus(reset)}`,
-              `Model: ${modelLabel(modelInfo)}`,
-              ...systemLines(reset)
-            ].join("\n"),
-            preview: `Reset (${reset.automation_ref})`,
-            data: automationData(reset, modelInfo)
-          }
-        }
-        const alone = (fields: ReadonlyArray<string>): boolean =>
-          Object.keys(input.changes).every((field) => fields.includes(field))
-        if (pause_at_percent !== undefined || max_tokens_per_run !== undefined) {
-          if (!alone(["pause_at_percent", "max_tokens_per_run"])) {
-            throw new ToolExecutionError(
-              "Change this Automation's plan limits in a separate automation_update call",
-              { preview: "Separate limit change", retryable: false }
-            )
-          }
-          return setAutomationLimits(services.limits, current, current.automation_ref, {
-            pause_at_percent,
-            max_tokens_per_run,
-            signal: ctx.signal
-          })
-        }
-        if (action_mode !== undefined) {
-          if (!alone(["action_mode"])) {
-            throw new ToolExecutionError(
-              "Change the chat's permissions in a separate automation_update call",
-              { preview: "Separate permission change", retryable: false }
-            )
-          }
-          const permissionChat = automationPermissionChat(current)
-          if (permissionChat === null) {
-            throw new ToolExecutionError("This Automation has no chat", {
-              preview: "No chat",
-              retryable: false
-            })
-          }
-          await recordApplied(
-            effects,
-            Effect.runPromise(
-              services.policy
-                .setSession({
-                  sessionId: permissionChat,
-                  mode: action_mode
-                })
-                .pipe(Effect.mapError(policyFailure)),
-              { signal: ctx.signal }
-            )
-          )
-        }
-        const chat =
-          where === undefined && chat_ref === undefined
-            ? undefined
-            : await chosenChat({ where, chat_ref }, services, ctx.run.sessionId, ctx.signal)
-        const chatModelChange =
-          chatGuards.yours(current.chat) &&
-          chat === undefined &&
-          (changes.history ?? historyOf(current)) === "chat" &&
-          changes.model != null
-        if (chatModelChange && chatGuards.yours(current.chat) && changes.model != null) {
-          if (!alone(["model"])) {
-            throw new ToolExecutionError(
-              "Change the chat's model in a separate automation_update call",
-              { preview: "Separate model change", retryable: false }
-            )
-          }
-          await recordApplied(
-            effects,
-            Effect.runPromise(
-              services.models
-                .setSessionModel(current.chat.session_id, changes.model)
-                .pipe(Effect.mapError(modelFailure)),
-              { signal: ctx.signal }
-            )
-          )
-        }
-        const updated =
-          chatModelChange || action_mode !== undefined
-            ? current
-            : requireResult(
-                "update",
-                await recordApplied(
-                  effects,
-                  Effect.runPromise(
-                    services.store
-                      .update(
-                        AutomationId.make(current.task_id),
-                        updateRequestOf(changes, chat),
-                        promptWriterOf(ctx.approval),
-                        { runId: ctx.run.runId, toolCallId: ctx.toolCallId }
-                      )
-                      .pipe(Effect.mapError(storeFailure)),
-                    { signal: ctx.signal }
-                  )
-                )
-              )
-        const modelInfo = await automationModelInfo(updated, services, ctx.signal)
-        const dropped =
-          changes.triggers === undefined || updated === current
-            ? []
-            : droppedTriggerLines(current, updateTriggersOf(changes.triggers), "  ")
-        return {
-          result: [
-            `Updated Automation: ${updated.name}`,
-            `Reference: ${updated.automation_ref}`,
-            "Triggers:",
-            triggersLabel(updated, "  "),
-            ...(dropped.length === 0
-              ? []
-              : ["Dropped by this write (no trigger checks them now):", ...dropped]),
-            `Schedule: ${scheduleStatus(updated)}`,
-            ...(!updated.enabled && isRunning(updated) ? ["Current run: still running"] : []),
-            ...(automationGuards.user(updated)
-              ? [
-                  `Chat: ${chatLabel(updated, modelInfo, ctx.run.sessionId)}`,
-                  `History: ${historyLabel(updated)}`
-                ]
-              : []),
-            `Model: ${modelLabel(modelInfo)}`,
-            ...systemLines(updated)
-          ].join("\n"),
-          preview: `Updated (${updated.automation_ref})`,
-          data: automationData(updated, modelInfo)
-        }
-      }
-    }),
+    makeAutomationUpdateTool(services),
     defineServerTool({
       name: "automation_delete",
       summary: "Removes an automation.",

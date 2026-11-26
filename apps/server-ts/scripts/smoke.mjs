@@ -1,6 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { HEALTH_STATUS_VALUE, healthDecoders } from "@arden-hq/protocol/health"
+import { parseJsonText } from "@arden-hq/std/json-text"
 import { startServer } from "../dist/index.js"
 
 const managedOutputRoot = await mkdtemp(join(tmpdir(), "arden-smoke-"))
@@ -12,8 +14,8 @@ try {
       throw new Error(`health check failed with HTTP ${response.status}`)
     }
 
-    const health = await response.json()
-    if (health.status !== "ok" || health.has_providers !== false) {
+    const health = healthDecoders.status(parseJsonText(await response.text()))
+    if (health.status !== HEALTH_STATUS_VALUE.ok || health.hasProviders !== false) {
       throw new Error(`unexpected health response: ${JSON.stringify(health)}`)
     }
 

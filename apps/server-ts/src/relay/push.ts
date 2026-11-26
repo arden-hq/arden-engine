@@ -2,24 +2,38 @@ import { sha256Hex } from "@arden-hq/std/hash"
 import { cutText } from "@arden-hq/std/text"
 import { bodyAad, fromB64url, sealQueued, toB64url, utf8 } from "@arden-hq/relay-protocol"
 import { previewLine } from "@arden-hq/protocol/chat"
+import { RECORD_TOLD_STATUS } from "@arden-hq/protocol"
+import { MOBILE_ASK } from "@arden-hq/protocol/mobile"
 import {
+  NOTICE_RECORD,
+  NOTICE_TIER,
+  NOTIFICATION_LEVEL,
   notifyOwner,
   noticeTier,
   type NoticeRecord,
   type NoticeTier
 } from "@arden-hq/protocol/notifications"
-import { Duration, Effect, Queue, Schedule, Schema } from "effect"
+import { Duration, Effect, Queue, Schedule, Schema, type SchemaAST } from "effect"
 import type { PairedDevice, RelayStoreError } from "../persistence/relay/store.js"
 import type { Notice } from "../persistence/sqlite/notices.js"
 import { iso } from "../runtime/clock.js"
 import type { MacIdentity } from "./identity.js"
 import type { Loopback } from "./ports.js"
 import { isUserAutomationPurpose } from "../persistence/job-classification.js"
+import { ENDING_PURPOSE } from "../persistence/runs/ending.js"
 import { HomeAsks } from "./home-asks.js"
+
+const PUSH_NOTICE_KIND = {
+  approval: MOBILE_ASK.approval,
+  question: MOBILE_ASK.question,
+  finished: "finished"
+} as const
+
+type PushNoticeKind = (typeof PUSH_NOTICE_KIND)[keyof typeof PUSH_NOTICE_KIND]
 
 export interface PushNotice {
   readonly key: string
-  readonly kind: "approval" | "question" | "finished"
+  readonly kind: PushNoticeKind
   readonly title: string
   readonly body: string
   readonly sessionId: string
@@ -30,39 +44,30 @@ export interface PushNotice {
   readonly news?: PushNews
 }
 
-type PushNews = "finished" | "stopped" | "posted"
+const PUSH_NEWS = { finished: "finished", stopped: "stopped", posted: "posted" } as const
 
-const finishedAlert = (news: PushNews | undefined): string => {
-  switch (news) {
-    case "posted":
-      return "A new message"
-    case "stopped":
-      return "A run stopped"
-    case "finished":
-    case undefined:
-      return "A chat finished"
-  }
+type PushNews = (typeof PUSH_NEWS)[keyof typeof PUSH_NEWS]
+
+const FINISHED_ALERT: Record<PushNews, string> = {
+  posted: "A new message",
+  stopped: "A run stopped",
+  finished: "A chat finished"
 }
 
-const category = (kind: PushNotice["kind"]): string | undefined => {
-  switch (kind) {
-    case "approval":
-      return "arden.approval"
-    case "question":
-      return "arden.question"
-    case "finished":
-      return undefined
-  }
+const CATEGORY: Record<PushNoticeKind, string | undefined> = {
+  approval: "arden.approval",
+  question: "arden.question",
+  finished: undefined
 }
 
 const fallbackAlert = (notice: PushNotice): string => {
   switch (notice.kind) {
-    case "approval":
+    case PUSH_NOTICE_KIND.approval:
       return "An approval request"
-    case "question":
+    case PUSH_NOTICE_KIND.question:
       return "A question from Arden"
-    case "finished":
-      return finishedAlert(notice.news)
+    case PUSH_NOTICE_KIND.finished:
+      return FINISHED_ALERT[notice.news ?? PUSH_NEWS.finished]
   }
 }
 
@@ -88,7 +93,7 @@ export const pushPayload = (input: {
     ),
     aad: bodyAad({ sender: input.identity.macId, receiver: input.device.dev })
   })
-  const kind = category(notice.kind)
+  const kind = CATEGORY[notice.kind]
   const aps = {
     alert: {
       title: "Arden",
@@ -111,7 +116,7 @@ const FINISHED_WINDOW_MS = 60 * 60_000
 
 const RECENT = 50
 
-const loose = { onExcessProperty: "ignore" } as const
+const loose: SchemaAST.ParseOptions = { onExcessProperty: "ignore" }
 
 export interface PushState {
   readonly loopback: Loopback
@@ -126,15 +131,15 @@ export interface PushState {
 
 const phoneTells = (notice: Notice): notice is Notice & { readonly chatSessionId: string } =>
   notice.chatSessionId !== null &&
-  (notice.status === "failed" ||
-    notice.status === "posted" ||
-    (notice.record === "ending" &&
-      notice.status === "finished" &&
-      (notice.purpose === "chat" || isUserAutomationPurpose(notice.purpose))))
+  (notice.status === RECORD_TOLD_STATUS.failed ||
+    notice.status === RECORD_TOLD_STATUS.posted ||
+    (notice.record === NOTICE_RECORD.ending &&
+      notice.status === RECORD_TOLD_STATUS.finished &&
+      (notice.purpose === ENDING_PURPOSE.chat || isUserAutomationPurpose(notice.purpose))))
 
 const newsOf = (status: Notice["status"], tier: NoticeTier | undefined): PushNews => {
-  if (status === "posted") return "posted"
-  return tier === "needs_you" ? "stopped" : "finished"
+  if (status === RECORD_TOLD_STATUS.posted) return PUSH_NEWS.posted
+  return tier === NOTICE_TIER.needs_you ? PUSH_NEWS.stopped : PUSH_NEWS.finished
 }
 
 const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now: number) {
@@ -142,10 +147,10 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
   const home = yield* read(state.loopback, "/mobile/home", HomeAsks)
   const recorded = yield* state.notices({ since, limit: RECENT })
   const asks = home.asks.map((ask): PushNotice =>
-    ask.kind === "question"
+    ask.kind === MOBILE_ASK.question
       ? {
           key: `ask:question:${ask.question_id}`,
-          kind: "question",
+          kind: PUSH_NOTICE_KIND.question,
           title: ask.place,
           body: ask.prompt,
           sessionId: ask.session_id,
@@ -154,7 +159,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
         }
       : {
           key: `ask:approval:${sha256Hex(JSON.stringify([ask.run_id, ask.tool_id, ask.asked_at]))}`,
-          kind: "approval",
+          kind: PUSH_NOTICE_KIND.approval,
           title: ask.place,
           body: ask.title,
           sessionId: ask.session_id,
@@ -174,17 +179,21 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
         shown: notice.shown,
         unread: notice.unread
       }
-      if (!notifyOwner({ record, level: "everything", inFront: false }) || !phoneTells(notice))
+      if (
+        !notifyOwner({ record, level: NOTIFICATION_LEVEL.everything, inFront: false }) ||
+        !phoneTells(notice)
+      )
         return []
       const tier = noticeTier(record)
       return [
         {
           key: notice.key,
-          kind: "finished",
+          kind: PUSH_NOTICE_KIND.finished,
           title: notice.title === "" ? "Arden" : notice.title,
           body: previewLine(notice.text) ?? "Finished",
           sessionId: notice.chatSessionId,
-          collapseId: notice.status === "posted" ? notice.key : notice.chatSessionId,
+          collapseId:
+            notice.status === RECORD_TOLD_STATUS.posted ? notice.key : notice.chatSessionId,
           askId: undefined,
           news: newsOf(notice.status, tier)
         }

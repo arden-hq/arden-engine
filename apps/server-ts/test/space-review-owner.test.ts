@@ -14,7 +14,7 @@ import { LATER, claim, makeAutomation, requestRun, type Lease } from "./work-fix
 
 const REVIEW = spaceJobId("space-1")
 
-// SQLite has no "BEFORE INSERT OR UPDATE", so the guard is two triggers with the same condition.
+// https://www.sqlite.org/lang_createtrigger.html
 const guardDefinitions = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   for (const event of ["INSERT", "UPDATE"])

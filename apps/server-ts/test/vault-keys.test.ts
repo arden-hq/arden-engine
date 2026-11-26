@@ -7,7 +7,7 @@ import {
   type VaultKeyBroker
 } from "../src/credentials/vault-keys.js"
 import { cardRuleSubjects } from "../src/persistence/sqlite/permissions.js"
-import { shellInvocation, shellRuntime } from "../src/tools/shell-policy.js"
+import { shellInvocation, shellRuntime } from "../src/tools/shell-invocation.js"
 import { keyUseDecision } from "../src/tools/vault.js"
 import { endsKeySessions } from "../src/chat/runner/built-in.js"
 import { matchesVaultKey } from "../src/execution/rules.js"
@@ -15,7 +15,6 @@ import { NO_PATH_RULES } from "./fixtures/local-policy.js"
 
 const REAL = "tdk_Real1234567890abcdefXYZ"
 
-/** A stand-in for the desktop: it holds the value, and answers only what the broker answers. */
 const desktop = (overrides: Partial<VaultKeyBroker> = {}): VaultKeyBroker => ({
   listVault: async () => ({
     keys: [
@@ -142,7 +141,6 @@ describe("the Vault seen from the engine", () => {
     vault.grant("run-1", "k1")
     await vault.end("run-1")
     expect(ended).toEqual(["run-1"])
-    // Ending a run also forgets what it was allowed.
     expect(vault.granted("run-1")).toEqual([])
     expect(await vault.environment("run-1", "all")).toBeUndefined()
     const failing = makeVaultKeys(
@@ -171,7 +169,6 @@ describe("using a key", () => {
     expect(decide("allow", "ask")).toBe("allowed")
     expect(decide("never", "ask", true)).toBe("refuse")
     expect(decide(undefined, "read_only")).toBe("refuse")
-    // Never ask does not allow a key: its card still asks (and waits when nobody is there).
     expect(decide(undefined, "allow")).toBe("ask")
     expect(decide("allow", "allow")).toBe("allowed")
   })
@@ -184,7 +181,6 @@ describe("using a key", () => {
         data: { reviewer: "user", vault_key: "Todoist", vault_key_id: "k1" }
       })
     ).toEqual([{ kind: "vault_key", name: "Todoist", keyId: "k1" }])
-    // A rule about the old key does not cover a new key given its name.
     expect(matchesVaultKey("k2")({ kind: "vault_key", name: "Todoist", keyId: "k1" })).toBe(false)
     expect(matchesVaultKey("k1")({ kind: "vault_key", name: "Todoist", keyId: "k1" })).toBe(true)
     expect(

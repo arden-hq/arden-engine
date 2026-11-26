@@ -1,7 +1,7 @@
 import { sha256Hex } from "@arden-hq/std/hash"
 import { canonicalJson, compareCodePoints } from "@arden-hq/std/json"
 
-import type { ResourceChange, ResourceState, ResourceVersion } from "./model.js"
+import type { ChangeAction, ResourceChange, ResourceState, ResourceVersion } from "./model.js"
 
 type JsonPrimitive = null | boolean | number | string
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue }
@@ -25,11 +25,16 @@ const assertSafeIntegers = (value: JsonValue): void => {
   }
 }
 
-/** Encode the canonical compact, key-sorted JSON representation followed by LF. */
 export const canonicalJsonl = (value: JsonRecord): Uint8Array => {
   assertSafeIntegers(value)
   return encodeUtf8(`${canonicalJson(value, { lenient: true })}\n`)
 }
+
+export const OBJECT_KIND = { blob: "blob", tree: "tree", commit: "commit" } as const
+export type ObjectKind = (typeof OBJECT_KIND)[keyof typeof OBJECT_KIND]
+export const OBJECT_KINDS: ReadonlyArray<ObjectKind> = Object.values(OBJECT_KIND)
+
+export const TREE_ENTRY_KIND = { resource: "resource", subtree: "subtree" } as const
 
 export interface VersionRecord {
   readonly resource_id: string
@@ -40,14 +45,14 @@ export interface VersionRecord {
 }
 
 export interface ChangeRecord {
-  readonly action: string
+  readonly action: ChangeAction
   readonly before: VersionRecord | null
   readonly after: VersionRecord | null
 }
 
 export interface CommitRecord {
   readonly version: 2
-  readonly kind: "commit"
+  readonly kind: typeof OBJECT_KIND.commit
   readonly parent_id: string | null
   readonly tree_id: string
   readonly actor: string
@@ -58,7 +63,7 @@ export interface CommitRecord {
 }
 
 interface TreeResourceRecord {
-  readonly kind: "resource"
+  readonly kind: typeof TREE_ENTRY_KIND.resource
   readonly name: string
   readonly resource_id: string
   readonly blob_id: string
@@ -67,7 +72,7 @@ interface TreeResourceRecord {
 }
 
 interface TreeSubtreeRecord {
-  readonly kind: "subtree"
+  readonly kind: typeof TREE_ENTRY_KIND.subtree
   readonly name: string
   readonly tree_id: string
 }
@@ -76,7 +81,7 @@ export type TreeEntryRecord = TreeResourceRecord | TreeSubtreeRecord
 
 export interface TreeRecord {
   readonly version: 2
-  readonly kind: "tree"
+  readonly kind: typeof OBJECT_KIND.tree
   readonly entries: readonly TreeEntryRecord[]
 }
 
@@ -99,7 +104,6 @@ const changeRecord = (value: ResourceChange): ChangeRecord => ({
   after: value.after === null ? null : versionRecord(value.after)
 })
 
-/** Build the exact v2 commit record before content-addressing it. */
 export const commitRecord = (value: {
   readonly parentId: string | null
   readonly treeId: string
@@ -110,7 +114,7 @@ export const commitRecord = (value: {
   readonly changes: readonly ResourceChange[]
 }): CommitRecord => ({
   version: 2,
-  kind: "commit",
+  kind: OBJECT_KIND.commit,
   parent_id: value.parentId,
   tree_id: value.treeId,
   actor: value.actor,
@@ -120,8 +124,8 @@ export const commitRecord = (value: {
   changes: value.changes.map(changeRecord)
 })
 
-const entrySortKey = (entry: TreeEntryRecord): string =>
-  `${entry.name}\u0000${entry.kind}\u0000${entry.kind === "resource" ? entry.resource_id : entry.tree_id}`
+export const treeEntrySortKey = (entry: TreeEntryRecord): string =>
+  `${entry.name}\u0000${entry.kind}\u0000${entry.kind === TREE_ENTRY_KIND.resource ? entry.resource_id : entry.tree_id}`
 
 const buildTreeNode = (
   items: readonly (readonly [readonly string[], ResourceVersion])[],
@@ -133,7 +137,7 @@ const buildTreeNode = (
     if (name === undefined) continue
     if (rest.length === 0) {
       resources.push({
-        kind: "resource",
+        kind: TREE_ENTRY_KIND.resource,
         name,
         resource_id: resource.resourceId,
         blob_id: resource.blobId,
@@ -148,20 +152,23 @@ const buildTreeNode = (
   }
   const entries: TreeEntryRecord[] = [...resources]
   for (const [name, childItems] of children) {
-    entries.push({ kind: "subtree", name, tree_id: buildTreeNode(childItems, objects) })
+    entries.push({
+      kind: TREE_ENTRY_KIND.subtree,
+      name,
+      tree_id: buildTreeNode(childItems, objects)
+    })
   }
   entries.sort((left, right) => {
-    const leftKey = entrySortKey(left)
-    const rightKey = entrySortKey(right)
+    const leftKey = treeEntrySortKey(left)
+    const rightKey = treeEntrySortKey(right)
     return compareCodePoints(leftKey, rightKey)
   })
-  const record: TreeRecord = { version: 2, kind: "tree", entries }
+  const record: TreeRecord = { version: 2, kind: OBJECT_KIND.tree, entries }
   const treeId = sha256Hex(canonicalJsonl(record as unknown as JsonRecord))
   objects.set(treeId, record)
   return treeId
 }
 
-/** Build v2 per-directory tree objects with structural sharing by identity. */
 export const buildTreeObjects = (resources: readonly ResourceVersion[]): TreeObjects => {
   const objects = new Map<string, TreeRecord>()
   const items = resources.map((resource) => [resource.path.split("/"), resource] as const)

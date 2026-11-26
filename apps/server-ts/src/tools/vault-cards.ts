@@ -27,20 +27,10 @@ import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./
 import type { ServerRunContext } from "./run-context.js"
 import { toolRefusal } from "./tool-failure.js"
 
-/**
- * Paying with a saved card. The agent asks with `vault_pay`; the owner answers on the card with
- * Touch ID, which the desktop's main process prompts and checks itself. Only then does the desktop
- * type that card's fields (browser_act with `card`) on that shop's tab, for 10 minutes or until
- * the tab leaves the shop. This server never sees the number or the security code, and has no way
- * to open a payment on its own: an approval here only says the owner answered the card.
- */
-
-/** How long a payment the owner approved lets Arden type the card, as the desktop holds it. */
 const APPROVAL_MINUTES = 10
 
 const ReasonSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(200))
 
-/** https, or plain http on this Mac, as the desktop allows: an exact origin with no path. */
 const shopIssues = (value: string, path: string): Array<Schema.FilterIssue> => {
   if (!URL.canParse(value)) return [{ path: [path], issue: "must be an exact https origin" }]
   const url = new URL(value)
@@ -94,11 +84,6 @@ type Card = NonNullable<VaultList["cards"]>[number]
 
 type PayUse = { readonly kind: "allowed" } | { readonly kind: "ask" } | { readonly kind: "refuse" }
 
-/**
- * Whether the run may go on, must ask on the card, or may not pay. Only the owner allows a
- * payment, on its card: no approval mode and no rule allow one, and with nobody there the card
- * waits in the chat. A read-only run may not pay.
- */
 export const payDecision = (input: {
   readonly answered: boolean
   readonly mode: ChatApprovalMode
@@ -119,7 +104,6 @@ const amountText = (input: Pick<PayInput, "amount" | "currency">): string => {
   return read.text
 }
 
-/** "Pay $84.20 at booking.com?" with the card, the shop and the agent's reason. */
 const payCard = (input: PayInput, card: Card): ServerApprovalPrompt => {
   const amount = amountText(input)
   const title = cardTitle(card)
@@ -145,7 +129,6 @@ const payCard = (input: PayInput, card: Card): ServerApprovalPrompt => {
   }
 }
 
-/** "Give your card to pay.example.com?": a payment frame Arden does not know. */
 const frameCard = (input: typeof FrameParametersSchema.Type, card: Card): ServerApprovalPrompt => ({
   preview: `Give your card to ${host(input.frame)}`,
   presentation: {
@@ -191,7 +174,6 @@ const refuseSecretShaped = (reason: string): void => {
 
 const READ_ONLY = "This run is read-only, so it may not pay."
 
-/** What the agent is told once the owner paid with Touch ID: the one way to finish. */
 const paymentAllowed = (card: Card, input: Pick<PayInput, "shop" | "tab_ref">): string =>
   [
     `The user approved the payment with Touch ID. For the next ${APPROVAL_MINUTES} minutes, while ${input.tab_ref} stays on ${input.shop}, Arden types the ${cardTitle(card)} card for you with vault_checkout.`,
@@ -241,8 +223,6 @@ const makeVaultPayTool = (
       changes_state: false,
       concurrency_group: "browser",
       destructive: null,
-      // No approval_bypass: the card is this call's own requirement, so Never ask does not waive
-      // it, and its reviewer is the owner, so Auto's helper does not answer it either.
       policy_scope: "external",
       code_mode: false
     },
@@ -281,10 +261,6 @@ const makeVaultPayTool = (
   })
 }
 
-/**
- * Whether the desktop found the tab's focused card field in a frame from the address the card
- * would name, placed directly in the shop's page. Anything else, the card is not raised.
- */
 export const frameThere = (checked: {
   readonly data?: Record<string, unknown> | undefined
 }): boolean => checked.data?.["matches"] === true
@@ -320,8 +296,6 @@ const makeAllowFrameTool = (
       const card = findCard(await listOrRefuse(vault), input.card_id)
       if (payDecision({ answered: false, mode: ctx.run.approvalMode }).kind === "refuse")
         throw toolRefusal(READ_ONLY, DECISION_WORD.denied)
-      // The card says the shop's card fields come from this address, so the desktop checks that
-      // first: the focused card field is in a frame from it, directly in the shop's page.
       const checked = await runBrowserForRun(
         browser,
         { run: ctx.run },
@@ -390,7 +364,6 @@ const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
       target: "reported",
       concurrency_group: "browser",
       destructive: false,
-      // The user's approval is the pay card with Touch ID: the desktop types nothing without it.
       approval_bypass: true,
       policy_scope: "external",
       open_world: true,
@@ -423,7 +396,6 @@ const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
     }
   })
 
-/** The agent's card tools: ask to pay, ask about an unknown payment frame, and pay. */
 export const vaultCardTools = Effect.gen(function* () {
   const vault = yield* VaultKeys
   const browser = yield* BrowserClient
@@ -434,7 +406,6 @@ export const vaultCardTools = Effect.gen(function* () {
   ]
 })
 
-/** vault_list's lines for cards: safe fields and the id the agent pays with. */
 export const cardLines = (list: VaultList): ReadonlyArray<string> =>
   (list.cards ?? []).map(
     (card) =>

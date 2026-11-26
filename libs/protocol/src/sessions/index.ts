@@ -63,8 +63,8 @@ import {
 } from "./routes.js"
 
 export * from "./contracts.js"
+export * from "./presentation.js"
 
-/** A refused archive or delete's 409 body (`SessionEndConflict`). */
 export const isSessionEndConflict = Schema.is(SessionEndConflictSchema)
 
 export const sessionDecoders = {
@@ -143,7 +143,6 @@ export const sessionRequests = {
 const route = (program: ReturnType<typeof encodeSessionItemPathEffect>, message: string): string =>
   runBoundary(program, message, "encode")
 
-/** Validated paths for the current Session lifecycle. */
 export const sessionRoutes = {
   collection: "/sessions",
   capture: "/captures",
@@ -184,7 +183,6 @@ export const sessionRoutes = {
   triage(sessionId: string): string {
     return route(encodeSessionTriagePathEffect(sessionId), "Invalid session-triage route")
   },
-  /** Every message of one chat that holds `query`, loaded or not. */
   find(sessionId: string, query: string): string {
     return runBoundary(
       encodeChatFindPathEffect({ sessionId, query }),
@@ -192,7 +190,6 @@ export const sessionRoutes = {
       "encode"
     )
   },
-  /** The best matches for `query` across all conversations. */
   search(query: string): string {
     return runBoundary(encodeChatSearchPathEffect(query), "Invalid chat-search route", "encode")
   },

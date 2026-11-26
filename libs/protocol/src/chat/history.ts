@@ -1,4 +1,8 @@
-import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
+import {
+  INTERACTION_KIND,
+  INTERACTION_SOURCE,
+  type ImageMediaType
+} from "@arden-hq/std/message-vocabulary"
 import type { JsonRecord } from "../common/json.js"
 export {
   INTERACTION_KINDS,
@@ -15,37 +19,34 @@ import type {
 } from "@arden-hq/std/message-vocabulary"
 import type { SessionRuntimeSnapshot } from "./runtime.js"
 export type { HistoryToolCall } from "./history-tool-call.js"
-import type { HistoryMessage } from "./history-message.js"
+import type { HistoryMessage, TEXT_PHASE } from "./history-message.js"
 export type * from "./history-message.js"
 
-export type HistoryImageMediaType = "image/png" | "image/jpeg"
+export { IMAGE_MEDIA_TYPE, type ImageMediaType } from "@arden-hq/std/message-vocabulary"
 
-/** A UI surface that writes a message for the person to confirm: a visualization's
- *  "Send to chat" bar, or an answer block's Button text sent unchanged. Such a message is the person's send, never their own words,
- *  so approval review and offers do not read it as their instruction. "cli": sent
- *  with the command line's capability, which an agent's own command can hold;
- *  the server sets it. */
-export type ChatSentFrom = "visualization" | "answer" | "cli"
+export const CHAT_SENT_FROM = {
+  visualization: "visualization",
+  answer: "answer",
+  cli: "cli"
+} as const
 
-/** A connection the person made or declined from an offer card. It arrives
- *  at the time it happened, as its own row, and tells the agent that offered it. */
+export type ChatSentFrom = (typeof CHAT_SENT_FROM)[keyof typeof CHAT_SENT_FROM]
+
+export const CONNECTION_ARRIVAL = { connected: "connected", declined: "declined" } as const
+
+export type ConnectionArrivalOutcome = (typeof CONNECTION_ARRIVAL)[keyof typeof CONNECTION_ARRIVAL]
+
 export interface ConnectionArrival {
-  /** The `capability_propose` call whose card this answers. */
   readonly tool_call_id: string
-  /** The name the card showed for the connection. */
   readonly server: string
-  readonly outcome: "connected" | "declined"
-  /** When the card was offered; the folded card shows this time. */
+  readonly outcome: ConnectionArrivalOutcome
   readonly offered_at: string
-  /** When the person connected or declined. */
   readonly at: string
 }
 
-/** A validated image projected from one stored user-message content block. */
 export interface HistoryImage extends JsonRecord {
   readonly type: "image"
-  readonly media_type: HistoryImageMediaType
-  /** Base64 bytes without a data-URL prefix. */
+  readonly media_type: ImageMediaType
   readonly data: string
 }
 
@@ -73,8 +74,11 @@ export const INTERACTION_REFERENCE = {
   workflow: "workflow"
 } as const
 
+export type InteractionReferenceType =
+  (typeof INTERACTION_REFERENCE)[keyof typeof INTERACTION_REFERENCE]
+
 export interface InteractionReference extends JsonRecord {
-  readonly type: "message" | "run" | "tool_call" | "workflow"
+  readonly type: InteractionReferenceType
   readonly id: string
 }
 
@@ -115,13 +119,11 @@ export interface AgentResult extends JsonRecord {
   readonly preview: InteractionPreview
 }
 
-/** A Gmail provider receipt. Its presence proves Gmail accepted one send. */
 export interface GmailSendReceipt extends JsonRecord {
   readonly kind: "gmail_send_v1"
   readonly provider_message_id: string
   readonly provider_thread_id: string
   readonly recipient: string
-  /** Local observation time after Gmail accepted the send; not Gmail's send time. */
   readonly confirmed_at: string
 }
 
@@ -132,8 +134,6 @@ export interface TurnShell extends JsonRecord {
   readonly started_at: string
   readonly ended_at: string
   readonly has_work: boolean
-  /** Work beyond reasoning: a tool call ran. A turn that only reasoned
-   *  "thought"; one that ran tools "worked". */
   readonly has_tool_work: boolean
   readonly tool_calls: ReadonlyArray<TurnToolCallCount>
   readonly ending: TurnEnding
@@ -205,7 +205,6 @@ export type ContextBudgetSnapshot = {
 
 export interface HistoryResponse extends JsonRecord {
   readonly messages: ReadonlyArray<HistoryMessage>
-  /** Bounded work projection for the exact active physical turn. */
   readonly active_work_tail: ActiveWork
   readonly runtime: SessionRuntimeSnapshot
   readonly page: HistoryPage
@@ -215,20 +214,14 @@ export interface HistoryResponse extends JsonRecord {
 
 export interface TurnWorkResponse extends JsonRecord {
   readonly turn_id: string
-  /** Work carriers plus their matching hydrated tool-result rows. */
   readonly messages: ReadonlyArray<HistoryMessage>
-  /** Cursors and counts are over work carriers, not hydrated result rows. */
   readonly page: HistoryPage
 }
 
-/** Everything one turn did, across all of its runs, for the Details panel:
- *  every work carrier in compact form, past the page window. */
 export interface TurnDetailsResponse extends JsonRecord {
   readonly turn_id: string
   readonly messages: ReadonlyArray<HistoryMessage>
-  /** False when the turn has more work carriers than one read returns; the
-   *  read then holds the newest ones. */
   readonly complete: boolean
 }
 
-export type AssistantTextPhase = "commentary" | "final_answer"
+export type AssistantTextPhase = typeof TEXT_PHASE.commentary | typeof TEXT_PHASE.finalAnswer

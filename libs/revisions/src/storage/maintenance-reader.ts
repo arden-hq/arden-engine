@@ -3,10 +3,10 @@ import { Effect } from "effect"
 import { decodeCanonicalJsonl, parseCommitObject, parseTreeRecord } from "../domain/codec.js"
 import { Commit, ResourceVersion } from "../domain/model.js"
 import { CorruptRepositoryError } from "../domain/errors.js"
-import { type TreeRecord } from "../domain/format.js"
+import { OBJECT_KIND, TREE_ENTRY_KIND, type TreeRecord } from "../domain/format.js"
 import { validateSnapshotTransition } from "../domain/integrity.js"
 import { materializeSnapshot } from "../domain/tree.js"
-import type { MaintenanceError, MaintenanceStorage } from "./maintenance.js"
+import type { MaintenanceError, MaintenanceStorage } from "./maintenance-types.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
 export const validHash = (value: unknown): value is string =>
@@ -43,7 +43,7 @@ export const makeReader = (storage: MaintenanceStorage): MaintenanceReader => {
     if (!validHash(id)) return yield* corrupt(`commit identifier is invalid: ${id}`)
     const cached = commits.get(id)
     if (cached !== undefined) return cached
-    const bytes = yield* storage.readObject("commit", id)
+    const bytes = yield* storage.readObject(OBJECT_KIND.commit, id)
     const parsed = yield* parseCommitObject(id, bytes)
     commits.set(id, parsed)
     return parsed
@@ -55,7 +55,7 @@ export const makeReader = (storage: MaintenanceStorage): MaintenanceReader => {
     if (!validHash(id)) return yield* corrupt(`tree identifier is invalid: ${id}`)
     const cached = trees.get(id)
     if (cached !== undefined) return cached
-    const bytes = yield* storage.readObject("tree", id)
+    const bytes = yield* storage.readObject(OBJECT_KIND.tree, id)
     const record = yield* decodeCanonicalJsonl(bytes)
     const parsed = yield* parseTreeRecord(record)
     trees.set(id, parsed)
@@ -81,7 +81,7 @@ export const makeReader = (storage: MaintenanceStorage): MaintenanceReader => {
       const node = yield* tree(treeId)
       result.add(treeId)
       for (const entry of node.entries) {
-        if (entry.kind === "subtree") yield* visit(entry.tree_id)
+        if (entry.kind === TREE_ENTRY_KIND.subtree) yield* visit(entry.tree_id)
       }
       active.delete(treeId)
     })
@@ -94,7 +94,7 @@ export const makeReader = (storage: MaintenanceStorage): MaintenanceReader => {
   ): Effect.fn.Return<void, MaintenanceError> {
     if (!validHash(id)) return yield* corrupt(`blob identifier is invalid: ${id}`)
     if (blobs.has(id)) return
-    const bytes = yield* storage.readObject("blob", id)
+    const bytes = yield* storage.readObject(OBJECT_KIND.blob, id)
     if (sha256Hex(bytes) !== id) return yield* corrupt(`blob hash mismatch: ${id}`)
     blobs.add(id)
   })

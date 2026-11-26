@@ -22,13 +22,9 @@ import { wikiOperationTools } from "../../src/tools/wiki-operations.js"
 import { makeWikiCaptureMethods } from "../../src/wiki/capture.js"
 import { makeWikiChangeMethods } from "../../src/wiki/change.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../src/wiki/authority.js"
-import {
-  commitWiki,
-  createPage,
-  updatePage,
-  type WikiCommitOrigin,
-  type WikiCommitPoint
-} from "../../src/wiki/commit.js"
+import { commitWiki, createPage, updatePage } from "../../src/wiki/commit.js"
+import { type WikiCommitPoint } from "../../src/wiki/commit-write-types.js"
+import { type WikiCommitOrigin } from "../../src/wiki/origin.js"
 import { createRulesPage } from "../../src/wiki/foundation.js"
 import { makeWikiHistoryMethods } from "../../src/wiki/history.js"
 import { makeWikiListingMethods } from "../../src/wiki/listing.js"
@@ -40,12 +36,10 @@ import { makeWikiRestoreMethods } from "../../src/wiki/restore.js"
 import { Wiki } from "../../src/wiki/service.js"
 import { partialService, recordOf, serverRunContext, sessionHeader } from "../kit.js"
 
-/** The real Wiki read, history, change, update, rename and restore methods over a fresh repository on disk. */
 export interface WikiRepositoryFixture {
   readonly repository: ManagedFileRepositoryShape
   readonly workingRoot: string
   readonly wiki: Wiki["Service"]
-  /** Saves `body` as the page's whole body, creating the page on its first save. */
   readonly save: (input: {
     readonly pageId: string
     readonly path: string

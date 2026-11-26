@@ -1,6 +1,11 @@
+import { UPDATE_WEIGHT } from "@arden-hq/protocol/chat"
 import { DateTime, Effect } from "effect"
 import type { SqlError } from "effect/unstable/sql/SqlError"
-import { RunDeliveryPayloadSchema, type RunDeliveryPayload } from "../deliveries/model.js"
+import {
+  RUN_DELIVERY_KIND,
+  RunDeliveryPayloadSchema,
+  type RunDeliveryPayload
+} from "../deliveries/model.js"
 import type { SqlClient } from "effect/unstable/sql"
 import { decodeJson } from "./json.js"
 import { captureRunTask } from "./run-context.js"
@@ -16,9 +21,6 @@ import {
   threadDeliveryOwner,
   arrivalText
 } from "./work-delivery-routing.js"
-
-const UPDATE_WEIGHT = { owed: "owed" } as const
-const DELIVERY_KIND = { thread: "thread", update: "update", answer: "answer" } as const
 
 export const readDeliveryForAdmission = Effect.fn(function* (options: {
   readonly sql: SqlClient.SqlClient
@@ -46,13 +48,13 @@ export const readDeliveryForAdmission = Effect.fn(function* (options: {
   )
   if (payload.sessionId !== options.sessionId || row.body !== content)
     return yield* workError("invalid", "Arrival destination or content changed")
-  if (payload.kind === DELIVERY_KIND.thread) yield* threadDeliveryOwner(options.sql, payload)
-  if (payload.kind !== DELIVERY_KIND.update && payload.timeout === true) {
+  if (payload.kind === RUN_DELIVERY_KIND.thread) yield* threadDeliveryOwner(options.sql, payload)
+  if (payload.kind !== RUN_DELIVERY_KIND.update && payload.timeout === true) {
     const stopped = yield* options.sql`SELECT 1 FROM chat_runs WHERE run_id = ${payload.runIds[0]}
       AND ${stoppedRunSql()}`
     if (stopped.length > 0) return yield* workError("conflict", "The asking run was stopped")
   }
-  if (payload.kind === DELIVERY_KIND.answer && payload.context.task) {
+  if (payload.kind === RUN_DELIVERY_KIND.answer && payload.context.task) {
     const current = yield* captureRunTask({
       sql: options.sql,
       itemId: payload.context.task.item_id
@@ -99,6 +101,6 @@ export const liftOwedUpdate = (
   delivery: RunDeliveryPayload | undefined,
   at: string
 ): Effect.Effect<void, SqlError | SessionLifecycleEventError, UnitOfWork> =>
-  delivery?.kind === DELIVERY_KIND.update && delivery.update.weight === UPDATE_WEIGHT.owed
+  delivery?.kind === RUN_DELIVERY_KIND.update && delivery.update.weight === UPDATE_WEIGHT.owed
     ? liftChat(sql, sessionEvents, { sessionId: delivery.sessionId, at })
     : Effect.void

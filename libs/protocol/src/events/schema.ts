@@ -1,15 +1,18 @@
+import { SERVER_EVENT_TYPE, eventTypeLiterals } from "../common/event-types.js"
 import { Schema } from "effect"
 import type { Agrees, Assert } from "../common/type-agreement.js"
-import { eventTypeLiterals } from "../common/event-types.js"
 import { ENTITY_TARGET, LINK, TASK_SPACE } from "../common/links.js"
 import { SessionListItemSchema } from "../sessions/state-schema.js"
 import type { EventFrame, Framed } from "../common/event-fields.js"
-import type {
-  AutomationEvent,
-  LifecycleFeedBody,
-  RecordToldStatus,
-  ServerEvent,
-  TaskWorkChangedEvent
+import {
+  NAVIGATION_MODE,
+  RECORD_TOLD_STATUS,
+  TASK_WORK_STATE,
+  type AutomationEvent,
+  type LifecycleFeedBody,
+  type RecordToldStatus,
+  type ServerEvent,
+  type TaskWorkChangedEvent
 } from "./contracts.js"
 import { NAVIGATION_ASKED_BY } from "../common/navigation.js"
 import type { JsonRecord } from "../common/json.js"
@@ -26,17 +29,13 @@ import {
 } from "../common/schema.js"
 import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
 
-/** Cursor correction for a resumable follower. Only the session/automation
- *  journal replays from a client cursor, so only that stream can reset; the
- *  Chat detail stream attaches at its captured head and signals a lost range
- *  with `stream_overflow` instead. */
-export const StreamResetEventSchema = event("stream_reset", {
+export const StreamResetEventSchema = event(SERVER_EVENT_TYPE.streamReset, {
   session_id: Schema.NonEmptyString,
   seq: NonNegativeIntSchema,
   reason: Schema.Literals(["future_cursor", "replay_gap"] as const)
 })
 
-export const AutomationProgressEventSchema = event("automation_progress", {
+export const AutomationProgressEventSchema = event(SERVER_EVENT_TYPE.automationProgress, {
   task_id: Schema.String,
   status: Schema.String
 })
@@ -56,25 +55,15 @@ const TaskSpaceSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal(TASK_SPACE.space), space_id: Schema.NonEmptyString })
 ])
 
-export const AutomationFinishedEventSchema = event("automation_finished", {
+export const AutomationFinishedEventSchema = event(SERVER_EVENT_TYPE.automationFinished, {
   task_id: Schema.String,
   outcome: Schema.Literals([...AUTOMATION_RUN_OUTCOMES, "completed"] as const),
   run_chat: LinkedChatSchema
 })
 
-const RecordToldStatusSchema = Schema.Literals([
-  "finished",
-  "blocked",
-  "failed",
-  "cancelled",
-  "silent",
-  "waiting",
-  "done",
-  "paused",
-  "posted"
-] as const)
+const RecordToldStatusSchema = Schema.Literals(Object.values(RECORD_TOLD_STATUS))
 
-export const RecordToldEventSchema = event("record_told", {
+export const RecordToldEventSchema = event(SERVER_EVENT_TYPE.recordTold, {
   key: Schema.NonEmptyString,
   record: Schema.Literals(["ending", "entity"] as const),
   status: RecordToldStatusSchema,
@@ -90,32 +79,32 @@ export const RecordToldEventSchema = event("record_told", {
   task: LinkedTaskSchema
 })
 
-export const SessionCreatedEventSchema = event("session_created", {
+export const SessionCreatedEventSchema = event(SERVER_EVENT_TYPE.sessionCreated, {
   session: SessionListItemSchema
 })
 
-export const SessionActivityEventSchema = event("session_activity", {
+export const SessionActivityEventSchema = event(SERVER_EVENT_TYPE.sessionActivity, {
   session: SessionListItemSchema
 })
 
-export const ChatInputCommittedEventSchema = event("chat_input_committed", {
+export const ChatInputCommittedEventSchema = event(SERVER_EVENT_TYPE.chatInputCommitted, {
   chat_session_id: Schema.NonEmptyString,
   run_id: Schema.NonEmptyString
 })
 
 export const SessionBlockingWorkEventSchema = sessionEvent(
-  "session_blocking_work",
+  SERVER_EVENT_TYPE.sessionBlockingWork,
   Schema.NonEmptyString,
   {
     blocking_work: Schema.Boolean
   }
 )
 
-export const NavigationRequestedEventSchema = event("navigation_requested", {
+export const NavigationRequestedEventSchema = event(SERVER_EVENT_TYPE.navigationRequested, {
   origin_session_id: Schema.NonEmptyString,
   destination: AppDestinationSchema,
   label: Schema.NonEmptyString,
-  mode: Schema.Literals(["offer", "open"] as const),
+  mode: Schema.Literals(Object.values(NAVIGATION_MODE)),
   asked_by: Schema.Union([
     Schema.Struct({ kind: Schema.Literal(NAVIGATION_ASKED_BY.untracked) }),
     Schema.Struct({
@@ -125,11 +114,11 @@ export const NavigationRequestedEventSchema = event("navigation_requested", {
   ])
 })
 
-export const McpServerChangedEventSchema = event("mcp_server_changed", {
+export const McpServerChangedEventSchema = event(SERVER_EVENT_TYPE.mcpServerChanged, {
   server: Schema.NonEmptyString
 })
 
-export const EntityChangedEventSchema = event("entity_changed", {
+export const EntityChangedEventSchema = event(SERVER_EVENT_TYPE.entityChanged, {
   kind: Schema.Literals([
     "session",
     "space",
@@ -144,32 +133,35 @@ export const EntityChangedEventSchema = event("entity_changed", {
   ])
 })
 
-/** One Task moved: a comment landed, or its status changed. */
-export const QuestionChangedEventSchema = sessionEvent("question_changed", Schema.NonEmptyString, {
-  question_id: Schema.NonEmptyString,
-  run_id: Schema.NonEmptyString,
-  task: LinkedTaskSchema
-})
+export const QuestionChangedEventSchema = sessionEvent(
+  SERVER_EVENT_TYPE.questionChanged,
+  Schema.NonEmptyString,
+  {
+    question_id: Schema.NonEmptyString,
+    run_id: Schema.NonEmptyString,
+    task: LinkedTaskSchema
+  }
+)
 
-export const TaskVisibilityChangedEventSchema = event("task_visibility_changed", {
+export const TaskVisibilityChangedEventSchema = event(SERVER_EVENT_TYPE.taskVisibilityChanged, {
   space: TaskSpaceSchema,
   item_id: Schema.NonEmptyString
 })
 
-export const WorkChangedEventSchema = event("work_changed", {
+export const WorkChangedEventSchema = event(SERVER_EVENT_TYPE.workChanged, {
   space: TaskSpaceSchema,
   item_id: Schema.NonEmptyString,
   change: Schema.Literals(["comment", "status"] as const)
 })
 
-export const TaskProposalChangedEventSchema = event("task_proposal_changed", {
+export const TaskProposalChangedEventSchema = event(SERVER_EVENT_TYPE.taskProposalChanged, {
   space_id: Schema.NonEmptyString,
   proposal_id: Schema.NonEmptyString,
   revision: NonNegativeIntSchema,
   status: Schema.Literals(["offered", "accepted", "rejected", "expired", "retired"] as const)
 })
 
-export const FocusChoiceChangedEventSchema = event("focus_choice_changed", {
+export const FocusChoiceChangedEventSchema = event(SERVER_EVENT_TYPE.focusChoiceChanged, {
   space_id: Schema.NonEmptyString,
   question_id: Schema.NonEmptyString,
   revision: NonNegativeIntSchema,
@@ -186,17 +178,17 @@ const taskWorkEventFields = {
 }
 
 export const TaskWorkChangedEventSchema: Schema.Codec<TaskWorkChangedEvent> = Schema.Union([
-  event("task_work_changed", {
+  event(SERVER_EVENT_TYPE.taskWorkChanged, {
     ...taskWorkEventFields,
-    state: Schema.Literal("running"),
+    state: Schema.Literal(TASK_WORK_STATE.running),
     phase: Schema.Literals(ACTIVE_RUN_STATUSES),
     ended_at: Schema.Null,
     outcome: Schema.Null
   }),
-  event("task_work_changed", {
+  event(SERVER_EVENT_TYPE.taskWorkChanged, {
     ...taskWorkEventFields,
-    state: Schema.Literal("ended"),
-    phase: Schema.Literal("ended"),
+    state: Schema.Literal(TASK_WORK_STATE.ended),
+    phase: Schema.Literal(TASK_WORK_STATE.ended),
     ended_at: IsoDateTimeStringSchema,
     outcome: Schema.Literals(["finished", "failed", "stopped"] as const)
   })
@@ -226,7 +218,6 @@ const automationEventSchemas = [
 export const AutomationEventSchema: Schema.Codec<AutomationEvent, JsonRecord> =
   Schema.Union(automationEventSchemas)
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type AutomationEventAgrees = Assert<
   Agrees<(typeof automationEventSchemas)[number]["Type"], AutomationEvent>
 >
@@ -268,18 +259,14 @@ const serverEventSchemas = [
 export const ServerEventSchema: Schema.Codec<ServerEvent, JsonRecord> =
   Schema.Union(serverEventSchemas)
 
-/** Every `type` the transport can carry, read from the schemas. */
 export const SERVER_EVENT_TYPES: ReadonlySet<string> = eventTypeLiterals(serverEventSchemas)
 
-/** True when this build of the protocol knows the event type. */
 export const isKnownServerEventType = (type: string): boolean => SERVER_EVENT_TYPES.has(type)
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type ServerEventAgrees = Assert<
   Agrees<(typeof serverEventSchemas)[number]["Type"], ServerEvent>
 >
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type RecordToldStatusAgrees = Assert<
   Agrees<(typeof RecordToldStatusSchema)["Type"], RecordToldStatus>
 >

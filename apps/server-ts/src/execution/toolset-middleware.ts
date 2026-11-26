@@ -55,7 +55,6 @@ export const mergeToolsets = (
   }
 }
 
-/** The same toolset without the named tools: not advertised, not loadable, refused when called. */
 export const withoutTools = (base: Toolset, names: ReadonlySet<string>): Toolset => ({
   ...base,
   entries: async () => (await base.entries()).filter((entry) => !names.has(entry.meta.name)),

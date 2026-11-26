@@ -12,11 +12,8 @@ export type PromptTemplateErrorReason =
   | "unmatched_opening_delimiter"
 
 export interface PromptTemplateLocation {
-  /** Zero-based UTF-8 byte offset, matching source-file diagnostics. */
   readonly byteOffset: number
-  /** One-based line in the LF-normalized source. */
   readonly line: number
-  /** One-based Unicode code-point column. */
   readonly column: number
 }
 
@@ -38,9 +35,11 @@ export class PromptTemplateError extends Error {
   }
 }
 
+const TOKEN_KIND = { text: "text", slot: "slot" } as const
+
 type PromptTemplateToken =
-  | { readonly kind: "text"; readonly value: string }
-  | { readonly kind: "slot"; readonly name: string }
+  | { readonly kind: typeof TOKEN_KIND.text; readonly value: string }
+  | { readonly kind: typeof TOKEN_KIND.slot; readonly name: string }
 
 interface CompiledPromptTemplate {
   readonly tokens: readonly PromptTemplateToken[]
@@ -48,9 +47,7 @@ interface CompiledPromptTemplate {
 }
 
 export interface PromptTemplate {
-  /** Source normalized to LF before parsing. */
   readonly source: string
-  /** Unique slot names in first-use order. */
   readonly slots: readonly string[]
 }
 
@@ -70,7 +67,6 @@ export interface RenderPromptTemplateEntriesOptions {
 
 const compiledTemplates = new WeakMap<PromptTemplate, CompiledPromptTemplate>()
 
-/** Parse a static prompt definition. `{{{{` and `}}}}` produce literal delimiters. */
 export const compilePromptTemplate = ({ source }: CompilePromptTemplateOptions): PromptTemplate => {
   const normalizedSource = normalizeLf(source)
   const tokens: PromptTemplateToken[] = []
@@ -101,7 +97,7 @@ export const compilePromptTemplate = ({ source }: CompilePromptTemplateOptions):
         seenSlots.add(slot.name)
         slots.push(slot.name)
       }
-      tokens.push(Object.freeze({ kind: "slot", name: slot.name }))
+      tokens.push(Object.freeze({ kind: TOKEN_KIND.slot, name: slot.name }))
       cursor = slot.nextCursor
       literalStart = cursor
       continue
@@ -132,11 +128,9 @@ export const compilePromptTemplate = ({ source }: CompilePromptTemplateOptions):
   return template
 }
 
-/** Render exactly the slots declared by a compiled prompt, once and without evaluation. */
 export const renderPromptTemplate = ({ template, values }: RenderPromptTemplateOptions): string =>
   renderPromptTemplateEntries({ template, values: Object.entries(values) })
 
-/** Iterable form preserves duplicate keys so boundary adapters can reject them. */
 export const renderPromptTemplateEntries = ({
   template,
   values
@@ -176,7 +170,7 @@ export const renderPromptTemplateEntries = ({
 
   return compiled.tokens
     .map((token) => {
-      if (token.kind === "text") return token.value
+      if (token.kind === TOKEN_KIND.text) return token.value
       const value = resolved.get(token.name)
       if (value === undefined) {
         throw templateError(
@@ -192,11 +186,14 @@ export const renderPromptTemplateEntries = ({
 const appendText = (tokens: PromptTemplateToken[], value: string): void => {
   if (value.length === 0) return
   const previous = tokens.at(-1)
-  if (previous?.kind === "text") {
-    tokens[tokens.length - 1] = Object.freeze({ kind: "text", value: previous.value + value })
+  if (previous?.kind === TOKEN_KIND.text) {
+    tokens[tokens.length - 1] = Object.freeze({
+      kind: TOKEN_KIND.text,
+      value: previous.value + value
+    })
     return
   }
-  tokens.push(Object.freeze({ kind: "text", value }))
+  tokens.push(Object.freeze({ kind: TOKEN_KIND.text, value }))
 }
 
 const parseSlot = (

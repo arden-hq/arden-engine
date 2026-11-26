@@ -61,8 +61,6 @@ export const sessionFilesSchemaSection = {
       failures INTEGER NOT NULL DEFAULT 0 CHECK(failures >= 0),
       retry_after TEXT
     )`,
-    // Which message names which upload folder. Triggers note a message in
-    // `chat_upload_unlisted`; the engine reads those and fills `chat_upload_refs`.
     `CREATE TABLE chat_upload_refs (
       upload_id TEXT NOT NULL CHECK(length(upload_id) = 36),
       message_rowid INTEGER NOT NULL,
@@ -88,7 +86,6 @@ export const sessionFilesSchemaSection = {
         DELETE FROM chat_upload_unlisted WHERE message_rowid = old.message_rowid;
         DELETE FROM chat_upload_refs WHERE message_rowid = old.message_rowid;
       END`,
-    // Chat sizes as numbers, kept by triggers (migration 145).
     `CREATE TABLE session_sizes (
       session_id TEXT PRIMARY KEY,
       message_json_bytes INTEGER NOT NULL DEFAULT 0,

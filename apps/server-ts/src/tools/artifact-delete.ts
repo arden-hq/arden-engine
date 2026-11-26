@@ -7,11 +7,11 @@ import { isAbsolute, join, relative, sep } from "node:path"
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
 import { appliedReceipt } from "./call-receipt.js"
 import type { ServerRunContext } from "./run-context.js"
+import { ConversationArtifacts } from "../artifacts/conversation.js"
 import {
-  ConversationArtifacts,
   type ConversationArtifactError,
   type ConversationArtifactManifest
-} from "../artifacts/conversation.js"
+} from "../artifacts/conversation-model.js"
 import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { errorMessage } from "@arden-hq/std/errors"

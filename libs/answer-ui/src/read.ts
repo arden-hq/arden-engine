@@ -4,7 +4,6 @@ import { parseUnguarded } from "./library.js"
 
 const MAX_EXPANDED_TOKENS = 40_000
 
-// lang-core's token kinds are a `const enum` its types do not export as values.
 const IDENT = 16
 const STATE_VAR = 18
 const MINUS = 21
@@ -12,13 +11,12 @@ const NUM = 15
 const COLON = 8
 const LITERAL_TOKENS: ReadonlySet<number> = new Set([3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, NUM, 0])
 
+export const ROOT_STATEMENT = "root"
+
 export interface Statement {
   readonly name: string
   readonly line: number
   readonly isState: boolean
-  /** A `$state` line whose value is not a literal (it names another
-   *  statement, calls something or does arithmetic). lang-core 1.x folds such
-   *  a value into `stateDeclarations`, so only the tokens still tell. */
   readonly computed: boolean
   readonly idents: ReadonlyArray<string>
   readonly states: ReadonlyArray<string>
@@ -27,39 +25,56 @@ export interface Statement {
   readonly end: number
 }
 
-type BlockGuard =
-  | { readonly kind: "ok"; readonly statements: ReadonlyArray<Statement> }
-  | { readonly kind: "too_large" }
-  | { readonly kind: "expands" }
-  | { readonly kind: "unreadable" }
+export const BLOCK_GUARD_KIND = {
+  ok: "ok",
+  tooLarge: "too_large",
+  expands: "expands",
+  unreadable: "unreadable"
+} as const
+
+type BlockRefusal =
+  | { readonly kind: typeof BLOCK_GUARD_KIND.tooLarge }
+  | { readonly kind: typeof BLOCK_GUARD_KIND.expands }
+  | { readonly kind: typeof BLOCK_GUARD_KIND.unreadable }
+
+export type BlockGuard =
+  | { readonly kind: typeof BLOCK_GUARD_KIND.ok; readonly statements: ReadonlyArray<Statement> }
+  | BlockRefusal
+
+export const BLOCK_READ_KIND = {
+  parsed: "parsed",
+  tooLarge: BLOCK_GUARD_KIND.tooLarge,
+  expands: BLOCK_GUARD_KIND.expands,
+  unreadable: BLOCK_GUARD_KIND.unreadable
+} as const
 
 export type BlockRead =
   | {
-      readonly kind: "parsed"
+      readonly kind: typeof BLOCK_READ_KIND.parsed
       readonly parsed: ParseResult
       readonly statements: ReadonlyArray<Statement>
     }
-  | Exclude<BlockGuard, { readonly kind: "ok" }>
+  | BlockRefusal
 
-/** The guards every reader of a block goes through before anything parses it:
- *  the byte caps, then the estimate of how far its references inline. The one
- *  definition of "this block may be read", used by the server (`readBlock`)
- *  and by the desktop, whose renderer parses the body itself. */
 export function guardBlock(source: string): BlockGuard {
-  if (!answerBlockFits(source)) return { kind: "too_large" }
+  if (!answerBlockFits(source)) return { kind: BLOCK_GUARD_KIND.tooLarge }
   const statements = readStatements(source)
-  if (statements === undefined) return { kind: "unreadable" }
-  if (expandedSize(statements) > MAX_EXPANDED_TOKENS) return { kind: "expands" }
-  return { kind: "ok", statements }
+  if (statements === undefined) return { kind: BLOCK_GUARD_KIND.unreadable }
+  if (expandedSize(statements) > MAX_EXPANDED_TOKENS) return { kind: BLOCK_GUARD_KIND.expands }
+  return { kind: BLOCK_GUARD_KIND.ok, statements }
 }
 
 export function readBlock(source: string): BlockRead {
   const guard = guardBlock(source)
-  if (guard.kind !== "ok") return guard
+  if (guard.kind !== BLOCK_GUARD_KIND.ok) return guard
   try {
-    return { kind: "parsed", parsed: parseUnguarded(source), statements: guard.statements }
+    return {
+      kind: BLOCK_READ_KIND.parsed,
+      parsed: parseUnguarded(source),
+      statements: guard.statements
+    }
   } catch {
-    return { kind: "unreadable" }
+    return { kind: BLOCK_READ_KIND.unreadable }
   }
 }
 
@@ -86,12 +101,9 @@ export function completeStatements(source: string, statements: ReadonlyArray<Sta
   return source
 }
 
-/** A block body parsed against the parts, or undefined when it is too big,
- *  expands too far or cannot be read. Dropped parts and bad arguments come
- *  back in `meta.errors`; the rest of the block still parses. */
 export function readAnswerBlock(source: string): ParseResult | undefined {
   const read = readBlock(source)
-  return read.kind === "parsed" ? read.parsed : undefined
+  return read.kind === BLOCK_READ_KIND.parsed ? read.parsed : undefined
 }
 
 function readStatements(source: string): ReadonlyArray<Statement> | undefined {

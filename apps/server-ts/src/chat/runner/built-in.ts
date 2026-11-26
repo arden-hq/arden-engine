@@ -6,22 +6,27 @@ import { VaultKeys } from "../../credentials/vault-keys.js"
 import { DataRoot } from "../../runtime/data-root.js"
 import type { ModelRoute } from "../../models/provider.js"
 import { chatOutputOptions } from "../../models/structured-output.js"
-import type { StopReason } from "@arden-hq/loop"
+import { StopReason } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { join } from "node:path"
 
 import { systemHandlerForAutomation } from "../../automations/system.js"
 import { loadLocalInstructions } from "../../context/local-instructions.js"
-import { ContextCompaction, type ContextCompactionError } from "../../context/service.js"
+import { LOCAL_TARGET_KIND } from "../../execution/local-target.js"
+import {
+  CONTEXT_COMPACTION_FAILURE,
+  ContextCompaction,
+  type ContextCompactionError
+} from "../../context/service.js"
 import { ModelCatalog } from "../../models/catalog.js"
 import { renderLocalTimeContext } from "../../context/system-context.js"
-import {
-  composeTurnContext,
-  omittedSkills,
-  type SessionOrigin,
-  type TurnContextServices
-} from "../../context/turn-context.js"
+import { composeTurnContext, type TurnContextServices } from "../../context/turn-context.js"
 import { readSpecialChat } from "../../context/special-chat.js"
+import {
+  omittedSkills,
+  SESSION_ORIGIN_SOURCE,
+  type SessionOrigin
+} from "../../context/session-origin.js"
 import { renderTodoReminder } from "../../context/todo-reminder.js"
 import { renderThreadContext } from "../../context/thread.js"
 import {
@@ -30,7 +35,7 @@ import {
   loadForRun
 } from "../../context/global-instructions.js"
 import { RULES_PAGE_PATH } from "../../wiki/code-owned-pages.js"
-import { runPolicyOf } from "../../execution/policy.js"
+import { RUN_EXECUTION_MODE, runPolicyOf } from "../../execution/policy.js"
 import { authorityScopes } from "../../execution/authority.js"
 import { boundAuthority } from "../run-authority.js"
 import { Memory } from "../../memory/service.js"
@@ -38,6 +43,8 @@ import { SPACE_CHAT_PRELOAD, SPECIAL_CHAT_PRELOAD } from "../../tools/tool-catal
 import { AutomationCatalog } from "../../persistence/automations/catalog.js"
 import { AutomationQueue } from "../../persistence/automations/queue.js"
 import { eventTextTools } from "../../persistence/automations/event-text.js"
+import { RUN_EVENTS_SOURCE } from "../../persistence/automations/event-batch.js"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { ChatWriteStore } from "../../persistence/chat/store.js"
 import { SpaceStore } from "../../persistence/spaces/store.js"
 import { SummaryStore } from "../../persistence/summaries/store.js"
@@ -59,27 +66,28 @@ import {
 } from "../../storage/local-paths.js"
 import { ServerToolRegistry } from "../../tools/registry.js"
 import { Wiki } from "../../wiki/service.js"
-import { makeLoopChatRunner, type LoopChatCompactionResult } from "../loop-runner.js"
+import { makeLoopChatRunner } from "../loop-runner.js"
+import { type LoopChatCompactionResult } from "../loop-runner-options.js"
 import type { ChatRunner } from "../runner-contract.js"
 import type { StoredMessageDecodeError } from "../message-errors.js"
-import { toChatRunnerMessages } from "../run-driver.js"
+import { toChatRunnerMessages } from "../run-driver-support.js"
 import type { AutomationId } from "../../persistence/automations/model.js"
 
 const stoppedEarly = (reason: StopReason, maxRunSteps: number): string => {
   switch (reason) {
-    case "cancelled":
-    case "end_turn":
-    case "paused":
+    case StopReason.CANCELLED:
+    case StopReason.END_TURN:
+    case StopReason.PAUSED:
       return ""
-    case "max_iterations":
+    case StopReason.MAX_ITERATIONS:
       return `Stopped at the ${maxRunSteps}-step limit before a final reply. The work so far is in this chat. Send it a message to continue.`
-    case "no_progress":
+    case StopReason.NO_PROGRESS:
       return "Stopped after repeated failed steps, before a final reply."
-    case "max_tool_calls":
-    case "max_wall_time":
-    case "max_cost":
-    case "max_token_budget":
-    case "max_output_length":
+    case StopReason.MAX_TOOL_CALLS:
+    case StopReason.MAX_WALL_TIME:
+    case StopReason.MAX_COST:
+    case StopReason.MAX_TOKEN_BUDGET:
+    case StopReason.MAX_OUTPUT_LENGTH:
       return "Stopped at a run limit before a final reply. The work so far is in this chat."
   }
 }
@@ -136,31 +144,35 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
       Effect.flatMap((snapshot) => {
         if (snapshot === null) {
           return Effect.succeed<SessionOrigin>({
-            source: "personal",
+            source: SESSION_ORIGIN_SOURCE.personal,
             header: null,
             starting: undefined,
             special: undefined
           })
         }
         const header = snapshot.header
-        if (header.sessionType === "agent") {
+        if (header.sessionType === SESSION_TYPE.agent) {
           const agent = readAgentSessionMetadata(snapshot.metadata)
           if (agent === null) {
             return Effect.fail(new Error("Agent Session metadata is invalid"))
           }
-          return Effect.succeed<SessionOrigin>({ source: "agent", mode: agent.mode, header })
+          return Effect.succeed<SessionOrigin>({
+            source: SESSION_ORIGIN_SOURCE.agent,
+            mode: agent.mode,
+            header
+          })
         }
         const automationId = runAutomationId ?? header.originAutomationId
         return automationId === null
           ? Effect.succeed<SessionOrigin>({
-              source: "personal",
+              source: SESSION_ORIGIN_SOURCE.personal,
               header,
               starting: renderThreadContext(snapshot.metadata["thread"]),
               special: readSpecialChat(snapshot.metadata)
             })
           : automations.originPolicy(automationId).pipe(
               Effect.map((policy): SessionOrigin => ({
-                source: "scheduled_task",
+                source: SESSION_ORIGIN_SOURCE.scheduledTask,
                 automationId,
                 policy,
                 header,
@@ -197,7 +209,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
           const policy = await sessionPathPolicy(services, { sessionId, runId, signal })
           if (target === undefined) return loadLocalInstructions({ policy })
           const resolved = await resolveLocalPath(target, policy.cwd, {
-            allowMissing: targetKind === "file",
+            allowMissing: targetKind === LOCAL_TARGET_KIND.file,
             ...policyPathOptions(policy)
           }).catch(() => undefined)
           return resolved === undefined
@@ -223,19 +235,25 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
             Effect.gen(function* () {
               const policy = yield* services.runs.get(run.runId).pipe(Effect.flatMap(runPolicyOf))
               const origin = yield* sessionOrigin(run.sessionId, run.automationId)
-              experiments.begin(run.sessionId, run.runId, origin.source === "personal")
+              experiments.begin(
+                run.sessionId,
+                run.runId,
+                origin.source === SESSION_ORIGIN_SOURCE.personal
+              )
               const authority = yield* boundAuthority(services.runs, run)
               const scoped = yield* registry.runToolset(
                 { ...run, policy, authority },
                 {
                   omitSkills: omittedSkills(origin),
                   declareTree:
-                    origin.source === "agent" ||
-                    (origin.source === "personal" && policy.execution.mode === "inline") ||
-                    (origin.source === "scheduled_task" && origin.fork)
+                    origin.source === SESSION_ORIGIN_SOURCE.agent ||
+                    (origin.source === SESSION_ORIGIN_SOURCE.personal &&
+                      policy.execution.mode === RUN_EXECUTION_MODE.inline) ||
+                    (origin.source === SESSION_ORIGIN_SOURCE.scheduledTask && origin.fork)
                 }
               )
-              if (origin.source === "scheduled_task" && origin.fork) return scoped
+              if (origin.source === SESSION_ORIGIN_SOURCE.scheduledTask && origin.fork)
+                return scoped
               return systemHandlerForAutomation(run.automationId)?.tools?.(scoped) ?? scoped
             })
           ),
@@ -243,27 +261,28 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
           Effect.runPromise(
             Effect.gen(function* () {
               const origin = yield* sessionOrigin(sessionId, automationId)
-              if (origin.source === "scheduled_task" && origin.fork) {
+              if (origin.source === SESSION_ORIGIN_SOURCE.scheduledTask && origin.fork) {
                 const [primary] = authorityScopes(
                   yield* boundAuthority(services.runs, { runId, sessionId })
                 )
                 return registry.ownedTools([primary])
               }
-              if (origin.source === "agent")
+              if (origin.source === SESSION_ORIGIN_SOURCE.agent)
                 return registry.ownedTools(
                   authorityScopes(yield* boundAuthority(services.runs, { runId, sessionId }))
                 )
-              if (origin.source === "personal" && origin.special !== undefined)
+              if (origin.source === SESSION_ORIGIN_SOURCE.personal && origin.special !== undefined)
                 return registry.preloadTools(SPECIAL_CHAT_PRELOAD[origin.special.kind])
               const base =
                 typeof origin.header?.spaceId === "string"
                   ? registry.preloadTools(SPACE_CHAT_PRELOAD)
                   : []
-              if (origin.source !== "scheduled_task") return base
+              if (origin.source !== SESSION_ORIGIN_SOURCE.scheduledTask) return base
               const carried = yield* automationQueue
                 .runEvents({ sessionId, chatRunId: runId })
                 .pipe(Effect.orElseSucceed(() => undefined))
-              const followUps = carried?.run === "this_run" ? eventTextTools(carried.events) : []
+              const followUps =
+                carried?.run === RUN_EVENTS_SOURCE.thisRun ? eventTextTools(carried.events) : []
               return [...new Set([...base, ...followUps])]
             })
           ),
@@ -329,16 +348,19 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
                   "ContextCompactionError",
                   (cause): Effect.Effect<LoopChatCompactionResult, ContextCompactionError> => {
                     if (input.signal.aborted) return Effect.fail(cause)
-                    if (cause.reason === "conflict" || cause.reason === "not_found") {
+                    if (
+                      cause.reason === CONTEXT_COMPACTION_FAILURE.conflict ||
+                      cause.reason === CONTEXT_COMPACTION_FAILURE.notFound
+                    ) {
                       return Effect.succeed({ kind: "unchanged" as const })
                     }
-                    if (cause.reason === "unavailable") {
+                    if (cause.reason === CONTEXT_COMPACTION_FAILURE.unavailable) {
                       return Effect.logDebug(
                         "Automatic context compaction unavailable",
                         cause
                       ).pipe(Effect.as({ kind: "unchanged" as const }))
                     }
-                    if (cause.reason === "provider") {
+                    if (cause.reason === CONTEXT_COMPACTION_FAILURE.provider) {
                       return Effect.logWarning("Automatic context compaction failed", cause).pipe(
                         Effect.as({ kind: "disabled_for_run" as const })
                       )
@@ -352,11 +374,6 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
     )
 })
 
-/**
- * The run's saved keys stop working when it ends: done, failed or stopped. A run that pauses for a
- * card keeps them, because it resumes as the same run. The proxy's own time limits bound a run
- * that never ends.
- */
 export const endsKeySessions = <I extends { readonly runId: string }, E extends object>(
   end: (runId: string) => Promise<void>,
   runner: (input: I) => AsyncIterable<E>
@@ -365,7 +382,7 @@ export const endsKeySessions = <I extends { readonly runId: string }, E extends 
     let paused = false
     try {
       for await (const event of runner(input)) {
-        if (!("_tag" in event) && "stop_reason" in event && event.stop_reason === "paused")
+        if (!("_tag" in event) && "stop_reason" in event && event.stop_reason === StopReason.PAUSED)
           paused = true
         yield event
       }

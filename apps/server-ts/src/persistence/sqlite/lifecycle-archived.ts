@@ -14,11 +14,6 @@ export const lifecycleError = (
     ...(cause === undefined ? {} : { cause })
   })
 
-/** What announcing a change to an archived chat appends: nothing. The chat
- * list holds no archived chat, so there is no row to refresh. Every caller of
- * the lifecycle append (the hourly log trim, recovery, read state) may touch
- * an archived chat and must not fail there. Null for a chat that is not
- * archived. */
 export const archivedChatAppend = Effect.fn("SessionLifecycleEvents.archivedChatAppend")(function* (
   sql: SqlClient.SqlClient,
   sessionId: string

@@ -1,6 +1,7 @@
 import type { HandlerItemInput, HandlerItemKind } from "../persistence/automations/handler-item.js"
 import {
-  SYSTEM_HANDLER_IDS,
+  SYSTEM_HANDLER,
+  isSystemHandlerId,
   type SystemAutomationSpec,
   type SystemHandlerId
 } from "../persistence/automations/model.js"
@@ -24,16 +25,13 @@ export const SYSTEM_HANDLERS: { readonly [Id in SystemHandlerId]: SystemAutomati
   events: eventsHandler
 }
 
-const handlers: ReadonlyArray<SystemAutomationHandler> = SYSTEM_HANDLER_IDS.map(
+const handlers: ReadonlyArray<SystemAutomationHandler> = Object.values(SYSTEM_HANDLER).map(
   (id) => SYSTEM_HANDLERS[id]
 )
 
 export const SYSTEM_AUTOMATION_SPECS: ReadonlyArray<SystemAutomationSpec> = handlers.map(
   (handler) => handler.spec
 )
-
-const isSystemHandlerId = (handler: string): handler is SystemHandlerId =>
-  SYSTEM_HANDLER_IDS.some((id) => id === handler)
 
 export const systemSpec = (handler: string): SystemAutomationSpec | undefined =>
   isSystemHandlerId(handler) ? SYSTEM_HANDLERS[handler].spec : undefined

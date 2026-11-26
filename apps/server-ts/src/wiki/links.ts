@@ -126,7 +126,6 @@ const parseWikiLinks = (source: string): ReadonlyArray<WikiLinkToken> => {
 
 const scanned = new WeakMap<ParsedWikiPage, ReadonlyArray<WikiLinkToken>>()
 
-/** The links a Memory page holds. A code-owned page quotes lines rather than linking, so it holds none. */
 export const pageWikiLinks = (record: PageRecord): ReadonlyArray<WikiLinkToken> => {
   if (isCodeOwnedPage(record.resource.path)) return []
   const page = record.page

@@ -1,8 +1,9 @@
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
 import { contextSize, messageEnd, RUN_USAGE } from "@arden-hq/protocol/chat"
 import { type StoredRunUsage, wireRunUsage } from "../runs/stored-result.js"
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { randomUUID } from "node:crypto"
-import type { RunEnding } from "./tool-receipts.js"
+import type { RunEnding } from "./tool-uncertainty.js"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import type { ChatRunErrorCode } from "@arden-hq/protocol/chat"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
@@ -23,7 +24,7 @@ import { hasResumableTail } from "./chat-transcript.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { appendSessionTurn } from "./turns.js"
-import type { RunTerminal } from "./run-ending.js"
+import type { RunTerminal } from "./run-ending-said.js"
 import { releaseKeyMessageCopies } from "./chat-key-message.js"
 import { assistantTextStart } from "./assistant-text-start.js"
 import type { StreamedPart } from "../transcript/minted-ids.js"
@@ -48,21 +49,26 @@ export interface RecoveryCause {
   readonly ending: RunEnding
 }
 
+export const RECOVERED_SETTLEMENT = { finish: "finish", fail: "fail", cancel: "cancel" } as const
+
 type RecoveredSettlement =
-  | { readonly _tag: "finish"; readonly reply: StoredMessageEnvelope }
-  | { readonly _tag: "fail" }
-  | { readonly _tag: "cancel" }
+  | { readonly _tag: typeof RECOVERED_SETTLEMENT.finish; readonly reply: StoredMessageEnvelope }
+  | { readonly _tag: typeof RECOVERED_SETTLEMENT.fail }
+  | { readonly _tag: typeof RECOVERED_SETTLEMENT.cancel }
 
 export interface QueuedMessage {
   readonly clientId: string
   readonly message: StoredMessageEnvelope
 }
 
-export const settledToolStatus = {
+export const settledToolStatus: Record<
+  (typeof RECOVERED_SETTLEMENT)[keyof typeof RECOVERED_SETTLEMENT],
+  "completed" | "failed" | "cancelled"
+> = {
   finish: "completed",
   fail: "failed",
   cancel: "cancelled"
-} as const
+}
 
 const replyText = (reply: StoredMessageEnvelope): string =>
   typeof reply.content === "string" ? reply.content : ""
@@ -74,7 +80,7 @@ export const terminalEvent = (
   cause: RecoveryCause
 ): ChatProjectionEvent => {
   switch (outcome._tag) {
-    case "finish":
+    case RECOVERED_SETTLEMENT.finish:
       return {
         type: "RUN_FINISHED",
         run_id: run.run_id,
@@ -83,14 +89,14 @@ export const terminalEvent = (
         message_count: messageCount,
         ...runTotals(undefined, undefined)
       }
-    case "cancel":
+    case RECOVERED_SETTLEMENT.cancel:
       return {
         type: "run_cancelled",
         run_id: run.run_id,
         session_id: run.session_id,
         turn_id: run.turn_id
       }
-    case "fail":
+    case RECOVERED_SETTLEMENT.fail:
       return {
         type: "RUN_ERROR",
         run_id: run.run_id,
@@ -104,11 +110,11 @@ export const terminalEvent = (
 
 export const runTerminal = (outcome: RecoveredSettlement, cause: RecoveryCause): RunTerminal => {
   switch (outcome._tag) {
-    case "finish":
+    case RECOVERED_SETTLEMENT.finish:
       return { status: "completed", result: replyText(outcome.reply) }
-    case "cancel":
+    case RECOVERED_SETTLEMENT.cancel:
       return { status: "cancelled" }
-    case "fail":
+    case RECOVERED_SETTLEMENT.fail:
       return { status: "failed", error: cause.interruption }
   }
 }
@@ -147,12 +153,12 @@ export const loadRunStreamedMessages = Effect.fn("SqlitePersistence.loadRunStrea
     const openText = new Set<string>()
     for (const row of rows) {
       if (typeof row.message_id !== "string") continue
-      if (row.event_type === "model_response_reset") {
+      if (row.event_type === SERVER_EVENT_TYPE.modelResponseReset) {
         started.delete(row.message_id)
         openText.delete(row.message_id)
         continue
       }
-      if (row.event_type === "TEXT_MESSAGE_END") {
+      if (row.event_type === SERVER_EVENT_TYPE.textMessageEnd) {
         openText.delete(row.message_id)
         continue
       }
@@ -160,7 +166,7 @@ export const loadRunStreamedMessages = Effect.fn("SqlitePersistence.loadRunStrea
         messageId: row.message_id,
         recordId: typeof row.record_id === "string" ? row.record_id : undefined
       })
-      if (row.event_type === "TEXT_MESSAGE_START") openText.add(row.message_id)
+      if (row.event_type === SERVER_EVENT_TYPE.textMessageStart) openText.add(row.message_id)
     }
     return { started: [...started.values()], openText: [...openText] } satisfies RunStreamedMessages
   }
@@ -279,7 +285,7 @@ export const settlementOf = (
   cancelled: boolean,
   finalReply: StoredMessageEnvelope | undefined
 ): RecoveredSettlement => {
-  if (cancelled) return { _tag: "cancel" }
+  if (cancelled) return { _tag: RECOVERED_SETTLEMENT.cancel }
   if (finalReply === undefined) return { _tag: "fail" }
   return { _tag: "finish", reply: finalReply }
 }

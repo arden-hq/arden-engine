@@ -1,4 +1,4 @@
-import { AUTOMATION_EVENT_TYPES } from "@arden-hq/protocol/automations"
+import { AUTOMATION_EVENT_TYPE } from "@arden-hq/protocol/automations"
 import { TriggerIdSchema } from "@arden-hq/protocol/effect/automations"
 import { NonNegativeIntSchema, PositiveIntSchema } from "@arden-hq/protocol/effect/common"
 import { Schema } from "effect"
@@ -53,7 +53,7 @@ const McpEventSelectorSchema = Schema.Struct({
 export const ToolEventTriggerSchema = Schema.Struct({
   id: triggerId,
   type: Schema.Literal("event"),
-  event_type: Schema.Literals(AUTOMATION_EVENT_TYPES),
+  event_type: Schema.Literals(Object.values(AUTOMATION_EVENT_TYPE)),
   lead_minutes: Schema.optionalKey(Schema.NullOr(NonNegativeIntSchema)),
   mcp_event: Schema.optionalKey(Schema.NullOr(McpEventSelectorSchema)),
   condition: Schema.optionalKey(Schema.Null),

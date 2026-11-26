@@ -1,3 +1,8 @@
+import {
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_SUBJECT
+} from "@arden-hq/protocol/permissions"
 import { expandHome, isWithin } from "@arden-hq/std/paths"
 import { homedir } from "node:os"
 import path from "node:path"
@@ -10,8 +15,17 @@ import {
 } from "../storage/local-paths.js"
 import { toolRefusal } from "./tool-failure.js"
 import type { PathAccess } from "../execution/rules.js"
-import { parseCommandSegments } from "./bash-permissions.js"
-import { isReadOnlyCommand, SHELL_FRAME } from "./bash-safe-commands.js"
+import { parseCommandSegments } from "./shell-parse.js"
+import { commandReadsOnly, isReadOnlyCommand } from "./bash-safe-commands.js"
+import {
+  COMMAND,
+  isRedirect,
+  OPTION,
+  SEGMENT_READING,
+  SHELL_CHARACTER,
+  SHELL_FRAME,
+  SHELLS
+} from "./shell-words.js"
 
 export const refuseNeverPaths = async (
   command: string,
@@ -19,7 +33,8 @@ export const refuseNeverPaths = async (
   policy: LocalPathPolicy
 ): Promise<void> => {
   const nevers = policy.pathRules.rules.flatMap((rule) =>
-    rule.subject.kind === "path" && rule.decision === "never"
+    rule.subject.kind === PERMISSION_RULE_SUBJECT.path &&
+    rule.decision === PERMISSION_RULE_DECISION.never
       ? [{ path: rule.subject.path, access: rule.subject.access }]
       : []
   )
@@ -28,31 +43,37 @@ export const refuseNeverPaths = async (
     throw unchecked("uses $'…' or $\"…\" quoting, which can spell any folder")
   if (/\bCDPATH\b/u.test(command)) throw unchecked("sets CDPATH, which moves cd anywhere")
   const segments =
-    parseCommandSegments(command, { reading: "loose" }) ??
+    parseCommandSegments(command, { reading: SEGMENT_READING.loose }) ??
     command.split(/[\s;|&]+/u).map((word) => [word])
-  const changes = !isReadOnlyCommand(parseCommandSegments(command), cwd)
+  const changes = !commandReadsOnly(command, cwd)
   for (const never of nevers) {
-    if (never.access === "change" && !changes) continue
+    if (never.access === PERMISSION_PATH_ACCESS.change && !changes) continue
     if (spellings(never.path).some((spelling) => spelling.test(command)))
       throw neverRuleRefusal(never.path, never.access)
   }
   let here = cwd
   const start = await namedPath(cwd, cwd)
-  if (start !== undefined && pathRuleFor(policy, start, "read") === "never")
-    throw neverRuleRefusal(start.real, "read")
+  if (
+    start !== undefined &&
+    pathRuleFor(policy, start, PERMISSION_PATH_ACCESS.read) === PERMISSION_RULE_DECISION.never
+  )
+    throw neverRuleRefusal(start.real, PERMISSION_PATH_ACCESS.read)
   for (const words of segments) {
     const program = programWords(words)
-    if (program[0] === "eval") throw unchecked("uses eval, whose words are read only when it runs")
+    if (program[0] === COMMAND.eval)
+      throw unchecked("uses eval, whose words are read only when it runs")
     const flag = program.findIndex((word) => /^-[a-z]*c$/u.test(word))
     const body = SHELLS.has(program[0] ?? "") && flag > 0 ? program[flag + 1] : undefined
     if (body !== undefined) await refuseNeverPaths(body, here, policy)
     const partChanges = !isReadOnlyCommand([words], here)
     const bases = [here, ...(await optionFolders(words, here))]
     for (const [index, word] of words.entries()) {
-      if (word === ">" || word === "<") continue
-      const redirected = words[index - 1] === ">"
+      if (isRedirect(word)) continue
+      const redirected = words[index - 1] === SHELL_CHARACTER.output
       const accesses: ReadonlyArray<PathAccess> =
-        partChanges || redirected ? ["read", "change"] : ["read"]
+        partChanges || redirected
+          ? [PERMISSION_PATH_ACCESS.read, PERMISSION_PATH_ACCESS.change]
+          : [PERMISSION_PATH_ACCESS.read]
       for (const candidate of pathWords(word)) {
         if (/^~[^/]/u.test(candidate))
           throw unchecked(`names ${candidate}, a home folder the check cannot read`)
@@ -60,7 +81,7 @@ export const refuseNeverPaths = async (
           const target = await namedPath(candidate, base)
           if (target === undefined) continue
           for (const access of accesses)
-            if (pathRuleFor(policy, target, access) === "never")
+            if (pathRuleFor(policy, target, access) === PERMISSION_RULE_DECISION.never)
               throw neverRuleRefusal(target.real, access)
           if (program.some((part) => LINKERS.has(path.basename(part)))) {
             const holds = nevers.find((never) => isWithin(target.real, never.path))
@@ -93,8 +114,6 @@ const WRAPPERS = new Set([
   "time"
 ])
 
-const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
-
 const programWords = (segment: ReadonlyArray<string>): ReadonlyArray<string> => {
   let at = 0
   for (;;) {
@@ -111,14 +130,14 @@ const programWords = (segment: ReadonlyArray<string>): ReadonlyArray<string> => 
 
 const movedTo = async (segment: ReadonlyArray<string>, here: string): Promise<string> => {
   const [executable, ...rest] = segment
-  if (executable === "popd") throw unchecked("uses popd, whose folder it cannot know")
-  if (executable !== "cd" && executable !== "pushd") return here
-  const operands = rest.filter((word) => !/^-[LPe@]+$/u.test(word) && word !== "--")
+  if (executable === COMMAND.popd) throw unchecked("uses popd, whose folder it cannot know")
+  if (executable !== COMMAND.cd && executable !== COMMAND.pushd) return here
+  const operands = rest.filter((word) => !/^-[LPe@]+$/u.test(word) && word !== OPTION.end)
   const target = operands[0]
-  if (target === undefined && executable === "pushd")
+  if (target === undefined && executable === COMMAND.pushd)
     throw unchecked("uses pushd with no folder, whose folder it cannot know")
   if (target === undefined) return homedir()
-  if (target === "-" || /^[+-]\d+$/u.test(target))
+  if (target === OPTION.previousFolder || /^[+-]\d+$/u.test(target))
     throw unchecked(`uses ${executable} ${target}, whose folder it cannot know`)
   const moved = await namedPath(target, here)
   if (moved === undefined) throw unchecked(`moves to ${target}, a folder it cannot read`)
@@ -178,7 +197,6 @@ const numberRange = (range: RegExpExecArray, cap: number): ReadonlyArray<string>
   )
 }
 
-/** `{a,b}`; undefined for braces with no comma, which the shell leaves as they are. */
 const commaChoices = (inner: string): ReadonlyArray<string> | undefined =>
   inner.includes(",") ? inner.split(",") : undefined
 

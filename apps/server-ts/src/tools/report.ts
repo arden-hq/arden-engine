@@ -5,17 +5,17 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { toolFailure } from "./tool-failure.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
-import { AUTOMATION_BLOCKED_KINDS, AutomationQueue } from "../persistence/automations/queue.js"
+import { AutomationBlockedKindSchema, AutomationQueue } from "../persistence/automations/queue.js"
 import type { AutomationStoreError } from "../persistence/automations/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { appliedReceipt, inChatTarget } from "./call-receipt.js"
 import type { ServerRunContext } from "./run-context.js"
-import { RUN_VERDICTS } from "../prompts/run-verdicts.js"
+import { RUN_VERDICT, RUN_VERDICTS } from "../prompts/run-verdicts.js"
 
 const ReportToolInputSchema = Schema.Union([
   Schema.Struct({
-    event: Schema.Literal("blocked"),
-    kind: Schema.Literals(AUTOMATION_BLOCKED_KINDS).annotate({
+    event: Schema.Literal(RUN_VERDICT.blocked),
+    kind: AutomationBlockedKindSchema.annotate({
       description: [
         "transient: a temporary problem that a later attempt may clear.",
         "needs_input: the user must decide or supply something.",
@@ -31,7 +31,7 @@ const ReportToolInputSchema = Schema.Union([
     )
   }),
   Schema.Struct({
-    event: Schema.Literal("news"),
+    event: Schema.Literal(RUN_VERDICT.news),
     line: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(400)).pipe(
       Schema.annotateEncoded({
         description:
@@ -40,7 +40,7 @@ const ReportToolInputSchema = Schema.Union([
     )
   }),
   Schema.Struct({
-    event: Schema.Literal("no_change"),
+    event: Schema.Literal(RUN_VERDICT.no_change),
     evidence: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(2_000)).pipe(
       Schema.annotateEncoded({
         description: "Evidence checked and why it adds no meaningful change."

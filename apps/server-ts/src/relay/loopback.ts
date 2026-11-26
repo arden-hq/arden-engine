@@ -1,6 +1,6 @@
 import { SSE_FRAME_ID, decodeSseFrameStream } from "@arden-hq/protocol"
 import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
-import { Option, Schema } from "effect"
+import { Option, Predicate, Schema } from "effect"
 import type { HttpServer } from "effect/unstable/http"
 import type { LocalAccess } from "../http/middleware/local-only.js"
 import type { Loopback } from "./ports.js"
@@ -14,8 +14,9 @@ export const relayLoopback = (
   address: HttpServer.Address,
   access: LocalAccess | undefined
 ): Loopback => {
-  const base =
-    address._tag === "TcpAddress" ? `http://127.0.0.1:${address.port}` : "http://127.0.0.1"
+  const base = Predicate.isTagged(address, "TcpAddress")
+    ? `http://127.0.0.1:${address.port}`
+    : "http://127.0.0.1"
   const auth: Record<string, string> =
     access === undefined ? {} : { [LOCAL_CAPABILITY_HEADER]: access.phoneCapability }
   return {

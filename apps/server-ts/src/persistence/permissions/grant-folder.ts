@@ -5,6 +5,7 @@ import { cutText } from "@arden-hq/std/text"
 import { spaceFolderGrantOf } from "./space-folder-approval.js"
 
 const GRANT_FOLDER_TEXT = 40
+const HOME = "~"
 
 export const grantFolderOf = (toolName: string, data: unknown): ApprovalGrantFolder => {
   const folder = spaceFolderGrantOf(toolName, data)?.local_folder
@@ -16,7 +17,7 @@ export const grantFolderOf = (toolName: string, data: unknown): ApprovalGrantFol
 const shortFolder = (shown: string): string => {
   if (shown.length <= GRANT_FOLDER_TEXT) return shown
   const [first, ...rest] = shown.split("/")
-  const head = first === "~" ? "~/…" : "…"
+  const head = first === HOME ? "~/…" : "…"
   const kept: string[] = []
   for (const part of rest.toReversed()) {
     if (kept.length > 0 && [head, part, ...kept].join("/").length > GRANT_FOLDER_TEXT) break

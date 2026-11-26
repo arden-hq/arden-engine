@@ -3,7 +3,7 @@ import type { AssistantMessage } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 import { makeResultHistoryProjector } from "../src/chat/result-history.js"
-import { toChatRunnerMessages } from "../src/chat/run-driver.js"
+import { toChatRunnerMessages } from "../src/chat/run-driver-support.js"
 import { decodeJson, encodeJson } from "../src/persistence/sqlite/json.js"
 import { StoredMessageEnvelopeSchema } from "../src/persistence/transcript/model.js"
 

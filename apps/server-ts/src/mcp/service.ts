@@ -23,29 +23,18 @@ import { McpConnectionError, mcpError, type McpOperation } from "./errors.js"
 import { makeMcpEventSubscriptions, McpEvents } from "./events/subscriptions.js"
 import { McpOAuthCallbacks } from "./oauth.js"
 import { makeGitHubOAuth } from "./github-oauth.js"
-import { GitHubTokenRejected, makeGitHubConnection } from "./github-connection.js"
-import { MCP_PRESETS, mcpPresetTransportAuth } from "./presets.js"
-import { cancelRetry, makeMcpRuntime, storeFailure } from "./runtime.js"
+import { makeGitHubConnection } from "./github-connection.js"
+import { cancelRetry, storeFailure } from "./runtime-state.js"
+import { makeMcpRuntime } from "./runtime.js"
 import { KeyedSerialQueue } from "./serial.js"
 import { makeMcpServerSecrets } from "./server-secrets.js"
-import { mcpServiceTitle, mcpSignInNotSetUpDetail } from "./transport.js"
+import { mcpSignInNotSetUpDetail } from "./transport.js"
 import { MCP_CREDENTIALS_UNREADABLE, McpSignInNotSetUp, type McpOAuthVault } from "./vault.js"
+import { githubFailure, notAnswering, vaultAwareFailure } from "./failures.js"
+import { makeInstallPreset } from "./preset-install.js"
 
 type CreateInput = typeof McpCreateServerRequestSchema.Type
 type UpdateInput = typeof McpUpdateServerRequestSchema.Type
-
-const runServerOperations = <A>(
-  queue: KeyedSerialQueue,
-  names: ReadonlyArray<string>,
-  operation: () => Promise<A>
-): Promise<A> => {
-  const keys = [...new Set(names)].sort()
-  const run = (index: number): Promise<A> => {
-    const key = keys[index]
-    return key === undefined ? operation() : queue.run(key, () => run(index + 1))
-  }
-  return run(0)
-}
 
 export class McpConnections extends Context.Service<
   McpConnections,
@@ -145,46 +134,7 @@ export const mcpConnectionsLayer = (
 
       const snapshot = () => Effect.sync(runtime.snapshot)
 
-      const installPreset = (presetId: McpPresetId) =>
-        Effect.tryPromise({
-          try: () => {
-            const definitions = MCP_PRESETS[presetId].servers.map(
-              (server) =>
-                ({
-                  name: server.name,
-                  presetId,
-                  enabled: true,
-                  transport: {
-                    type: "http" as const,
-                    url: server.url,
-                    auth: mcpPresetTransportAuth(presetId),
-                    headerKeys: []
-                  }
-                }) satisfies McpStoredServer
-            )
-            return runServerOperations(
-              operations,
-              definitions.map((server) => server.name),
-              async () => {
-                const installed = await Effect.runPromise(
-                  store
-                    .installPreset(presetId, definitions)
-                    .pipe(Effect.mapError((cause) => storeFailure("install_preset", cause)))
-                )
-                for (const config of installed) {
-                  if (!runtime.has(config.name)) runtime.start(config)
-                }
-                return installed.map((config) =>
-                  runtime.snapshotOne(runtime.requireRuntime(config.name, "install_preset"))
-                )
-              }
-            )
-          },
-          catch: (cause) =>
-            cause instanceof McpConnectionError
-              ? cause
-              : mcpError("install_preset", "storage", "MCP preset could not be installed", cause)
-        })
+      const installPreset = makeInstallPreset({ store, runtime, operations })
 
       const create = (input: CreateInput) =>
         Effect.tryPromise({
@@ -536,41 +486,3 @@ export const mcpConnectionsLayer = (
       ).pipe(Context.add(McpEvents, events))
     })
   )
-
-const notAnswering = (config: McpStoredServer): string =>
-  `${mcpServiceTitle(config)} isn’t answering right now. Try again in a few minutes.`
-
-const githubFailure = (fallback: string, cause: unknown): McpConnectionError => {
-  if (cause instanceof McpConnectionError) return cause
-  if (cause instanceof GitHubTokenRejected) {
-    return mcpError("github", "rejected", cause.detail, cause)
-  }
-  if (cause instanceof VaultError) {
-    return mcpError(
-      "github",
-      "unavailable",
-      "Arden’s secure storage isn’t available right now. Try again in a moment.",
-      cause
-    )
-  }
-  return mcpError("github", "unavailable", `${fallback}. Try again in a moment.`, cause)
-}
-
-const vaultAwareFailure = (
-  operation: "create" | "update",
-  fallback: string,
-  cause: unknown
-): McpConnectionError => {
-  if (cause instanceof McpConnectionError) return cause
-  if (cause instanceof VaultError) {
-    return cause.reason === "invalid"
-      ? mcpError(operation, "invalid", cause.message, cause)
-      : mcpError(
-          operation,
-          "unavailable",
-          "Arden’s secure storage isn’t available right now. Try again in a moment.",
-          cause
-        )
-  }
-  return mcpError(operation, "invalid", fallback, cause)
-}

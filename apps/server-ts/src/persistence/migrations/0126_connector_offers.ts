@@ -1,15 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/**
- * A permission offer may name a connector (`change_json` kind `connector`):
- * "Use GitHub without asking?" saves one rule for every tool of that MCP
- * server, in the Space's list or the global list.
- *
- * Cheap: one row per offer Arden showed, a few dozen at most. The table is
- * renamed aside with legacy ALTER TABLE, so the triggers and the child
- * tables' REFERENCES that name `permission_offers` keep naming the new table.
- */
 const permissionOffers = `CREATE TABLE permission_offers (
       question_id TEXT PRIMARY KEY CHECK(length(question_id) > 0),
       session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,

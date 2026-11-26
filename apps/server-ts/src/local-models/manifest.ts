@@ -10,11 +10,6 @@ const PINNED_HUGGING_FACE_PAGE =
   /^https:\/\/huggingface\.co\/[^\s/]+\/[^\s/]+\/blob\/[0-9a-f]{40}\/\S+$/u
 
 const ModelFileSchema = Schema.Struct({
-  /**
-   * weights — the GGUF model; projector — the multimodal projector (llama-server
-   * --mmproj); license — the licence text, kept beside the weights when the
-   * licence asks that its copy travel with them (LFM Open License §4).
-   */
   role: Schema.Literals(["weights", "projector", "license"]),
   path: Schema.String.check(Schema.isPattern(SAFE_RELATIVE_PATH)),
   url: Schema.String.check(Schema.isPattern(PINNED_HUGGING_FACE_URL)),

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import { withExtras } from "../common/schema.js"
 import {
   INTELLIGENCE_SETTINGS_CHANGE,
@@ -6,8 +6,7 @@ import {
   type IntelligenceSettingsPatch
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
-/** Counts the chat itself: 1 = no sub-agents, 2 = one level, 3 = two. */
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const MaxAgentDepthSchema = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(1),
   Schema.isLessThanOrEqualTo(3)
@@ -33,7 +32,6 @@ const SummaryMaxTokensSchema = Schema.Int.check(
   Schema.isLessThanOrEqualTo(8_000)
 )
 
-/** What the assistant calls itself. */
 const AssistantNameSchema = Schema.Trim.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(40),

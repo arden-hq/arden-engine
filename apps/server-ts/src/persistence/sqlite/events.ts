@@ -1,13 +1,10 @@
 import { runActivityView } from "@arden-hq/protocol/chat"
-import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import { ChatProjectionEventSchema } from "@arden-hq/protocol/effect/chat"
 import {
   appendInTransaction as appendJournalInTransaction,
   journalRecordsSql,
   journalStreamsSql,
   readHeadSequence,
   type JournalAppendResult,
-  type JournalRecord,
   type JournalRuntime as GenericJournalRuntime
 } from "@arden-hq/journal/effect"
 import { DateTime, Effect, Schema, Stream } from "effect"
@@ -18,7 +15,6 @@ import {
   ChatEventStoreError,
   type ChatActiveProjection,
   type ChatEventDelivery,
-  type ChatEventOperation,
   type FollowChatEvents,
   type ReadChatActiveProjection,
   type ReadChatEventPage
@@ -28,27 +24,30 @@ import {
   CommitEventBatchSchema,
   EventWatermarksSchema,
   isDurableDraft,
-  isEphemeralChatEvent,
   type CommitEventBatch,
   type CommittedEventBatch,
-  type EventDraft,
   type EventPage,
-  type EventWatermarks,
-  type SessionEventRecord
+  type EventWatermarks
 } from "../events/model.js"
 import type { PersistenceDeps } from "./deps.js"
 import { UnitOfWork } from "../unit-of-work.js"
 import { readLatestRunBoundary } from "./journal-run-boundary.js"
 import { withContentAnchor } from "../events/content-anchor.js"
-import { decodeStoredChatEvent } from "../events/stored-chat-event.js"
 import {
   projectionBytes,
   reduceActiveProjection,
-  terminalEventRunId,
   terminalRunId,
   type ActiveProjectionState
 } from "../events/active-projection.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import {
+  type EventAdmissionState,
+  EventAdmissionRowSchema,
+  eventAdmissionState,
+  heldThrough,
+  rejectedDraftIndex
+} from "./event-admission.js"
+import { decodeRecord, eventError, journalDraft, mapError } from "./event-records.js"
 
 const DEFAULT_ACTIVE_PROJECTION_CAPACITY_BYTES = 4 * 1024 * 1024
 const DEFAULT_ACTIVE_PROJECTION_GLOBAL_CAPACITY_BYTES = 16 * 1024 * 1024
@@ -68,145 +67,6 @@ interface EventPayloadSizeRow {
   readonly sequence: number
   readonly payload_bytes: number
 }
-
-const EventAdmissionRowSchema = Schema.Struct({
-  event_type: Schema.Literals(["RUN_STARTED", "RUN_FINISHED", "RUN_ERROR", "run_cancelled"]),
-  run_id: Schema.NonEmptyString
-})
-
-const eventError = (
-  operation: ChatEventOperation,
-  message: string,
-  cause?: unknown
-): ChatEventStoreError =>
-  new ChatEventStoreError({ operation, message, ...(cause === undefined ? {} : { cause }) })
-
-const mapError = (operation: ChatEventOperation, message: string) => (cause: unknown) =>
-  cause instanceof ChatEventStoreError ? cause : eventError(operation, message, cause)
-
-type EventAdmissionState =
-  | { readonly kind: "active"; readonly runId: string | undefined }
-  | { readonly kind: "terminal"; readonly runId: string }
-
-const eventAdmissionState = (
-  current: ActiveProjectionState | undefined
-): EventAdmissionState | undefined => {
-  if (current === undefined) return undefined
-  if (current.kind === "terminal") return { kind: "terminal", runId: current.runId }
-  return { kind: "active", runId: current.runId }
-}
-
-/** The highest sequence a projection still holds records for, which a run
- * ending or restarting drops without a later event replacing them. */
-const heldThrough = (projection: ActiveProjectionState | undefined): number => {
-  if (projection === undefined) return 0
-  switch (projection.kind) {
-    case "ready":
-      return projection.records.reduce(
-        (highest, { record }) => Math.max(highest, record.sequence),
-        0
-      )
-    case "overflow":
-      return projection.throughSequence
-    case "terminal":
-      return 0
-  }
-}
-
-const draftRunId = (draft: EventDraft): string | undefined => {
-  if (draft.runId !== undefined && draft.runId !== null) return draft.runId
-  return draft.event.type === "RUN_STARTED" ? draft.event.run_id : undefined
-}
-
-const rejectsAppendDraft = (
-  current: EventAdmissionState | undefined,
-  draft: EventDraft
-): boolean => {
-  if (draft.admission === "detached" || current === undefined) return false
-  const endedRunId = terminalEventRunId(draft.event)
-  if (endedRunId !== undefined) {
-    return (
-      current.kind === "terminal" || (current.runId !== undefined && current.runId !== endedRunId)
-    )
-  }
-  const runId = draftRunId(draft)
-  if (current.kind === "terminal") {
-    if (draft.event.type === "approval_resolved" && runId === current.runId) return false
-    return isEphemeralChatEvent(draft.event) || runId === current.runId
-  }
-  return current.runId !== undefined && runId !== undefined && current.runId !== runId
-}
-
-const advanceEventAdmission = (
-  current: EventAdmissionState | undefined,
-  draft: EventDraft
-): EventAdmissionState | undefined => {
-  if (draft.event.type === "RUN_STARTED") {
-    return { kind: "active", runId: draft.event.run_id }
-  }
-  const endedRunId = terminalEventRunId(draft.event)
-  return endedRunId === undefined ? current : { kind: "terminal", runId: endedRunId }
-}
-
-const rejectedDraftIndex = (
-  current: EventAdmissionState | undefined,
-  drafts: ReadonlyArray<EventDraft>
-): number | undefined => {
-  let state = current
-  for (const [index, draft] of drafts.entries()) {
-    if (rejectsAppendDraft(state, draft)) return index
-    state = advanceEventAdmission(state, draft)
-  }
-  return undefined
-}
-
-const decodeRecord = Effect.fn("SqliteChatEventStore.decodeRecord")(function* (
-  record: JournalRecord,
-  operation: "read" | "follow"
-): Effect.fn.Return<SessionEventRecord, ChatEventStoreError> {
-  const event = yield* decodeStoredChatEvent(record.data, record.streamId).pipe(
-    Effect.mapError((cause) => eventError(operation, "Stored Chat event is corrupt", cause))
-  )
-  if (event.type !== record.type) {
-    return yield* eventError(operation, "Stored Chat event type does not match its payload")
-  }
-  const createdAt = yield* Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString)(
-    record.createdAt
-  ).pipe(
-    Effect.mapError((cause) =>
-      eventError(operation, "Stored Chat event timestamp is corrupt", cause)
-    )
-  )
-  const attribute = record.attributes.runId
-  if (attribute !== undefined && (typeof attribute !== "string" || attribute.length === 0)) {
-    return yield* eventError(operation, "Stored Chat event runId is corrupt")
-  }
-  return {
-    sessionId: record.streamId,
-    sequence: record.sequence,
-    event,
-    createdAt,
-    durable: record.durable,
-    ...(attribute === undefined ? {} : { runId: attribute })
-  }
-})
-
-const encodeChatEvent = Schema.encodeEffect(Schema.toCodecJson(ChatProjectionEventSchema))
-
-const journalDraft = (
-  event: ChatProjectionEvent,
-  runId: string | null | undefined,
-  durable: boolean
-) =>
-  encodeChatEvent(event).pipe(
-    Effect.map((data) => ({
-      type: event.type,
-      data,
-      attributes: runId === undefined || runId === null ? {} : { runId },
-      durable
-    })),
-    Effect.mapError((cause) => eventError("append", "Chat event cannot be encoded", cause))
-  )
 
 const observeDeltaVolume = Effect.fn("SqliteChatEventStore.observeDeltaVolume")(function* (
   deltas: DeltaWindow,
@@ -258,10 +118,6 @@ export const makeChatEventStore = (
   }
   const activeProjections = new Map<string, ActiveProjectionState>()
   let activeProjectionBytes = 0
-  // Coverage of the projections, per session, for reads that run beside the
-  // write queue (see ChatActiveProjection). `staged` is the head of the last
-  // batch appended inside a transaction, set before COMMIT, and stays when that
-  // transaction rolls back; `published` is the head the projection has applied.
   const staged = new Map<string, number>()
   const published = new Map<string, number>()
   const trimFloors = new Map<string, number>()

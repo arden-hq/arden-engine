@@ -5,26 +5,41 @@ import type {
   SpaceTaskSource
 } from "../spaces/work/contracts.js"
 import type { JsonRecord } from "../common/json.js"
+import { SOURCE_KIND } from "../spaces/work/contracts.js"
 
-export type TaskProposalPlace = "space" | "chat"
+export const TASK_PROPOSAL_PLACEMENT = { space: "space", chat: "chat" } as const
+
+export type TaskProposalPlace =
+  (typeof TASK_PROPOSAL_PLACEMENT)[keyof typeof TASK_PROPOSAL_PLACEMENT]
 
 export type TaskProposalSignalSender =
   | { readonly kind: "unnamed" }
   | { readonly kind: "named"; readonly name: string }
 
+export const TASK_PROPOSAL_RETIREMENT_EVIDENCE = {
+  chat: "chat",
+  memory: "memory",
+  task: "task",
+  connection_item: "connection_item"
+} as const
+
 export type TaskProposalRetirementEvidence =
   | {
-      readonly kind: "chat"
+      readonly kind: typeof TASK_PROPOSAL_RETIREMENT_EVIDENCE.chat
       readonly session_id: string
       readonly turn:
         | { readonly kind: "whole_chat" }
         | { readonly kind: "turn"; readonly turn_id: string }
       readonly label: TaskProposalSignalSender
     }
-  | { readonly kind: "memory"; readonly page_ref: string }
-  | { readonly kind: "task"; readonly item_id: string; readonly label: string }
+  | { readonly kind: typeof TASK_PROPOSAL_RETIREMENT_EVIDENCE.memory; readonly page_ref: string }
   | {
-      readonly kind: "connection_item"
+      readonly kind: typeof TASK_PROPOSAL_RETIREMENT_EVIDENCE.task
+      readonly item_id: string
+      readonly label: string
+    }
+  | {
+      readonly kind: typeof TASK_PROPOSAL_RETIREMENT_EVIDENCE.connection_item
       readonly item_id: string
       readonly label: string
       readonly link:
@@ -37,11 +52,9 @@ export interface TaskProposalRetirement extends JsonRecord {
   readonly evidence: ReadonlyArray<TaskProposalRetirementEvidence>
 }
 
-export const TASK_PROPOSAL_PLACEMENT = { space: "space", chat: "chat" } as const
-
 export type TaskProposalPlacement =
-  | { readonly kind: "space"; readonly space_id: string }
-  | { readonly kind: "chat"; readonly session_id: string }
+  | { readonly kind: typeof TASK_PROPOSAL_PLACEMENT.space; readonly space_id: string }
+  | { readonly kind: typeof TASK_PROPOSAL_PLACEMENT.chat; readonly session_id: string }
 
 export type TaskProposalBody =
   | { readonly kind: "plain" }
@@ -59,9 +72,9 @@ export type TaskProposalSignal =
 export const TASK_PROPOSAL_ORIGIN = { router: "router", run: "run" } as const
 
 export type TaskProposalOrigin =
-  | { readonly kind: "router" }
+  | { readonly kind: typeof TASK_PROPOSAL_ORIGIN.router }
   | {
-      readonly kind: "run"
+      readonly kind: typeof TASK_PROPOSAL_ORIGIN.run
       readonly run_id: string
       readonly session_id: string
       readonly turn_id: string
@@ -75,20 +88,32 @@ export type TaskProposalPutOff =
 export const TASK_PROPOSAL_TASK = { kept: "kept", gone: "gone" } as const
 
 export type TaskProposalStartedTask =
-  | { readonly kind: "kept"; readonly item_id: string }
-  | { readonly kind: "gone" }
+  | { readonly kind: typeof TASK_PROPOSAL_TASK.kept; readonly item_id: string }
+  | { readonly kind: typeof TASK_PROPOSAL_TASK.gone }
+
+export const TASK_PROPOSAL_STATUS = {
+  held: "held",
+  offered: "offered",
+  accepted: "accepted",
+  rejected: "rejected",
+  expired: "expired",
+  retired: "retired"
+} as const
 
 export type TaskProposalState =
-  | { readonly status: "held" }
-  | { readonly status: "offered"; readonly put_off: TaskProposalPutOff }
+  | { readonly status: typeof TASK_PROPOSAL_STATUS.held }
+  | { readonly status: typeof TASK_PROPOSAL_STATUS.offered; readonly put_off: TaskProposalPutOff }
   | {
-      readonly status: "accepted"
+      readonly status: typeof TASK_PROPOSAL_STATUS.accepted
       readonly settled_at: string
       readonly task: TaskProposalStartedTask
     }
-  | { readonly status: "rejected" | "expired"; readonly settled_at: string }
   | {
-      readonly status: "retired"
+      readonly status: typeof TASK_PROPOSAL_STATUS.rejected | typeof TASK_PROPOSAL_STATUS.expired
+      readonly settled_at: string
+    }
+  | {
+      readonly status: typeof TASK_PROPOSAL_STATUS.retired
       readonly settled_at: string
       readonly retirement: TaskProposalRetirement
     }
@@ -118,8 +143,8 @@ export interface TaskProposalList extends JsonRecord {
 }
 
 export type TaskProposalScope =
-  | { readonly place: "space"; readonly spaceId: string }
-  | { readonly place: "chat"; readonly sessionId: string }
+  | { readonly place: typeof TASK_PROPOSAL_PLACEMENT.space; readonly spaceId: string }
+  | { readonly place: typeof TASK_PROPOSAL_PLACEMENT.chat; readonly sessionId: string }
 
 interface ResolveTaskProposalBase {
   readonly expected_revision: number
@@ -130,34 +155,46 @@ export const TASK_PROPOSAL_START_SPACE = { proposed: "proposed", chosen: "chosen
 export const TASK_PROPOSAL_ACCEPTED_IN = { elsewhere: "elsewhere", chat: "chat" } as const
 
 export type TaskProposalStartSpace =
-  | { readonly kind: "proposed" }
-  | { readonly kind: "chosen"; readonly space_id: string }
+  | { readonly kind: typeof TASK_PROPOSAL_START_SPACE.proposed }
+  | { readonly kind: typeof TASK_PROPOSAL_START_SPACE.chosen; readonly space_id: string }
 
 export type TaskProposalAcceptedIn =
-  | { readonly kind: "elsewhere" }
-  | { readonly kind: "chat"; readonly session_id: string }
+  | { readonly kind: typeof TASK_PROPOSAL_ACCEPTED_IN.elsewhere }
+  | { readonly kind: typeof TASK_PROPOSAL_ACCEPTED_IN.chat; readonly session_id: string }
+
+export const TASK_PROPOSAL_DECISION = {
+  accept: "accept",
+  reject: "reject",
+  later: "later"
+} as const
 
 export type ResolveTaskProposalInput =
   | (ResolveTaskProposalBase & {
-      readonly decision: "accept"
+      readonly decision: typeof TASK_PROPOSAL_DECISION.accept
       readonly space: TaskProposalStartSpace
       readonly accepted_in: TaskProposalAcceptedIn
     })
-  | (ResolveTaskProposalBase & { readonly decision: "reject" })
-  | (ResolveTaskProposalBase & { readonly decision: "later" })
+  | (ResolveTaskProposalBase & { readonly decision: typeof TASK_PROPOSAL_DECISION.reject })
+  | (ResolveTaskProposalBase & { readonly decision: typeof TASK_PROPOSAL_DECISION.later })
+
+export const RESOLVED_PROPOSAL_TASK = { started: "started", unstarted: "unstarted" } as const
 
 export type ResolveTaskProposalTask =
-  | { readonly kind: "started"; readonly task: SpaceTask }
-  | { readonly kind: "unstarted" }
+  | { readonly kind: typeof RESOLVED_PROPOSAL_TASK.started; readonly task: SpaceTask }
+  | { readonly kind: typeof RESOLVED_PROPOSAL_TASK.unstarted }
 
 export interface ResolveTaskProposalResponse extends JsonRecord {
   readonly proposal: TaskProposal
   readonly task: ResolveTaskProposalTask
 }
 
-/** Exact applied action evidence is available only when retiring a suggestion. */
+export const TASK_PROPOSAL_RETIREMENT_SOURCE = {
+  ...SOURCE_KIND,
+  chat_action: "chat_action"
+} as const
+
 export interface ChatActionRetirementSource {
-  readonly kind: "chat_action"
+  readonly kind: typeof TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action
   readonly session_id: string
   readonly turn_id: string
   readonly run_id: string
@@ -167,28 +204,46 @@ export interface ChatActionRetirementSource {
 
 export type TaskProposalRetirementSource = SpaceTaskSource | ChatActionRetirementSource
 
-/** Why the server could not settle an offered suggestion. */
+export const TASK_PROPOSAL_CONFLICT = {
+  proposal_changed: "proposal_changed",
+  source_changed: "source_changed",
+  source_unavailable: "source_unavailable",
+  space_unavailable: "space_unavailable",
+  settled: "settled",
+  not_offered: "not_offered"
+} as const
+
 export type TaskProposalConflictKind =
-  | "proposal_changed"
-  | "source_changed"
-  | "source_unavailable"
-  | "space_unavailable"
-  | "settled"
-  | "not_offered"
+  (typeof TASK_PROPOSAL_CONFLICT)[keyof typeof TASK_PROPOSAL_CONFLICT]
 
 export interface TaskProposalConflict {
   readonly kind: TaskProposalConflictKind
   readonly message: string
 }
 
+export const TASK_PROPOSAL_REVIEW_STATE = {
+  queued: "queued",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+  unrequested: "unrequested"
+} as const
+
+export type TaskProposalReviewState = Exclude<
+  (typeof TASK_PROPOSAL_REVIEW_STATE)[keyof typeof TASK_PROPOSAL_REVIEW_STATE],
+  typeof TASK_PROPOSAL_REVIEW_STATE.unrequested
+>
+
 export interface TaskProposalReview {
   readonly expected_revision: number
-  readonly state: "queued" | "running" | "completed" | "failed"
+  readonly state: TaskProposalReviewState
   readonly message: string
   readonly proposal: TaskProposal
 }
 
-export type TaskProposalReviewStatus = { readonly state: "unrequested" } | TaskProposalReview
+export type TaskProposalReviewStatus =
+  | { readonly state: typeof TASK_PROPOSAL_REVIEW_STATE.unrequested }
+  | TaskProposalReview
 
 export interface RecheckTaskProposalInput {
   readonly expected_revision: number

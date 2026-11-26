@@ -10,6 +10,7 @@ import type { SessionQueries } from "../persistence/sessions/queries.js"
 import type { RunQueries } from "../persistence/runs/queries.js"
 import type { ConversationArtifacts } from "../artifacts/conversation.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
+import { SANDBOX } from "../execution/authority.js"
 import { runPolicyOf } from "../execution/policy.js"
 import { readAgentSessionMetadata } from "../sessions/agent-mode.js"
 import { isErrnoCode } from "../fs/private-store.js"
@@ -41,13 +42,16 @@ export interface LocalPathContext {
   readonly signal: AbortSignal
 }
 
+export const LOCAL_SANDBOX = { ...SANDBOX, approvedLocal: "approved_local" } as const
+type LocalSandbox = (typeof LOCAL_SANDBOX)[keyof typeof LOCAL_SANDBOX]
+
 export interface LocalPathPolicy {
   readonly cwd: string | null
   readonly readRoots: ReadonlyArray<string> | null
   readonly readOnlyRoots?: ReadonlyArray<string>
   readonly writeRoot: string | null
   readonly stateRoot: string
-  readonly sandbox: "code_agent" | "approved_local" | "host_approved" | null
+  readonly sandbox: LocalSandbox | null
   readonly network?: boolean
   readonly pathRules: RunRules
 }
@@ -57,7 +61,6 @@ export interface SessionPathPolicy extends LocalPathPolicy {
   readonly usableRoots: ReadonlyArray<string>
 }
 
-/** macOS disks ignore case by default: a never rule matches any spelling there. */
 const CASE_FOLDING_DISK = process.platform === "darwin"
 export const caseFoldingDisk = CASE_FOLDING_DISK
 
@@ -100,13 +103,6 @@ export const insideLocalFolder = (policy: SessionPathPolicy, target: string): bo
 
 const PROTECTED_ROOT_METADATA = [".agents", ".codex"] as const
 
-/**
- * Directories a protected path hangs from inside the writable root, the root
- * included. A path deny does not stop renaming a parent, so these cannot be
- * renamed or removed: otherwise `mv Library L2` would free L2/LaunchAgents to
- * be written and moved back (Codex denies the same unlink on its roots and on
- * the ancestors of protected globs).
- */
 const anchorsWithin = (
   writeRoot: string,
   protectedPaths: ReadonlyArray<string>

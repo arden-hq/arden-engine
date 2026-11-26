@@ -53,8 +53,6 @@ const storeError = (
     ...(cause === undefined ? {} : { cause })
   })
 
-// A chat's size is read from `session_sizes`, which triggers keep current as
-// messages and runs change. Adding up message lengths here read every message.
 const sessionOwnBytesSql = (sql: SqlClient.SqlClient, alias: string) => {
   const session = sql.literal(alias)
   return sql`MAX(1,
@@ -68,8 +66,6 @@ const sessionOwnBytesSql = (sql: SqlClient.SqlClient, alias: string) => {
       ), 0))`
 }
 
-// One row per kind of chat. An empty chat counted as one byte in the old sum;
-// here it counts as zero, which does not move the share this total is used for.
 const loadTotalBytes = (sql: SqlClient.SqlClient) => sql<{ readonly total: number }>`
   SELECT COALESCE(SUM(message_json_bytes + search_text_bytes + run_bytes + own_bytes), 0) AS total
   FROM session_type_sizes`

@@ -9,12 +9,12 @@ import { describe, expect, it } from "vitest"
 
 import {
   JournalError,
-  appendInTransaction,
-  initializeJournalSchema,
-  makeJournalRuntime,
   type JournalRuntime,
   type JournalRuntimeOptions
-} from "../src/effect/runtime.js"
+} from "../src/effect/contracts.js"
+import { appendInTransaction } from "../src/effect/store.js"
+import { makeJournalRuntime } from "../src/effect/runtime.js"
+import { initializeJournalSchema } from "../src/effect/schema.js"
 
 const withJournal = async <A, E>(
   label: string,

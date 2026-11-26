@@ -2,7 +2,11 @@ import {
   feedsActivityTriggers,
   type TriggerFeedRecord
 } from "../persistence/automations/triggers.js"
-import { LINK } from "@arden-hq/protocol"
+import { LINK, SERVER_EVENT_TYPE } from "@arden-hq/protocol"
+import {
+  INTERNAL_LIFECYCLE_EVENT,
+  RUN_SETTLED_STATUS
+} from "../persistence/sessions/internal-events.js"
 import type { SessionLifecycleDelivery } from "../persistence/sessions/events.js"
 
 export const triggerFeedRecord = (
@@ -14,14 +18,18 @@ export const triggerFeedRecord = (
     atMs: delivery.createdAtMs,
     journal: { atMs: delivery.createdAtMs, event }
   }
-  if (event.type === "chat_input_committed") {
+  if (event.type === SERVER_EVENT_TYPE.chatInputCommitted) {
     return { ...base, kind: "input_committed", sessionId: event.chat_session_id }
   }
-  if (event.type === "run_settled" && event.personal && event.status === "completed") {
+  if (
+    event.type === INTERNAL_LIFECYCLE_EVENT.runSettled &&
+    event.personal &&
+    event.status === RUN_SETTLED_STATUS.completed
+  ) {
     return { ...base, kind: "run_completed", sessionId: event.session_id }
   }
   if (
-    event.type === "session_activity" &&
+    event.type === SERVER_EVENT_TYPE.sessionActivity &&
     feedsActivityTriggers({
       sessionType: event.session.session_type,
       originAutomationId:

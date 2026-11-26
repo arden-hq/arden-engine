@@ -2,13 +2,9 @@ import { formatBytes } from "@arden-hq/std/count"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
-import {
-  createSharedFileAccess,
-  fileOwnerSessions,
-  sharedFileServices,
-  type SharedFileServices
-} from "./shared-files.js"
+import { createSharedFileAccess, fileOwnerSessions, sharedFileServices } from "./shared-files.js"
 import { transcriptFiles, type TranscriptFile } from "./shared-file-sources.js"
+import type { SharedFileServices } from "./shared-file-types.js"
 import { toolFailure } from "./tool-failure.js"
 
 type ListedFile = {

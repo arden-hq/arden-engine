@@ -2,9 +2,6 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Schema } from "effect"
 import { bundleWithin } from "./bundle-id.js"
 
-/** The installed desktop app. A dev build runs as `com.github.Electron`, which
- *  every other Electron app shares, so a dev build is known by its process id
- *  alone and that bundle id is never refused. */
 const ARDEN_BUNDLE_ID = "com.arden.desktop"
 
 const isObject = Schema.is(Schema.Record(Schema.String, Schema.Json))
@@ -89,7 +86,6 @@ export const ownWindowIssue = (input: object, ownPid: number | undefined): strin
   return nativeCallRefusal(args, ownPid, () => undefined)
 }
 
-/** The window a driver call names: its pid and window id, when both are given. */
 const namedWindow = (
   args: Readonly<Record<string, Schema.Json>>
 ): { readonly pid: number; readonly windowId: number } | undefined => {
@@ -98,7 +94,6 @@ const namedWindow = (
   return pid === undefined || windowId === undefined ? undefined : { pid, windowId }
 }
 
-/** The window ids a `list_windows` answer lists for that pid; empty for anything else. */
 const windowIdsOf = (listing: CallToolResult, pid: number): ReadonlySet<number> => {
   const structured = listing.isError ? undefined : listing.structuredContent
   if (!isObject(structured) || !isArray(structured.windows)) return new Set()
@@ -114,11 +109,6 @@ const windowIdsOf = (listing: CallToolResult, pid: number): ReadonlySet<number> 
 const NOT_THAT_APPS_WINDOW =
   "That window is not one of that app's windows. List the app's windows with computer_read again."
 
-/**
- * The one check before any driver call that names a window, read or act: the window must be one
- * the driver lists for that pid, and none of Arden's own. Arden never relies on the driver to
- * check that a window belongs to a pid.
- */
 const windowCallIssue = async (
   target: { readonly pid: number; readonly windowId: number },
   ownPid: number | undefined,
@@ -134,7 +124,6 @@ const windowCallIssue = async (
     : NOT_THAT_APPS_WINDOW
 }
 
-/** Whether a driver's answer names another pid or window than the call asked for. */
 const answersAnotherWindow = (
   target: { readonly pid: number; readonly windowId: number },
   result: CallToolResult
@@ -152,11 +141,6 @@ const answersAnotherWindow = (
 const ANOTHER_WINDOW_ANSWER =
   "The driver answered for a different window than the one asked, so Arden dropped its answer. Observe the window again."
 
-/**
- * Every driver call that names a window, read or act, goes through here: the window must be one
- * the driver lists for that pid and none of Arden's own (`windowCallIssue`), and an answer that
- * names another pid or window than asked is dropped for an error with no content.
- */
 export const windowCall = async (
   name: string,
   args: Readonly<Record<string, Schema.Json>>,

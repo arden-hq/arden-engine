@@ -11,13 +11,9 @@ interface ToolCallCountRow {
   readonly display_name: string | null
   readonly count: number
   readonly rejected: number
-  /** The `seq` of each call's message, joined by commas, in no promised order. */
   readonly seqs: string
 }
 
-/** Which tools each turn called, how often, and where in the chat each call sits.
- *  `conversationCall` is the predicate over `call.value` for a call whose result is
- *  conversation content: such a call is not counted as work. */
 export const makeToolCallCounts = (
   sql: SqlClient.SqlClient,
   conversationCall: Statement.Fragment
@@ -25,10 +21,6 @@ export const makeToolCallCounts = (
   Effect.fn("SqliteTranscriptQueries.toolCallCounts")(function* (sessionId, turnIds) {
     const counts = new Map<string, Array<TurnToolCallCount>>()
     if (turnIds.length === 0) return counts
-    // CROSS JOIN keeps session_turns outermost, so each turn reads only its
-    // own (session_id, seq) range. With a plain JOIN SQLite drove the query
-    // from the transcript and parsed every message of the chat twice: 160 ms
-    // instead of 5 ms on a 22k-message chat.
     const rows = yield* sql<ToolCallCountRow>`
       SELECT turn_id, name, display_name, COUNT(*) AS count, SUM(rejected) AS rejected,
              group_concat(seq) AS seqs

@@ -11,6 +11,7 @@ import {
   type ToolResultOutput
 } from "@arden-hq/loop"
 import type { ApprovalPresentationDraft } from "../persistence/tools/approval-draft.js"
+import { ToolKindSchema } from "@arden-hq/protocol/chat"
 import { ToolDisplaySchema } from "@arden-hq/protocol/effect/tools"
 import { Effect, Option, Predicate, Schema } from "effect"
 
@@ -36,16 +37,11 @@ import { mutationReceiptHost, readMutationReceipt } from "../persistence/tools/m
 
 const ServerToolMetadataInputSchema = Schema.Struct({
   display_name: Schema.String,
-  kind: Schema.String,
+  kind: ToolKindSchema,
   action: Schema.Literals(["read", "write", "execute"]),
   source: Schema.String,
   changes_state: Schema.Boolean,
   concurrency_group: Schema.NullOr(Schema.String),
-  /**
-   * true when a call can remove or overwrite something Arden cannot bring
-   * back (delete, overwrite, unsubscribe). Archiving, which the user can
-   * undo, is false. null when it does not apply (reads).
-   */
   destructive: Schema.NullOr(Schema.Boolean),
   approval_preview: Schema.optionalKey(Schema.String),
   default_approval: Schema.optionalKey(Schema.Literals(["approve", "ask"])),
@@ -95,8 +91,6 @@ const ServerToolMetadataInputSchema = Schema.Struct({
   )
 )
 export type ServerToolMetadataInput = typeof ServerToolMetadataInputSchema.Type
-// Excess keys are an error at runtime too: metadata spread from a shared
-// constant or read from JSON escapes the compiler's excess-property check.
 const decodeServerToolMetadataInput = Schema.decodeUnknownOption(ServerToolMetadataInputSchema, {
   onExcessProperty: "error"
 })
@@ -176,8 +170,6 @@ export const summaryOf = (definition: object): string | undefined =>
 
 export type ToolDiscovery = "always_loaded" | { readonly group: string }
 
-// OpenAI reserves "browser": a run that loaded a group of that name was refused with
-// HTTP 400 on its next request. `mcp_` names an MCP server's tools (tool-catalog.ts).
 const GROUP_NAME = /^(?!browser$)(?!mcp_)[a-z][a-z0-9_]*$/
 
 const validDiscovery = (value: unknown): value is ToolDiscovery =>

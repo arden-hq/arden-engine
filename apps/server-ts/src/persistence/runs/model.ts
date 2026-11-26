@@ -2,7 +2,7 @@ import { RuntimeRunStatusSchema } from "@arden-hq/protocol/effect/common"
 import { DateTime, Schema } from "effect"
 import { EventCursorSchema } from "../events/model.js"
 import { JsonObjectSchema } from "../json.js"
-import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import { isActiveRunStatus, RUN_STATUS } from "@arden-hq/protocol/runs"
 
 const ChatRunRecordFields = Schema.Struct({
   runId: Schema.NonEmptyString,
@@ -21,6 +21,8 @@ const ChatRunRecordFields = Schema.Struct({
   modelId: Schema.NullOr(Schema.NonEmptyString),
   reasoningEffort: Schema.NullOr(Schema.NonEmptyString)
 })
+
+export const SERVER_RESTART_STOP_REASON = "server_restart"
 
 export const ChatRunRecordSchema = ChatRunRecordFields.check(
   Schema.makeFilter((run) => {
@@ -44,16 +46,22 @@ export const ChatRunRecordSchema = ChatRunRecordFields.check(
         issue: "must be present exactly when errorMessage is present"
       })
     }
-    if (run.status === "interrupted" && run.stopReason === null) {
+    if (run.status === RUN_STATUS.interrupted && run.stopReason === null) {
       issues.push({ path: ["stopReason"], issue: "is required for an interrupted run" })
     }
-    if (run.status === "completed" && (run.errorCode !== null || run.errorMessage !== null)) {
+    if (
+      run.status === RUN_STATUS.completed &&
+      (run.errorCode !== null || run.errorMessage !== null)
+    ) {
       issues.push({ path: ["errorCode"], issue: "completed runs cannot contain an error" })
     }
-    if (run.status === "error" && (run.errorCode === null || run.errorMessage === null)) {
+    if (run.status === RUN_STATUS.error && (run.errorCode === null || run.errorMessage === null)) {
       issues.push({ path: ["errorCode"], issue: `${run.status} requires a structured error` })
     }
-    if (run.status === "cancelled" && (run.errorCode !== null || run.errorMessage !== null)) {
+    if (
+      run.status === RUN_STATUS.cancelled &&
+      (run.errorCode !== null || run.errorMessage !== null)
+    ) {
       issues.push({ path: ["errorCode"], issue: "cancelled runs cannot contain an error" })
     }
     const startedAt = DateTime.toEpochMillis(run.startedAt)

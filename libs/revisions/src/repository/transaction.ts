@@ -1,9 +1,12 @@
 import { Effect } from "effect"
 
 import {
+  TRANSACTION_MARKER,
+  markerLocation,
   parseIdempotencyRecord,
   parseTransaction,
-  type Transaction
+  type Transaction,
+  type TransactionMarker
 } from "../domain/transaction.js"
 import { validateSnapshotTransition } from "../domain/integrity.js"
 import { materializationRows } from "../domain/change-set.js"
@@ -12,14 +15,15 @@ import { normalizeRelativePath } from "../domain/model.js"
 import {
   CorruptRepositoryError,
   IdempotencyConflictError,
-  RevisionConflictError
+  RevisionConflictError,
+  UnsafePathError
 } from "../domain/errors.js"
 import { canonicalJsonl } from "../domain/format.js"
 import { currentMap, materializeTree, validHash, type RepositoryError } from "./state.js"
-import type { RevisionStorageShape } from "../storage/service.js"
+import type { RevisionStorageShape } from "../storage/service-types.js"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
-import type { StorageError } from "../storage/service.js"
+import type { StorageError } from "../storage/service-types.js"
 
 const readTransaction = Effect.fn("RevisionTransaction.readTransaction")(function* (
   storage: RevisionStorageShape,
@@ -34,28 +38,26 @@ const readTransaction = Effect.fn("RevisionTransaction.readTransaction")(functio
   return yield* parseTransaction(id, content)
 })
 
+const isWorkingConflict = (error: unknown): boolean =>
+  error instanceof RevisionConflictError || error instanceof UnsafePathError
+
 const hasMarker = (
   storage: RevisionStorageShape,
   id: string,
-  marker: string
+  marker: TransactionMarker
 ): Effect.Effect<boolean, RepositoryError> =>
-  storage
-    .readMetadata(
-      `transactions/${id}/${marker === "PREPARED" ? marker : `markers/${marker}`}`,
-      true
-    )
-    .pipe(
-      Effect.flatMap((content) => {
-        if (content === null) return Effect.succeed(false)
-        return content.length === 0
-          ? Effect.succeed(true)
-          : Effect.fail(
-              new CorruptRepositoryError({
-                message: `transaction marker is not an empty file: ${id}/${marker}`
-              })
-            )
-      })
-    )
+  storage.readMetadata(markerLocation(id, marker), true).pipe(
+    Effect.flatMap((content) => {
+      if (content === null) return Effect.succeed(false)
+      return content.length === 0
+        ? Effect.succeed(true)
+        : Effect.fail(
+            new CorruptRepositoryError({
+              message: `transaction marker is not an empty file: ${id}/${marker}`
+            })
+          )
+    })
+  )
 
 export const writeIdempotencyRecord = (
   storage: RevisionStorageShape,
@@ -100,7 +102,6 @@ export const workingHash = (
 ): Effect.Effect<string | null, RepositoryError> =>
   storage.readWorking(path, true, true).pipe(Effect.map(contentHash))
 
-/** Write each row's new content; `validateWorkingTree` then checks every row together. */
 export const installRows = Effect.fn("RevisionTransaction.installRows")(function* (
   storage: RevisionStorageShape,
   transaction: Transaction
@@ -201,7 +202,7 @@ const moveTransactionToConflicts = Effect.fn("RevisionTransaction.moveTransactio
     storage: RevisionStorageShape,
     transactionId: string
   ): Effect.fn.Return<void, RepositoryError> {
-    if (!(yield* hasMarker(storage, transactionId, "CONFLICT"))) {
+    if (!(yield* hasMarker(storage, transactionId, TRANSACTION_MARKER.conflict))) {
       yield* storage.writeMetadata(
         `transactions/${transactionId}/markers/CONFLICT`,
         new Uint8Array(),
@@ -288,7 +289,7 @@ const rollbackTransaction = Effect.fn("RevisionTransaction.rollbackTransaction")
     yield* moveTransactionToConflicts(storage, transaction.transactionId)
     return
   }
-  if (!(yield* hasMarker(storage, transaction.transactionId, "ROLLED_BACK"))) {
+  if (!(yield* hasMarker(storage, transaction.transactionId, TRANSACTION_MARKER.rolledBack))) {
     yield* storage.writeMetadata(
       `transactions/${transaction.transactionId}/markers/ROLLED_BACK`,
       new Uint8Array(),
@@ -298,10 +299,6 @@ const rollbackTransaction = Effect.fn("RevisionTransaction.rollbackTransaction")
   yield* storage.removeMetadataTree(`transactions/${transaction.transactionId}`)
 })
 
-/**
- * Validate every path the transaction touches before publishing or deleting recovery metadata.
- * Paths it does not touch may differ from history: they are outside edits not yet taken in.
- */
 export const validateWorkingTree = Effect.fn("RevisionTransaction.validateWorkingTree")(function* (
   storage: RevisionStorageShape,
   transaction: Transaction
@@ -316,13 +313,6 @@ export const validateWorkingTree = Effect.fn("RevisionTransaction.validateWorkin
   }
 })
 
-/**
- * Settle interrupted transactions. Only the transactions directory is swept
- * for crash-orphaned temporaries here, because recovery lists it and nothing
- * else: this runs before every commit, and sweeping the whole history
- * (thousands of objects) each time cost seconds per boot. The rest of the
- * history is swept once per open, and before maintenance lists objects.
- */
 export const recoverTransactions = Effect.fn("recoverRevisionTransactions")(function* (
   storage: RevisionStorageShape
 ): Effect.fn.Return<void, RepositoryError> {
@@ -331,15 +321,15 @@ export const recoverTransactions = Effect.fn("recoverRevisionTransactions")(func
   for (const id of [...names].sort(compareCodePoints)) {
     if (!validHash(id))
       return yield* new CorruptRepositoryError({ message: `invalid transaction directory: ${id}` })
-    const prepared = yield* hasMarker(storage, id, "PREPARED")
+    const prepared = yield* hasMarker(storage, id, TRANSACTION_MARKER.prepared)
     if (!prepared) {
       yield* storage.removeMetadataTree(`transactions/${id}`)
       continue
     }
     const transaction = yield* readTransaction(storage, id)
-    const decided = yield* hasMarker(storage, id, "DECIDED")
-    const committed = yield* hasMarker(storage, id, "COMMITTED")
-    const adopting = yield* hasMarker(storage, id, "ADOPTING")
+    const decided = yield* hasMarker(storage, id, TRANSACTION_MARKER.decided)
+    const committed = yield* hasMarker(storage, id, TRANSACTION_MARKER.committed)
+    const adopting = yield* hasMarker(storage, id, TRANSACTION_MARKER.adopting)
     const semanticsOk = yield* validateTransactionSemantics(storage, transaction).pipe(
       Effect.as(true),
       Effect.catch((error) =>
@@ -366,7 +356,7 @@ export const recoverTransactions = Effect.fn("recoverRevisionTransactions")(func
               adopting &&
               !decided &&
               !committed &&
-              (error._tag === "RevisionConflictError" || error._tag === "UnsafePathError") &&
+              isWorkingConflict(error) &&
               (current === transaction.oldHead || current === transaction.newHead)
             ) {
               if (current === transaction.newHead) {
@@ -375,11 +365,7 @@ export const recoverTransactions = Effect.fn("recoverRevisionTransactions")(func
               yield* moveTransactionToConflicts(storage, transaction.transactionId)
               return false
             }
-            if (
-              !decided &&
-              current === transaction.newHead &&
-              (error._tag === "RevisionConflictError" || error._tag === "UnsafePathError")
-            ) {
+            if (!decided && current === transaction.newHead && isWorkingConflict(error)) {
               yield* storage.compensateRef(transaction.newHead, transaction.oldHead)
             }
             return yield* Effect.fail(error)

@@ -10,18 +10,20 @@ import {
   NonNegativeIntSchema,
   PositiveIntSchema,
   RuntimeRunStatusSchema,
+  SessionTypeSchema,
   withExtras,
   ProviderCostSchema
 } from "../common/schema.js"
 import type { RuntimeRunStatus } from "../chat/runtime.js"
 import { SessionNameSchema } from "../sessions/state-schema.js"
+import type { SessionType } from "../sessions/contracts.js"
 import type { SessionName } from "../sessions/states.js"
 import { RUN_MODEL, RUN_REASONING } from "./run-states.js"
 import type { ProviderCost, RunModel, RunReasoning, RunUsage } from "./contracts.js"
 import { RunUsageSchema } from "./schema.js"
-import { MODEL_CALL_KINDS, type ModelCallKind } from "./usage.js"
+import { MODEL_CALL_KIND, USAGE_ORIGIN, type ModelCallKind, type UsageOrigin } from "./usage.js"
 
-export type UsageSessionType = "chat" | "channel" | "agent"
+export type UsageSessionType = SessionType
 
 export const USAGE_SPACE = { none: "none", space: "space", removed: "removed" } as const
 
@@ -39,7 +41,7 @@ export type UsageChat =
 export interface UsageDailyCell extends JsonRecord {
   readonly day: string
   readonly space: UsageSpace
-  readonly origin: "user" | "automation"
+  readonly origin: UsageOrigin
   readonly chat: UsageChat
   readonly model: RunModel
   readonly kind: ModelCallKind
@@ -193,7 +195,6 @@ export interface SessionUsageReport extends JsonRecord {
 
 const IdentifierSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 const DaySchema = Schema.String.check(Schema.isMinLength(10), Schema.isMaxLength(10))
-const SessionTypeSchema = Schema.Literals(["chat", "channel", "agent"] as const)
 
 const RunModelSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal(RUN_MODEL.unrecorded) }),
@@ -226,13 +227,13 @@ const tokenFields = {
 const UsageDailyCellSchema = withExtras({
   day: DaySchema,
   space: UsageSpaceSchema,
-  origin: Schema.Literals(["user", "automation"] as const),
+  origin: Schema.Literals(Object.values(USAGE_ORIGIN)),
   chat: Schema.Union([
     Schema.Struct({ kind: Schema.Literal(USAGE_CHAT.none) }),
     Schema.Struct({ kind: Schema.Literal(USAGE_CHAT.chat), session_type: SessionTypeSchema })
   ]),
   model: RunModelSchema,
-  kind: Schema.Literals(MODEL_CALL_KINDS),
+  kind: Schema.Literals(Object.values(MODEL_CALL_KIND)),
   ...tokenFields,
   cost: ProviderCostSchema,
   runs: NonNegativeIntSchema

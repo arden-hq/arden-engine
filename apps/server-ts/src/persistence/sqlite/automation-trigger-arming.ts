@@ -1,4 +1,6 @@
 import {
+  AUTOMATION_EVENT_TYPE,
+  TRIGGER_TYPE,
   type AutomationCountThrough,
   type AutomationTrigger,
   type AutomationTriggerContext,
@@ -153,17 +155,18 @@ export const makeTriggerArming = ({
     for (const row of rows) {
       const triggers = yield* listenerTriggers(row)
       if (triggers === undefined) continue
-      const idle = triggers.find((trigger) => trigger.type === "idle")
-      const count = triggers.find((trigger) => trigger.type === "count")
+      const idle = triggers.find((trigger) => trigger.type === TRIGGER_TYPE.idle)
+      const count = triggers.find((trigger) => trigger.type === TRIGGER_TYPE.count)
       const chatQuiet = triggers.find(
         (trigger): trigger is EventAutomationTrigger =>
-          trigger.type === "event" && trigger.event_type === "chat.quiet"
+          trigger.type === TRIGGER_TYPE.event &&
+          trigger.event_type === AUTOMATION_EVENT_TYPE.chat_quiet
       )
       if (idle === undefined && count === undefined && chatQuiet === undefined) continue
       tasks.push({
         automationId: row.task_id,
-        idle: idle?.type === "idle" ? idle.idle_minutes : null,
-        count: count?.type === "count" ? count.every_n : null,
+        idle: idle?.type === TRIGGER_TYPE.idle ? idle.idle_minutes : null,
+        count: count?.type === TRIGGER_TYPE.count ? count.every_n : null,
         chatQuiet: chatQuiet ?? null
       })
     }

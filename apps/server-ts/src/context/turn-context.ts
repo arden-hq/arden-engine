@@ -1,4 +1,3 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { requestedSkillsContext } from "./requested-skills.js"
 import { ContextExperiments } from "./experiments.js"
 import type { ToolApprovalPolicy } from "../tools/approval-policy.js"
@@ -11,17 +10,13 @@ import { renderPromptSection } from "../prompts/format.js"
 import type { ChatRunnerMessage } from "../chat/runner-contract.js"
 import type { Memory, MemoryTurn } from "../memory/service.js"
 import type { RunMemoryReader } from "@arden-hq/protocol/runs"
-import type { AutomationOriginPolicy } from "../persistence/automations/catalog.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { SummaryStore } from "../persistence/summaries/store.js"
-import { isSpaceWorkJob } from "../persistence/job-classification.js"
 import type { RunQueries } from "../persistence/runs/queries.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
-import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import type { TodoStore } from "../persistence/todos/store.js"
 import type { WorkStore } from "../persistence/work/store.js"
-import type { AgentMode } from "../sessions/agent-mode.js"
 import type { CliTools } from "../cli-tools/service.js"
 import type { SkillCatalog } from "../skills/service.js"
 import type { Wiki } from "../wiki/service.js"
@@ -30,6 +25,12 @@ import type { ChatWriteStore } from "../persistence/chat/store.js"
 import { spaceConversationContextSnapshot } from "./space.js"
 import { spaceAsksContext } from "./space-asks.js"
 import { renderThreadLocations } from "./thread.js"
+import {
+  isLiveChat,
+  omittedSkills,
+  SESSION_ORIGIN_SOURCE,
+  type SessionOrigin
+} from "./session-origin.js"
 import type { FocusChoiceStore } from "../persistence/focus-choices/store.js"
 import type { AnswerBlockStore } from "../persistence/answer-blocks/store.js"
 import { latestAnswer, renderAnswerBlockNote } from "./answer-block-note.js"
@@ -46,30 +47,12 @@ import {
   renderResearchAgentContext,
   renderTodoOverrideContext
 } from "./system-context.js"
-import type { AutomationId } from "../persistence/automations/model.js"
-import { renderCaptureSpaces, type SpecialChat } from "./special-chat.js"
+import { renderCaptureSpaces } from "./special-chat.js"
 import { renderTaskContract, renderTaskProgress } from "../prompts/task-contract.js"
 import type { TaskContract } from "../persistence/work/contract.js"
 import type { TaskWorkerSnapshot } from "../persistence/automations/job-prompt.js"
 import { taskDirectionReceipt } from "../persistence/work/task-direction.js"
 import { renderTaskStateSection } from "../prompts/task-state.js"
-
-export type SessionOrigin =
-  | {
-      readonly source: "personal"
-      readonly header: SessionHistoryHeader | null
-      readonly starting: string | undefined
-      readonly special: SpecialChat | undefined
-    }
-  | { readonly source: "agent"; readonly mode: AgentMode; readonly header: SessionHistoryHeader }
-  | {
-      readonly source: "scheduled_task"
-      readonly automationId: AutomationId
-      readonly policy: AutomationOriginPolicy
-      readonly header: SessionHistoryHeader
-      readonly fork: boolean
-      readonly ownRun: boolean
-    }
 
 export interface TurnContextServices {
   readonly experiments?: typeof ContextExperiments.Service
@@ -89,24 +72,7 @@ export interface TurnContextServices {
   readonly permissions: ToolApprovalPolicy
   readonly rules: PermissionRules["Service"]
   readonly dataDir: string
-  /** False on a server no person follows; see `ServerOptions.userFacing`. Defaults to true. */
   readonly userFacing?: boolean
-}
-
-/**
- * Whether a person is in this chat for this turn. The "keep this chat
- * responsive" guidance is for that case only: a chat on a server a program
- * drives, or a turn asked for from the command line, has nobody to stay
- * responsive for, so it does the work itself as a worker does.
- */
-export const isLiveChat = (
-  origin: SessionOrigin,
-  messages: ReadonlyArray<ChatRunnerMessage>,
-  userFacing: boolean
-): boolean => {
-  if (origin.source !== "personal" || !userFacing) return false
-  const latest = messages.findLast((message) => message.role === ROLE.user)
-  return !(latest !== undefined && "sent_from" in latest && latest.sent_from === "cli")
 }
 
 interface TurnContextInput {
@@ -115,11 +81,6 @@ interface TurnContextInput {
   readonly messages: ReadonlyArray<ChatRunnerMessage>
   readonly signal: AbortSignal
 }
-
-export const omittedSkills = (origin: SessionOrigin): ReadonlyArray<string> =>
-  origin.source === "scheduled_task" && !isSpaceWorkJob(origin.policy)
-    ? ["work-coordination", "automation-design"]
-    : []
 
 export const composeTurnContext = Effect.fn("Context.composeTurnContext")(function* (
   services: TurnContextServices,
@@ -369,9 +330,7 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
     readonly sessionId: string
     readonly runId: string
     readonly reader: RunMemoryReader
-    /** The chat's Space, if it has one; the reader decides whether it is sent. */
     readonly spaceId: string | undefined
-    /** The owner's latest typed turn. */
     readonly query: string
     readonly memory: MemoryTurn | undefined
     readonly measure: TurnMeasure
@@ -518,7 +477,7 @@ const answerBlockNote = Effect.fn("Context.answerBlockNote")(
 )
 
 const automationPlacement = (
-  origin: Extract<SessionOrigin, { readonly source: "scheduled_task" }>
+  origin: Extract<SessionOrigin, { readonly source: typeof SESSION_ORIGIN_SOURCE.scheduledTask }>
 ): "in_place" | "fork" | "own_chat" => {
   if (origin.fork) return "fork"
   return origin.policy.threadId === origin.header.sessionId ? "in_place" : "own_chat"

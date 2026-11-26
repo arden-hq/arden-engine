@@ -6,6 +6,7 @@ import type {
 
 import {
   mergePath,
+  PROBE_RESULT,
   type ProbeResult,
   readLoginShellPath,
   resolveLoginShellPath,
@@ -85,11 +86,11 @@ const locate = async (
 }
 
 const versionOf = (result: ProbeResult): CliToolVersion =>
-  result.kind === "exited" && result.code === 0
+  result.kind === PROBE_RESULT.exited && result.code === 0
     ? parseVersion(result.output)
     : { kind: "unreported" }
 
 const signInState = (result: ProbeResult): CliToolSignIn => {
-  if (result.kind !== "exited") return "unknown"
+  if (result.kind !== PROBE_RESULT.exited) return "unknown"
   return result.code === 0 ? "signed_in" : "signed_out"
 }

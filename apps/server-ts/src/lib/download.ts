@@ -115,7 +115,6 @@ export const downloadFile = Effect.fn("Downloads.file")(function* (options: File
         }
       }
       if (response.status === 200) {
-        // The server ignored the Range header: start the file over.
         const fresh = createHash("sha256")
         return {
           kind: "done" as const,

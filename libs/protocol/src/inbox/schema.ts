@@ -2,12 +2,23 @@ import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, withExtras, NonNegativeIntSchema } from "../common/schema.js"
 import { checkRunApprovalConnection, runApprovalFields } from "../runs/approval-schema.js"
 import { RunQuestionSchema } from "../runs/questions.js"
-import { INBOX_ITEM_LIMIT } from "./contracts.js"
+import {
+  INBOX_ITEM_LIMIT,
+  INBOX_ITEM_SOURCE,
+  INBOX_PLAN_LIMIT_LEVEL,
+  INBOX_SPACE,
+  type InboxItemSource
+} from "./contracts.js"
+import { TaskWaitingOnSchema } from "../spaces/work/schema.js"
 import type { InboxGroupKind, InboxView } from "./contracts.js"
 
 export const InboxSpaceSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("loose") }),
-  Schema.Struct({ kind: Schema.Literal("space"), space_id: Schema.String, title: Schema.String })
+  Schema.Struct({ kind: Schema.Literal(INBOX_SPACE.loose) }),
+  Schema.Struct({
+    kind: Schema.Literal(INBOX_SPACE.space),
+    space_id: Schema.String,
+    title: Schema.String
+  })
 ]).pipe(Schema.toTaggedUnion("kind"))
 
 const InboxReadMarkSchema = Schema.Union([
@@ -49,8 +60,11 @@ const InboxFailureOriginSchema = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("kind"))
 
 const InboxPlanLimitReachedSchema = Schema.Union([
-  Schema.Struct({ level: Schema.Literal("used_up") }),
-  Schema.Struct({ level: Schema.Literals(["background", "arden"]), limit_percent: Schema.Number })
+  Schema.Struct({ level: Schema.Literal(INBOX_PLAN_LIMIT_LEVEL.used_up) }),
+  Schema.Struct({
+    level: Schema.Literals([INBOX_PLAN_LIMIT_LEVEL.background, INBOX_PLAN_LIMIT_LEVEL.arden]),
+    limit_percent: Schema.Number
+  })
 ])
 
 const inboxItemBase = {
@@ -64,25 +78,25 @@ const inboxItemBase = {
 
 export const InboxBlockedTaskItemSchema = withExtras({
   ...inboxItemBase,
-  source: Schema.Literal("blocked_task"),
+  source: Schema.Literal(INBOX_ITEM_SOURCE.blocked_task),
   space: InboxSpaceSchema,
   item_id: Schema.String,
   stable_key: Schema.String,
   numbering: InboxTaskNumberingSchema,
   text: Schema.String,
-  waiting_on: Schema.Literals(["you", "external"] as const),
+  waiting_on: TaskWaitingOnSchema,
   ask: InboxTaskAskSchema
 })
 
 export const InboxApprovalItemSchema = withExtras({
   ...inboxItemBase,
-  source: Schema.Literal("approval"),
+  source: Schema.Literal(INBOX_ITEM_SOURCE.approval),
   ...runApprovalFields
 }).check(Schema.makeFilter(checkRunApprovalConnection))
 
 export const InboxFailureGroupItemSchema = withExtras({
   ...inboxItemBase,
-  source: Schema.Literal("failure"),
+  source: Schema.Literal(INBOX_ITEM_SOURCE.failure),
   space: InboxSpaceSchema,
   origin: InboxFailureOriginSchema,
   cause: Schema.String,
@@ -94,7 +108,7 @@ export const InboxFailureGroupItemSchema = withExtras({
 
 export const InboxIncidentItemSchema = withExtras({
   ...inboxItemBase,
-  source: Schema.Literal("incident"),
+  source: Schema.Literal(INBOX_ITEM_SOURCE.incident),
   incident_id: Schema.String,
   code: Schema.Literal("delivery.unroutable"),
   summary: Schema.String,
@@ -104,7 +118,7 @@ export const InboxIncidentItemSchema = withExtras({
 
 export const InboxPlanLimitItemSchema = withExtras({
   ...inboxItemBase,
-  source: Schema.Literal("plan_limit"),
+  source: Schema.Literal(INBOX_ITEM_SOURCE.plan_limit),
   reached: InboxPlanLimitReachedSchema,
   used_percent: Schema.Number,
   window_seconds: Schema.Number,
@@ -112,7 +126,11 @@ export const InboxPlanLimitItemSchema = withExtras({
 })
 
 export const InboxItemSchema = Schema.Union([
-  withExtras({ ...inboxItemBase, source: Schema.Literal("question"), question: RunQuestionSchema }),
+  withExtras({
+    ...inboxItemBase,
+    source: Schema.Literal(INBOX_ITEM_SOURCE.question),
+    question: RunQuestionSchema
+  }),
   InboxBlockedTaskItemSchema,
   InboxApprovalItemSchema,
   InboxIncidentItemSchema,
@@ -120,13 +138,13 @@ export const InboxItemSchema = Schema.Union([
   InboxPlanLimitItemSchema
 ]).pipe(Schema.toTaggedUnion("source"))
 
-const SOURCE_BY_GROUP_KIND: Record<InboxGroupKind, (typeof InboxItemSchema)["Type"]["source"]> = {
-  space: "blocked_task",
-  questions: "question",
-  approvals: "approval",
-  incidents: "incident",
-  failures: "failure",
-  limits: "plan_limit"
+const SOURCE_BY_GROUP_KIND: Record<InboxGroupKind, InboxItemSource> = {
+  space: INBOX_ITEM_SOURCE.blocked_task,
+  questions: INBOX_ITEM_SOURCE.question,
+  approvals: INBOX_ITEM_SOURCE.approval,
+  incidents: INBOX_ITEM_SOURCE.incident,
+  failures: INBOX_ITEM_SOURCE.failure,
+  limits: INBOX_ITEM_SOURCE.plan_limit
 }
 
 const inboxGroupBase = {

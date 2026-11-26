@@ -2,16 +2,12 @@ import { writtenByPersonSql } from "./person-written-sql.js"
 import { readChatSettled, settledFingerprint } from "./chat-ownership.js"
 import { readSpaceReviewContext } from "./space-job-context.js"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
-import { eventCauseOf } from "../automations/event-cause.js"
 import { Clock, Effect, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
 import { AutomationStoreError, type AutomationJobLeaseRef } from "../automations/store.js"
 import { SpaceReviewStore } from "../automations/space-review-store.js"
 import {
   askedByOwner,
   canonicalDisposition,
-  canonicalProposalId,
-  REVIEWED_TASK_FIELDS,
   SpaceReviewDispositionSchema,
   SpaceReviewInputSchema
 } from "../automations/space-review.js"
@@ -19,279 +15,28 @@ import { parseLease } from "./automation-lease.js"
 import { QueueContextSchema } from "./automation-queue-context.js"
 import { decodeJson, encodeJson } from "./json.js"
 import type { PersistenceDeps } from "./deps.js"
-import { modelTurnRunStatusList, restartCutRunSql } from "./status-sets.js"
-import { runChanged } from "./run-effects.js"
+import { modelTurnRunStatusList } from "./status-sets.js"
 import { iso } from "../../runtime/clock.js"
-import { enqueue } from "./automation-enqueue.js"
-import { spaceJobId } from "../space-job-id.js"
 import { userChatSql } from "./chat-ownership.js"
-import { queuedEventType } from "./automation-listening.js"
-import { RUNS_ALONE } from "../automations/event-batch.js"
 import { keyMessageJson } from "./chat-key-message.js"
-import { reviewMayRunSql } from "./automation-rows.js"
 import { reviewSpaceIdSql } from "./automation-owner.js"
-
-const REVIEWED_TASK_COLUMNS = REVIEWED_TASK_FIELDS.map((field) => `'${field}', ${field}`).join(", ")
-
-const failure = (reason: AutomationStoreError["reason"], message: string, cause?: unknown) =>
-  new AutomationStoreError({
-    operation: "space_review",
-    reason,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
-
-const reviewRunState = (state: string): "completed" | "failed" | "running" => {
-  switch (state) {
-    case "running":
-      return "running"
-    case "failed":
-    case "cancelled":
-    case "interrupted":
-      return "failed"
-    default:
-      return "completed"
-  }
-}
-
-const reviewRunMessage = (
-  state: "completed" | "failed" | "running",
-  outcome: string | null
-): string => {
-  switch (state) {
-    case "running":
-      return "The Space is rechecking this offer."
-    case "failed":
-      return "The Space review failed. You can recheck this offer again."
-    case "completed":
-      return outcome === "no_change"
-        ? "The review found no supported change. The proposal remains blocked from Start pending conclusive evidence; recheck after relevant evidence changes."
-        : "The review finished. Check the current offer for updated evidence; it remains offered until you accept or reject it."
-  }
-}
-
-const attemptedActions = (sql: SqlClient.SqlClient, runId: string) =>
-  sql`SELECT 1 WHERE ${runChanged(sql, runId)}
-    UNION ALL SELECT 1 FROM task_proposals WHERE source_run_id = ${runId}
-      OR json_extract(retirement_json, '$.run_id') = ${runId}
-    UNION ALL SELECT 1 FROM run_questions WHERE run_id = ${runId}
-    UNION ALL SELECT 1 FROM space_task_events WHERE run_ref = ${runId} LIMIT 1`.pipe(
-    Effect.map((rows) => rows.length > 0)
-  )
-
-const validateProposed = Effect.fn("SpaceReview.validateProposed")(function* (
-  sql: SqlClient.SqlClient,
-  runId: string,
-  spaceId: string,
-  proposalIds: ReadonlyArray<string>
-) {
-  const expected = [...new Set(proposalIds.map(canonicalProposalId))].sort()
-  const proposals = yield* sql<{ readonly proposal_id: string }>`
-    SELECT proposal_id FROM task_proposals
-    WHERE (source_run_id = ${runId} OR json_extract(retirement_json, '$.run_id') = ${runId}) AND space_id = ${spaceId}
-    ORDER BY proposal_id`
-  const receipts = yield* sql<{
-    readonly proposal_id: string | null
-    readonly source_tool_call_id: string | null
-    readonly tool_call_id: string
-  }>`
-    SELECT json_extract(receipt.result_json, '$.data.proposal.proposal_id') AS proposal_id,
-      CASE WHEN json_extract(receipt.result_json, '$.data.decision') = 'retire'
-        THEN json_extract(proposal.retirement_json, '$.tool_call_id')
-        ELSE proposal.source_tool_call_id END AS source_tool_call_id, receipt.tool_call_id
-    FROM tool_calls AS receipt
-    LEFT JOIN task_proposals AS proposal
-      ON proposal.proposal_id = json_extract(receipt.result_json, '$.data.proposal.proposal_id')
-      AND (proposal.source_run_id = ${runId} OR json_extract(proposal.retirement_json, '$.run_id') = ${runId})
-      AND proposal.space_id = ${spaceId}
-    WHERE receipt.run_id = ${runId} AND receipt.changes_state = 1
-      AND receipt.tool_name IN ('space_task_infer', 'task_propose') AND receipt.status = 'completed'
-      AND COALESCE(json_extract(receipt.result_json, '$.is_error'), 1) = 0
-      AND json_extract(receipt.result_json, '$.data.decision') IN ('propose', 'retire')
-    ORDER BY proposal_id, receipt.tool_call_id`
-  const questions = yield* sql`SELECT 1 FROM run_questions WHERE run_id = ${runId}
-    AND resolution IS NULL AND closed_at IS NULL LIMIT 1`
-  const persisted = proposals.map((proposal) => proposal.proposal_id)
-  const malformedReceipt = receipts.some(
-    (receipt) =>
-      receipt.proposal_id === null || receipt.source_tool_call_id !== receipt.tool_call_id
-  )
-  const recorded = [...new Set(receipts.map((receipt) => receipt.proposal_id))]
-  if (
-    questions.length > 0 ||
-    malformedReceipt ||
-    JSON.stringify(persisted) !== JSON.stringify(recorded)
-  )
-    return yield* failure(
-      "invalid",
-      "Proposed result must reference the exact proposals authored by this Space review"
-    )
-  if (JSON.stringify(persisted) !== JSON.stringify(expected))
-    return yield* failure(
-      "conflict",
-      persisted.length === 0
-        ? "This Space review offered no Task proposals, so it cannot finish as proposed. Finish with the disposition that matches what this Run did."
-        : `Proposed result must list exactly the proposals this Space review offered. Call space_review_finish again with proposal_ids ${JSON.stringify(persisted)}.`
-    )
-})
+import { makeProposalReviews } from "./space-review-proposals.js"
+import {
+  REVIEWED_TASK_COLUMNS,
+  attemptedActions,
+  failure,
+  validateProposed
+} from "./space-review-support.js"
 
 export const makeSpaceReviewStore = ({
   writer,
   sessionEvents
 }: Pick<PersistenceDeps, "writer" | "sessionEvents">): SpaceReviewStore["Service"] => {
   const sql = writer.sql
-  const proposalReviewRequestId = (proposalId: string, revision: number) =>
-    `proposal-review:${proposalId}:${revision}`
-
-  const requestProposalReview: SpaceReviewStore["Service"]["requestProposalReview"] = Effect.fn(
-    "SpaceReview.requestProposalReview"
-  )(function* ({ proposalId, expectedRevision }) {
-    const now = yield* Clock.currentTimeMillis
-    yield* writer
-      .transact(
-        Effect.gen(function* () {
-          const rows = yield* sql<{
-            readonly space_id: string | null
-            readonly space_exists: number
-            readonly archived_at: string | null
-          }>`SELECT proposal.space_id, space.space_id IS NOT NULL AS space_exists,
-              space.archived_at
-            FROM task_proposals AS proposal
-            LEFT JOIN spaces AS space ON space.space_id = proposal.space_id
-            WHERE proposal.proposal_id = ${proposalId} AND proposal.status = 'offered'
-              AND proposal.revision = ${expectedRevision}`
-          const offer = rows[0]
-          if (offer === undefined)
-            return yield* failure("conflict", "The Task proposal changed or is no longer offered")
-          const spaceId = offer.space_id
-          if (spaceId === null || spaceId === undefined)
-            return yield* failure("conflict", "The Task proposal changed or is no longer offered")
-          if (offer.space_exists !== 1 || offer.archived_at !== null)
-            return yield* failure("conflict", "The Space is archived or unavailable")
-          const automationId = spaceJobId(spaceId)
-          const jobs = yield* sql`SELECT 1 FROM spaces AS space
-            WHERE space.space_id = ${spaceId} AND ${reviewMayRunSql(sql, "space")}`
-          if (jobs.length === 0)
-            return yield* failure("conflict", "The Space review is off or unavailable")
-          const requestId = proposalReviewRequestId(proposalId, expectedRevision)
-          const active = yield* sql<{ readonly id: number }>`SELECT queue.id
-            FROM automation_event_queue AS queue
-            WHERE queue.task_id = ${automationId}
-              AND EXISTS (SELECT 1 FROM json_tree(queue.context) AS target
-                WHERE target.key = 'request_id' AND target.value = ${requestId})
-              AND (json_extract(queue.context, '$.automation_run_id') IS NULL OR EXISTS (
-                SELECT 1 FROM automation_runs AS run
-                WHERE run.id = json_extract(queue.context, '$.automation_run_id')
-                  AND run.status = 'running'))
-            ORDER BY queue.id DESC LIMIT 1`
-          if (active.length > 0) return
-          const queuedAt = iso(now)
-          const context = {
-            scheduled_for: null,
-            automation_run_id: null,
-            trigger_context: `The person explicitly asked to recheck proposal ${proposalId} at revision ${expectedRevision}.`,
-            trigger_context_snapshot: eventCauseOf({
-              queued_at: queuedAt,
-              event_type: "space.proposal_review_requested",
-              event_key: requestId,
-              produced_by: null,
-              context: {
-                proposal_id: proposalId,
-                expected_revision: expectedRevision,
-                request_id: requestId
-              }
-            })
-          }
-          yield* enqueue(
-            { sql, sessionEvents },
-            {
-              automationId,
-              source: "manual",
-              key: requestId,
-              context,
-              dueAt: now,
-              pending: "add"
-            }
-          )
-        })
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          cause instanceof AutomationStoreError
-            ? cause
-            : failure("storage", "Could not queue the Task proposal recheck", cause)
-        )
-      )
+  const { requestProposalReview, proposalReviewStatus } = makeProposalReviews({
+    writer,
+    sessionEvents
   })
-
-  const proposalReviewStatus: SpaceReviewStore["Service"]["proposalReviewStatus"] = Effect.fn(
-    "SpaceReview.proposalReviewStatus"
-  )(
-    function* ({ proposalId }) {
-      const proposalRows = yield* sql<{ readonly space_id: string | null }>`SELECT space_id
-      FROM task_proposals WHERE proposal_id = ${proposalId}`
-      const spaceId = proposalRows[0]?.space_id
-      if (spaceId === null || spaceId === undefined) return undefined
-      const automationId = spaceJobId(spaceId)
-      const queued = yield* sql<{
-        readonly expected_revision: number
-        readonly claimed_at: string | null
-        readonly run_status: string | null
-      }>`SELECT json_extract(queue.context, '$.trigger_context_snapshot.context.expected_revision') AS expected_revision,
-        queue.claimed_at, run.status AS run_status
-      FROM automation_event_queue AS queue
-      LEFT JOIN automation_runs AS run ON run.id = json_extract(queue.context, '$.automation_run_id')
-      WHERE queue.task_id = ${automationId}
-        AND ${queuedEventType(sql, sql`queue.context`)} = ${RUNS_ALONE}
-        AND json_extract(queue.context, '$.trigger_context_snapshot.context.proposal_id') = ${proposalId}
-      ORDER BY queue.id DESC LIMIT 1`
-      if (queued[0] !== undefined) {
-        const row = queued[0]
-        const state: "queued" | "running" =
-          row.claimed_at === null || row.run_status !== "running" ? "queued" : "running"
-        return {
-          expectedRevision: row.expected_revision,
-          state,
-          message:
-            state === "queued"
-              ? "The Space review is queued. The offer is not cleared to Start until its evidence is rechecked."
-              : "The Space is rechecking this offer."
-        }
-      }
-      const rows = yield* sql<{
-        readonly expected_revision: number
-        readonly state: string
-        readonly outcome: string | null
-        readonly restart_cut: number
-      }>`SELECT json_extract(run.trigger_json, '$.context.expected_revision') AS expected_revision,
-        run.status AS state, run.outcome, COALESCE(${restartCutRunSql("chat")}, 0) AS restart_cut
-      FROM automation_runs AS run
-      LEFT JOIN chat_runs AS chat ON chat.run_id = run.chat_run_id
-      WHERE run.task_id = ${automationId} AND run.purpose = 'space_review'
-        AND json_extract(run.trigger_json, '$.event_type') = 'space.proposal_review_requested'
-        AND json_extract(run.trigger_json, '$.context.proposal_id') = ${proposalId}
-      ORDER BY run.id DESC LIMIT 1`
-      const latest = rows[0]
-      if (latest !== undefined) {
-        const revision = latest.expected_revision
-        const state = reviewRunState(latest.state)
-        const message =
-          latest.restart_cut === 1
-            ? "A restart interrupted the Space review. You can recheck this offer again."
-            : reviewRunMessage(state, latest.outcome)
-        if (typeof revision === "number") return { expectedRevision: revision, state, message }
-      }
-      return undefined
-    },
-    (self) =>
-      self.pipe(
-        Effect.mapError((cause) =>
-          cause instanceof AutomationStoreError
-            ? cause
-            : failure("storage", "Could not read the Task proposal recheck", cause)
-        )
-      )
-  )
   const currentLease = Effect.fn("SpaceReview.currentLease")(function* (
     lease: AutomationJobLeaseRef
   ) {

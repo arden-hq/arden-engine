@@ -27,9 +27,9 @@ import {
   type TaskStateRecordChange,
   type TaskStateSection
 } from "@arden-hq/protocol/spaces/work"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const boundedTrimmed = (maximum: number) =>
   Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(maximum))
 

@@ -29,7 +29,8 @@ import { clipLine, cutText } from "@arden-hq/std/text"
 import { randomUUID } from "node:crypto"
 
 import { plainHttpMessage, type CliClient, type CliDependencies } from "./command.js"
-import type { ApprovalHandling, CliOutputFormat, DeclinedRequest } from "./run.js"
+import type { ApprovalHandling } from "./run.js"
+import type { CliOutputFormat, DeclinedRequest } from "./run-receipt.js"
 
 export const progressLines = (): ((event: HeadlessRunEvent) => string | undefined) => {
   const calls = new Map<string, { readonly name: string; args: string }>()

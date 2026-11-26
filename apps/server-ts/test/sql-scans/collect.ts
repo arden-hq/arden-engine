@@ -3,12 +3,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { GROWING_TABLES } from "./growing-tables.js"
 
-/** One statement that reads a growing table from start to end. */
 export interface TableScan {
-  /** Stable id of the statement text, for the approved list. */
   readonly id: string
   readonly table: string
-  /** The plan step SQLite reported. */
   readonly detail: string
   readonly sql: string
 }
@@ -50,7 +47,6 @@ const NOT_AN_ALIAS = new Set([
   "intersect"
 ])
 
-/** `FROM tool_calls AS call` and `JOIN chat_runs run` name the table behind an alias. */
 const aliases = (sql: string): Map<string, string> => {
   const found = new Map<string, string>()
   const pattern =
@@ -65,7 +61,6 @@ const aliases = (sql: string): Map<string, string> => {
   return found
 }
 
-/** The same statement with a different number of `IN (?, ?)` values is one statement. */
 const shape = (sql: string): string =>
   sql
     .replace(/\s+/g, " ")
@@ -75,7 +70,6 @@ const shape = (sql: string): string =>
 const scanId = (sql: string): string =>
   createHash("sha256").update(shape(sql)).digest("hex").slice(0, 12)
 
-/** Reads the scan log the SQLite threads wrote during a test run. */
 export const collectTableScans = (directory: string): ReadonlyArray<TableScan> => {
   const scans = new Map<string, TableScan>()
   if (!existsSync(directory)) return []
@@ -84,7 +78,6 @@ export const collectTableScans = (directory: string): ReadonlyArray<TableScan> =
     for (const line of readFileSync(join(directory, file), "utf8").split("\n")) {
       if (line.length === 0) continue
       const logged = JSON.parse(line) as LoggedScan
-      // A partial index holds only the rows of one state: reading all of it is reading a short list.
       if (logged.partial) continue
       const name = logged.name.toLowerCase().replace(/^main\./, "")
       const table = logged.table ?? aliases(logged.sql).get(name) ?? name

@@ -1,27 +1,27 @@
 import { Schema } from "effect"
 import { NonNegativeIntSchema } from "../common/schema.js"
 import {
+  ARTIFACT_OPERATION,
   ARTIFACT_PRODUCER,
   ARTIFACT_ROLES,
   VISUALIZATION_KIND,
   VISUALIZATION_LIBRARIES,
+  VISUALIZATION_MODE,
   VISUALIZATION_RUNTIME_VERSION,
   type ArtifactProducer,
   type VisualizationManifest
 } from "./contracts.js"
 
-/** `viz-…` for rendered HTML, `file-…` for a stored file; 128 random bits in hex. */
 export const VisualizationRefSchema = Schema.String.check(
   Schema.isPattern(/^(?:viz|file)-[a-f0-9]{32}$/)
 )
 
-export const VisualizationKindSchema = Schema.Literals(["html", "image", "file"] as const)
+export const VisualizationKindSchema = Schema.Literals(Object.values(VISUALIZATION_KIND))
 
-export const VisualizationModeSchema = Schema.Literals(["normal", "wide"] as const)
+export const VisualizationModeSchema = Schema.Literals(Object.values(VISUALIZATION_MODE))
 
 export const ArtifactRoleSchema = Schema.Literals(ARTIFACT_ROLES)
 
-/** Each supported library at most once. */
 export const VisualizationLibrariesSchema = Schema.Array(
   Schema.Literals(VISUALIZATION_LIBRARIES)
 ).check(Schema.isMaxLength(VISUALIZATION_LIBRARIES.length), Schema.isUnique())
@@ -37,22 +37,29 @@ const ManifestFacts = {
   byte_length: NonNegativeIntSchema,
   created_at: Schema.String,
   producer: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("unrecorded") }),
-    Schema.Struct({ kind: Schema.Literal("run"), run_id: Schema.String }),
-    Schema.Struct({ kind: Schema.Literal("turn"), run_id: Schema.String, turn_id: Schema.String })
+    Schema.Struct({ kind: Schema.Literal(ARTIFACT_PRODUCER.unrecorded) }),
+    Schema.Struct({ kind: Schema.Literal(ARTIFACT_PRODUCER.run), run_id: Schema.String }),
+    Schema.Struct({
+      kind: Schema.Literal(ARTIFACT_PRODUCER.turn),
+      run_id: Schema.String,
+      turn_id: Schema.String
+    })
   ]),
   operation: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("unkeyed") }),
-    Schema.Struct({ kind: Schema.Literal("keyed"), key: Schema.String })
+    Schema.Struct({ kind: Schema.Literal(ARTIFACT_OPERATION.unkeyed) }),
+    Schema.Struct({ kind: Schema.Literal(ARTIFACT_OPERATION.keyed), key: Schema.String })
   ]),
   role: ArtifactRoleSchema
 }
 
 export const VisualizationManifestResponseSchema = Schema.Union([
-  Schema.Struct({ ...ManifestFacts, kind: Schema.Literals(["html", "image"] as const) }),
   Schema.Struct({
     ...ManifestFacts,
-    kind: Schema.Literal("file"),
+    kind: Schema.Literals([VISUALIZATION_KIND.html, VISUALIZATION_KIND.image])
+  }),
+  Schema.Struct({
+    ...ManifestFacts,
+    kind: Schema.Literal(VISUALIZATION_KIND.file),
     filename: Schema.String
   })
 ])

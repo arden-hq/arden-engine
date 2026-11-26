@@ -1,14 +1,21 @@
+import { isWebProtocol } from "@arden-hq/std/url"
+import { strict } from "../common/boundary.js"
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../common/schema.js"
 import {
+  CHAT_ENDPOINT_AUTH,
+  CHAT_ENDPOINT_SERVICE,
+  MODEL_ENDPOINT_AUTH,
+  MODEL_ENDPOINT_FORMAT,
+  MODEL_ENDPOINT_HEALTH,
+  MODEL_ENDPOINT_INPUT,
+  MODEL_ENDPOINT_KIND,
+  MODEL_ENDPOINT_RESULT,
   MODEL_ENDPOINT_SLOT,
   type ChatEndpointCheck,
   type ChatEndpointDraft,
   type ChatEndpointSaveResult,
   type ChatModelEndpoint,
-  type DecisionSiteStatus,
-  type DecisionSource,
-  type DecisionStatus,
   type ModelEndpoint,
   type ModelEndpointCheck,
   type ModelEndpointDraft,
@@ -16,24 +23,21 @@ import {
   type ModelEndpointSaveResult,
   type ModelEndpointSlot
 } from "./contracts.js"
-
-const strict = { onExcessProperty: "error" } as const
-
 const BaseUrlSchema = Schema.Trim.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(2_048),
   Schema.makeFilter((value) => {
     try {
       const url = new URL(value)
-      return url.protocol === "https:" || url.protocol === "http:"
-        ? undefined
-        : "must be an http or https address"
+      return isWebProtocol(url.protocol) ? undefined : "must be an http or https address"
     } catch {
       return "must be an address"
     }
   })
 )
-const ModelNameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512))
+
+export const ModelNameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512))
+
 const SecretSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8_192))
 /** An HTTP header token (RFC 9110), not one Arden sets itself. */
 const HeaderNameSchema = Schema.Trim.check(
@@ -46,34 +50,43 @@ const HeaderNameSchema = Schema.Trim.check(
       : undefined
   })
 )
+
+const RESERVED_CHAT_ENDPOINT_ID = "check"
+
 const MessageSchema = Schema.String.check(Schema.isMaxLength(4_096))
 
-export const ModelEndpointKindSchema = Schema.Literals(["search", "decision"] as const)
-/**
- * A saved model server's id, as the server assigns it: `:id` of
- * `/model-endpoints/chat/:id`. Never `check`, the segment of a new server's Check.
- */
+export const ModelEndpointKindSchema = Schema.Literals(Object.values(MODEL_ENDPOINT_KIND))
+
 export const ChatEndpointIdSchema = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/u),
-  Schema.makeFilter((id) => (id === "check" ? "must not be check" : undefined))
+  Schema.makeFilter((id) => (id === RESERVED_CHAT_ENDPOINT_ID ? "must not be check" : undefined))
 )
-const FormatSchema = Schema.Literals([
-  "openai-embeddings",
-  "openai-decisions",
-  "systemone",
-  "openrouter-decisions"
-] as const)
-const InputSchema = Schema.Literals(["text", "text+image"] as const)
-const FailureReasonSchema = Schema.Literals(["key_refused", "wrong_format", "unreachable"] as const)
-const RuntimeFailureSchema = Schema.Literals(["key_refused", "unreachable"] as const)
 
-const AuthInputWireSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("bearer"), api_key: SecretSchema }),
-  Schema.Struct({ kind: Schema.Literal("header"), name: HeaderNameSchema, value: SecretSchema }),
-  Schema.Struct({ kind: Schema.Literal("keep") })
+const FormatSchema = Schema.Literals(Object.values(MODEL_ENDPOINT_FORMAT))
+
+export const InputSchema = Schema.Literals(Object.values(MODEL_ENDPOINT_INPUT))
+
+const FailureReasonSchema = Schema.Literals([
+  MODEL_ENDPOINT_RESULT.keyRefused,
+  MODEL_ENDPOINT_RESULT.wrongFormat,
+  MODEL_ENDPOINT_RESULT.unreachable
 ])
 
-/** The body of `PUT /model-endpoints/:kind` and `POST /model-endpoints/:kind/check`. */
+export const RuntimeFailureSchema = Schema.Literals([
+  MODEL_ENDPOINT_RESULT.keyRefused,
+  MODEL_ENDPOINT_RESULT.unreachable
+])
+
+const AuthInputWireSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(MODEL_ENDPOINT_AUTH.bearer), api_key: SecretSchema }),
+  Schema.Struct({
+    kind: Schema.Literal(MODEL_ENDPOINT_AUTH.header),
+    name: HeaderNameSchema,
+    value: SecretSchema
+  }),
+  Schema.Struct({ kind: Schema.Literal(MODEL_ENDPOINT_AUTH.keep) })
+])
+
 export const ModelEndpointDraftRequestSchema = Schema.Struct({
   base_url: BaseUrlSchema,
   format: FormatSchema,
@@ -91,12 +104,12 @@ const draftFromWire = (wire: DraftWire): ModelEndpointDraft => ({
   input: wire.input,
   auth: (() => {
     switch (wire.auth.kind) {
-      case "bearer":
-        return { kind: "bearer", apiKey: wire.auth.api_key }
-      case "header":
-        return { kind: "header", name: wire.auth.name, value: wire.auth.value }
-      case "keep":
-        return { kind: "keep" }
+      case MODEL_ENDPOINT_AUTH.bearer:
+        return { kind: MODEL_ENDPOINT_AUTH.bearer, apiKey: wire.auth.api_key }
+      case MODEL_ENDPOINT_AUTH.header:
+        return { kind: MODEL_ENDPOINT_AUTH.header, name: wire.auth.name, value: wire.auth.value }
+      case MODEL_ENDPOINT_AUTH.keep:
+        return { kind: MODEL_ENDPOINT_AUTH.keep }
     }
   })()
 })
@@ -118,14 +131,12 @@ export const encodeModelEndpointDraftEffect = (
       model: draft.model,
       input: draft.input,
       auth:
-        draft.auth.kind === "bearer" ? { kind: "bearer", api_key: draft.auth.apiKey } : draft.auth
+        draft.auth.kind === MODEL_ENDPOINT_AUTH.bearer
+          ? { kind: MODEL_ENDPOINT_AUTH.bearer, api_key: draft.auth.apiKey }
+          : draft.auth
     },
     strict
   ).pipe(Effect.map(JSON.stringify))
-
-export const DecisionSourceRequestSchema = Schema.Struct({
-  source: Schema.Literals(["local", "endpoint", "off"] as const)
-})
 
 export const encodeChatEndpointPathEffect = (
   id: string
@@ -134,17 +145,10 @@ export const encodeChatEndpointPathEffect = (
     Effect.map((valid) => `/model-endpoints/chat/${valid}`)
   )
 
-export const encodeDecisionSourceEffect = (
-  source: DecisionSource
-): Effect.Effect<string, Schema.SchemaError, never> =>
-  Schema.decodeUnknownEffect(DecisionSourceRequestSchema)({ source }, strict).pipe(
-    Effect.map(JSON.stringify)
-  )
-
 const HealthWireSchema = Schema.Union([
-  Schema.Struct({ state: Schema.Literal("works") }),
+  Schema.Struct({ state: Schema.Literal(MODEL_ENDPOINT_HEALTH.works) }),
   Schema.Struct({
-    state: Schema.Literal("failing"),
+    state: Schema.Literal(MODEL_ENDPOINT_HEALTH.failing),
     reason: RuntimeFailureSchema,
     since: IsoDateTimeStringSchema,
     message: MessageSchema
@@ -158,23 +162,22 @@ const EndpointWireSchema = withExtras({
   model: ModelNameSchema,
   input: InputSchema,
   auth: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("bearer") }),
-    Schema.Struct({ kind: Schema.Literal("header"), name: HeaderNameSchema })
+    Schema.Struct({ kind: Schema.Literal(MODEL_ENDPOINT_AUTH.bearer) }),
+    Schema.Struct({ kind: Schema.Literal(MODEL_ENDPOINT_AUTH.header), name: HeaderNameSchema })
   ]),
   health: HealthWireSchema
 })
 
 type EndpointWire = typeof EndpointWireSchema.Type
 
-const ChatServiceSchema = Schema.Literals(["llama.cpp", "openrouter", "custom"] as const)
+const ChatServiceSchema = Schema.Literals(Object.values(CHAT_ENDPOINT_SERVICE))
 
 const ChatAuthInputWireSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("none") }),
-  Schema.Struct({ kind: Schema.Literal("bearer"), api_key: SecretSchema }),
-  Schema.Struct({ kind: Schema.Literal("keep") })
+  Schema.Struct({ kind: Schema.Literal(CHAT_ENDPOINT_AUTH.none) }),
+  Schema.Struct({ kind: Schema.Literal(CHAT_ENDPOINT_AUTH.bearer), api_key: SecretSchema }),
+  Schema.Struct({ kind: Schema.Literal(CHAT_ENDPOINT_AUTH.keep) })
 ])
 
-/** At least one model, none twice: each becomes one id in the model list. */
 const NamedModelsSchema = Schema.Array(ModelNameSchema).check(
   Schema.isMinLength(1),
   Schema.makeFilter((models) =>
@@ -182,15 +185,14 @@ const NamedModelsSchema = Schema.Array(ModelNameSchema).check(
   )
 )
 
-/** The body of every model server save and Check: `POST`/`PUT /model-endpoints/chat[/:id]`, `…/check`. */
 export const ChatEndpointDraftRequestSchema = Schema.Union([
   Schema.Struct({
-    service: Schema.Literal("llama.cpp"),
+    service: Schema.Literal(CHAT_ENDPOINT_SERVICE.llamaCpp),
     base_url: BaseUrlSchema,
     auth: ChatAuthInputWireSchema
   }),
   Schema.Struct({
-    service: Schema.Literals(["openrouter", "custom"] as const),
+    service: Schema.Literals([CHAT_ENDPOINT_SERVICE.openrouter, CHAT_ENDPOINT_SERVICE.custom]),
     base_url: BaseUrlSchema,
     models: NamedModelsSchema,
     auth: ChatAuthInputWireSchema
@@ -200,10 +202,12 @@ export const ChatEndpointDraftRequestSchema = Schema.Union([
 type ChatDraftWire = typeof ChatEndpointDraftRequestSchema.Type
 
 const chatAuthFromWire = (wire: ChatDraftWire["auth"]): ChatEndpointDraft["auth"] =>
-  wire.kind === "bearer" ? { kind: "bearer", apiKey: wire.api_key } : wire
+  wire.kind === CHAT_ENDPOINT_AUTH.bearer
+    ? { kind: CHAT_ENDPOINT_AUTH.bearer, apiKey: wire.api_key }
+    : wire
 
 const chatDraftFromWire = (wire: ChatDraftWire): ChatEndpointDraft =>
-  wire.service === "llama.cpp"
+  wire.service === CHAT_ENDPOINT_SERVICE.llamaCpp
     ? { service: wire.service, baseUrl: wire.base_url, auth: chatAuthFromWire(wire.auth) }
     : {
         service: wire.service,
@@ -226,9 +230,11 @@ export const encodeChatEndpointDraftEffect = (
     {
       service: draft.service,
       base_url: draft.baseUrl,
-      ...(draft.service === "llama.cpp" ? {} : { models: draft.models }),
+      ...(draft.service === CHAT_ENDPOINT_SERVICE.llamaCpp ? {} : { models: draft.models }),
       auth:
-        draft.auth.kind === "bearer" ? { kind: "bearer", api_key: draft.auth.apiKey } : draft.auth
+        draft.auth.kind === CHAT_ENDPOINT_AUTH.bearer
+          ? { kind: CHAT_ENDPOINT_AUTH.bearer, api_key: draft.auth.apiKey }
+          : draft.auth
     },
     strict
   ).pipe(Effect.map(JSON.stringify))
@@ -245,15 +251,15 @@ const ChatSkipWireSchema = Schema.Union([
   Schema.Struct({
     id: ModelNameSchema,
     reason: Schema.Literals([
-      "no_tool_calls",
-      "window_unknown",
-      "model_taken",
-      "wrong_format"
-    ] as const)
+      MODEL_ENDPOINT_RESULT.noToolCalls,
+      MODEL_ENDPOINT_RESULT.windowUnknown,
+      MODEL_ENDPOINT_RESULT.modelTaken,
+      MODEL_ENDPOINT_RESULT.wrongFormat
+    ])
   }),
   Schema.Struct({
     id: ModelNameSchema,
-    reason: Schema.Literal("window_too_small"),
+    reason: Schema.Literal(MODEL_ENDPOINT_RESULT.windowTooSmall),
     window: PositiveIntSchema
   })
 ])
@@ -266,8 +272,8 @@ const ChatEndpointWireSchema = withExtras({
   host: ModelNameSchema,
   group: ModelNameSchema,
   auth: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("none") }),
-    Schema.Struct({ kind: Schema.Literal("bearer") })
+    Schema.Struct({ kind: Schema.Literal(CHAT_ENDPOINT_AUTH.none) }),
+    Schema.Struct({ kind: Schema.Literal(CHAT_ENDPOINT_AUTH.bearer) })
   ]),
   models: Schema.Array(ChatModelWireSchema),
   skipped: Schema.Array(ChatSkipWireSchema),
@@ -293,7 +299,7 @@ const FailureWireSchema = Schema.Struct({ result: FailureReasonSchema, message: 
 
 export const ModelEndpointCheckResponseSchema = Schema.Union([
   Schema.Struct({
-    result: Schema.Literal("works"),
+    result: Schema.Literal(MODEL_ENDPOINT_RESULT.works),
     input: InputSchema,
     ms: NonNegativeIntSchema
   }),
@@ -301,40 +307,47 @@ export const ModelEndpointCheckResponseSchema = Schema.Union([
 ])
 
 export const ModelEndpointSaveResponseSchema = Schema.Union([
-  Schema.Struct({ result: Schema.Literal("saved"), endpoint: EndpointWireSchema }),
+  Schema.Struct({
+    result: Schema.Literal(MODEL_ENDPOINT_RESULT.saved),
+    endpoint: EndpointWireSchema
+  }),
   FailureWireSchema
 ])
 
 const ChatFailureWireSchema = Schema.Union([
   FailureWireSchema,
   Schema.Struct({
-    result: Schema.Literal("address_refused"),
+    result: Schema.Literal(MODEL_ENDPOINT_RESULT.addressRefused),
     issue: Schema.Literals(["invalid", "credentials", "fragment", "query", "insecure"] as const),
     message: MessageSchema
   }),
   Schema.Struct({
-    result: Schema.Literals(["no_tool_calls", "window_unknown", "model_taken"] as const),
+    result: Schema.Literals([
+      MODEL_ENDPOINT_RESULT.noToolCalls,
+      MODEL_ENDPOINT_RESULT.windowUnknown,
+      MODEL_ENDPOINT_RESULT.modelTaken
+    ]),
     model: ModelNameSchema,
     message: MessageSchema
   }),
   Schema.Struct({
-    result: Schema.Literal("window_too_small"),
+    result: Schema.Literal(MODEL_ENDPOINT_RESULT.windowTooSmall),
     model: ModelNameSchema,
     window: PositiveIntSchema,
     needed: PositiveIntSchema,
     message: MessageSchema
   }),
   Schema.Struct({
-    result: Schema.Literal("model_missing"),
+    result: Schema.Literal(MODEL_ENDPOINT_RESULT.modelMissing),
     model: ModelNameSchema,
     message: MessageSchema
   }),
-  Schema.Struct({ result: Schema.Literal("no_model"), message: MessageSchema })
+  Schema.Struct({ result: Schema.Literal(MODEL_ENDPOINT_RESULT.noModel), message: MessageSchema })
 ])
 
 export const ChatEndpointCheckResponseSchema = Schema.Union([
   Schema.Struct({
-    result: Schema.Literal("works"),
+    result: Schema.Literal(MODEL_ENDPOINT_RESULT.works),
     host: ModelNameSchema,
     group: ModelNameSchema,
     models: Schema.Array(ChatModelWireSchema),
@@ -345,41 +358,12 @@ export const ChatEndpointCheckResponseSchema = Schema.Union([
 ])
 
 export const ChatEndpointSaveResponseSchema = Schema.Union([
-  Schema.Struct({ result: Schema.Literal("saved"), endpoint: ChatEndpointWireSchema }),
+  Schema.Struct({
+    result: Schema.Literal(MODEL_ENDPOINT_RESULT.saved),
+    endpoint: ChatEndpointWireSchema
+  }),
   ChatFailureWireSchema
 ])
-
-const SiteIdSchema = Schema.Literals(["automation_prefilter", "capture"] as const)
-
-const SiteWireSchema = withExtras({
-  site: SiteIdSchema,
-  needs_images: Schema.Boolean,
-  state: Schema.Literals(["decision_model", "helper"] as const)
-})
-
-type SiteWire = typeof SiteWireSchema.Type
-
-export const DecisionStatusResponseSchema = withExtras({
-  source: DecisionSourceRequestSchema.fields.source,
-  backend: Schema.Union([
-    Schema.Struct({ state: Schema.Literal("off") }),
-    Schema.Struct({
-      state: Schema.Literal("unavailable"),
-      reason: Schema.Literals(["no_local_model", "no_endpoint"] as const)
-    }),
-    Schema.Struct({ state: Schema.Literal("ready"), model: ModelNameSchema, input: InputSchema }),
-    Schema.Struct({
-      state: Schema.Literal("failing"),
-      model: ModelNameSchema,
-      input: InputSchema,
-      reason: RuntimeFailureSchema,
-      since: IsoDateTimeStringSchema
-    })
-  ]),
-  sites: Schema.Array(SiteWireSchema)
-})
-
-type DecisionStatusWire = typeof DecisionStatusResponseSchema.Type
 
 const endpointFromWire = (wire: EndpointWire): ModelEndpoint => ({
   kind: wire.kind,
@@ -387,12 +371,15 @@ const endpointFromWire = (wire: EndpointWire): ModelEndpoint => ({
   format: wire.format,
   model: wire.model,
   input: wire.input,
-  auth: wire.auth.kind === "header" ? { kind: "header", name: wire.auth.name } : { kind: "bearer" },
+  auth:
+    wire.auth.kind === MODEL_ENDPOINT_AUTH.header
+      ? { kind: MODEL_ENDPOINT_AUTH.header, name: wire.auth.name }
+      : { kind: MODEL_ENDPOINT_AUTH.bearer },
   health:
-    wire.health.state === "works"
-      ? { state: "works" }
+    wire.health.state === MODEL_ENDPOINT_HEALTH.works
+      ? { state: MODEL_ENDPOINT_HEALTH.works }
       : {
-          state: "failing",
+          state: MODEL_ENDPOINT_HEALTH.failing,
           reason: wire.health.reason,
           since: wire.health.since,
           message: wire.health.message
@@ -478,28 +465,31 @@ export const modelEndpointsResponse = (
 export const mapChatEndpointCheck = (
   wire: typeof ChatEndpointCheckResponseSchema.Type
 ): ChatEndpointCheck =>
-  wire.result === "works" ? { ...wire, models: wire.models.map(chatModelFromWire) } : wire
+  wire.result === MODEL_ENDPOINT_RESULT.works
+    ? { ...wire, models: wire.models.map(chatModelFromWire) }
+    : wire
 
 export const chatEndpointCheckResponse = (
   check: ChatEndpointCheck
 ): typeof ChatEndpointCheckResponseSchema.Type =>
-  check.result === "works" ? { ...check, models: check.models.map(chatModelResponse) } : check
+  check.result === MODEL_ENDPOINT_RESULT.works
+    ? { ...check, models: check.models.map(chatModelResponse) }
+    : check
 
 export const mapChatEndpointSave = (
   wire: typeof ChatEndpointSaveResponseSchema.Type
 ): ChatEndpointSaveResult =>
-  wire.result === "saved"
-    ? { result: "saved", endpoint: chatEndpointFromWire(wire.endpoint) }
+  wire.result === MODEL_ENDPOINT_RESULT.saved
+    ? { result: MODEL_ENDPOINT_RESULT.saved, endpoint: chatEndpointFromWire(wire.endpoint) }
     : wire
 
 export const chatEndpointSaveResponse = (
   result: ChatEndpointSaveResult
 ): typeof ChatEndpointSaveResponseSchema.Type =>
-  result.result === "saved"
-    ? { result: "saved", endpoint: chatEndpointResponse(result.endpoint) }
+  result.result === MODEL_ENDPOINT_RESULT.saved
+    ? { result: MODEL_ENDPOINT_RESULT.saved, endpoint: chatEndpointResponse(result.endpoint) }
     : result
 
-/** The check union has the same field names on both sides. */
 export const mapModelEndpointCheck = (
   wire: typeof ModelEndpointCheckResponseSchema.Type
 ): ModelEndpointCheck => wire
@@ -507,35 +497,13 @@ export const mapModelEndpointCheck = (
 export const mapModelEndpointSave = (
   wire: typeof ModelEndpointSaveResponseSchema.Type
 ): ModelEndpointSaveResult =>
-  wire.result === "saved" ? { result: "saved", endpoint: endpointFromWire(wire.endpoint) } : wire
+  wire.result === MODEL_ENDPOINT_RESULT.saved
+    ? { result: MODEL_ENDPOINT_RESULT.saved, endpoint: endpointFromWire(wire.endpoint) }
+    : wire
 
 export const modelEndpointSaveResponse = (
   result: ModelEndpointSaveResult
 ): typeof ModelEndpointSaveResponseSchema.Type =>
-  result.result === "saved"
-    ? { result: "saved", endpoint: endpointResponse(result.endpoint) }
+  result.result === MODEL_ENDPOINT_RESULT.saved
+    ? { result: MODEL_ENDPOINT_RESULT.saved, endpoint: endpointResponse(result.endpoint) }
     : result
-
-const siteFromWire = (wire: SiteWire): DecisionSiteStatus => ({
-  site: wire.site,
-  needsImages: wire.needs_images,
-  state: wire.state
-})
-
-const siteResponse = (site: DecisionSiteStatus): SiteWire => ({
-  site: site.site,
-  needs_images: site.needsImages,
-  state: site.state
-})
-
-export const mapDecisionStatus = (wire: DecisionStatusWire): DecisionStatus => ({
-  source: wire.source,
-  backend: wire.backend,
-  sites: wire.sites.map(siteFromWire)
-})
-
-export const decisionStatusResponse = (status: DecisionStatus): DecisionStatusWire => ({
-  source: status.source,
-  backend: status.backend,
-  sites: status.sites.map(siteResponse)
-})

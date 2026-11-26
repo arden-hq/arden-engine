@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import { HOME_LETTER_AUTOMATION_ID } from "../automations/model.js"
+import { SYSTEM_HANDLER, HOME_LETTER_AUTOMATION_ID } from "../automations/model.js"
 import { AutomationStoreError } from "../automations/store.js"
 import { HomeLetterInputs } from "../automations/home-letter-inputs.js"
 import { HomeLetterInputSchema } from "../home/model.js"
@@ -25,7 +25,7 @@ export const makeHomeLetterInputs = ({
         automationId: lease.payload.automationId,
         ...(cause === undefined ? {} : { cause })
       })
-    if (lease.payload.handler !== "home_letter")
+    if (lease.payload.handler !== SYSTEM_HANDLER.homeLetter)
       return yield* error("invalid", "Only Home Automation owns letter inputs")
     const valid = yield* Schema.decodeUnknownEffect(HomeLetterInputSchema)(input).pipe(
       Effect.mapError((cause) => error("invalid", "Invalid Home input", cause))

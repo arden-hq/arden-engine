@@ -1,4 +1,4 @@
-import type { SessionPresentation } from "@arden-hq/protocol"
+import type { SessionOwner, SessionPresentation } from "@arden-hq/protocol"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { JobPurpose } from "../job-classification.js"
@@ -6,7 +6,7 @@ import { ownerJoin } from "./automation-rows.js"
 import type { Statement } from "effect/unstable/sql/Statement"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
-const NO_OWNER = { kind: "none" } as const
+const NO_OWNER: SessionOwner = { kind: "none" }
 
 export const readableConversationSql = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`(session_type = 'chat' AND parent_session_id IS NULL AND parent_message_id IS NULL

@@ -1,4 +1,4 @@
-import type { CommandKind, HttpMethod } from "@arden-hq/relay-protocol"
+import { COMMAND_KIND, type CommandKind, type HttpMethod } from "@arden-hq/relay-protocol"
 import { Option, Schema } from "effect"
 
 const segment = "[^/]+"
@@ -17,15 +17,21 @@ const allowed: ReadonlyArray<{
   { method: "POST", pattern: new RegExp(`^/spaces/${segment}/conversation$`), query: new Set() }
 ]
 
+export const STREAM_ROUTE = { bus: "bus", chat: "chat" } as const
+
 export type StreamRoute =
-  | { readonly kind: "bus"; readonly path: string }
-  | { readonly kind: "chat"; readonly path: string }
+  | { readonly kind: typeof STREAM_ROUTE.bus; readonly path: string }
+  | { readonly kind: typeof STREAM_ROUTE.chat; readonly path: string }
+
+const RELAY_BASE = new URL("http://relay.invalid")
+
+const BUS_EVENTS_PATH = "/automations/events"
 
 const normalize = (path: string): URL | undefined => {
   if (!path.startsWith("/") || path.startsWith("//")) return undefined
   try {
-    const url = new URL(path, "http://relay.invalid")
-    return url.host === "relay.invalid" && url.hash === "" ? url : undefined
+    const url = new URL(path, RELAY_BASE)
+    return url.host === RELAY_BASE.host && url.hash === "" ? url : undefined
   } catch {
     return undefined
   }
@@ -48,9 +54,9 @@ export const allowedRequest = (
 export const allowedStream = (path: string): StreamRoute | undefined => {
   const url = normalize(path)
   if (url === undefined || url.search !== "") return undefined
-  if (url.pathname === "/automations/events") return { kind: "bus", path: url.pathname }
+  if (url.pathname === BUS_EVENTS_PATH) return { kind: STREAM_ROUTE.bus, path: url.pathname }
   return new RegExp(`^/chat/events/${segment}$`).test(url.pathname)
-    ? { kind: "chat", path: url.pathname }
+    ? { kind: STREAM_ROUTE.chat, path: url.pathname }
     : undefined
 }
 
@@ -118,31 +124,31 @@ const decodeArgs = <S extends Schema.Decoder<unknown>>(
 
 export const decodeCommand = (kind: CommandKind, args: unknown): Command | undefined => {
   switch (kind) {
-    case "send": {
+    case COMMAND_KIND.send: {
       const decoded = decodeArgs(CommandArgs.send, args)
       return decoded === undefined ? undefined : { kind, args: decoded }
     }
-    case "answer": {
+    case COMMAND_KIND.answer: {
       const decoded = decodeArgs(CommandArgs.answer, args)
       return decoded === undefined ? undefined : { kind, args: decoded }
     }
-    case "decide": {
+    case COMMAND_KIND.decide: {
       const decoded = decodeArgs(CommandArgs.decide, args)
       return decoded === undefined ? undefined : { kind, args: decoded }
     }
-    case "stop": {
+    case COMMAND_KIND.stop: {
       const decoded = decodeArgs(CommandArgs.stop, args)
       return decoded === undefined ? undefined : { kind, args: decoded }
     }
-    case "capture": {
+    case COMMAND_KIND.capture: {
       const decoded = decodeArgs(CommandArgs.capture, args)
       return decoded === undefined ? undefined : { kind, args: decoded }
     }
-    case "register_push": {
+    case COMMAND_KIND.register_push: {
       const decoded = decodeArgs(CommandArgs.register_push, args)
       return decoded === undefined ? undefined : { kind, args: decoded }
     }
-    case "set_keep_awake": {
+    case COMMAND_KIND.set_keep_awake: {
       const decoded = decodeArgs(CommandArgs.set_keep_awake, args)
       return decoded === undefined ? undefined : { kind, args: decoded }
     }

@@ -1,6 +1,5 @@
 import { countOf } from "./count.js"
 
-/** Whole-second duration words: "0s", "1m 26s", "2h 5m"; `units: 1` keeps the largest unit only ("2m", "1h") for compact rows. Each unit is picked after rounding, so 59.6 s reads "1m", never "60s". */
 export const formatDuration = (ms: number, options: { readonly units?: 1 | 2 } = {}): string => {
   const seconds = Math.round(ms / 1000)
   if (seconds < 60) return `${seconds}s`
@@ -12,7 +11,6 @@ export const formatDuration = (ms: number, options: { readonly units?: 1 | 2 } =
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-/** Fine duration for timings: "850ms", "4.2s", "10s", "2m", "2m 05s". Each unit is picked after rounding, so 59.95 s reads "1m", never "60.0s". */
 export const formatDurationFine = (ms: number): string => {
   if (Math.round(ms) < 1000) return `${Math.round(ms)}ms`
   if (ms >= 3_600_000) return formatDuration(ms)
@@ -25,30 +23,32 @@ export const formatDurationFine = (ms: number): string => {
     : `${Math.floor(seconds / 60)}m ${String(rest).padStart(2, "0")}s`
 }
 
+const SPAN_UNIT = { minute: "minute", hour: "hour", day: "day", month: "month" } as const
+
+type SpanUnit = (typeof SPAN_UNIT)[keyof typeof SPAN_UNIT]
+
 interface SpanTier {
   readonly count: number
-  readonly unit: "minute" | "hour" | "day" | "month"
+  readonly unit: SpanUnit
 }
 
 const spanTier = (deltaMs: number): SpanTier => {
   const minutes = Math.max(1, Math.floor(deltaMs / 60_000))
-  if (minutes < 60) return { count: minutes, unit: "minute" }
+  if (minutes < 60) return { count: minutes, unit: SPAN_UNIT.minute }
   const hours = Math.floor(minutes / 60)
-  if (hours < 48) return { count: hours, unit: "hour" }
+  if (hours < 48) return { count: hours, unit: SPAN_UNIT.hour }
   const days = Math.floor(hours / 24)
-  if (days < 30) return { count: days, unit: "day" }
-  return { count: Math.floor(days / 30), unit: "month" }
+  if (days < 30) return { count: days, unit: SPAN_UNIT.day }
+  return { count: Math.floor(days / 30), unit: SPAN_UNIT.month }
 }
 
-const COMPACT_UNIT = { minute: "m", hour: "h", day: "d", month: "mo" } as const
+const COMPACT_UNIT: Record<SpanUnit, string> = { minute: "m", hour: "h", day: "d", month: "mo" }
 
-/** "12m", "3h", "2d", "5mo". */
 export const compactSpan = (deltaMs: number): string => {
   const { count, unit } = spanTier(deltaMs)
   return `${count}${COMPACT_UNIT[unit]}`
 }
 
-/** "5 minutes", "1 hour", "2 days". */
 export const spanWords = (deltaMs: number): string => {
   const { count, unit } = spanTier(deltaMs)
   return countOf(count, unit)
@@ -57,10 +57,6 @@ export const spanWords = (deltaMs: number): string => {
 const instantMs = (value: string | number): number =>
   typeof value === "number" ? value : new Date(value).getTime()
 
-/**
- * An instant against `now`: "now", "<1m", "3h ago", "in 3h". Empty for a value
- * that is not a date, never the raw text.
- */
 export const relativeLabel = (value: string | number, now: number): string => {
   const at = instantMs(value)
   if (!Number.isFinite(at)) return ""
@@ -69,27 +65,23 @@ export const relativeLabel = (value: string | number, now: number): string => {
   return delta > 0 ? `in ${compactSpan(delta)}` : `${compactSpan(-delta)} ago`
 }
 
-/** `YYYY-MM-DD HH:MM UTC` for an instant; empty for a value that is not a date. */
 export const utcStamp = (value: string | number): string => {
   const at = instantMs(value)
   if (!Number.isFinite(at)) return ""
   return `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`
 }
 
-/** The UTC calendar day `YYYY-MM-DD` of an instant; empty for a value that is not a date. */
 export const utcDay = (value: string | number): string => {
   const at = instantMs(value)
   return Number.isFinite(at) ? new Date(at).toISOString().slice(0, 10) : ""
 }
 
-/** A calendar day, not an instant. */
 export interface CalendarDay {
   readonly year: number
   readonly month: number
   readonly day: number
 }
 
-/** `YYYY-MM-DD` as a calendar day; undefined for anything else, including 2026-02-30. */
 export const parseCalendarDay = (text: string): CalendarDay | undefined => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(text)
   if (match === null) return undefined
@@ -102,11 +94,9 @@ export const parseCalendarDay = (text: string): CalendarDay | undefined => {
     : undefined
 }
 
-/** The zone the machine runs in: what "local" means for a person using Arden on it. */
 export const machineTimeZone = (): string =>
   Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
 
-/** The `YYYY-MM-DD` day an instant falls on in a zone; empty for a value that is not a date. */
 export const localDayOf = (value: string | number, timeZone: string): string => {
   const at = instantMs(value)
   if (!Number.isFinite(at)) return ""
@@ -120,18 +110,11 @@ export const localDayOf = (value: string | number, timeZone: string): string => 
   return `${part("year")}-${part("month")}-${part("day")}`
 }
 
-const oneDecimal = (value: number): string => String(Math.round(value * 10) / 10)
-
 const unitWords = (value: number, unit: string): string => {
-  const text = oneDecimal(value)
-  return `${text} ${text === "1" ? unit : `${unit}s`}`
+  const rounded = Math.round(value * 10) / 10
+  return `${rounded} ${rounded === 1 ? unit : `${unit}s`}`
 }
 
-/**
- * An age or gap for the model: whole minutes under an hour ("1 minute", "45
- * minutes"), hours under 48 ("1.5 hours", "2 hours"), then days likewise. A
- * decimal of .0 is dropped.
- */
 export const ageWords = (ms: number): string => {
   const minutes = Math.floor(ms / 60_000)
   if (minutes < 60) return unitWords(Math.max(1, minutes), "minute")
@@ -140,7 +123,6 @@ export const ageWords = (ms: number): string => {
 }
 
 export interface ClockOptions {
-  /** Names follow this locale; the OS locale when absent. */
   readonly locale?: Intl.LocalesArgument
   readonly timeZone?: string
 }
@@ -164,7 +146,8 @@ const cachedFormat = (
 const zoneOption = (options: ClockOptions): { timeZone?: string } =>
   options.timeZone === undefined ? {} : { timeZone: options.timeZone }
 
-/** The one clock the app and the model read: 12-hour, "7:38 AM" (a plain space, not ICU's narrow one). */
+const ICU_NARROW_AND_NO_BREAK_SPACES = /[\u202f\u00a0]/gu
+
 export const formatClock = (at: number | Date, options: ClockOptions = {}): string =>
   cachedFormat(
     "clock",
@@ -178,7 +161,7 @@ export const formatClock = (at: number | Date, options: ClockOptions = {}): stri
       })
   )
     .format(at)
-    .replace(/[\u202f\u00a0]/gu, " ")
+    .replace(ICU_NARROW_AND_NO_BREAK_SPACES, " ")
 
 const dayKey = (at: number, options: ClockOptions): string =>
   localDayOf(at, options.timeZone ?? machineTimeZone())
@@ -188,11 +171,10 @@ const dayNumber = (key: string): number => {
   return Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1) / 86_400_000
 }
 
-/**
- * The day an instant falls on, in the fewest words: "Today", "Tomorrow",
- * "Yesterday", the weekday within six days either way ("Fri"), else "Oct 3",
- * with the year when it is not this one.
- */
+export const DAY_WORD = { today: "Today", tomorrow: "Tomorrow", yesterday: "Yesterday" } as const
+
+export type DayWord = (typeof DAY_WORD)[keyof typeof DAY_WORD]
+
 export const formatDayWord = (
   at: number | Date,
   now: number | Date,
@@ -203,9 +185,9 @@ export const formatDayWord = (
   const atKey = dayKey(atMs, options)
   const nowKey = dayKey(nowMs, options)
   const days = dayNumber(atKey) - dayNumber(nowKey)
-  if (days === 0) return "Today"
-  if (days === 1) return "Tomorrow"
-  if (days === -1) return "Yesterday"
+  if (days === 0) return DAY_WORD.today
+  if (days === 1) return DAY_WORD.tomorrow
+  if (days === -1) return DAY_WORD.yesterday
   if (Math.abs(days) < 7) {
     return cachedFormat(
       "weekday",
@@ -227,7 +209,6 @@ export const formatDayWord = (
   ).format(atMs)
 }
 
-/** "Today 9:00 AM", "Fri 6:00 PM", "Oct 3, 9:00 AM": a day word and the clock. */
 export const formatDayClock = (
   at: number | Date,
   now: number | Date,
@@ -241,20 +222,11 @@ export const formatDayClock = (
   return `${formatDayWord(at, now, options)}${separator}${formatClock(at, options)}`
 }
 
-/**
- * Day words read after a label, inside a sentence: "Today 9:00 AM" becomes
- * "today 9:00 AM", "Yesterday" becomes "yesterday"; "Fri 6:00 PM" and "Oct 3"
- * stay as they are.
- */
 export const dayWordsInSentence = (words: string): string =>
   /^(Today|Tomorrow|Yesterday)\b/u.test(words)
     ? words.charAt(0).toLowerCase() + words.slice(1)
     : words
 
-/**
- * A stored wall time ("09:00", "24:00" for the end of the day) as the clock
- * words show it: "9:00 AM", "midnight". Anything else comes back as given.
- */
 export const wallClockWords = (text: string): string => {
   const match = /^(\d{1,2}):(\d{2})$/u.exec(text.trim())
   if (match === null) return text
@@ -265,10 +237,9 @@ export const wallClockWords = (text: string): string => {
   return `${hour % 12 === 0 ? 12 : hour % 12}:${match[2]} ${hour < 12 ? "AM" : "PM"}`
 }
 
-/** An explicit-offset timestamp in words, preserving its wall time and precision. */
 export const isoDateTimeWords = (text: string): string => {
   const parts =
-    /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/u.exec(
+    /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(\.\d+)?)?(?:Z|([+-]\d{2}:\d{2}))$/u.exec(
       text
     )
   if (
@@ -286,9 +257,9 @@ export const isoDateTimeWords = (text: string): string => {
   }).format(day)
   const hour = Number(parts[2])
   const seconds =
-    parts[4] === undefined || (parts[4] === "00" && parts[5] === undefined)
+    parts[4] === undefined || (Number(parts[4]) === 0 && parts[5] === undefined)
       ? ""
       : `:${parts[4]}${parts[5] ?? ""}`
-  const zone = parts[6] === "Z" ? "UTC" : `UTC${parts[6]}`
+  const zone = parts[6] === undefined ? "UTC" : `UTC${parts[6]}`
   return `${date}, ${hour % 12 || 12}:${parts[3]}${seconds} ${hour < 12 ? "AM" : "PM"} (${zone})`
 }

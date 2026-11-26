@@ -12,7 +12,7 @@ import { ACTIVE_WORK } from "./history.js"
 import { HistoryPageSchema, TurnShellSchema } from "./history-page-schema.js"
 import type { HistoryResponse } from "./history.js"
 import type { TurnDetailsResponse, TurnWorkResponse } from "./history.js"
-import { TOOL_CALL_RETURN } from "./contracts.js"
+import { CHAT_RECEIPT_STATUS, TOOL_CALL_RETURN } from "./contracts.js"
 import type { ChatReceiptStatus, ToolCallResponse } from "./contracts.js"
 import { event, isChatEventFrame, withExtras, NonNegativeIntSchema } from "../common/schema.js"
 
@@ -66,14 +66,6 @@ const chatProjectionEventSchemas = [
   ...sessionStateEventSchemas
 ] as const
 
-/**
- * Annotated with the hand-written event union on purpose. Without the
- * annotation every consumer re-expands forty struct schemas (and their extras
- * mapped types) each time it relates a value to this schema; the HttpApi
- * handler for run events then exceeds the compiler's instantiation depth
- * (TS2589) as soon as one more member is added. The named union is the same
- * type, related by name, and costs nothing to add members to.
- */
 export const ChatProjectionEventSchema: Schema.Codec<ChatProjectionEvent> = Schema.Union(
   chatProjectionEventSchemas
 )
@@ -84,7 +76,6 @@ export const FramedChatProjectionEventSchema = ChatProjectionEventSchema.pipe(
   })
 )
 
-/** Every `type` the projection stream can carry, read from the schemas. */
 export const CHAT_PROJECTION_EVENT_TYPES: ReadonlySet<string> = eventTypeLiterals(
   chatProjectionEventSchemas
 )
@@ -96,26 +87,11 @@ const isKnownProjectionEventCandidate = (value: unknown): boolean =>
   typeof value.type === "string" &&
   CHAT_PROJECTION_EVENT_TYPES.has(value.type)
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type ChatProjectionEventAgrees = Assert<
   Agrees<(typeof chatProjectionEventSchemas)[number]["Type"], ChatProjectionEvent>
 >
 
-export const ChatReceiptStatusSchema = Schema.Literals([
-  "running",
-  "queued",
-  "ingested",
-  "accepted",
-  "cancelled",
-  "busy",
-  "steered",
-  "active",
-  "resumed",
-  "completed",
-  "error",
-  "failed",
-  "interrupted"
-] as const)
+export const ChatReceiptStatusSchema = Schema.Literals(Object.values(CHAT_RECEIPT_STATUS))
 
 export const SessionRuntimeSnapshotSchema = withExtras({
   session_id: Schema.String,
@@ -141,7 +117,6 @@ export const ToolCallQuerySchema = withExtras({
   tool_call_id: Schema.NonEmptyString
 })
 
-/** One call in full: the arguments the model sent and the result it got. */
 export const ToolCallResponseSchema: Schema.Codec<ToolCallResponse> = withExtras({
   tool_call_id: Schema.NonEmptyString,
   name: Schema.NonEmptyString,
@@ -157,13 +132,20 @@ export const ToolResultValueQuerySchema = Schema.Struct({
   path: Schema.String
 })
 
-/** One value from a tool call's result in one chat, for an answer block's
- *  `Query("tool_result", …)`: the value, or why there is none. */
+export const TOOL_RESULT_VALUE = { value: "value", unavailable: "unavailable" } as const
+
+export const TOOL_RESULT_VALUE_GAP = {
+  noCall: "no_call",
+  notJson: "not_json",
+  noPath: "no_path",
+  tooLarge: "too_large"
+} as const
+
 export const ToolResultValueResponseSchema = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("value"), value: Schema.Json }),
+  Schema.Struct({ status: Schema.Literal(TOOL_RESULT_VALUE.value), value: Schema.Json }),
   Schema.Struct({
-    status: Schema.Literal("unavailable"),
-    reason: Schema.Literals(["no_call", "not_json", "no_path", "too_large"])
+    status: Schema.Literal(TOOL_RESULT_VALUE.unavailable),
+    reason: Schema.Literals(Object.values(TOOL_RESULT_VALUE_GAP))
   })
 ])
 
@@ -198,7 +180,6 @@ export const HistoryResponseSchema: Schema.Codec<HistoryResponse> = withExtras({
   turn_shells: Schema.Array(TurnShellSchema)
 })
 
-/** A projection event as a resume snapshot carries it: addressed, sequenced, replay-marked. */
 export const SnapshotProjectionEventSchema = ChatProjectionEventSchema.pipe(
   Schema.refine(
     (event): event is SnapshotProjectionEvent => isChatEventFrame(event) && event.replay === true,
@@ -206,12 +187,6 @@ export const SnapshotProjectionEventSchema = ChatProjectionEventSchema.pipe(
   )
 )
 
-/**
- * A snapshot's replayed events, with events of a type this client does not
- * know dropped before decoding. A newer server may journal an event an older
- * client has never seen; that must cost the client one event, not the whole
- * resume. A known type with a bad payload is still a decode error.
- */
 const knownSnapshotProjectionEventsSchema = Schema.Array(Schema.Unknown).pipe(
   Schema.decodeTo(
     Schema.Array(Schema.Unknown.pipe(Schema.decodeTo(SnapshotProjectionEventSchema))),
@@ -309,17 +284,13 @@ const chatServerEventSchemas = [
   StreamOverflowEventSchema
 ] as const
 
-// Encoded is the JSON object on the wire: the snapshot member decodes its
-// replayed events through a refinement, so its encoded shape is wider than its type.
 export const ChatServerEventSchema: Schema.Codec<ChatServerEvent, JsonRecord> =
   Schema.Union(chatServerEventSchemas)
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type ChatServerEventAgrees = Assert<
   Agrees<(typeof chatServerEventSchemas)[number]["Type"], ChatServerEvent>
 >
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type ChatReceiptStatusAgrees = Assert<
   Agrees<(typeof ChatReceiptStatusSchema)["Type"], ChatReceiptStatus>
 >

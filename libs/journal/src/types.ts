@@ -10,7 +10,6 @@ export interface JournalEvent {
   readonly type: string
   readonly data: JsonValue
   readonly attributes?: Readonly<Record<string, JsonValue>>
-  /** Durable by default. Live-only records cannot be replayed. */
   readonly durable?: boolean
 }
 
@@ -29,20 +28,20 @@ export interface JournalAppendResult {
   readonly headSequence: number
 }
 
+export const JOURNAL_DELIVERY = { record: "record", reset: "reset", overflow: "overflow" } as const
+
 export type JournalDelivery =
   | {
-      readonly kind: "record"
+      readonly kind: typeof JOURNAL_DELIVERY.record
       readonly record: JournalRecord
-      /** True only for the initial historical replay. */
       readonly replayed: boolean
     }
   | {
-      readonly kind: "reset"
+      readonly kind: typeof JOURNAL_DELIVERY.reset
       readonly reason: "future_cursor" | "replay_gap"
       readonly cursor: number
     }
   | {
-      /** The bounded live follower could not retain every unseen signal. */
-      readonly kind: "overflow"
+      readonly kind: typeof JOURNAL_DELIVERY.overflow
       readonly cursor: number
     }

@@ -35,8 +35,6 @@ export class SpaceReviewStore extends Context.Service<
       | undefined,
       AutomationStoreError
     >
-    /** What the running Space review behind this Run was given to read; undefined for any other
-     *  Run. A finished review's input is an archive that no schema reads. */
     readonly reviewReads: (
       runId: string
     ) => Effect.Effect<SpaceReviewReads | undefined, AutomationStoreError>

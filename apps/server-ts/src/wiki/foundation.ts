@@ -8,7 +8,8 @@ import { PROMPTS } from "../prompts/catalog.js"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { RULES_PAGE_PATH, RULES_PAGE_TITLE } from "./code-owned-pages.js"
-import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
+import { commitWiki, createPage } from "./commit.js"
+import { type WikiCommitPoint } from "./commit-write-types.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage } from "./page.js"
 
@@ -81,7 +82,6 @@ checkpoints stay in application storage. Add specialist directories only when a 
   ).pipe(Effect.mapError(mapRevisionError("open")))
 })
 
-/** Makes the owner's rules page from `body`, the rules file it replaces, as the owner's own words. */
 export const createRulesPage = Effect.fn("Wiki.createRulesPage")(function* (
   { repository, spaces }: WikiCommitPoint,
   body: string

@@ -1,12 +1,17 @@
 import { Effect, Schema } from "effect"
 
 import {
+  CHANGE_ACTION_OF,
   ChangeSet,
+  OPERATION_TAG,
   Operation as OperationSchema,
+  RESOURCE_STATE,
   ResourceChange,
   ResourceVersion,
+  isActive,
   makeVersion,
-  normalizeRelativePath
+  normalizeRelativePath,
+  type ChangeAction
 } from "./model.js"
 import type { Operation } from "./model.js"
 import {
@@ -21,17 +26,14 @@ import type { JsonRecord, JsonValue } from "./format.js"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-/** The immutable resource map consumed by the pure change-set algorithms. */
 export type ResourceSnapshot = ReadonlyMap<string, ResourceVersion>
 
-/** One active-file publication delta. */
 export interface MaterializationRow {
   readonly path: string
   readonly oldBlob: string | null
   readonly newBlob: string | null
 }
 
-/** Pure result of applying one validated change set. */
 export interface AppliedChangeSet {
   readonly resulting: ResourceSnapshot
   readonly changes: readonly ResourceChange[]
@@ -39,7 +41,6 @@ export interface AppliedChangeSet {
   readonly rows: readonly MaterializationRow[]
 }
 
-/** Content-addressed request identities used by idempotent persistence. */
 export interface RequestIdentity {
   readonly request: JsonRecord
   readonly requestHash: string
@@ -84,9 +85,7 @@ const rejectAncestorCollisions = (
 const validateActivePaths = Effect.fn("validateActivePaths")(function* (
   resources: ResourceSnapshot
 ): Effect.fn.Return<void, RevisionConflictError> {
-  const paths = [...resources.values()]
-    .filter((version) => version.state === "active")
-    .map((version) => version.path)
+  const paths = [...resources.values()].filter(isActive).map((version) => version.path)
   if (new Set(paths).size !== paths.length) {
     return yield* failConflict("two active resources cannot share one path")
   }
@@ -98,7 +97,7 @@ const activePathBlobs = Effect.fn("activePathBlobs")(function* (
 ): Effect.fn.Return<ReadonlyMap<string, string>, RevisionConflictError> {
   const paths = new Map<string, string>()
   for (const version of resources.values()) {
-    if (version.state !== "active") continue
+    if (!isActive(version)) continue
     if (paths.has(version.path))
       return yield* failConflict("two active resources cannot share one path")
     paths.set(version.path, version.blobId)
@@ -107,7 +106,6 @@ const activePathBlobs = Effect.fn("activePathBlobs")(function* (
   return paths
 })
 
-/** Calculate file publication rows from two materialized resource snapshots. */
 export const materializationRows = Effect.fn("materializationRows")(function* (
   before: ResourceSnapshot,
   after: ResourceSnapshot
@@ -158,9 +156,9 @@ const validateChangeSet = Effect.fn("validateChangeSet")(function* (
 
 const requireActive = (
   version: ResourceVersion,
-  operation: string
+  operation: ChangeAction
 ): Effect.Effect<void, RevisionConflictError> =>
-  version.state === "active"
+  isActive(version)
     ? Effect.succeed(undefined)
     : failConflict(`cannot ${operation} archived resource ${version.resourceId}`)
 
@@ -178,7 +176,6 @@ const recordPayload = (
   return Effect.succeed(blobId)
 }
 
-/** Apply Create/Update/Move/Archive/Restore to an immutable snapshot. */
 export const applyChangeSet = Effect.fn("applyChangeSet")(function* (
   value: ChangeSet,
   current: ResourceSnapshot
@@ -200,14 +197,19 @@ export const applyChangeSet = Effect.fn("applyChangeSet")(function* (
   for (const operation of ordered) {
     const before = current.get(operation.resourceId)
     let after: ResourceVersion
-    let action: string
+    const action = CHANGE_ACTION_OF[operation._tag]
 
-    if (operation._tag === "Create") {
+    if (operation._tag === OPERATION_TAG.Create) {
       if (before !== undefined)
         return yield* failConflict(`resource already exists: ${operation.resourceId}`)
       const blobId = yield* recordPayload(payloads, operation.content)
-      after = yield* makeVersion(operation.resourceId, operation.path, blobId, "active", null)
-      action = "create"
+      after = yield* makeVersion(
+        operation.resourceId,
+        operation.path,
+        blobId,
+        RESOURCE_STATE.active,
+        null
+      )
     } else {
       if (before === undefined)
         return yield* failConflict(`resource does not exist: ${operation.resourceId}`)
@@ -217,19 +219,18 @@ export const applyChangeSet = Effect.fn("applyChangeSet")(function* (
         )
       }
 
-      if (operation._tag === "Update") {
-        yield* requireActive(before, "update")
+      if (operation._tag === OPERATION_TAG.Update) {
+        yield* requireActive(before, action)
         const blobId = yield* recordPayload(payloads, operation.content)
         after = yield* makeVersion(
           operation.resourceId,
           before.path,
           blobId,
-          "active",
+          RESOURCE_STATE.active,
           before.versionId
         )
-        action = "update"
-      } else if (operation._tag === "Move") {
-        yield* requireActive(before, "move")
+      } else if (operation._tag === OPERATION_TAG.Move) {
+        yield* requireActive(before, action)
         const blobId =
           operation.content === undefined
             ? before.blobId
@@ -238,28 +239,31 @@ export const applyChangeSet = Effect.fn("applyChangeSet")(function* (
           operation.resourceId,
           operation.path,
           blobId,
-          "active",
+          RESOURCE_STATE.active,
           before.versionId
         )
-        action = "move"
-      } else if (operation._tag === "Archive") {
-        yield* requireActive(before, "archive")
+      } else if (operation._tag === OPERATION_TAG.Archive) {
+        yield* requireActive(before, action)
         after = yield* makeVersion(
           operation.resourceId,
           before.path,
           before.blobId,
-          "archived",
+          RESOURCE_STATE.archived,
           before.versionId
         )
-        action = "archive"
       } else {
         const blobId =
           operation.content === undefined
             ? before.blobId
             : yield* recordPayload(payloads, operation.content)
         const path = operation.path === undefined ? before.path : operation.path
-        after = yield* makeVersion(operation.resourceId, path, blobId, "active", before.versionId)
-        action = "restore"
+        after = yield* makeVersion(
+          operation.resourceId,
+          path,
+          blobId,
+          RESOURCE_STATE.active,
+          before.versionId
+        )
       }
     }
 
@@ -289,19 +293,19 @@ const operationRequestRecord = Effect.fn("operationRequestRecord")(function* (
 ): Effect.fn.Return<JsonRecord, UnsafePathError> {
   const base: Record<string, JsonValue> = {
     resource_id: operation.resourceId,
-    operation: operation._tag.toLowerCase()
+    operation: CHANGE_ACTION_OF[operation._tag]
   }
-  if (operation._tag === "Create") {
+  if (operation._tag === OPERATION_TAG.Create) {
     base.path = yield* normalizeRelativePath(operation.path)
     base.content_hash = sha256Hex(operation.content)
   } else {
     base.expected_version = operation.expectedVersion
-    if (operation._tag === "Update") {
+    if (operation._tag === OPERATION_TAG.Update) {
       base.content_hash = sha256Hex(operation.content)
-    } else if (operation._tag === "Move") {
+    } else if (operation._tag === OPERATION_TAG.Move) {
       base.path = yield* normalizeRelativePath(operation.path)
       base.content_hash = operation.content === undefined ? null : sha256Hex(operation.content)
-    } else if (operation._tag === "Restore") {
+    } else if (operation._tag === OPERATION_TAG.Restore) {
       base.path = operation.path === undefined ? null : yield* normalizeRelativePath(operation.path)
       base.content_hash = operation.content === undefined ? null : sha256Hex(operation.content)
     }
@@ -309,7 +313,6 @@ const operationRequestRecord = Effect.fn("operationRequestRecord")(function* (
   return base
 })
 
-/** Build the deterministic request and idempotency hashes used by persistence. */
 export const requestIdentity = Effect.fn("requestIdentity")(function* (
   value: ChangeSet
 ): Effect.fn.Return<RequestIdentity, InvalidRevisionInputError | UnsafePathError> {

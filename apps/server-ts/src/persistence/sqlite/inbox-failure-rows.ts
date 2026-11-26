@@ -8,14 +8,6 @@ import type { Statement } from "effect/unstable/sql/Statement"
 
 const AUTOMATION_FAILED_PREFIX = "automation-failed:"
 
-/**
- * The failures the Inbox shows: those started since `cutoff` (or at a time
- * that does not parse), and older ones whose Task is stuck. Each source is
- * read from those short lists, never from every failure on record: failed
- * attempts and failed endings by time (idx_automation_runs_status_started,
- * idx_run_endings_status_at), and the stuck Tasks (idx_space_tasks_stuck).
- * The final filter still decides; the lists only bound what it reads.
- */
 export const failureRows = (
   sql: SqlClient.SqlClient,
   cutoff: string

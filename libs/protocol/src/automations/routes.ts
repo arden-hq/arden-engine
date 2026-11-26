@@ -59,7 +59,6 @@ const AutomationSkippedRunRouteSchema = Schema.Struct({
   runId: PositiveIntSchema
 })
 
-/** "Run with this event": a run of the Automation with the event a skip held back. */
 export const encodeAutomationRunWithEventPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> =>

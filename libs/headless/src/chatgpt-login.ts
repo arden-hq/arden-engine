@@ -14,6 +14,8 @@ export const CHATGPT_LOGIN_FILE = "chatgpt-login.json"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const CALLBACK_PATH = "/auth/callback"
+const CALLBACK_METHOD = "GET"
+const MISSING_FILE_CODE = "ENOENT"
 const LOGIN_TIMEOUT_MS = 5 * 60_000
 const TOKEN_TIMEOUT_MS = 30_000
 const REFRESH_MARGIN_MS = 5 * 60_000
@@ -42,14 +44,16 @@ export interface ChatGptLoginStore {
   readonly remove: () => Promise<void>
 }
 
-export type ChatGptLoginFailure =
-  | "callback_port"
-  | "denied"
-  | "token_exchange"
-  | "refresh_rejected"
-  | "timeout"
-  | "cancelled"
-  | "unreadable_store"
+const CHATGPT_LOGIN_FAILURE = {
+  callbackPort: "callback_port",
+  denied: "denied",
+  tokenExchange: "token_exchange",
+  refreshRejected: "refresh_rejected",
+  timeout: "timeout",
+  cancelled: "cancelled",
+  unreadableStore: "unreadable_store"
+} as const
+export type ChatGptLoginFailure = (typeof CHATGPT_LOGIN_FAILURE)[keyof typeof CHATGPT_LOGIN_FAILURE]
 
 const FAILURE_MESSAGES: Record<ChatGptLoginFailure, string> = {
   callback_port: `Sign-in could not start: port ${CHATGPT_CALLBACK_PORT} is in use.`,
@@ -107,7 +111,7 @@ export const startChatGptLogin = async ({
   })
   const answer = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const callback = new URL(request.url ?? "/", redirectUri)
-    if (request.method !== "GET" || callback.pathname !== CALLBACK_PATH) {
+    if (request.method !== CALLBACK_METHOD || callback.pathname !== CALLBACK_PATH) {
       response.writeHead(404).end()
       return
     }
@@ -130,9 +134,10 @@ export const startChatGptLogin = async ({
     }
   }
   const tokensFromCallback = async (params: URLSearchParams): Promise<ChatGptTokens> => {
-    if (params.get("error") !== null) throw new ChatGptLoginError("denied")
+    if (params.get("error") !== null) throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.denied)
     const code = params.get("code")
-    if (code === null || code === "") throw new ChatGptLoginError("token_exchange")
+    if (code === null || code === "")
+      throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.tokenExchange)
     return exchangeChatGptCode({ code, redirectUri, verifier, issuer, fetch: fetchImpl, now })
   }
   try {
@@ -145,12 +150,12 @@ export const startChatGptLogin = async ({
     })
   } catch {
     server.close()
-    throw new ChatGptLoginError("callback_port")
+    throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.callbackPort)
   }
   const address = server.address()
   redirectUri = `http://localhost:${typeof address === "object" && address !== null ? address.port : port}${CALLBACK_PATH}`
   const timer = after(timeoutMs, () =>
-    settle({ ok: false, error: new ChatGptLoginError("timeout") })
+    settle({ ok: false, error: new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.timeout) })
   )
   const tokens = settled.then((outcome) => {
     timer.cancel()
@@ -162,7 +167,8 @@ export const startChatGptLogin = async ({
   return {
     url: chatGptAuthorizeUrl({ issuer, redirectUri, verifier, state }),
     tokens,
-    cancel: () => settle({ ok: false, error: new ChatGptLoginError("cancelled") })
+    cancel: () =>
+      settle({ ok: false, error: new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.cancelled) })
   }
 }
 
@@ -217,7 +223,7 @@ export const exchangeChatGptCode = async ({
       code_verifier: verifier
     })
   )
-  if (!response.ok) throw new ChatGptLoginError("token_exchange")
+  if (!response.ok) throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.tokenExchange)
   return tokensFromResponse(await bodyOf(response), now(), undefined)
 }
 
@@ -241,8 +247,8 @@ export const refreshChatGptTokens = async ({
   if (!response.ok) {
     throw new ChatGptLoginError(
       response.status === 401 || hasPermanentRefreshCode(body, 0)
-        ? "refresh_rejected"
-        : "token_exchange"
+        ? CHATGPT_LOGIN_FAILURE.refreshRejected
+        : CHATGPT_LOGIN_FAILURE.tokenExchange
     )
   }
   const next = tokensFromResponse(body, now(), tokens)
@@ -251,7 +257,7 @@ export const refreshChatGptTokens = async ({
     next.accountId !== undefined &&
     next.accountId !== tokens.accountId
   ) {
-    throw new ChatGptLoginError("refresh_rejected")
+    throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.refreshRejected)
   }
   return next
 }
@@ -273,7 +279,10 @@ export const chatGptCredentials = ({
         return next
       })
       .catch(async (cause: unknown) => {
-        if (!(cause instanceof ChatGptLoginError) || cause.reason !== "refresh_rejected")
+        if (
+          !(cause instanceof ChatGptLoginError) ||
+          cause.reason !== CHATGPT_LOGIN_FAILURE.refreshRejected
+        )
           throw cause
         const stored = await store.read().catch(() => undefined)
         if (stored !== undefined && stored.refresh !== current.refresh) return stored
@@ -306,11 +315,11 @@ export const chatGptLoginFile = (folder: string): ChatGptLoginStore => {
       try {
         text = await readFile(path, "utf8")
       } catch (cause) {
-        if (isRecord(cause) && cause["code"] === "ENOENT") return undefined
-        throw new ChatGptLoginError("unreadable_store")
+        if (isRecord(cause) && cause["code"] === MISSING_FILE_CODE) return undefined
+        throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.unreadableStore)
       }
       const tokens = storedTokens(parseJsonTextOrUndefined(text))
-      if (tokens === undefined) throw new ChatGptLoginError("unreadable_store")
+      if (tokens === undefined) throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.unreadableStore)
       return tokens
     },
     write: async (tokens) => {
@@ -336,7 +345,7 @@ const postToken = async (
       signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS)
     })
   } catch {
-    throw new ChatGptLoginError("token_exchange")
+    throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.tokenExchange)
   }
 }
 
@@ -344,7 +353,7 @@ const bodyOf = async (response: Response): Promise<unknown> => {
   try {
     return await parseJsonBody(response)
   } catch {
-    throw new ChatGptLoginError("token_exchange")
+    throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.tokenExchange)
   }
 }
 
@@ -353,10 +362,11 @@ const tokensFromResponse = (
   now: number,
   previous: ChatGptTokens | undefined
 ): ChatGptTokens => {
-  if (!isRecord(value)) throw new ChatGptLoginError("token_exchange")
+  if (!isRecord(value)) throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.tokenExchange)
   const access = nonEmpty(value["access_token"])
   const refresh = nonEmpty(value["refresh_token"]) ?? previous?.refresh
-  if (access === undefined || refresh === undefined) throw new ChatGptLoginError("token_exchange")
+  if (access === undefined || refresh === undefined)
+    throw new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.tokenExchange)
   const expiresIn = value["expires_in"]
   const seconds =
     typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3_600
@@ -422,7 +432,9 @@ const nonEmpty = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined
 
 const toLoginError = (cause: unknown): Error =>
-  cause instanceof ChatGptLoginError ? cause : new ChatGptLoginError("token_exchange")
+  cause instanceof ChatGptLoginError
+    ? cause
+    : new ChatGptLoginError(CHATGPT_LOGIN_FAILURE.tokenExchange)
 
 const respond = (response: ServerResponse, ok: boolean): void => {
   const body = `<!doctype html><html><head><meta charset="utf-8"><title>Arden</title></head><body style="font-family:system-ui;padding:48px"><h1>${ok ? "Signed in" : "Sign-in failed"}</h1><p>${ok ? "You can close this window." : "Return to the terminal and try again."}</p></body></html>`

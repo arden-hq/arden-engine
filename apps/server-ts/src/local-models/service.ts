@@ -40,7 +40,6 @@ export class LocalModels extends Context.Service<
     readonly remove: (
       id: string
     ) => Effect.Effect<LocalModelsStatus, LocalModelNotFound | LocalModelInUse | LocalModelsError>
-    /** The installed decision model as an endpoint; undefined when none is installed. Cheap. */
   }
 >()("@arden-hq/server/local-models/LocalModels") {}
 

@@ -11,43 +11,14 @@ import { startServer, type ServerHandle } from "../../src/index.js"
 import { BREAKDOWN_QUERIES } from "../../src/persistence/sqlite/storage-breakdown-queries.js"
 import { seedFullSizeDatabase, type FullSizeIds } from "../fixtures/full-size-database.js"
 
-// The scan check (test/sql-scans) fails a statement whose plan reads a whole
-// growing table, and it judges plans on an empty database. A statement can
-// use an index and still read thousands of rows: the newest run of one
-// Automation among its 3,500, every completed run through a status index.
-// Only rows show that, and a time budget cannot: on a file just written every
-// page is in memory, so such a statement takes milliseconds here and seconds
-// on an old database after a restart.
-//
-// So this judges growth. It fills one database to about the owner's size and
-// one with four times the history (test/fixtures/full-size-database.ts),
-// opens every screen with ids that exist and lets every timer job run on
-// each, and compares each distinct statement's fastest time at the two
-// sizes. A statement whose work is bounded (one chat's messages, a LIMIT an
-// index serves) takes the same time at both; one that reads more rows as the
-// history grows takes longer. Times are noisy, so each size runs the sweep on
-// two server starts and a statement is judged by its fastest run.
-
-/** The large database holds this many times the history of the first. */
 const LARGE_SCALE = 4
-/** A statement fails when its fastest time at the large size is at least this... */
 const GROWTH_FLOOR_MS = 5
-/** ...and at least this many times its fastest time at the owner's size. */
 const GROWTH_RATIO = 2
-/** First-run times at or over this are listed in the report (not judged). */
 const FIRST_RUN_REPORT_MS = 50
 const MEASURED_STARTS = 2
-/** After the routes, how long the timer jobs (ARDEN_TIMERS_AT_ONCE) get to run. */
 const TIMER_JOBS_MS = 6_000
-/** A route that streams is read until its first frame or this long. */
 const ROUTE_TIMEOUT_MS = 3_000
 
-/**
- * Statements allowed to grow, each with its reason. Two kinds belong here:
- * one-time work (a migration, a backfill's first fill), and an exception the
- * owner approved, with the date. A statement that grows with the history is
- * fixed, not listed.
- */
 const ALLOWED_TO_GROW: ReadonlyArray<{ readonly sql: string; readonly reason: string }> = [
   {
     sql: BREAKDOWN_QUERIES.others,
@@ -59,10 +30,6 @@ const ALLOWED_TO_GROW: ReadonlyArray<{ readonly sql: string; readonly reason: st
   }
 ]
 
-/**
- * Routes whose id names something this database does not hold; each is still
- * called, with an id that does not exist, so its other queries run.
- */
 const NO_REAL_ID: Readonly<Record<string, string>> = {
   "/skills/:name/content": "skills are files in the data folder, not rows",
   "/scripts/:workflowRef": "no code-mode script is seeded",
@@ -84,8 +51,6 @@ const NO_REAL_ID: Readonly<Record<string, string>> = {
 
 const MISSING = "not-seeded"
 
-/** Routes that reach a service outside Arden (GitHub, the skills marketplace,
- * Google, the keychain); their answer depends on the machine, not the data. */
 const OUTSIDE: ReadonlySet<string> = new Set([
   "/mcp/github",
   "/skills/marketplace/popular",
@@ -93,10 +58,8 @@ const OUTSIDE: ReadonlySet<string> = new Set([
   "/google/accounts"
 ])
 
-/** The warm-up's search waits this long for the index to catch up. */
 const SEARCH_CATCH_UP_MS = 180_000
 
-/** Every GET route with the calls that open it on the seeded data. */
 const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<string>>> => {
   const chats = [ids.chat, ids.fork, ids.agent, ids.channel, ids.thread]
   const q = (params: Record<string, string>) => `?${new URLSearchParams(params).toString()}`
@@ -284,7 +247,6 @@ interface Logged {
   readonly sql: string
 }
 
-/** The same statement with a different number of `IN (?, ?)` values is one statement. */
 const shape = (sql: string): string =>
   sql
     .replace(/\s+/g, " ")
@@ -303,7 +265,6 @@ const readLog = (directory: string): ReadonlyArray<Logged> => {
   return rows
 }
 
-/** Each distinct statement with its fastest and slowest time and how often it ran. */
 const fastest = (rows: ReadonlyArray<Logged>) => {
   const statements = new Map<string, { min: number; max: number; count: number; sql: string }>()
   for (const row of rows) {
@@ -340,7 +301,6 @@ const call = async (
   const timer = setTimeout(() => abort.abort(), timeoutMs)
   try {
     const response = await server.fetch(url, { signal: abort.signal })
-    // An event stream never ends: its first frame is enough.
     await response.body?.getReader().read()
     return response.status
   } catch (cause) {
@@ -351,7 +311,6 @@ const call = async (
   }
 }
 
-/** Starts the server on the file, opens every screen, lets the timer jobs run, stops it. */
 const sweep = async (
   databasePath: string,
   calls: ReadonlyArray<string>,
@@ -388,11 +347,9 @@ interface Timing {
   readonly min: number
   readonly max: number
   readonly count: number
-  /** One run's text as sent, for its plan. */
   readonly sql: string
 }
 
-/** The plan steps that say how much a statement reads: scans, sorts, automatic indexes. */
 const planOf = (databasePath: string, sql: string): ReadonlyArray<string> => {
   const database = new DatabaseSync(databasePath, { readOnly: true })
   try {
@@ -421,12 +378,9 @@ interface SizeResult {
   readonly databasePath: string
 }
 
-/** Seeds a database at `scale`, warms it up, and runs the measured sweeps. */
 const measure = async (directory: string, scale: number): Promise<SizeResult> => {
   await mkdir(directory, { recursive: true })
   const databasePath = join(directory, "arden.db")
-  // A first start writes what a new install holds (built-in Automations,
-  // settings); the history goes in after it.
   const first = await startServer({ port: 0, databasePath })
   await first.stop()
   const seedStarted = performance.now()
@@ -439,8 +393,6 @@ const measure = async (directory: string, scale: number): Promise<SizeResult> =>
   expect(uncovered, "Add each new GET route to routeCalls, with real ids").toEqual([])
   const calls = routes.flatMap((route) => table[route] ?? [])
 
-  // Warm-up: a first start on the seeded file does work an old database
-  // did long ago. Its statements are reported, not judged.
   const warmLog = join(directory, "warm-up")
   await sweep(databasePath, calls, warmLog, TIMER_JOBS_MS, async (server) => {
     expect(await call(server, "/sessions/search?q=item", SEARCH_CATCH_UP_MS)).toBe(200)
@@ -451,7 +403,6 @@ const measure = async (directory: string, scale: number): Promise<SizeResult> =>
   for (let start = 0; start < MEASURED_STARTS; start++)
     answers.push(await sweep(databasePath, calls, measuredLog, TIMER_JOBS_MS))
 
-  // A route that answers with an error ran too little to judge its queries.
   const failed = calls.filter((url) => {
     const route = routes.find((path) => table[path]?.includes(url))
     if (route !== undefined && (NO_REAL_ID[route] !== undefined || OUTSIDE.has(route))) return false
@@ -500,7 +451,6 @@ it(
         )
         .toSorted((a, b) => b.large.min - a.large.min)
         .map((entry) => ({ ...entry, plan: planOf(large.databasePath, entry.large.sql) }))
-      // Slow on a server's first run of it (a cold page cache): listed, not judged.
       const firstRun = [...new Set([...small.measured.keys(), ...large.measured.keys()])]
         .map((sql) => ({ sql, small: small.measured.get(sql), large: large.measured.get(sql) }))
         .filter(

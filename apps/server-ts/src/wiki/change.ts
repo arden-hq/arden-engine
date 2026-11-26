@@ -1,13 +1,17 @@
-import type { Commit, ManagedFileRepositoryShape, ResourceChange } from "@arden-hq/revisions/effect"
+import {
+  CHANGE_ACTION,
+  type Commit,
+  type ManagedFileRepositoryShape,
+  type ResourceChange
+} from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 
-import { decodeWikiOrigin, wikiOriginSource, type WikiCommitSource } from "./commit.js"
+import { decodeWikiOrigin, wikiOriginSource, type WikiCommitSource } from "./origin.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { isCodeOwnedPage } from "./code-owned-pages.js"
 
 const CHANGE_DIFF_CHARS = 12_000
 const MIN_PAGE_CHARS = 400
-// How far back a page with no id (an archived one) is looked for by its path.
 const CHANGE_SEARCH_COMMITS = 2_000
 const MAX_LISTED_SAVES = 20
 
@@ -42,23 +46,12 @@ export interface WikiChangeRead {
   readonly next: WikiChangeCursor | undefined
 }
 
-/**
- * Names one saved change the way a person does: a page and a time. `pageId`
- * is the page's id when it is still in Memory; without it the page is found
- * by its path in recent changes, which covers an archived page. `at` picks
- * the change in effect at that time; omitted, the page's latest change.
- */
 interface WikiChangeName {
   readonly path: string
   readonly pageId: string | undefined
   readonly at: string | undefined
 }
 
-/**
- * One page between two saved states of Memory: `base` is the state a reader
- * last saw, `head` the state it reads now. A null `base` means the reader
- * never saw the page, so its whole text counts as added.
- */
 interface WikiPageSpan {
   readonly pageId: string
   readonly path: string
@@ -70,7 +63,6 @@ interface WikiPageSpan {
 export interface WikiPageChangesRead {
   readonly path: string
   readonly isNew: boolean
-  /** The saved changes the diff covers, newest first, up to a listing limit. */
   readonly saved: ReadonlyArray<{
     readonly timestamp: string
     readonly source: WikiCommitSource
@@ -95,10 +87,8 @@ const touches =
       ? change.before?.path === name.path || change.after?.path === name.path
       : (change.after ?? change.before)?.resourceId === name.pageId
 
-/** Whether a run is shown a saved change at this path: never a code-owned page's. */
 export const shownPathToRuns = (path: string): boolean => !isCodeOwnedPage(path)
 
-/** Whether a run is shown a saved change: never one to a code-owned page. */
 export const shownToRuns = (change: {
   readonly before: { readonly path: string } | null
   readonly after: { readonly path: string } | null
@@ -109,7 +99,8 @@ export const shownToRuns = (change: {
 
 const pathOf = (change: ResourceChange): string => (change.after ?? change.before)?.path ?? ""
 
-const diffTarget = (change: ResourceChange) => (change.action === "archive" ? null : change.after)
+const diffTarget = (change: ResourceChange) =>
+  change.action === CHANGE_ACTION.archive ? null : change.after
 
 const sameText = (change: ResourceChange): boolean =>
   change.before !== null &&
@@ -129,8 +120,6 @@ export const makeWikiChangeMethods = (
     const ofPage = commits.filter((commit) =>
       commit.changes.some((change) => shownToRuns(change) && touches(name)(change))
     )
-    // A time copied from a listing names that change exactly, even when two
-    // changes were saved within one millisecond.
     const found =
       ofPage.find((commit) => commit.timestamp === name.at) ??
       ofPage.find((commit) => until === undefined || Date.parse(commit.timestamp) <= until)

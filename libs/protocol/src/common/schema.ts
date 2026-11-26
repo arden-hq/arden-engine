@@ -1,5 +1,7 @@
 import { DateTime, Option, Schema } from "effect"
 import {
+  APP_DESTINATION,
+  APP_SETTINGS_TAB,
   AUTOMATION_DESTINATION,
   MEMORY_DESTINATION,
   SESSION_DESTINATION_TURN,
@@ -8,18 +10,18 @@ import {
 } from "./navigation.js"
 import { PROVIDER_COST } from "./event-fields.js"
 import type { Agrees, Assert } from "./type-agreement.js"
-import type { ConnectionState, RuntimeRunStatus } from "../chat/runtime.js"
+import {
+  CONNECTION_ACTION,
+  CONNECTION_STATE,
+  RUN_STATUS,
+  type ConnectionState,
+  type RuntimeRunStatus
+} from "../chat/runtime.js"
 import { TODO_REASON, TODO_STATUS } from "../sessions/todos/contracts.js"
 
-/** Shared schema helpers. All public object schemas retain additive fields. */
 export const extraFields = [Schema.Record(Schema.String, Schema.Unknown)] as const
 export const unknownRecord = Schema.Record(Schema.String, Schema.Unknown)
 
-/**
- * ISO-8601 date-time text with an explicit UTC (`Z`) or numeric-offset zone.
- * Bracketed named zones (`[Europe/Paris]`) are deliberately rejected: no wire
- * producer emits them and downstream `Date` parsing cannot read them.
- */
 export const IsoDateTimeStringSchema = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(128),
@@ -57,7 +59,6 @@ export const event = <const Type extends string, Fields extends Schema.Struct.Fi
     ...fields
   })
 
-/** Event variant for a required or nullable session identifier. */
 export const sessionEvent = <
   const Type extends string,
   SessionId extends Schema.Top,
@@ -102,51 +103,22 @@ export const eventUsage = withExtras({
   cost: ProviderCostSchema
 })
 
-export const RuntimeRunStatusSchema = Schema.Literals([
-  "pending",
-  "running",
-  "interrupted",
-  "error",
-  "cancelled",
-  "completed"
-] as const)
-export const SessionTypeSchema = Schema.Literals(["chat", "channel", "agent"] as const)
-export const ConnectionStateSchema = Schema.Literals([
-  "not_configured",
-  "disabled",
-  "auth_required",
-  "scope_required",
-  "degraded"
-] as const)
-export const ConnectionActionSchema = Schema.Literals([
-  "oauth",
-  "credentials",
-  "enable",
-  "settings"
-] as const)
+export const RuntimeRunStatusSchema = Schema.Literals(Object.values(RUN_STATUS))
+export const SESSION_TYPE = { chat: "chat", channel: "channel", agent: "agent" } as const
+export const SessionTypeSchema = Schema.Literals(Object.values(SESSION_TYPE))
+export const ConnectionStateSchema = Schema.Literals(Object.values(CONNECTION_STATE))
+export const ConnectionActionSchema = Schema.Literals(Object.values(CONNECTION_ACTION))
 
-export const AppSettingsTabIdSchema = Schema.Literals([
-  "integrations",
-  "models",
-  "usage",
-  "tools",
-  "skills",
-  "permissions",
-  "appearance",
-  "storage",
-  "archive",
-  "iphone"
-] as const)
+export const AppSettingsTabIdSchema = Schema.Literals(Object.values(APP_SETTINGS_TAB))
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type AppSettingsTabIdAgrees = Assert<
   Agrees<typeof AppSettingsTabIdSchema.Type, AppSettingsTabId>
 >
 
 export const AppDestinationSchema = Schema.Union([
-  withExtras({ kind: Schema.Literal("home") }),
+  withExtras({ kind: Schema.Literal(APP_DESTINATION.home) }),
   withExtras({
-    kind: Schema.Literal("session"),
+    kind: Schema.Literal(APP_DESTINATION.session),
     session_id: Schema.NonEmptyString,
     turn: Schema.Union([
       Schema.Struct({ kind: Schema.Literal(SESSION_DESTINATION_TURN.latest) }),
@@ -157,7 +129,7 @@ export const AppDestinationSchema = Schema.Union([
     ])
   }),
   withExtras({
-    kind: Schema.Literal("settings"),
+    kind: Schema.Literal(APP_DESTINATION.settings),
     tab: Schema.Union([
       Schema.Struct({ kind: Schema.Literal(SETTINGS_DESTINATION_TAB.general) }),
       Schema.Struct({
@@ -167,7 +139,7 @@ export const AppDestinationSchema = Schema.Union([
     ])
   }),
   withExtras({
-    kind: Schema.Literal("automation"),
+    kind: Schema.Literal(APP_DESTINATION.automation),
     target: Schema.Union([
       Schema.Struct({ kind: Schema.Literal(AUTOMATION_DESTINATION.list) }),
       Schema.Struct({
@@ -176,15 +148,15 @@ export const AppDestinationSchema = Schema.Union([
       })
     ])
   }),
-  withExtras({ kind: Schema.Literal("task"), item_id: Schema.NonEmptyString }),
+  withExtras({ kind: Schema.Literal(APP_DESTINATION.task), item_id: Schema.NonEmptyString }),
   withExtras({
-    kind: Schema.Literal("memory"),
+    kind: Schema.Literal(APP_DESTINATION.memory),
     target: Schema.Union([
       Schema.Struct({ kind: Schema.Literal(MEMORY_DESTINATION.index) }),
       Schema.Struct({ kind: Schema.Literal(MEMORY_DESTINATION.page), path: Schema.NonEmptyString })
     ])
   }),
-  withExtras({ kind: Schema.Literal("space"), space_id: Schema.NonEmptyString })
+  withExtras({ kind: Schema.Literal(APP_DESTINATION.space), space_id: Schema.NonEmptyString })
 ])
 
 const focusEvidence = withExtras({
@@ -225,12 +197,10 @@ export const TodoListItemSchema = Schema.Union([
   })
 ])
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type RuntimeRunStatusAgrees = Assert<
   Agrees<(typeof RuntimeRunStatusSchema)["Type"], RuntimeRunStatus>
 >
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type ConnectionStateAgrees = Assert<
   Agrees<(typeof ConnectionStateSchema)["Type"], ConnectionState>
 >

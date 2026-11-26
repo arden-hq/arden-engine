@@ -1,12 +1,14 @@
-import { PauseRequested, ToolExecutionError } from "../errors.js"
-import type {
-  StandardSchemaV1,
-  ChatMessage,
-  JsonObject,
-  ModelContentBlock
+import { PAUSE_REASON, PauseRequested, ToolExecutionError } from "../errors.js"
+import {
+  CONTENT_BLOCK_TYPE,
+  type StandardSchemaV1,
+  type ChatMessage,
+  type JsonObject,
+  type ModelContentBlock
 } from "../contracts/messages.js"
 import {
   canRunInBackground,
+  TOOL_PHASE,
   type EndsTurn,
   type ToolApprovalContext,
   type ToolCallRequest,
@@ -25,38 +27,23 @@ import { truncateToolResult } from "./truncate.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 export interface ToolContext<RunCtx = void> {
-  /** The owning inference's admission, retained by nested tool effects. */
   readonly beforeExecute?: ToolCallRequest["beforeExecute"]
   readonly toolCallId: string
-  /** Per-call signal, tied to run cancellation. */
   readonly signal: AbortSignal
-  /** Host-confirmed approval replay for this exact call. */
   readonly approval?: ToolApprovalContext
-  /** Typed run-context: session identity, spawn seam, stores. */
   readonly run: RunCtx
-  /** Read-only view of the canonical history at call time. */
   readonly messages: ReadonlyArray<ChatMessage>
-  /**
-   * Push a live progress update for this call (a `ToolProgress` stream event).
-   * Fire-and-forget: it never throws and is safe to call after the call has
-   * settled — late emits are dropped. Parallel tools interleave their
-   * progress events in emission order.
-   */
   readonly emit?: (update: ToolProgressUpdate) => void
 }
 
 export interface ToolResultOutput {
-  /** Model-facing text. */
   readonly result: string
-  /** UI-facing preview (host metadata rides ToolMeta.host). */
   readonly preview?: string
   readonly data?: Readonly<Record<string, unknown>>
-  /** Extra host metadata merged into the ToolFinished event. */
   readonly host?: Readonly<Record<string, unknown>>
   readonly model_content?: ReadonlyArray<ModelContentBlock>
 }
 
-/** The card a paused call shows; `presentation` is the host's own shape. */
 export interface ToolApprovalPrompt<Presentation = unknown> {
   readonly preview?: string
   readonly diff?: string
@@ -64,39 +51,19 @@ export interface ToolApprovalPrompt<Presentation = unknown> {
   readonly data?: JsonObject
 }
 
-/** The metadata keys the loop reads. */
 export interface LoopToolMetadata {
-  /**
-   * Start in the background at once, so the model continues independent work.
-   * Every other call that can run in the background moves there when it
-   * outlives the loop's foreground budget.
-   */
   readonly background?: boolean
-  /**
-   * Starts its own long-running job and returns a handle to it (a child Agent,
-   * a workflow, a detached process). Its lifecycle already runs outside the
-   * turn, so the loop never runs it in the background as well.
-   */
   readonly detached?: boolean
-  /** Executes upstream rather than through the local toolset. */
   readonly hosted?: boolean
-  /** Write lock in the fair read/write group. */
   readonly changes_state?: boolean
   readonly concurrency_group?: string | null
   readonly deferred?: boolean
-  /** The namespace a deferred tool is found and loaded under. */
   readonly group?: string
-  /** Tools that produce this tool's required inputs; search loads them with it. */
   readonly input_sources?: ReadonlyArray<ToolInputSource>
   readonly ends_turn?: EndsTurn
-  /** "ask" pauses every call until the host replays an approval; "always"/"never" are host vocabulary. */
-  readonly approval?: "always" | "ask" | "never"
+  readonly approval?: ToolApprovalPolicy
 }
 
-/**
- * A tool's policy bag: the loop's keys plus the host's own. The whole bag
- * rides `ToolMeta.host` on catalog entries and events.
- */
 export type ToolMetadata<HostMeta extends object = Record<never, never>> = LoopToolMetadata &
   HostMeta
 
@@ -107,24 +74,13 @@ export interface ToolDefinition<
 > {
   readonly name: string
   readonly description: string
-  /** Standard Schema — zod v4, effect Schema, and valibot all conform. */
   readonly parameters: S
-  /**
-   * Authoritative model-facing JSON Schema when the tool source already owns
-   * one, as MCP does. Validation still goes through `parameters`.
-   */
   readonly parameterJsonSchema?: Readonly<Record<string, unknown>>
-  /** Policy bag; a tool cannot exist without it. */
   readonly metadata: ToolMetadata<HostMeta>
-  /** Build the exact approval card after arguments validate. */
   readonly approvalPrompt?: (
     input: StandardSchemaV1.InferOutput<S>,
     ctx: ToolContext<RunCtx>
   ) => ToolApprovalPrompt | Promise<ToolApprovalPrompt>
-  /**
-   * Require approval for this exact validated call even when host settings
-   * otherwise approve the tool. Returning undefined keeps the host decision.
-   */
   readonly approvalRequirement?: (
     input: StandardSchemaV1.InferOutput<S>,
     ctx: ToolContext<RunCtx>
@@ -137,9 +93,7 @@ export interface ToolDefinition<
 
 export interface Tool<RunCtx = void, HostMeta extends object = Record<never, never>> {
   readonly definition: ToolDefinition<StandardSchemaV1, RunCtx, HostMeta>
-  /** Catalog entry; the JSON-Schema converter is host-supplied via createToolset. */
   readonly entry: (toJsonSchema: JsonSchemaConverter, displayTitle?: ToolDisplayTitle) => ToolEntry
-  /** Validation, approval gating, and result normalization baked in. */
   readonly execute: (
     args: Readonly<Record<string, unknown>>,
     ctx: ToolContext<RunCtx>,
@@ -147,55 +101,35 @@ export interface Tool<RunCtx = void, HostMeta extends object = Record<never, nev
   ) => Promise<Required<ToolResult>>
 }
 
-/** Host decision for one tool: "deny" hides and refuses, "ask" pauses. */
-export type ToolApprovalDecision = "approve" | "ask" | "deny"
+export const TOOL_APPROVAL_POLICY = { always: "always", ask: "ask", never: "never" } as const
+export type ToolApprovalPolicy = (typeof TOOL_APPROVAL_POLICY)[keyof typeof TOOL_APPROVAL_POLICY]
 
-/** One validated call on its way to `execute`. */
+export const TOOL_APPROVAL_DECISION = { approve: "approve", ask: "ask", deny: "deny" } as const
+export type ToolApprovalDecision =
+  (typeof TOOL_APPROVAL_DECISION)[keyof typeof TOOL_APPROVAL_DECISION]
+type CallApprovalDecision = Exclude<ToolApprovalDecision, typeof TOOL_APPROVAL_DECISION.deny>
+
 export interface ToolApprovalCall<RunCtx, HostMeta extends object = Record<never, never>> {
   readonly definition: ToolDefinition<StandardSchemaV1, RunCtx, HostMeta>
-  /** The validated arguments. */
   readonly input: unknown
   readonly ctx: ToolContext<RunCtx>
-  /** The host's decision for this tool, or the tool's own `approval: "ask"`. */
-  readonly decision: "approve" | "ask"
+  readonly decision: CallApprovalDecision
 }
 
-/**
- * The host's approval policy for one validated call. It may pause (throw
- * `PauseRequested`), run the call through `execute` — with any context, for
- * example one carrying an approval the host granted itself — and shape the
- * normalized result. Without a gate the loop pauses an "ask" call, or a call
- * whose `approvalRequirement` returns a card, until an approval is replayed.
- */
 export type ToolApprovalGate<RunCtx, HostMeta extends object = Record<never, never>> = (
   call: ToolApprovalCall<RunCtx, HostMeta>,
   execute: (ctx: ToolContext<RunCtx>) => Promise<Required<ToolResult>>
 ) => Promise<Required<ToolResult>>
 
-/** What a toolset hands one call: the host's decision for the tool and its gate. */
 export interface ToolExecuteOptions<RunCtx, HostMeta extends object = Record<never, never>> {
-  /** Defaults to the tool's own `approval: "ask"`, else "approve". */
-  readonly decision?: "approve" | "ask"
+  readonly decision?: CallApprovalDecision
   readonly gate?: ToolApprovalGate<RunCtx, HostMeta>
-  /** Recheck the owning inference after approval, before the effect begins. */
   readonly beforeExecute?: ToolCallRequest["beforeExecute"]
-  /** Where the call is, for the loop's foreground budget (`ToolCallRequest.phase`). */
   readonly phase?: (phase: ToolPhase) => void
 }
 
-/**
- * Any Standard-Schema→JSON-Schema function. The `never` parameter makes this
- * contravariantly permissive: `z.toJSONSchema`, effect's `JSONSchema.make`,
- * and hand-written converters all assign without casts; the loop only ever
- * calls it with the schemas the host itself registered.
- */
 export type JsonSchemaConverter = (schema: never) => object
 
-/**
- * The ONE place the converter's contravariant `never` parameter is bridged to
- * a real schema — internally the loop only hands it schemas the host itself
- * registered, so the cast is honest here and nowhere else.
- */
 export const applyJsonSchemaConverter = (
   converter: JsonSchemaConverter,
   schema: StandardSchemaV1
@@ -206,57 +140,19 @@ export interface CreateToolsetOptions<
   RunCtx = void,
   HostMeta extends object = Record<never, never>
 > {
-  /** Host supplies the Standard-Schema→JSON-Schema conversion ONCE (e.g. zod's `z.toJSONSchema` or effect's `JSONSchema.make` — no casts needed). */
   readonly toJsonSchema: JsonSchemaConverter
-  /** Default mapper for plain execute throws. */
   readonly onExecuteError?: (error: unknown, request: ToolCallRequest) => ToolExecutionError
-  /**
-   * Names this toolset advertises and executes. Tools outside the scope stay
-   * metadata-resolvable (the recovery seam) but refuse execution.
-   */
   readonly scope?: Iterable<string>
-  /**
-   * Dynamic per-tool approval decisions (host settings) for the named tools,
-   * snapshotted at every entries() call (every advertised name) and execute()
-   * call (the called name only): "deny" hides the tool and refuses execution;
-   * "ask" reaches the approval gate, which by default throws PauseRequested
-   * until the host replays an approval. Hosts that persist pauses durably
-   * replay the recorded approval as request.approval and must not gate again
-   * themselves.
-   */
   readonly approvals?: (
     run: RunCtx,
     names: ReadonlyArray<string>
   ) =>
     | Readonly<Record<string, ToolApprovalDecision>>
     | Promise<Readonly<Record<string, ToolApprovalDecision>>>
-  /** The host's approval policy for each validated call (see `ToolApprovalGate`). */
   readonly approvalGate?: ToolApprovalGate<RunCtx, HostMeta>
-  /**
-   * The model-facing text when a call is refused: `scope` — outside this
-   * run's scope; `denied` — an approval decision of "deny". A host that
-   * declares tools a run may not call uses it to say what to do instead.
-   */
   readonly refusal?: (name: string, reason: "scope" | "denied") => string
-  /** Opt-in display-title argument; the returned Toolset carries it for the agent. */
   readonly displayTitle?: ToolDisplayTitle
-  /**
-   * Central output truncation (`truncateToolResult`), applied to every
-   * result's model-facing text after `execute` and before the loop's result
-   * normalization. `preview` and `data` are untouched. File spill of the full
-   * output stays host-side — the lib touches no filesystem; hosts that want
-   * opencode-style "full output saved to X" behavior write the untruncated
-   * text themselves (e.g. in a toolCallMiddleware) and append their own hint.
-   * Applies to the model-facing `content` text only; `model_content` blocks
-   * (tool media) are not truncated — cap those in the tool itself.
-   */
   readonly truncate?: { readonly maxBytes: number; readonly maxLines?: number }
-  /**
-   * The host's last guard on what the model reads: applied to every result's
-   * `content`, `preview` and text in `model_content`, and to a thrown
-   * `ToolExecutionError`'s message, before truncation. A host that cannot
-   * check a text returns the text it shows instead.
-   */
   readonly scrub?: (text: string) => Promise<string>
 }
 
@@ -294,7 +190,6 @@ const removeNullAt = (value: unknown, path: ReadonlyArray<PropertyKey>): unknown
     : Object.fromEntries(entries.map(([key, entry]) => [key, key === found[0] ? field : entry]))
 }
 
-/** `data.outcome` of a call its schema rejected: the tool never ran. */
 export const INVALID_ARGUMENTS_OUTCOME = "invalid_arguments"
 
 const invalidArgumentsResult = (
@@ -366,17 +261,19 @@ const pauseUntilApproved = async <RunCtx, HostMeta extends object>(
     definition.approvalRequirement === undefined
       ? undefined
       : await definition.approvalRequirement(input, ctx)
-  if (ctx.approval !== undefined || (required === undefined && call.decision !== "ask"))
+  if (
+    ctx.approval !== undefined ||
+    (required === undefined && call.decision !== TOOL_APPROVAL_DECISION.ask)
+  )
     return execute(ctx)
   const prompt =
     required ??
     (definition.approvalPrompt === undefined
       ? { preview: definition.description }
       : await definition.approvalPrompt(input, ctx))
-  throw new PauseRequested("approval", prompt.preview, prompt)
+  throw new PauseRequested(PAUSE_REASON.approval, prompt.preview, prompt)
 }
 
-/** Wrap one co-located definition with validation and approval gating. */
 export const createTool = <
   S extends StandardSchemaV1,
   RunCtx = void,
@@ -420,18 +317,22 @@ export const createTool = <
     }
     const input = validated.value
     const gate = options.gate ?? pauseUntilApproved
-    options.phase?.("waiting")
+    options.phase?.(TOOL_PHASE.waiting)
     return gate(
       {
         definition: erased,
         input,
         ctx,
-        decision: options.decision ?? (definition.metadata.approval === "ask" ? "ask" : "approve")
+        decision:
+          options.decision ??
+          (definition.metadata.approval === TOOL_APPROVAL_POLICY.ask
+            ? TOOL_APPROVAL_DECISION.ask
+            : TOOL_APPROVAL_DECISION.approve)
       },
       async (callCtx) => {
         const refusal = await options.beforeExecute?.()
         if (refusal !== undefined) return normalizeToolResult(refusal)
-        options.phase?.("executing")
+        options.phase?.(TOOL_PHASE.executing)
         return outputToResult(await definition.execute(input, callCtx))
       }
     )
@@ -463,11 +364,6 @@ const defaultExecuteError = (error: unknown, request: ToolCallRequest): ToolExec
 
 const neverAborted = new AbortController().signal
 
-/**
- * Bind a tool list into a per-run Toolset. The returned factory replaces
- * per-call dependency provisioning: call it once per run with the typed run
- * context.
- */
 export const createToolset = <RunCtx, HostMeta extends object = Record<never, never>>(
   tools: ReadonlyArray<Tool<RunCtx, HostMeta>>,
   options: CreateToolsetOptions<RunCtx, HostMeta>
@@ -497,8 +393,9 @@ export const createToolset = <RunCtx, HostMeta extends object = Record<never, ne
     const [content, preview] = await Promise.all([scrub(result.content), scrub(result.preview)])
     const modelContent = await Promise.all(
       result.model_content.map(async (block) => {
-        if (block.type === "text") return { ...block, text: await scrub(block.text) }
-        if (block.type === "context" && typeof block.content === "string")
+        if (block.type === CONTENT_BLOCK_TYPE.text)
+          return { ...block, text: await scrub(block.text) }
+        if (block.type === CONTENT_BLOCK_TYPE.context && typeof block.content === "string")
           return { ...block, content: await scrub(block.content) }
         return block
       })
@@ -535,7 +432,9 @@ export const createToolset = <RunCtx, HostMeta extends object = Record<never, ne
           ? () => entries
           : async () => {
               const decisions = await approvals(run, entryNames)
-              return entries.filter((entry) => decisions[entry.meta.name] !== "deny")
+              return entries.filter(
+                (entry) => decisions[entry.meta.name] !== TOOL_APPROVAL_DECISION.deny
+              )
             },
       metadata: (name) => metas.get(name),
       loadedNames: () => new Set(loaded),
@@ -563,8 +462,9 @@ export const createToolset = <RunCtx, HostMeta extends object = Record<never, ne
           const approvalDecision =
             approvals === undefined
               ? undefined
-              : ((await approvals(run, [request.name]))[request.name] ?? "approve")
-          if (approvalDecision === "deny") {
+              : ((await approvals(run, [request.name]))[request.name] ??
+                TOOL_APPROVAL_DECISION.approve)
+          if (approvalDecision === TOOL_APPROVAL_DECISION.deny) {
             throw new ToolExecutionError(
               options.refusal?.(request.name, "denied") ??
                 `Tool denied by settings: ${request.name}`,

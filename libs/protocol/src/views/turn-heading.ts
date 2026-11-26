@@ -1,15 +1,9 @@
 import { formatDuration } from "@arden-hq/std/time"
 
-/** A duration inside a sentence: the compact form, "less than a second" under 1 s. */
 export function turnDurationWords(durationMs: number): string {
   return durationMs < 1000 ? "less than a second" : formatDuration(durationMs)
 }
 
-/** A settled fold's heading: what the turn did, then how long it took as a
- *  quieter second part ("Listed chats, reported a blocker", "1m 26s"). The
- *  fold says what is inside it, so a reader knows whether to open it; a
- *  duration alone ("Worked for 1m 26s") said only that something happened.
- *  A stop outranks everything and keeps its own sentence. */
 export interface TurnHeading {
   readonly text: string
   readonly time: string | null
@@ -34,7 +28,6 @@ export function turnHeading(
     : { text: "Done", time: null }
 }
 
-/** The heading as one string, for labels and announcements. */
 export function turnHeadingText(heading: TurnHeading): string {
   return heading.time ? `${heading.text}, ${heading.time}` : heading.text
 }

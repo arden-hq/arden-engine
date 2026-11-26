@@ -1,35 +1,42 @@
 import { Schema } from "effect"
 export const GoogleOAuthCancelledSchema = Schema.Struct({ status: Schema.Literal("cancelled") })
-export const GoogleClientReplacementSchema = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("ready") }),
+import {
+  GOOGLE_CLIENT_BLOCK,
+  GOOGLE_CLIENT_CONFIGURED,
+  GOOGLE_CLIENT_REPLACEMENT,
+  GOOGLE_CLIENT_SECRET,
+  type GoogleClientConfigured,
+  type GoogleClientReplacement,
+  type GoogleDesktopClientFile,
+  type GoogleOAuthClient
+} from "./contracts.js"
+
+const GoogleClientBlockSchema = Schema.Literals(Object.values(GOOGLE_CLIENT_BLOCK))
+
+export const GoogleClientReplacementSchema: Schema.Codec<GoogleClientReplacement> = Schema.Union([
+  Schema.Struct({ status: Schema.Literal(GOOGLE_CLIENT_REPLACEMENT.ready) }),
   Schema.Struct({
-    status: Schema.Literal("blocked"),
-    reason: Schema.Literals(["accounts_connected", "authorization_pending"])
+    status: Schema.Literal(GOOGLE_CLIENT_REPLACEMENT.blocked),
+    reason: GoogleClientBlockSchema
   })
 ])
-
-import type {
-  GoogleClientConfigured,
-  GoogleDesktopClientFile,
-  GoogleOAuthClient
-} from "./contracts.js"
 
 export const GoogleOAuthClientSchema: Schema.Codec<GoogleOAuthClient> = Schema.Struct({
   clientId: Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
   secret: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("public") }),
+    Schema.Struct({ kind: Schema.Literal(GOOGLE_CLIENT_SECRET.public) }),
     Schema.Struct({
-      kind: Schema.Literal("confidential"),
+      kind: Schema.Literal(GOOGLE_CLIENT_SECRET.confidential),
       clientSecret: Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(512))
     })
   ])
 })
 
 export const GoogleClientConfiguredSchema: Schema.Codec<GoogleClientConfigured> = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("configured") }),
+  Schema.Struct({ status: Schema.Literal(GOOGLE_CLIENT_CONFIGURED.configured) }),
   Schema.Struct({
-    status: Schema.Literal("blocked"),
-    reason: Schema.Literals(["accounts_connected", "authorization_pending"])
+    status: Schema.Literal(GOOGLE_CLIENT_CONFIGURED.blocked),
+    reason: GoogleClientBlockSchema
   })
 ])
 

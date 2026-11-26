@@ -5,12 +5,10 @@ import { parseWikiPage } from "./page.js"
 
 const isPagePath = (path: string): boolean => path.endsWith(".md")
 
-/** The status scan reads the untracked files that could be pages. */
 export const UNTRACKED_PAGES: WorkingTreeStatusOptions = { readUntracked: isPagePath }
 
 const decoder = new TextDecoder("utf-8", { fatal: true })
 
-/** The file's text, or undefined when it is not UTF-8. */
 export const utf8 = (bytes: Uint8Array): string | undefined => {
   try {
     return decoder.decode(bytes)
@@ -19,13 +17,9 @@ export const utf8 = (bytes: Uint8Array): string | undefined => {
   }
 }
 
-/** The files in the Memory folder that history does not hold, by what Arden can do with them. */
 export interface UntrackedFiles {
-  /** `.md` files: they could be pages, but Arden never adds one by itself. */
   readonly notInMemory: ReadonlyArray<string>
-  /** Other files: only `.md` files are pages. */
   readonly otherFiles: ReadonlyArray<string>
-  /** Files or folders that could not be read, with the reason. */
   readonly unreadableFiles: ReadonlyArray<{ readonly path: string; readonly reason: string }>
 }
 
@@ -40,7 +34,6 @@ export const untrackedFiles = (files: ReadonlyArray<UntrackedFile>): UntrackedFi
   }
 }
 
-/** The page id each read untracked file carries, when it parses as a page, in file order. */
 export const untrackedPageIds = Effect.fn("Wiki.untrackedPageIds")(function* (
   files: ReadonlyArray<UntrackedFile>
 ) {

@@ -7,48 +7,44 @@ import {
   toolMeta,
   toolNoun,
   waitingVerb,
+  STEP_ICON,
   type StepIconKey
 } from "./tool-words.js"
+import { TOOL_NOUN } from "./tool-registry.js"
 
-/**
- * One call as the summary reads it. The desktop builds these from its loaded
- * rows (whose arguments and titles it knows); the server and a restored turn
- * build them from per-tool counts alone (`turnCallsSummaryText`).
- */
 export interface SummaryCall {
   readonly id: string
-  /** The tool's name as the server sends it; "" when unknown. */
   readonly name: string
-  /** A spawned agent: counted per call, under "Started agents". */
   readonly agent: boolean
-  /** The user turned the call down on its card: it never ran. */
   readonly rejected: boolean
-  /** The tool's stable per-kind verb ("Read", "Searched email"). */
   readonly verb: string
   readonly iconKey: StepIconKey
   readonly noun: string | null
-  /** What the call acted on (a path, query, command), which dedupes units. */
   readonly detail: string | null
-  /** The tool's name in words, for a tool the registry does not know. */
   readonly displayName: string
 }
 
-const CLASS_ORDER = [
-  "agents",
-  "changes",
-  "reads",
-  "pages",
-  "commands",
-  "web",
-  "mail",
-  "slack",
-  "calendar",
-  "memory",
-  "chats",
-  "other"
-] as const
+const ACTIVITY_CLASS = {
+  agents: "agents",
+  changes: "changes",
+  reads: "reads",
+  pages: "pages",
+  commands: "commands",
+  web: "web",
+  mail: "mail",
+  slack: "slack",
+  calendar: "calendar",
+  memory: "memory",
+  chats: "chats",
+  other: "other"
+} as const
 
-type ActivityClass = (typeof CLASS_ORDER)[number]
+type ActivityClass = (typeof ACTIVITY_CLASS)[keyof typeof ACTIVITY_CLASS]
+
+const CLASS_ORDER = Object.values(ACTIVITY_CLASS)
+
+export const SUMMARY_POSITION = { leading: "leading", following: "following" } as const
+export type SummaryPosition = (typeof SUMMARY_POSITION)[keyof typeof SUMMARY_POSITION]
 
 interface ActivitySummaryPart {
   readonly kind: ActivityClass
@@ -92,41 +88,41 @@ const SUMMARY_PART_LIMIT = 3
 const LIST_FORMAT = new Intl.ListFormat("en", { style: "long", type: "unit" })
 
 function classFor(call: SummaryCall): ActivityClass {
-  if (call.agent) return "agents"
+  if (call.agent) return ACTIVITY_CLASS.agents
   switch (call.iconKey) {
-    case "edit":
-    case "file-plus":
-      return "changes"
-    case "file":
-    case "folder":
-    case "table":
-      return "reads"
-    case "search":
-      return call.name.startsWith("file_") ? "reads" : "other"
-    case "mail":
-      return "mail"
-    case "slack":
-      return "slack"
-    case "calendar":
-      return "calendar"
-    case "book":
-      return "memory"
-    case "history":
-      return "chats"
-    case "globe":
-      return call.noun === "page" ? "pages" : "web"
-    case "terminal":
-      return "commands"
-    case "image":
-    case "list":
-    case "brain":
-    case "clock":
-    case "bell":
-    case "wrench":
-    case "app":
-    case "browser":
-    case "dot":
-      return "other"
+    case STEP_ICON.edit:
+    case STEP_ICON.filePlus:
+      return ACTIVITY_CLASS.changes
+    case STEP_ICON.file:
+    case STEP_ICON.folder:
+    case STEP_ICON.table:
+      return ACTIVITY_CLASS.reads
+    case STEP_ICON.search:
+      return call.name.startsWith("file_") ? ACTIVITY_CLASS.reads : ACTIVITY_CLASS.other
+    case STEP_ICON.mail:
+      return ACTIVITY_CLASS.mail
+    case STEP_ICON.slack:
+      return ACTIVITY_CLASS.slack
+    case STEP_ICON.calendar:
+      return ACTIVITY_CLASS.calendar
+    case STEP_ICON.book:
+      return ACTIVITY_CLASS.memory
+    case STEP_ICON.history:
+      return ACTIVITY_CLASS.chats
+    case STEP_ICON.globe:
+      return call.noun === TOOL_NOUN.page ? ACTIVITY_CLASS.pages : ACTIVITY_CLASS.web
+    case STEP_ICON.terminal:
+      return ACTIVITY_CLASS.commands
+    case STEP_ICON.image:
+    case STEP_ICON.list:
+    case STEP_ICON.brain:
+    case STEP_ICON.clock:
+    case STEP_ICON.bell:
+    case STEP_ICON.wrench:
+    case STEP_ICON.app:
+    case STEP_ICON.browser:
+    case STEP_ICON.dot:
+      return ACTIVITY_CLASS.other
   }
 }
 
@@ -152,9 +148,9 @@ function summaryParts(calls: readonly SummaryCall[]): ActivitySummaryPart[] {
   for (const call of calls) {
     if (isAskCall(call.name)) continue
     const kind = classFor(call)
-    if (kind === "other" || call.rejected) {
+    if (kind === ACTIVITY_CLASS.other || call.rejected) {
       const { one, many, icon } =
-        kind === "other" && toolMeta(call.name) === undefined
+        kind === ACTIVITY_CLASS.other && toolMeta(call.name) === undefined
           ? {
               one: `Used ${call.displayName}`,
               many: `Used ${call.displayName}`,
@@ -167,7 +163,7 @@ function summaryParts(calls: readonly SummaryCall[]): ActivitySummaryPart[] {
       continue
     }
     const seen = units.get(kind) ?? new Set<string>()
-    seen.add(kind === "agents" ? call.id : (call.detail ?? call.id))
+    seen.add(kind === ACTIVITY_CLASS.agents ? call.id : (call.detail ?? call.id))
     units.set(kind, seen)
     const tools = kinds.get(kind) ?? new Set<string>()
     const name = call.name.toLowerCase()
@@ -175,7 +171,7 @@ function summaryParts(calls: readonly SummaryCall[]): ActivitySummaryPart[] {
     kinds.set(kind, tools)
   }
   return CLASS_ORDER.flatMap((kind): ActivitySummaryPart[] => {
-    if (kind === "other") {
+    if (kind === ACTIVITY_CLASS.other) {
       return [...tail.values()].map(({ label, icon, count }) => ({ kind, count, label, icon }))
     }
     const seen = units.get(kind)
@@ -199,7 +195,6 @@ function ownVerb(
   return { one: meta.verb, many: meta.verb }
 }
 
-/** The glyph for a group of calls: its leading part's icon. */
 export function callsSummaryIcon(calls: readonly SummaryCall[]): StepIconKey {
   const first = summaryParts(calls)[0]
   return first ? first.icon : "dot"
@@ -207,19 +202,16 @@ export function callsSummaryIcon(calls: readonly SummaryCall[]): StepIconKey {
 
 const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1)
 
-/** One line for a finished trail — "Edited files, read files, ran commands".
- *  `position` picks the casing: `leading` opens a sentence, `following` sits
- *  after other words. Nothing to say reads "Done". */
 export function callsSummaryText(
   calls: readonly SummaryCall[],
-  position: "leading" | "following" = "leading"
+  position: SummaryPosition = SUMMARY_POSITION.leading
 ): string {
   const parts = summaryParts(calls).slice(0, SUMMARY_PART_LIMIT)
-  if (parts.length === 0) return position === "leading" ? "Done" : "done"
+  if (parts.length === 0) return position === SUMMARY_POSITION.leading ? "Done" : "done"
   return LIST_FORMAT.format(
     parts.map((part, index) => {
       const text = part.label[part.count === 1 ? "one" : "many"]
-      return index === 0 && position === "leading" ? text : lowerFirst(text)
+      return index === 0 && position === SUMMARY_POSITION.leading ? text : lowerFirst(text)
     })
   )
 }
@@ -231,11 +223,6 @@ interface TurnCallCount {
   readonly rejected: number
 }
 
-/** What a turn did, from the turn record's per-tool counts, when its rows
- *  are not loaded (a restored turn, the phone). The counts stand in for the
- *  calls, so the words are the ones the rows would give once they arrive — a
- *  call the user turned down on its card included: it says what was asked,
- *  never that it was done. */
 export function turnCallsSummaryText(calls: readonly TurnCallCount[]): string | undefined {
   const summary = calls
     .filter((call) => !isAskCall(call.name))

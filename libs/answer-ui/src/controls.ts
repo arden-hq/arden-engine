@@ -1,6 +1,8 @@
 import type { ElementNode } from "@openuidev/lang-core"
 import type { ComponentName } from "./parts.js"
 
+export const CONTROL_VALUE_PROP = "value"
+
 const UNBOUND_FIELD = {
   Segmented: "name",
   Tabs: "name",
@@ -19,7 +21,7 @@ export function unboundFieldName(
   part: ElementNode,
   bound: (value: unknown) => boolean
 ): string | undefined {
-  if (!isControl(part.typeName) || bound(part.props.value)) return undefined
+  if (!isControl(part.typeName) || bound(part.props[CONTROL_VALUE_PROP])) return undefined
   const name = part.props[UNBOUND_FIELD[part.typeName]]
   return typeof name === "string" && !name.startsWith("$") ? name : undefined
 }

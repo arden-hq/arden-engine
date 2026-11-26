@@ -63,9 +63,11 @@ export const RunContextSchema = Schema.Struct({
   ])
 })
 
+export const RUN_APPROVAL_WORK = { task: "task", automation: "automation" } as const
+
 export const RunApprovalWorkSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("task"), item_id: Identity }),
-  Schema.Struct({ kind: Schema.Literal("automation"), automation_id: Identity })
+  Schema.Struct({ kind: Schema.Literal(RUN_APPROVAL_WORK.task), item_id: Identity }),
+  Schema.Struct({ kind: Schema.Literal(RUN_APPROVAL_WORK.automation), automation_id: Identity })
 ])
 
 export type RunOrigin = typeof RunOriginSchema.Type

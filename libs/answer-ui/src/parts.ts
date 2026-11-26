@@ -4,7 +4,6 @@ import { Format } from "./format.js"
 import { FormulaVars, PlotSpec } from "./plot.js"
 import { ChartSpec, DiagramSpec } from "./specs.js"
 
-/** The glyphs a card or tile may name; the renderer maps each to an icon. */
 const ICON_NAMES = [
   "money",
   "train",
@@ -24,6 +23,9 @@ const ICON_NAMES = [
 ] as const
 export type IconName = (typeof ICON_NAMES)[number]
 const IconName = z.enum(ICON_NAMES)
+
+export const BAR_CHART_HIGHLIGHT = { min: "min", max: "max" } as const
+export type BarChartHighlight = (typeof BAR_CHART_HIGHLIGHT)[keyof typeof BAR_CHART_HIGHLIGHT]
 
 function reactive<T extends z.ZodType>(schema: T): z.ZodType<StateField<z.infer<T>>> {
   markReactive(schema)
@@ -127,7 +129,7 @@ const BarChart = part({
     labels: z.array(z.string()),
     values: z.array(z.number()),
     format: Format.optional(),
-    highlight: z.enum(["min", "max"]).optional()
+    highlight: z.enum(BAR_CHART_HIGHLIGHT).optional()
   })
 })
 
@@ -402,8 +404,6 @@ const Button = part({
   })
 })
 
-/** Every part an `arden:ui` block may use, by name. The order is the order the
- *  prompt lists them in. */
 export const ANSWER_PARTS = {
   Stack,
   Header,
@@ -447,10 +447,54 @@ export const ANSWER_PARTS = {
   Button
 } as const
 
-export type ComponentName = keyof typeof ANSWER_PARTS
+export const COMPONENT_NAME = {
+  Stack: "Stack",
+  Header: "Header",
+  Option: "Option",
+  Segmented: "Segmented",
+  Slider: "Slider",
+  Switch: "Switch",
+  Metric: "Metric",
+  Formula: "Formula",
+  Summary: "Summary",
+  BarChart: "BarChart",
+  Col: "Col",
+  Table: "Table",
+  Callout: "Callout",
+  Row: "Row",
+  List: "List",
+  VisualCard: "VisualCard",
+  VisualCards: "VisualCards",
+  OptionCard: "OptionCard",
+  OptionCards: "OptionCards",
+  Tile: "Tile",
+  Tiles: "Tiles",
+  Step: "Step",
+  Steps: "Steps",
+  TabItem: "TabItem",
+  Tabs: "Tabs",
+  Photo: "Photo",
+  Gallery: "Gallery",
+  Stepper: "Stepper",
+  CheckItem: "CheckItem",
+  Checklist: "Checklist",
+  Copy: "Copy",
+  Series: "Series",
+  LineChart: "LineChart",
+  Plot: "Plot",
+  Chart: "Chart",
+  Diagram: "Diagram",
+  App: "App",
+  Rows: "Rows",
+  Image: "Image",
+  Button: "Button"
+} as const satisfies { readonly [K in keyof typeof ANSWER_PARTS]: K }
+export type ComponentName = (typeof COMPONENT_NAME)[keyof typeof COMPONENT_NAME]
 
-/** The part names, in the parts' order. */
-export const COMPONENT_NAMES = Object.keys(ANSWER_PARTS) as readonly ComponentName[]
+export const COMPONENT_NAMES: ReadonlyArray<ComponentName> = Object.values(COMPONENT_NAME)
 
-/** The props a part's renderer receives, as the schema reads them. */
+const COMPONENT_NAME_SET: ReadonlySet<string> = new Set(COMPONENT_NAMES)
+
+export const isComponentName = (name: string): name is ComponentName => COMPONENT_NAME_SET.has(name)
+
 export type PartProps<K extends ComponentName> = z.infer<(typeof ANSWER_PARTS)[K]["props"]>

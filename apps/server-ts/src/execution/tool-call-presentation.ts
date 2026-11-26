@@ -1,5 +1,9 @@
 import type { JsonObject, Metadata, ToolDisplayTitle } from "@arden-hq/loop"
-import { MAX_TOOL_DISPLAY_TITLE_LENGTH, TOOL_DISPLAY_TITLE_ARGUMENT } from "@arden-hq/protocol/chat"
+import {
+  MAX_TOOL_DISPLAY_TITLE_LENGTH,
+  TOOL_DISPLAY_TITLE_ARGUMENT,
+  TOOL_PRESENTATION
+} from "@arden-hq/protocol/chat"
 
 export const TOOL_DISPLAY_TITLE: ToolDisplayTitle = {
   argument: TOOL_DISPLAY_TITLE_ARGUMENT,
@@ -24,6 +28,8 @@ export const persistToolCallHost = (host: Metadata): JsonObject => {
     ...(icon === undefined ? {} : { icon }),
     ...(noun === undefined ? {} : { noun }),
     ...(source === undefined ? {} : { source }),
-    ...(host["presentation"] === "conversation" ? { presentation: "conversation" } : {})
+    ...(host["presentation"] === TOOL_PRESENTATION.conversation
+      ? { presentation: TOOL_PRESENTATION.conversation }
+      : {})
   }
 }

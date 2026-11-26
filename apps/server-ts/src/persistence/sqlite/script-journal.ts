@@ -1,4 +1,5 @@
 import { AGENT_RUN } from "@arden-hq/protocol/workflows"
+import type { RuntimeRunStatus } from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
@@ -231,15 +232,17 @@ const scriptRetryVerdict = Effect.fn("ScriptJournal.retryVerdict")(function* (
   })
 })
 
-interface AgentRow {
-  readonly run_id: string | null
+interface AgentRowFields {
   readonly parent_tool_call_id: string
   readonly agent_key: string
   readonly public_ref: string
   readonly name: string | null
   readonly mode: string | null
-  readonly run_status: string | null
 }
+
+type AgentRow =
+  | (AgentRowFields & { readonly run_id: null; readonly run_status: null })
+  | (AgentRowFields & { readonly run_id: string; readonly run_status: RuntimeRunStatus })
 
 const AGENT_MODES = ["research", "code", "work"] as const
 
@@ -293,7 +296,7 @@ const readAgents = Effect.fn("ScriptJournal.agents")(function* (
           run:
             row.run_id === null
               ? { kind: AGENT_RUN.none }
-              : { kind: AGENT_RUN.run, run_id: row.run_id, status: row.run_status ?? "unavailable" }
+              : { kind: AGENT_RUN.run, run_id: row.run_id, status: row.run_status }
         }
       ],
       label: row.name ?? "Agent",

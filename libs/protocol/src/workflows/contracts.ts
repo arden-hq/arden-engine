@@ -1,23 +1,33 @@
 import type { JsonRecord } from "../common/json.js"
+import type { RuntimeRunStatus } from "../chat/runtime.js"
 
 import type { WorkflowStatus } from "./status.js"
 
-export type WorkflowEffectDisposition = "none" | "no_op" | "applied" | "unknown"
+export const WORKFLOW_EFFECT = {
+  none: "none",
+  no_op: "no_op",
+  applied: "applied",
+  unknown: "unknown"
+} as const
 
-export type WorkflowErrorCode =
-  | "coordinator_failed"
-  | "agent_failed"
-  | "schema_invalid"
-  | "interrupted"
-  | "cancelled"
-  | "timed_out"
-  | "budget_exhausted"
-  | "conflict"
-  | "uncertain_effect"
-  | "storage"
-  | "internal"
+export type WorkflowEffectDisposition = (typeof WORKFLOW_EFFECT)[keyof typeof WORKFLOW_EFFECT]
 
-/** One source reference retained with an outcome. */
+export const WORKFLOW_ERROR_CODE = {
+  coordinator_failed: "coordinator_failed",
+  agent_failed: "agent_failed",
+  schema_invalid: "schema_invalid",
+  interrupted: "interrupted",
+  cancelled: "cancelled",
+  timed_out: "timed_out",
+  budget_exhausted: "budget_exhausted",
+  conflict: "conflict",
+  uncertain_effect: "uncertain_effect",
+  storage: "storage",
+  internal: "internal"
+} as const
+
+export type WorkflowErrorCode = (typeof WORKFLOW_ERROR_CODE)[keyof typeof WORKFLOW_ERROR_CODE]
+
 export interface WorkflowSourceRef extends JsonRecord {
   readonly provider: string
   readonly kind: string
@@ -60,7 +70,6 @@ export type ScriptFailure =
   | { readonly kind: "none" }
   | { readonly kind: "failed"; readonly error: WorkflowError }
 
-/** A script's own record: one row per detached code_mode script. */
 export interface ScriptSummary extends JsonRecord {
   readonly workflow_ref: string
   readonly version: number
@@ -75,16 +84,18 @@ export interface ScriptSummary extends JsonRecord {
   readonly end: ScriptEnd
 }
 
-/** An admitted child run; later steering in the same chat does not change this execution. */
 export interface ScriptAgentAttempt extends JsonRecord {
   readonly session_ref: string
   readonly tool_call_id: string
   readonly run:
-    | { readonly kind: "none" }
-    | { readonly kind: "run"; readonly run_id: string; readonly status: string }
+    | { readonly kind: typeof AGENT_RUN.none }
+    | {
+        readonly kind: typeof AGENT_RUN.run
+        readonly run_id: string
+        readonly status: RuntimeRunStatus
+      }
 }
 
-/** One `agent()` of a script, as its latest child session stands. */
 export interface ScriptAgent extends JsonRecord {
   readonly key: string
   readonly attempts: ReadonlyArray<ScriptAgentAttempt>
@@ -97,7 +108,6 @@ export interface ScriptAgent extends JsonRecord {
 export interface ScriptDetail extends JsonRecord {
   readonly script: ScriptSummary
   readonly agents: ReadonlyArray<ScriptAgent>
-  /** Last nonempty progress per attempt, from the durable tool journal. */
   readonly executions: ReadonlyArray<ScriptExecution>
 }
 
@@ -106,13 +116,11 @@ export interface ScriptExecution extends JsonRecord {
   readonly data: JsonRecord
 }
 
-/** Caller context required by every script HTTP route. */
 export interface WorkflowRouteTarget {
   readonly workflowRef: string
   readonly sessionId: string
 }
 
 export interface ScriptRetryRequest {
-  /** The version the caller saw: a script that changed since is not retried. */
   readonly expected_version: number
 }

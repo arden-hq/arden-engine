@@ -1,15 +1,12 @@
-import type { ToolContext } from "@arden-hq/loop"
 import { PermissionRules } from "../persistence/permissions/rules.js"
 import { formatBytes } from "@arden-hq/std/count"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect, Option, Schema } from "effect"
 import { basename, join } from "node:path"
 
-import { ConversationArtifactError, ConversationArtifacts } from "../artifacts/conversation.js"
-import {
-  ManagedOutputs,
-  type ManagedOutputWriter
-} from "../artifacts/managed-output/managed-output.js"
+import { ConversationArtifactError } from "../artifacts/conversation-model.js"
+import { ConversationArtifacts } from "../artifacts/conversation.js"
+import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
 import { sharedResourceSessions } from "../execution/authority.js"
 import { PrivateFileError, readRegularFile } from "../fs/private-store.js"
 import { JsonObjectSchema, type JsonObject } from "../persistence/json.js"
@@ -20,7 +17,7 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { DataRoot } from "../runtime/data-root.js"
-import { neverRuleRefusal, pathRuleFor, type LocalPathServices } from "../storage/local-paths.js"
+import { neverRuleRefusal, pathRuleFor } from "../storage/local-paths.js"
 import { cwdFor, filesystemError } from "./file-tool-support.js"
 import {
   fileMediaType,
@@ -29,8 +26,8 @@ import {
   type TranscriptFile
 } from "./shared-file-sources.js"
 import { checkUploadPath, uploadRefusalText } from "./shared-file-policy.js"
-import type { ServerRunContext } from "./run-context.js"
 import { toolFailure, toolRefusal } from "./tool-failure.js"
+import type { ResolvedFile, SharedFileContext, SharedFileServices } from "./shared-file-types.js"
 
 const SHARED_FILE_MAX_BYTES = 100 * 1024 * 1024
 
@@ -70,22 +67,6 @@ export const PreparedFileSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("outside"), path: Schema.NonEmptyString, ...PreparedFields })
 ])
 export type PreparedFile = typeof PreparedFileSchema.Type
-
-export interface SharedFileServices extends LocalPathServices {
-  readonly artifacts: ConversationArtifacts["Service"]
-  readonly outputs: ManagedOutputWriter
-  readonly transcript: TranscriptQueries["Service"]
-  readonly stateRoots: ReadonlyArray<string>
-}
-export type SharedFileContext = Pick<
-  ToolContext<ServerRunContext>,
-  "run" | "signal" | "toolCallId" | "approval"
->
-export interface ResolvedFile {
-  readonly filename: string
-  readonly mimeType: string
-  readonly bytes: Buffer
-}
 
 const prepareFiles = async ({
   services,

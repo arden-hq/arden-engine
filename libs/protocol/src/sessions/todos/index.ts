@@ -23,7 +23,6 @@ export const todoRequests = {
   )
 } as const
 
-/** The item path serves GET, POST, and DELETE. */
 export const todoRoutes = {
   item(sessionId: string): string {
     return runBoundary(encodeTodoPathEffect(sessionId), "Invalid session-todo route", "encode")

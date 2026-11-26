@@ -1,5 +1,6 @@
+import { PATH_SEGMENT } from "@arden-hq/revisions/effect"
 import { cutText, foldSpace } from "@arden-hq/std/text"
-import type { WikiPage } from "@arden-hq/protocol/wiki"
+import { WIKI_PAGE_LIFECYCLE, type WikiPage } from "@arden-hq/protocol/wiki"
 import { Effect, Schema } from "effect"
 import { parseDocument, stringify } from "yaml"
 import { fromMarkdown } from "mdast-util-from-markdown"
@@ -102,7 +103,6 @@ const parseYaml = (source: string): unknown => {
 
 export const normal = (value: string): string => value.trim().toLowerCase()
 
-/** Whether a path is a folder's README, its contract, in any letter case. */
 export const isReadme = (path: string): boolean =>
   posix.basename(path).toLowerCase() === "readme.md"
 
@@ -110,12 +110,11 @@ const pageNamesForPath = (path: string): ReadonlyArray<string> => {
   const names = [path, ...(path.endsWith(".md") ? [path.slice(0, -3)] : [])]
   if (isReadme(path)) {
     const directory = posix.dirname(path)
-    if (directory !== ".") names.push(directory, `${directory}.md`)
+    if (directory !== PATH_SEGMENT.current) names.push(directory, `${directory}.md`)
   }
   return names
 }
 
-/** The names a page at `path` takes, in the one form any two names are compared in. */
 export const nameKeys = (path: string): ReadonlyArray<string> => pageNamesForPath(path).map(normal)
 
 export const namesTakenAt = (paths: Iterable<string>): Set<string> =>
@@ -199,11 +198,6 @@ const metadataOf = (frontmatter: Record<string, Schema.Json>): WikiPage["metadat
   )
 }
 
-/**
- * Reads `content` as a page. With `plainTitle`, the title of a code-owned page whose body holds all
- * of it, a file with no frontmatter reads as that page's body, and its content is the page as Arden
- * writes it.
- */
 export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
   content: string,
   expectedPageId?: string,
@@ -247,10 +241,10 @@ export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
       cause instanceof WikiPageFormatError ? cause : fail("invalid Memory page", cause)
   })
   const redirectTo = frontmatter.redirect_to ?? null
-  if (frontmatter.lifecycle === "redirect" && redirectTo === null) {
+  if (frontmatter.lifecycle === WIKI_PAGE_LIFECYCLE.redirect && redirectTo === null) {
     return yield* fail("redirect pages require redirect_to")
   }
-  if (frontmatter.lifecycle === "active" && redirectTo !== null) {
+  if (frontmatter.lifecycle === WIKI_PAGE_LIFECYCLE.active && redirectTo !== null) {
     return yield* fail("active pages must not declare redirect_to")
   }
   const page = {
@@ -327,7 +321,6 @@ export const reviseWikiPage = Effect.fn("WikiPage.revise")(function* (
   return `---\n${document.toString({ lineWidth: 0 }).trimEnd()}\n---\n${body}`
 })
 
-/** `content` as an update writes it, once it reads as an active page. */
 export const replacementContent = Effect.fn("WikiPage.replacementContent")(function* (
   operation: WikiOperation,
   pageId: string,
@@ -339,7 +332,7 @@ export const replacementContent = Effect.fn("WikiPage.replacementContent")(funct
   const replacement = yield* parseWikiPage(content, pageId, plainTitle).pipe(
     Effect.mapError(invalid)
   )
-  if (replacement.lifecycle !== "active")
+  if (replacement.lifecycle !== WIKI_PAGE_LIFECYCLE.active)
     return yield* wikiError(operation, "invalid", "A page update cannot create a redirect", {
       pageId
     })
@@ -353,7 +346,6 @@ type MarkdownNode = {
   readonly children?: ReadonlyArray<MarkdownNode> | undefined
 }
 
-/** The text a reader sees in a Markdown node: text, inline code and image descriptions. */
 export const visibleText = (node: MarkdownNode): string => {
   if (node.type === "text" || node.type === "inlineCode") return node.value ?? ""
   if (node.type === "image") return node.alt ?? ""
@@ -378,16 +370,11 @@ export const wikiPageExcerpt = (body: string, limit = 240): string | null => {
   return cutText(text, limit)
 }
 
-/** The sentences of space-folded text: each ends at `.`, `!` or `?` before a space or the end. */
 export const textSentences = (text: string): ReadonlyArray<string> =>
   text.split(/(?<=[.!?])\s+/u).filter((sentence) => sentence.length > 0)
 
 const summaries = new WeakMap<ParsedWikiPage, string | null>()
 
-/**
- * A page's one-line summary: its `summary` field, else the first sentence of its text; cut to
- * `limit` characters. Null when the page has neither.
- */
 export const wikiPageSummary = (page: ParsedWikiPage, limit: number): string | null => {
   const field = page.metadata["summary"]
   if (typeof field === "string" && foldSpace(field) !== "") return cutText(foldSpace(field), limit)

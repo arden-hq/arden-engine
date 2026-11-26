@@ -8,10 +8,8 @@ import { fileKind, imageForModel, type ModelImage } from "./read-binary.js"
 
 const MAX_DOCUMENT_IMAGES = 8
 
-/** A Docs image is at most this large on the wire; Google caps uploads at 50 MB. */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
-/** Docs serves image bytes only from Google's content hosts. */
 const isGoogleContent = (address: string): boolean => {
   const url = URL.parse(address)
   return (
@@ -25,7 +23,6 @@ const imageBytes = async (
   address: string,
   signal: AbortSignal
 ): Promise<Uint8Array | undefined> => {
-  // A redirect may move between Google's content hosts, never off them.
   let current = address
   let response = await fetch(current, { signal, redirect: "manual" })
   for (let hops = 0; hops < 3 && response.status >= 300 && response.status < 400; hops += 1) {

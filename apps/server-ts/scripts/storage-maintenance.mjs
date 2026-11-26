@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { spawnSync } from "node:child_process"
 import {
   chmodSync,
@@ -20,6 +18,13 @@ import { DatabaseSync } from "node:sqlite"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
+import {
+  MAINTENANCE_COMMAND,
+  MAINTENANCE_FLAG,
+  OS_PLATFORM,
+  SQLITE_CHECK_RESULT,
+  SQLITE_JOURNAL_MODE
+} from "../../../tooling/value-tables.mjs"
 import { databaseSchema } from "../dist/persistence/schema/database.js"
 import { searchSchemaSection } from "../dist/persistence/schema/search.js"
 import { initializeSearchIndex, refillTranscriptSearch } from "../dist/persistence/sqlite/search.js"
@@ -97,7 +102,9 @@ const currentSchema = () => {
 }
 
 const checkOperational = (database) => {
-  if (database.prepare("PRAGMA integrity_check").get()?.integrity_check !== "ok") {
+  if (
+    database.prepare("PRAGMA integrity_check").get()?.integrity_check !== SQLITE_CHECK_RESULT.ok
+  ) {
     throw new Error("Operational SQLite integrity check failed")
   }
   if (database.prepare("PRAGMA foreign_key_check").get() !== undefined) {
@@ -135,7 +142,10 @@ const checkDerived = (database, source) => {
   const version = database.prepare("PRAGMA search.user_version").get()?.user_version
   if (version !== searchSchemaSection.version)
     throw new Error("Derived search schema version is not current")
-  if (database.prepare("PRAGMA search.integrity_check").get()?.integrity_check !== "ok") {
+  if (
+    database.prepare("PRAGMA search.integrity_check").get()?.integrity_check !==
+    SQLITE_CHECK_RESULT.ok
+  ) {
     throw new Error("Derived search SQLite integrity check failed")
   }
   const cursor = database
@@ -147,8 +157,6 @@ const checkDerived = (database, source) => {
   if (database.prepare("SELECT 1 FROM search.transcript_rebuild").get() !== undefined) {
     throw new Error("Derived search index is still being rebuilt")
   }
-  // The index is contentless: it holds the words of each message, not its text,
-  // so the check compares which messages are indexed.
   const indexed = database.prepare("SELECT count(*) AS n FROM search.session_messages_fts").get().n
   const missing = database
     .prepare(
@@ -221,7 +229,7 @@ const checkStorage = (dataRoot, confirmStopped) => {
 }
 
 const assertNoOpenHandles = (paths) => {
-  if (process.platform !== "darwin")
+  if (process.platform !== OS_PLATFORM.darwin)
     throw new Error("Writer quiescence enforcement requires macOS lsof")
   for (const filename of [
     paths.operational,
@@ -341,7 +349,10 @@ const rebuildSearch = async (dataRoot, confirmStopped) => {
     const normalized = new DatabaseSync(built)
     try {
       normalized.exec("PRAGMA wal_checkpoint(TRUNCATE)")
-      if (normalized.prepare("PRAGMA journal_mode=DELETE").get()?.journal_mode !== "delete") {
+      if (
+        normalized.prepare("PRAGMA journal_mode=DELETE").get()?.journal_mode !==
+        SQLITE_JOURNAL_MODE.delete
+      ) {
         throw new Error("Temporary search journal could not be checkpointed")
       }
     } finally {
@@ -377,13 +388,14 @@ const rebuildSearch = async (dataRoot, confirmStopped) => {
 
 const parse = (args) => {
   const command = args.slice(0, 2).join(" ")
-  if (command !== "storage check" && command !== "search rebuild") throw new Error(usage)
+  if (command !== MAINTENANCE_COMMAND.storageCheck && command !== MAINTENANCE_COMMAND.searchRebuild)
+    throw new Error(usage)
   let dataRoot
   let confirmStopped = false
   for (let index = 2; index < args.length; index += 1) {
-    if (args[index] === "--data-root" && args[index + 1]) {
+    if (args[index] === MAINTENANCE_FLAG.dataRoot && args[index + 1]) {
       dataRoot = args[++index]
-    } else if (args[index] === "--confirm-stopped") {
+    } else if (args[index] === MAINTENANCE_FLAG.confirmStopped) {
       confirmStopped = true
     } else {
       throw new Error(usage)
@@ -396,7 +408,7 @@ const parse = (args) => {
 try {
   const args = parse(process.argv.slice(2))
   const result =
-    args.command === "storage check"
+    args.command === MAINTENANCE_COMMAND.storageCheck
       ? checkStorage(args.dataRoot, args.confirmStopped)
       : await rebuildSearch(args.dataRoot, args.confirmStopped)
   process.stdout.write(`${JSON.stringify(result)}\n`)

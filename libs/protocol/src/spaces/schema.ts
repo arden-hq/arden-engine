@@ -1,9 +1,15 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import { IsoDateTimeStringSchema, withExtras, NonNegativeIntSchema } from "../common/schema.js"
 import { APPROVAL_MODES } from "../permissions/modes.js"
 import { ChatRunningWorkSchema } from "../sessions/schema.js"
-import { SpaceSnapshotSchema, SpaceTaskStatusSchema } from "./work/schema.js"
-import { SPACE_AGENT, SPACE_KINDS, SPACE_MARK_COLOURS, SPACE_MARK_MEDIA } from "./contracts.js"
+import { SpaceSnapshotSchema, SpaceTaskStatusSchema, TaskOwnerSchema } from "./work/schema.js"
+import {
+  SPACE_AGENT,
+  SPACE_AGENT_AVAILABILITY,
+  SPACE_KIND,
+  SPACE_MARK_COLOUR,
+  SPACE_MARK_MEDIUM
+} from "./contracts.js"
 import type {
   SpaceConversationResponse,
   Space,
@@ -15,7 +21,7 @@ import type {
   SpaceEndConflict
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 export const SpaceNameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(200))
 export const SpaceInstructionsTextSchema = Schema.String.check(Schema.isMaxLength(20_000))
 
@@ -28,9 +34,12 @@ const unit = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 const SpaceMarkLookSchema = Schema.Struct({
   colour: Schema.Union([
     Schema.Struct({ kind: Schema.Literal("automatic") }),
-    Schema.Struct({ kind: Schema.Literal("chosen"), colour: Schema.Literals(SPACE_MARK_COLOURS) })
+    Schema.Struct({
+      kind: Schema.Literal("chosen"),
+      colour: Schema.Literals(Object.values(SPACE_MARK_COLOUR))
+    })
   ]).pipe(Schema.toTaggedUnion("kind")),
-  medium: Schema.Literals(SPACE_MARK_MEDIA),
+  medium: Schema.Literals(Object.values(SPACE_MARK_MEDIUM)),
   zoom: unit,
   aberration: unit,
   focus: unit
@@ -46,7 +55,7 @@ const SpacePageSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("bound"), path: Schema.String })
 ]).pipe(Schema.toTaggedUnion("kind"))
 
-export const SpaceKindSchema = Schema.Literals(SPACE_KINDS)
+export const SpaceKindSchema = Schema.Literals(Object.values(SPACE_KIND))
 
 const SpaceInstructionsSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("unwritten") }),
@@ -172,7 +181,7 @@ export const SpacesBriefSchema = withExtras({
     withExtras({
       ...briefFields,
       status: SpaceTaskStatusSchema,
-      owner: Schema.Literals(["worker", "user", "external"] as const)
+      owner: TaskOwnerSchema
     })
   )
 })
@@ -218,7 +227,7 @@ export const SpaceAgentStatusSchema = withExtras({
     tagged("idle", {}),
     tagged("running", { since: IsoDateTimeStringSchema })
   ]).pipe(Schema.toTaggedUnion("kind")),
-  availability: Schema.Literals(["ready", "stale", "unavailable", "error"] as const),
+  availability: Schema.Literals(Object.values(SPACE_AGENT_AVAILABILITY)),
   last_error: Schema.Union([tagged("none", {}), tagged("failed", { error: Schema.String })]).pipe(
     Schema.toTaggedUnion("kind")
   )

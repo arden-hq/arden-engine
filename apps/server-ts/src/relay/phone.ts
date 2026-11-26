@@ -1,5 +1,13 @@
 import { after, type Timer } from "@arden-hq/std/timer"
-import type { CommandMessage, HttpMethod, MacMessage, PhoneMessage } from "@arden-hq/relay-protocol"
+import {
+  APP_MESSAGE_TAG,
+  COMMAND_ACK_STATE,
+  COMMAND_KIND,
+  type CommandMessage,
+  type HttpMethod,
+  type MacMessage,
+  type PhoneMessage
+} from "@arden-hq/relay-protocol"
 import {
   FALLBACK_FAILURE,
   failureMessage,
@@ -7,7 +15,7 @@ import {
   runCommand,
   type CommandOutcome
 } from "./commands.js"
-import type { PushTarget } from "../persistence/relay/store.js"
+import { RELAY_COMMAND_STATE, type PushTarget } from "../persistence/relay/store.js"
 import type { CommandLog, Loopback, LoopbackResponse, RelayLog } from "./ports.js"
 import { allowedRequest, allowedStream, decodeCommand } from "./routes.js"
 import { RelayStream } from "./stream.js"
@@ -74,7 +82,7 @@ export class PhoneSession {
 
   handle(message: PhoneMessage): void {
     switch (message.t) {
-      case "resume":
+      case APP_MESSAGE_TAG.resume:
         for (const [sid, stream] of this.#streams) {
           if (!(sid in message.streams)) {
             stream.close()
@@ -83,24 +91,24 @@ export class PhoneSession {
         }
         for (const cid of message.pending) void this.#reack(cid)
         return
-      case "req":
+      case APP_MESSAGE_TAG.req:
         void this.#request(message.rid, message.method, message.path)
         return
-      case "cancel":
+      case APP_MESSAGE_TAG.cancel:
         this.#requests.get(message.rid)?.abort()
         this.#requests.delete(message.rid)
         return
-      case "sub":
+      case APP_MESSAGE_TAG.sub:
         this.#subscribe(message.sid, message.path, message.from_seq)
         return
-      case "unsub":
+      case APP_MESSAGE_TAG.unsub:
         this.#streams.get(message.sid)?.close()
         this.#streams.delete(message.sid)
         return
-      case "ack":
+      case APP_MESSAGE_TAG.ack:
         this.#streams.get(message.sid)?.ack(message.seq)
         return
-      case "cmd":
+      case APP_MESSAGE_TAG.cmd:
         void this.command(message)
         return
     }
@@ -117,24 +125,24 @@ export class PhoneSession {
       this.#ack(message.cid, rejected("Arden could not read that."))
       return
     }
-    if (command.kind === "register_push") {
+    if (command.kind === COMMAND_KIND.register_push) {
       await this.#registerPush({
         token: command.args.token.toLowerCase(),
         env: command.args.environment,
         topic: command.args.topic
       })
-      this.#ack(message.cid, { state: "done", result: null })
+      this.#ack(message.cid, { state: COMMAND_ACK_STATE.done, result: null })
       return
     }
-    if (command.kind === "set_keep_awake") {
+    if (command.kind === COMMAND_KIND.set_keep_awake) {
       await this.#setKeepAwake(command.args.on)
-      this.#ack(message.cid, { state: "done", result: null })
+      this.#ack(message.cid, { state: COMMAND_ACK_STATE.done, result: null })
       return
     }
     this.#running.add(message.cid)
     try {
       const known = await this.#commands.begin({ cid: message.cid, kind: message.kind })
-      if (known !== undefined && known.state !== "running") {
+      if (known !== undefined && known.state !== RELAY_COMMAND_STATE.running) {
         this.#ack(message.cid, { state: known.state, result: known.result })
         return
       }
@@ -155,7 +163,7 @@ export class PhoneSession {
       const kept = await this.#commands.find(message.cid)
       this.#ack(
         message.cid,
-        kept === undefined || kept.state === "running"
+        kept === undefined || kept.state === RELAY_COMMAND_STATE.running
           ? outcome
           : { state: kept.state, result: kept.result }
       )
@@ -166,7 +174,7 @@ export class PhoneSession {
 
   async #reack(cid: string): Promise<void> {
     const known = await this.#commands.find(cid)
-    if (known === undefined || known.state === "running") return
+    if (known === undefined || known.state === RELAY_COMMAND_STATE.running) return
     this.#ack(cid, { state: known.state, result: known.result })
   }
 

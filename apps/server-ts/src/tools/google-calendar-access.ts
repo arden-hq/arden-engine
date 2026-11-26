@@ -9,17 +9,17 @@ import type { GoogleGrantDescription, GoogleToolGrant } from "./google-tool-gran
 import { decodeGoogle, googleCall } from "./google-request.js"
 import { toolRefusal } from "./tool-failure.js"
 
-export const LIST_CALENDARS_GRANT = {
+export const LIST_CALENDARS_GRANT: GoogleGrantDescription = {
   grant: "calendar_list",
   what: "see your list of calendars",
   note: "Approving asks Google to let Arden see which calendars you have and your role on each."
-} as const satisfies GoogleGrantDescription
+}
 
-export const FREE_BUSY_GRANT = {
+export const FREE_BUSY_GRANT: GoogleGrantDescription = {
   grant: "calendar_freebusy",
   what: "check when calendars are busy",
   note: "Approving asks Google to let Arden see when calendars are busy, not what the events are."
-} as const satisfies GoogleGrantDescription
+}
 
 export const calendarWriteGrant = <Input>({
   google,

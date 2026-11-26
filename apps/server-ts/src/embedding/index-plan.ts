@@ -9,16 +9,27 @@ import type { WikiEmbeddingIndexRecord } from "../persistence/memory/embedding-s
 import type { EmbeddingSettings } from "../persistence/settings/store.js"
 import type { EmbeddingModelEntry } from "./models.js"
 
+export const INDEX_PLAN = {
+  off: "off",
+  unavailable: "unavailable",
+  steady: "steady",
+  build: "build"
+} as const
+
 export type IndexPlan =
-  | { readonly kind: "off"; readonly drop: ReadonlyArray<string> }
-  | { readonly kind: "unavailable"; readonly modelId: string; readonly drop: ReadonlyArray<string> }
+  | { readonly kind: typeof INDEX_PLAN.off; readonly drop: ReadonlyArray<string> }
   | {
-      readonly kind: "steady"
+      readonly kind: typeof INDEX_PLAN.unavailable
+      readonly modelId: string
+      readonly drop: ReadonlyArray<string>
+    }
+  | {
+      readonly kind: typeof INDEX_PLAN.steady
       readonly target: EmbeddingModelEntry
       readonly drop: ReadonlyArray<string>
     }
   | {
-      readonly kind: "build"
+      readonly kind: typeof INDEX_PLAN.build
       readonly target: EmbeddingModelEntry
       readonly serving: WikiEmbeddingIndexRecord | undefined
       readonly drop: ReadonlyArray<string>

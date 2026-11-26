@@ -11,12 +11,9 @@ import { Effect } from "effect"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import {
-  commitOutsideChange,
-  type WikiCommitError,
-  type WikiCommitIdentity,
-  type WikiWriter
-} from "./commit.js"
+import { commitOutsideChange } from "./commit.js"
+import { type WikiCommitError, type WikiWriter } from "./commit-write-types.js"
+import { type WikiCommitIdentity } from "./origin.js"
 import { mapRevisionError, WikiError } from "./errors.js"
 import { codeOwnedPage } from "./code-owned-pages.js"
 import { isReadme, replacementContent } from "./page.js"
@@ -29,21 +26,6 @@ import {
   type UntrackedFiles
 } from "./untracked.js"
 
-/**
- * What Memory does with one file that differs from its history. Nothing is decided about a file
- * until a check finds it in the same state as the check before, one poll apart.
- *
- * | File                                  | Rules allow it | Memory                                   |
- * | ------------------------------------- | -------------- | ---------------------------------------- |
- * | differs from the check before         | -              | `settling`: decided at the next check    |
- * | changed, a valid page                 | yes            | `take_in`: one update by `user:external` |
- * | missing                               | yes            | `take_in`: one archive                   |
- * | missing, its page found at a new path | -              | `set_aside`, `moved`                     |
- * | missing, with too many others         | -              | `set_aside`, `many_missing`              |
- * | changed or missing                    | no             | `set_aside`: recall keeps the last good  |
- * | unreadable                            | -              | `set_aside`                              |
- * | not in history, a `.md` file          | not yet        | `notInMemory`: listed, never added       |
- */
 type OutsideEdit =
   | { readonly kind: "take_in"; readonly change: AdoptableWorkingChange }
   | {
@@ -56,26 +38,18 @@ type OutsideEdit =
 
 type SetAside = Extract<OutsideEdit, { readonly kind: "set_aside" }>
 
-/**
- * Where a page whose file differs from its history stands, as of the last check: `set_aside`
- * until the file is fixed or put back, or `settling` until the next check decides it. Every write
- * to such a page is refused until the check takes the change in.
- */
 export type OutsideEditState =
   | { readonly kind: "set_aside"; readonly path: string; readonly detail: string }
   | { readonly kind: "settling"; readonly path: string }
 
 export interface OutsideEditCheck extends UntrackedFiles {
-  /** One commit each, oldest first. */
   readonly takenIn: ReadonlyArray<{
     readonly path: string
     readonly action: "update" | "archive"
     readonly revision: string
   }>
   readonly setAside: ReadonlyArray<SetAside>
-  /** Not in the same state as at the check before; decided at the next check if it stays. */
   readonly settling: ReadonlyArray<string>
-  /** Changed again, or Memory changed, while it was being taken in; the next check decides. */
   readonly changedDuringCheck: ReadonlyArray<string>
 }
 
@@ -360,7 +334,6 @@ const adoptionFailure = (cause: WikiCommitError): "again" | "refused" | "fail" =
   }
 }
 
-/** What a read of such a page says about it. */
 export const outsideEditNotice = (state: OutsideEditState): string =>
   state.kind === "set_aside"
     ? `This page's file was changed outside Arden and Memory set that change aside: ${state.detail}. This version stays in Memory, and writes to the page are refused until the file is fixed or put back.`

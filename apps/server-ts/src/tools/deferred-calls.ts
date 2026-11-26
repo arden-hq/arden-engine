@@ -19,12 +19,16 @@ const FOLLOW_UP_FAILED = failedToolResult(
   })
 )
 
+export const DEFERRED_DECISION = { decided: "decided", not_deferred: "not_deferred" } as const
+
+export type DeferredDecision = (typeof DEFERRED_DECISION)[keyof typeof DEFERRED_DECISION]
+
 export class DeferredCalls extends Context.Service<
   DeferredCalls,
   {
     readonly decide: (
       input: DeferredDecisionInput
-    ) => Effect.Effect<"decided" | "not_deferred", ToolExecutionStoreError>
+    ) => Effect.Effect<DeferredDecision, ToolExecutionStoreError>
   }
 >()("@arden-hq/server/tools/DeferredCalls") {
   static readonly layer = Layer.effect(
@@ -136,12 +140,12 @@ export class DeferredCalls extends Context.Service<
         const decision = yield* store.decide(input)
         switch (decision.kind) {
           case "not_deferred":
-            return "not_deferred" as const
+            return DEFERRED_DECISION.not_deferred
           case "settled":
-            return "decided" as const
+            return DEFERRED_DECISION.decided
           case "approved":
             if (lifecycle.isAccepting()) yield* start(decision.call)
-            return "decided" as const
+            return DEFERRED_DECISION.decided
         }
       })
 

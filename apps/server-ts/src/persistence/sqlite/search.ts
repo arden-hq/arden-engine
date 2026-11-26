@@ -6,14 +6,9 @@ import { timerSleep } from "../../lib/timer-sleep.js"
 import { pauseBetweenBatches, runIsActive } from "./background-pause.js"
 import type { Writer } from "./deps.js"
 
-/** Changed messages applied to the index per write. Each costs three
- * statements, so 100 keeps one write near a quarter second; 500 held the
- * single writer for one to two and a half seconds. */
-const CHANGE_BATCH_SIZE = 100
-/** How often the engine looks for changes the index has not applied yet. */
-const KEEP_CURRENT_EVERY = "2 seconds"
-/** Messages copied into the index per transaction while it is rebuilt. */
-const REBUILD_BATCH_SIZE = 2_000
+const CHANGES_PER_INDEX_WRITE = 100
+const PENDING_CHANGES_POLL_INTERVAL = "2 seconds"
+const REBUILD_MESSAGES_PER_TRANSACTION = 2_000
 
 interface SearchIndexOptions {
   readonly searchFilename?: string
@@ -106,10 +101,6 @@ export const initializeSearchIndex = Effect.fn("SqliteSearch.initialize")(functi
       message: "Search database belongs to a different operational source; rebuild required"
     })
   }
-  // A new index starts empty at the head of the change log. The engine fills it
-  // from main.session_messages in the background (transcriptSearchStep), a
-  // chunk per transaction from a saved position, so startup does not wait for
-  // it and a stopped fill resumes.
   if (cursor.length === 0) {
     yield* sql
       .withTransaction(
@@ -177,9 +168,6 @@ const upgradeSearchSchema = Effect.fn("SqliteSearch.upgrade")(function* (
   }
 })
 
-/** Brings the index up to the head of the change log, a batch per
- * transaction. It never fills the index: true while a refill (the background
- * step below) has not reached every message, so a search sees only part. */
 export const catchUpTranscriptSearch = Effect.fn("SqliteSearch.catchUp")(function* (
   sql: SqlClient.SqlClient
 ) {
@@ -192,24 +180,20 @@ export const catchUpTranscriptSearch = Effect.fn("SqliteSearch.catchUp")(functio
   return rebuild.length > 0
 })
 
-/** One step of background index upkeep, in one transaction: a batch of
- * changes, or else the next chunk of a refill. False when there is nothing to do. */
 const transcriptSearchStep = Effect.fn("SqliteSearch.step")(function* (
   sql: SqlClient.SqlClient,
   options: { readonly rebuildBatchSize?: number } = {}
 ) {
   if (yield* applyTranscriptChangeBatch(sql)) return true
-  return yield* rebuildTranscriptSearchBatch(sql, options.rebuildBatchSize ?? REBUILD_BATCH_SIZE)
+  return yield* rebuildTranscriptSearchBatch(
+    sql,
+    options.rebuildBatchSize ?? REBUILD_MESSAGES_PER_TRANSACTION
+  )
 })
 
-/** The engine's background fill: one step per write-queue item, giving way to
- * other writes and to active runs between steps. Searches meanwhile read the
- * part already indexed. */
 export const fillTranscriptSearch = (writer: Writer): Effect.Effect<void> =>
   Effect.gen(function* () {
     for (;;) {
-      // The span names the write: the write queue reports a slow write by the
-      // span it was submitted in, and this one was reported as "untraced".
       const stepped = yield* writer
         .run(transcriptSearchStep(writer.sql))
         .pipe(Effect.withSpan("SqliteSearch.fill"))
@@ -222,16 +206,10 @@ export const fillTranscriptSearch = (writer: Writer): Effect.Effect<void> =>
     )
   )
 
-/** Keeps the index current for as long as the engine runs. A changed message
- * leaves a row in `transcript_search_changes`, and the index applied those
- * rows only at the next search or the next launch: after a long session the
- * launch applied the whole backlog in large writes. This applies them within
- * seconds, in small writes, so no backlog builds up. The look for pending
- * rows is one read of a table that is empty when there is nothing to do. */
 export const keepTranscriptSearchCurrent = (writer: Writer): Effect.Effect<void> =>
   fillTranscriptSearch(writer).pipe(
     Effect.andThen(
-      timerSleep(KEEP_CURRENT_EVERY).pipe(
+      timerSleep(PENDING_CHANGES_POLL_INTERVAL).pipe(
         Effect.andThen(
           writer.reader<{ readonly pending: number }>`
             SELECT 1 AS pending FROM transcript_search_changes LIMIT 1`
@@ -245,8 +223,6 @@ export const keepTranscriptSearchCurrent = (writer: Writer): Effect.Effect<void>
     )
   )
 
-/** Runs every step until the index is complete: for tools that build an index
- * offline, not for the running engine. */
 export const refillTranscriptSearch = Effect.fn("SqliteSearch.refill")(function* (
   sql: SqlClient.SqlClient,
   options: { readonly rebuildBatchSize?: number } = {}
@@ -285,15 +261,13 @@ const applyTranscriptChangeBatch = Effect.fn("SqliteSearch.applyChanges")(functi
           })
         }
         if (applied === head) {
-          // A new or reset index starts at the head, and the rows before it
-          // would stay for good: the look for pending rows would never rest.
           yield* sql`DELETE FROM transcript_search_changes WHERE sequence <= ${applied}`
           return false
         }
         const changes = yield* sql<SearchChangeRow>`
         SELECT sequence, message_rowid FROM transcript_search_changes
         WHERE sequence > ${applied} AND sequence <= ${head}
-        ORDER BY sequence LIMIT ${CHANGE_BATCH_SIZE}
+        ORDER BY sequence LIMIT ${CHANGES_PER_INDEX_WRITE}
       `
         if (
           changes.length === 0 ||
@@ -306,8 +280,6 @@ const applyTranscriptChangeBatch = Effect.fn("SqliteSearch.applyChanges")(functi
             message: "Transcript search change log has a gap"
           })
         }
-        // While a rebuild runs, a message past its position is left to the
-        // rebuild, which reads the message's text when it gets there.
         const rebuild = yield* sql<SearchRebuildRow>`
         SELECT after_rowid FROM search.transcript_rebuild WHERE singleton_id = 1
       `
@@ -341,8 +313,6 @@ const applyTranscriptChangeBatch = Effect.fn("SqliteSearch.applyChanges")(functi
   return true
 })
 
-/** Copies the next chunk of messages into the index; false once no rebuild is
- * in progress. */
 const rebuildTranscriptSearchBatch = Effect.fn("SqliteSearch.rebuildBatch")(function* (
   sql: SqlClient.SqlClient,
   batchSize: number

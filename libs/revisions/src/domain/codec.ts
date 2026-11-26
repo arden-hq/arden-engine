@@ -1,14 +1,22 @@
 import { DateTime, Effect, Option, Schema } from "effect"
 
 import {
+  ChangeAction,
   Commit,
   ResourceChange,
   ResourceState,
   ResourceVersion,
+  isActive,
   normalizeRelativePath
 } from "./model.js"
 import { CorruptRepositoryError } from "./errors.js"
-import { canonicalJsonl, decodeUtf8 } from "./format.js"
+import {
+  OBJECT_KIND,
+  TREE_ENTRY_KIND,
+  canonicalJsonl,
+  decodeUtf8,
+  treeEntrySortKey
+} from "./format.js"
 import type {
   CommitRecord,
   JsonRecord,
@@ -34,14 +42,14 @@ const VersionRecordSchema = Schema.Struct({
 })
 
 const ChangeRecordSchema = Schema.Struct({
-  action: NonEmptyText,
+  action: ChangeAction,
   before: Schema.NullOr(VersionRecordSchema),
   after: Schema.NullOr(VersionRecordSchema)
 })
 
 const CommitRecordSchema = Schema.Struct({
   version: Schema.Literal(2),
-  kind: Schema.Literal("commit"),
+  kind: Schema.Literal(OBJECT_KIND.commit),
   parent_id: Schema.NullOr(Hash),
   tree_id: Hash,
   actor: NonEmptyText,
@@ -52,7 +60,7 @@ const CommitRecordSchema = Schema.Struct({
 })
 
 const TreeResourceRecordSchema = Schema.Struct({
-  kind: Schema.Literal("resource"),
+  kind: Schema.Literal(TREE_ENTRY_KIND.resource),
   name: NonEmptyText,
   resource_id: NonEmptyText,
   blob_id: Hash,
@@ -61,14 +69,14 @@ const TreeResourceRecordSchema = Schema.Struct({
 })
 
 const TreeSubtreeRecordSchema = Schema.Struct({
-  kind: Schema.Literal("subtree"),
+  kind: Schema.Literal(TREE_ENTRY_KIND.subtree),
   name: NonEmptyText,
   tree_id: Hash
 })
 
 const TreeRecordSchema = Schema.Struct({
   version: Schema.Literal(2),
-  kind: Schema.Literal("tree"),
+  kind: Schema.Literal(OBJECT_KIND.tree),
   entries: Schema.Array(Schema.Union([TreeResourceRecordSchema, TreeSubtreeRecordSchema]))
 })
 
@@ -90,7 +98,6 @@ const decode = <S extends Schema.Constraint>(
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index])
 
-/** Decode one canonical JSONL object and reject non-canonical bytes. */
 export const decodeCanonicalJsonl = Effect.fn("decodeCanonicalJsonl")(function* (
   content: Uint8Array
 ): Effect.fn.Return<JsonRecord, CorruptRepositoryError> {
@@ -159,11 +166,10 @@ const decodeChange = Effect.fn("decodeChange")(function* (
   })
 })
 
-/** Parse a v2 tree record, including strict entry shapes and state values. */
 export const parseTreeRecord = Effect.fn("parseTreeRecord")(function* (
   value: unknown
 ): Effect.fn.Return<TreeRecord, CorruptRepositoryError> {
-  const decoded = yield* decode(TreeRecordSchema, value, "tree")
+  const decoded = yield* decode(TreeRecordSchema, value, OBJECT_KIND.tree)
   const entries: TreeEntryRecord[] = []
   const subtreeNames = new Set<string>()
   const activeResourceNames = new Set<string>()
@@ -176,8 +182,8 @@ export const parseTreeRecord = Effect.fn("parseTreeRecord")(function* (
     if (normalizedName !== entry.name || entry.name.includes("/")) {
       return yield* fail(`tree entry ${index} has an invalid name`)
     }
-    if (entry.kind === "resource") {
-      if (entry.state === "active") {
+    if (entry.kind === TREE_ENTRY_KIND.resource) {
+      if (isActive(entry)) {
         if (activeResourceNames.has(entry.name))
           return yield* fail(`tree repeats active name ${entry.name}`)
         activeResourceNames.add(entry.name)
@@ -190,24 +196,21 @@ export const parseTreeRecord = Effect.fn("parseTreeRecord")(function* (
       entries.push(entry)
     }
   }
-  const sortKey = (entry: TreeEntryRecord): string =>
-    `${entry.name}\u0000${entry.kind}\u0000${entry.kind === "resource" ? entry.resource_id : entry.tree_id}`
   let previousKey: string | undefined
   for (const entry of entries) {
-    const key = sortKey(entry)
+    const key = treeEntrySortKey(entry)
     if (previousKey !== undefined && compareCodePoints(previousKey, key) > 0) {
       return yield* fail("tree entries are not uniquely ordered")
     }
     previousKey = key
   }
-  return { version: 2, kind: "tree", entries }
+  return { version: 2, kind: OBJECT_KIND.tree, entries }
 })
 
-/** Parse a v2 commit record and validate canonical timestamp precision. */
 export const parseCommitRecord = Effect.fn("parseCommitRecord")(function* (
   value: unknown
 ): Effect.fn.Return<CommitRecord, CorruptRepositoryError> {
-  const decoded = yield* decode(CommitRecordSchema, value, "commit")
+  const decoded = yield* decode(CommitRecordSchema, value, OBJECT_KIND.commit)
   if (Option.isNone(DateTime.make(decoded.timestamp)))
     return yield* fail("commit timestamp is invalid")
   const resourceIds = decoded.changes.map(
@@ -222,7 +225,7 @@ export const parseCommitRecord = Effect.fn("parseCommitRecord")(function* (
   }
   return {
     version: 2,
-    kind: "commit",
+    kind: OBJECT_KIND.commit,
     parent_id: decoded.parent_id,
     tree_id: decoded.tree_id,
     actor: decoded.actor,
@@ -233,7 +236,6 @@ export const parseCommitRecord = Effect.fn("parseCommitRecord")(function* (
   }
 })
 
-/** Parse a canonical commit object and attach its content-addressed identifier. */
 export const parseCommitObject = Effect.fn("parseCommitObject")(function* (
   objectId: string,
   content: Uint8Array
@@ -259,10 +261,8 @@ export const parseCommitObject = Effect.fn("parseCommitObject")(function* (
   })
 })
 
-/** Encode a validated commit record into its exact v2 canonical bytes. */
 export const encodeCommitRecord = (record: CommitRecord): Uint8Array =>
   canonicalJsonl(record as unknown as JsonRecord)
 
-/** Encode a validated tree record into its exact v2 canonical bytes. */
 export const encodeTreeRecord = (record: TreeRecord): Uint8Array =>
   canonicalJsonl(record as unknown as JsonRecord)

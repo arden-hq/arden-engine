@@ -1,9 +1,9 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import { AUTOMATION_EVENT_TYPES } from "@arden-hq/protocol/automations"
+import { AUTOMATION_EVENT_TYPE } from "@arden-hq/protocol/automations"
 import { Clock, Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
-import { pageRunEvents } from "../persistence/automations/event-batch.js"
+import { pageRunEvents, RUN_EVENTS_SOURCE } from "../persistence/automations/event-batch.js"
 import { renderEventPage, SHOWN_EVENTS } from "../persistence/automations/event-text.js"
 import { AutomationQueue } from "../persistence/automations/queue.js"
 
@@ -19,7 +19,7 @@ const RunEventsParametersSchema = Schema.Struct({
     })
     .pipe(Schema.withDecodingDefault(Effect.succeed(SHOWN_EVENTS))),
   event_type: Schema.optionalKey(
-    Schema.Literals(AUTOMATION_EVENT_TYPES).annotate({
+    Schema.Literals(Object.values(AUTOMATION_EVENT_TYPE)).annotate({
       description: "List only events of this type. Omit to list every type."
     })
   )
@@ -78,7 +78,7 @@ const makeAutomationRunEventsTools = ({
       const pageText = renderEventPage(page, { now, eventType: input.event_type })
       return {
         result:
-          carried.run === "this_run"
+          carried.run === RUN_EVENTS_SOURCE.thisRun
             ? pageText
             : `This turn is not an Automation run. These are the events of this chat's latest Automation run, started ${carried.startedAt}.\n\n${pageText}`,
         preview: `${page.events.length} of ${page.total} events`,

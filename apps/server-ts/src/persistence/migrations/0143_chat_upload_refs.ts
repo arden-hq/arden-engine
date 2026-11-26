@@ -1,13 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** Which message names which upload folder, written down when the message is
- * stored, so upload cleanup asks by lookup. Before, cleanup searched the text
- * of every message that had any upload.
- *
- * SQL cannot pull several ids out of one text, so the triggers only note the
- * message in `chat_upload_unlisted`; the engine reads those few messages and
- * fills `chat_upload_refs` before it decides about an upload. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TABLE chat_upload_refs (
       upload_id TEXT NOT NULL CHECK(length(upload_id) = 36),

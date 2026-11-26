@@ -34,7 +34,6 @@ const failed = (
   }
 }
 
-/** The payload was decoded by the route's schema; this maps it to the draft. */
 const draftOf = (payload: unknown) =>
   decodeModelEndpointDraftEffect(payload).pipe(
     Effect.mapError(() => new HttpApiError.UnprocessableEntity({}))

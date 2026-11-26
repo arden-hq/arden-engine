@@ -17,7 +17,6 @@ import {
 
 export * from "./contracts.js"
 
-/** Plain response decoders for local and marketplace Skills operations. */
 export const skillDecoders = {
   list: decoderFor(SkillListResponseSchema, "Invalid skill list", strict),
   skill: decoderFor(SkillSchema, "Invalid skill", strict),
@@ -32,7 +31,6 @@ export const skillDecoders = {
   removed: decoderFor(SkillRemoveReceiptSchema, "Invalid skill removal response", strict)
 } as const
 
-/** Semantic inputs become strict reusable JSON request bodies. */
 export const skillRequests = {
   installMarketplace(id: string): string {
     return runBoundary(
@@ -50,7 +48,6 @@ export const skillRequests = {
   }
 } as const
 
-/** Validated paths for the local and marketplace Skills HTTP surface. */
 export const skillRoutes = {
   collection: "/skills",
   marketplacePopular: "/skills/marketplace/popular",
@@ -72,7 +69,6 @@ export const skillRoutes = {
 
 const SKILL_MENTION = new RegExp(`(?:^|(?<=\\s))/(${SKILL_NAME_PATTERN})(?![\\w/-])`, "g")
 
-/** Shared spelling and boundaries for composer tokens and server-side skill preparation. */
 export const skillMentions = (
   text: string
 ): ReadonlyArray<{

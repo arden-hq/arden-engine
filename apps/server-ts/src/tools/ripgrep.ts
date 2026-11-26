@@ -191,11 +191,6 @@ const runRipgrep = async <A>(input: {
 
 const literalGlob = (relative: string): string => relative.replace(/[\\*?[\]{}!]/gu, "\\$&")
 
-/**
- * The fixed excludes, then each folder the owner's never rule hides under the
- * search root (`skip`, relative to it): it and everything in it, any case,
- * so a search never walks into it. ripgrep follows no links.
- */
 const excludeArgs = (skip: ReadonlyArray<string> = []): ReadonlyArray<string> => [
   ...EXCLUDES.flatMap((glob) => ["--glob", glob]),
   ...skip.flatMap((relative) => {

@@ -1,7 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage, ReplyContext, UserMessage } from "../contracts/messages.js"
 
-/** Every message a human reply quotes, in the order they were quoted. */
 export const replyContexts = (replyTo: UserMessage["replyTo"]): ReadonlyArray<ReplyContext> => {
   if (replyTo === undefined) return []
   return "messageId" in replyTo ? [replyTo] : replyTo

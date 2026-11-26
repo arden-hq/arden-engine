@@ -1,4 +1,4 @@
-import type { ChatProjectionEvent } from "@arden-hq/protocol"
+import { SERVER_EVENT_TYPE, type ChatProjectionEvent } from "@arden-hq/protocol"
 import { CONTENT_START } from "@arden-hq/protocol/chat"
 import type { SessionEventRecord } from "./model.js"
 
@@ -6,9 +6,15 @@ export function withContentAnchor(
   event: ChatProjectionEvent,
   retained: ReadonlyArray<{ readonly fromSequence: number; readonly record: SessionEventRecord }>
 ): ChatProjectionEvent {
-  if (event.type !== "TEXT_MESSAGE_END" && event.type !== "REASONING_MESSAGE_END") return event
+  if (
+    event.type !== SERVER_EVENT_TYPE.textMessageEnd &&
+    event.type !== SERVER_EVENT_TYPE.reasoningMessageEnd
+  )
+    return event
   const deltaType =
-    event.type === "TEXT_MESSAGE_END" ? "TEXT_MESSAGE_CONTENT" : "REASONING_MESSAGE_CONTENT"
+    event.type === SERVER_EVENT_TYPE.textMessageEnd
+      ? SERVER_EVENT_TYPE.textMessageContent
+      : SERVER_EVENT_TYPE.reasoningMessageContent
   const first = retained.find(
     ({ record }) =>
       record.event.type === deltaType &&

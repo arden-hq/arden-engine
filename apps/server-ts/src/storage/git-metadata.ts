@@ -1,15 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs"
 import path from "node:path"
 
-/**
- * Which Git metadata a sandboxed command may change.
- *
- * Git runs repository code later, outside the sandbox, only through a few
- * files: hooks, the config (core.hooksPath, core.fsmonitor, core.sshCommand,
- * filters, aliases), a worktree config, the `commondir` and `gitdir` pointers
- * that move either of those somewhere else, submodule gitdirs and legacy
- * remote files.
- */
 export interface GitMetadataRule {
   readonly writeProtected: ReadonlyArray<string>
   readonly writeProtectedPatterns: ReadonlyArray<string>
@@ -70,11 +61,6 @@ const dotGitAt = (root: string): DotGit => {
   return linked ? { kind: "worktree", admin, common } : { kind: "other", target: admin }
 }
 
-/**
- * The Git part of a sandbox rule for a write root. bubblewrap can deny
- * neither a pattern nor a path that does not exist yet, so off macOS all of
- * the root's `.git` stays read-only, as before.
- */
 export const gitMetadataRule = (root: string, platform: NodeJS.Platform): GitMetadataRule => {
   const dotGit = path.join(root, ".git")
   const state = dotGitAt(root)

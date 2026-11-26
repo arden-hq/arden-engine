@@ -8,8 +8,6 @@ import {
 } from "../transcript/queries.js"
 import type { TranscriptRow } from "./transcript-tool-result.js"
 
-/** The owner's own words over the `session_messages` row `m`: what they typed, or their answer
- *  to Arden's question. */
 export const ownerWordsSql = (
   sql: SqlClient.SqlClient,
   m: Statement.Fragment

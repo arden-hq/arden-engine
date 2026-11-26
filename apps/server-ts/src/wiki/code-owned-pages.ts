@@ -1,9 +1,7 @@
-import type { WikiCommitOrigin } from "./commit.js"
+import type { WikiCommitOrigin } from "./origin.js"
 
-/** The page that holds the owner's retractions: what they asked Arden to forget. */
 export const FORGOTTEN_PAGE_PATH = "forgotten.md"
 
-/** The owner's standing rules, sent whole to every chat. A Local folder `AGENTS.md` is more specific. */
 export const RULES_PAGE_PATH = "AGENTS.md"
 export const RULES_PAGE_TITLE = "Global instructions"
 

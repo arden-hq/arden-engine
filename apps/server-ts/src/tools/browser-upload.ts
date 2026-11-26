@@ -27,10 +27,9 @@ import {
   preparedFilesApproval,
   sharedFileServices,
   type PreparedFile,
-  type ResolvedFile,
-  type SharedFileAccess,
-  type SharedFileServices
+  type SharedFileAccess
 } from "./shared-files.js"
+import type { ResolvedFile, SharedFileServices } from "./shared-file-types.js"
 import type { ServerRunContext } from "./run-context.js"
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
 import { grantData, offerFolderGrant, type FolderGrant } from "./folder-grant.js"

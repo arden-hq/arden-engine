@@ -9,10 +9,21 @@ import { createBrowserBrokerBridge } from "./browser/bridge.js"
 import { cliAccessPath, publishCliAccess, withdrawCliAccess } from "./runtime/cli-access.js"
 import { createCredentialVaultBridge } from "./daemon-credential-vault.js"
 import { brokeredProviderRoute, type BrokerCredential } from "./providers/registry.js"
-import { createParentPortRpc, type ParentPortFailure } from "./runtime/parent-port-rpc.js"
+import { LOCAL_ACCESS_HOST } from "./http/middleware/local-only.js"
+import {
+  createParentPortRpc,
+  PARENT_PORT_FAILURE,
+  PARENT_PORT_RESPONSE,
+  type ParentPortFailure
+} from "./runtime/parent-port-rpc.js"
 import { mergePath, resolveLoginShellPath } from "./runtime/login-shell-path.js"
 import { resolveCommandSandbox } from "./runtime/command-sandbox.js"
-import { ServerError, startServerWithLocalAccess, type ServerHandle } from "./server.js"
+import {
+  isStorageErrorCode,
+  ServerError,
+  startServerWithLocalAccess,
+  type ServerHandle
+} from "./server.js"
 import type { ModelProviderOptions, PowerHost } from "./config/options.js"
 import type { MigrationProgress } from "./runtime/diagnostics.js"
 import type { StartupPhase } from "./runtime/startup-phase.js"
@@ -105,16 +116,16 @@ const cancelledCredentialRequest = (): DOMException =>
 
 const credentialFailure = (failure: ParentPortFailure<undefined>): unknown => {
   switch (failure.kind) {
-    case "aborted":
+    case PARENT_PORT_FAILURE.aborted:
       return failure.reason ?? cancelledCredentialRequest()
-    case "stopped":
+    case PARENT_PORT_FAILURE.stopped:
       return cancelledCredentialRequest()
-    case "timeout":
+    case PARENT_PORT_FAILURE.timeout:
       return new Error("The credential broker timed out")
-    case "dispatch_failed":
+    case PARENT_PORT_FAILURE.dispatch_failed:
       return failure.cause
-    case "invalid_response":
-    case "rejected":
+    case PARENT_PORT_FAILURE.invalid_response:
+    case PARENT_PORT_FAILURE.rejected:
       return new Error("The credential broker failed")
   }
 }
@@ -125,19 +136,18 @@ if (parentPort === undefined) {
   throw new Error("The Arden daemon must run as an Electron utility process")
 }
 
-// Launched from the Dock, the app inherits launchd's bare PATH. Ask the login
-// shell once, beside the boot and never in its way; agent terminals use it
-// once it lands, and the host's terminal drawer gets it in a message.
+const postUnlessHostGone = (message: unknown): void => {
+  try {
+    parentPort.postMessage(message)
+  } catch {}
+}
+
 void resolveLoginShellPath().then((loginPath) => {
   if (loginPath === undefined) return
-  try {
-    parentPort.postMessage({
-      type: "login_path",
-      path: mergePath(loginPath, process.env["PATH"])
-    })
-  } catch {
-    // The host may be gone; its terminals keep the inherited PATH.
-  }
+  postUnlessHostGone({
+    type: "login_path",
+    path: mergePath(loginPath, process.env["PATH"])
+  })
 })
 
 void resolveCommandSandbox()
@@ -148,11 +158,7 @@ const credentialVaultBridge = createCredentialVaultBridge(parentPort)
 const sleepListeners = new Set<(asleep: boolean) => void>()
 const power: PowerHost = {
   keepAwake: (hold) => {
-    try {
-      parentPort.postMessage({ type: "keep_awake", hold })
-    } catch {
-      // The host may be gone; a stopped daemon holds nothing.
-    }
+    postUnlessHostGone({ type: "keep_awake", hold })
   },
   onSleep: (listener) => {
     sleepListeners.add(listener)
@@ -166,7 +172,6 @@ let lifecycle: Promise<void> = Promise.resolve()
 let exiting = false
 let stopRequested = false
 let cliAccess: { readonly path: string; readonly capability: string } | undefined
-/** The account route last installed: Codex, or none when signed out. */
 let providerRoute: "codex" | "local_only" = brokeredProviderRoute.id
 
 const credentialRpc = createParentPortRpc<BrokerCredential | null, undefined>(parentPort, {
@@ -175,8 +180,8 @@ const credentialRpc = createParentPortRpc<BrokerCredential | null, undefined>(pa
   decode: (input) => {
     if (!isCredentialResponse(input)) return undefined
     return input.ok
-      ? { kind: "value", requestId: input.requestId, value: input.credential }
-      : { kind: "error", requestId: input.requestId, error: undefined }
+      ? { kind: PARENT_PORT_RESPONSE.value, requestId: input.requestId, value: input.credential }
+      : { kind: PARENT_PORT_RESPONSE.error, requestId: input.requestId, error: undefined }
   }
 })
 
@@ -247,7 +252,7 @@ const start = async (input: unknown): Promise<void> => {
     }
     const cliCapability = randomBytes(32).toString("base64url")
     const localAccess = {
-      host: "app" as const,
+      host: LOCAL_ACCESS_HOST.app,
       capability: message.capability,
       rendererOrigin: message.options.rendererOrigin,
       cliCapability,
@@ -259,27 +264,19 @@ const start = async (input: unknown): Promise<void> => {
     const reportPhase = (phase: StartupPhase): void => {
       if (reportedPhases.has(phase)) return
       reportedPhases.add(phase)
-      try {
-        parentPort.postMessage({
-          type: "startup_phase",
-          phase,
-          elapsedMs: Math.round(performance.now() - startedAt)
-        })
-      } catch {
-        // Diagnostics cannot prevent startup or recovery.
-      }
+      postUnlessHostGone({
+        type: "startup_phase",
+        phase,
+        elapsedMs: Math.round(performance.now() - startedAt)
+      })
     }
     const reportMigration = (progress: MigrationProgress): void => {
-      try {
-        parentPort.postMessage({
-          type: "startup_phase",
-          phase: "schema_migration",
-          elapsedMs: Math.round(performance.now() - startedAt),
-          migration: progress
-        })
-      } catch {
-        // Diagnostics cannot prevent startup or recovery.
-      }
+      postUnlessHostGone({
+        type: "startup_phase",
+        phase: "schema_migration",
+        elapsedMs: Math.round(performance.now() - startedAt),
+        migration: progress
+      })
     }
     reportPhase("server_open_started")
     const diagnostics = {
@@ -299,14 +296,8 @@ const start = async (input: unknown): Promise<void> => {
       browserBroker: browserBridge,
       vaultKeys: credentialVaultBridge.keys,
       power,
-      // A saved model server changed the list: the app reads it again, as
-      // after a ChatGPT sign-in. The route is still the account's.
       onModelListChange: () => {
-        try {
-          parentPort.postMessage({ type: "provider_changed", route: providerRoute })
-        } catch {
-          // The host may be gone; it reads the list when it comes back.
-        }
+        postUnlessHostGone({ type: "provider_changed", route: providerRoute })
       }
     })
     if (stopRequested) return
@@ -339,12 +330,7 @@ const start = async (input: unknown): Promise<void> => {
   } catch (cause) {
     if (stopRequested) return
     const detail = diagnosticDetail(cause)
-    if (
-      cause instanceof ServerError &&
-      (cause.code === "storage_failed" ||
-        cause.code === "data_newer" ||
-        cause.code === "schema_convert_failed")
-    ) {
+    if (cause instanceof ServerError && isStorageErrorCode(cause.code)) {
       parentPort.postMessage({
         type: "error",
         code: cause.code,

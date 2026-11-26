@@ -2,7 +2,16 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { AutomationId } from "../../src/persistence/automations/model.js"
 import { AutomationQueue } from "../../src/persistence/automations/queue.js"
-import { ChatWriteStore, type TaskStepCause } from "../../src/persistence/chat/store.js"
+import type { ClaimedAutomationJobLease } from "../../src/persistence/automations/store.js"
+import {
+  CHAT_WRITE_START,
+  ChatWriteStore,
+  type ChatWriteFailure,
+  type ChatWriteStartResult,
+  type TaskStepCause
+} from "../../src/persistence/chat/store.js"
+
+type StartedChat = Extract<ChatWriteStartResult, { readonly _tag: typeof CHAT_WRITE_START.started }>
 
 const message = (id: string, isMeta: boolean) => ({
   message_id: id,
@@ -26,7 +35,7 @@ export const startChat = (
       readonly lease: { readonly id: string; readonly token: string }
     }
   } = {}
-) =>
+): Effect.Effect<StartedChat, ChatWriteFailure, ChatWriteStore> =>
   Effect.gen(function* () {
     const chat = yield* ChatWriteStore
     const started = yield* chat.start({
@@ -69,11 +78,14 @@ export const startChat = (
             automationContextMode: "fresh" as const
           })
     })
-    if (started._tag !== "Started") throw new Error(`Run ${id} did not start: ${started._tag}`)
+    if (started._tag !== CHAT_WRITE_START.started)
+      throw new Error(`Run ${id} did not start: ${started._tag}`)
     return started
   })
 
-export const claimAll = (workerId: string) =>
+export const claimAll = (
+  workerId: string
+): Effect.Effect<ReadonlyArray<ClaimedAutomationJobLease>, never, AutomationQueue> =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
     return yield* Effect.promise(async () =>
@@ -86,9 +98,17 @@ export const claimAll = (workerId: string) =>
     )
   })
 
-type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
+type JobLease = ClaimedAutomationJobLease
 
-export const startJob = (lease: JobLease, id: string, sessionId = lease.payload.sessionId) =>
+export const startJob = (
+  lease: JobLease,
+  id: string,
+  sessionId = lease.payload.sessionId
+): Effect.Effect<
+  { readonly run: StartedChat; readonly sessionId: string },
+  ChatWriteFailure,
+  ChatWriteStore
+> =>
   Effect.gen(function* () {
     const automationId = lease.payload.automationId
     if (sessionId === null) throw new Error(`${automationId} has no chat`)
@@ -102,7 +122,9 @@ export const startJob = (lease: JobLease, id: string, sessionId = lease.payload.
     return { run, sessionId }
   })
 
-export const startJobs = (ids: Readonly<Record<string, string>>) =>
+export const startJobs = (
+  ids: Readonly<Record<string, string>>
+): Effect.Effect<Map<string, string>, ChatWriteFailure, AutomationQueue | ChatWriteStore> =>
   Effect.gen(function* () {
     const leases = yield* claimAll("wakes")
     const runs = new Map<string, string>()

@@ -32,19 +32,20 @@ const TimelineItem = z.object({
   tone: Tone.optional()
 })
 
-const CHART_KINDS = [
-  "bar",
-  "hbar",
-  "line",
-  "area",
-  "scatter",
-  "histogram",
-  "heatmap",
-  "timeline"
-] as const
+export const CHART_KIND = {
+  bar: "bar",
+  hbar: "hbar",
+  line: "line",
+  area: "area",
+  scatter: "scatter",
+  histogram: "histogram",
+  heatmap: "heatmap",
+  timeline: "timeline"
+} as const
+export type ChartKind = (typeof CHART_KIND)[keyof typeof CHART_KIND]
 
 const ChartFields = z.object({
-  kind: z.enum(CHART_KINDS),
+  kind: z.enum(CHART_KIND),
   title: Text.optional(),
   data: z
     .array(z.record(z.string(), Cell))
@@ -90,8 +91,6 @@ const ChartFields = z.object({
 
 export type ChartSpec = z.infer<typeof ChartFields>
 
-/** A chart spec, with the rules that tie its fields together (a field named
- *  by x must exist in data, a heatmap's rows match its values, …). */
 export const ChartSpec = ChartFields.superRefine((spec, ctx) => {
   const problem = chartProblem(spec)
   if (problem !== undefined) ctx.addIssue({ code: "custom", message: problem })
@@ -109,14 +108,14 @@ function chartProblem(spec: ChartSpec): string | undefined {
     if (rows && !fields.has(field)) return `y "${field}" is not a field of data`
   }
   switch (spec.kind) {
-    case "timeline":
+    case CHART_KIND.timeline:
       return spec.items !== undefined || rows ? undefined : "timeline needs items"
-    case "histogram":
+    case CHART_KIND.histogram:
       if (rows) return spec.x === undefined ? "histogram data needs x: the field to bin" : undefined
       return spec.values?.every((value) => typeof value === "number")
         ? undefined
         : "histogram needs values: an array of numbers, or data with x"
-    case "heatmap":
+    case CHART_KIND.heatmap:
       if (rows) {
         return spec.x !== undefined && typeof spec.y === "string" && spec.value !== undefined
           ? undefined
@@ -128,7 +127,7 @@ function chartProblem(spec: ChartSpec): string | undefined {
         spec.values.every((row) => Array.isArray(row) && row.length === spec.columns?.length)
         ? undefined
         : "heatmap values must have one array per row, each as long as columns"
-    case "scatter":
+    case CHART_KIND.scatter:
       if (rows)
         return spec.x !== undefined && spec.y !== undefined
           ? undefined
@@ -136,10 +135,10 @@ function chartProblem(spec: ChartSpec): string | undefined {
       return spec.series !== undefined
         ? undefined
         : "scatter needs series of {x, y} points, or data with x and y"
-    case "bar":
-    case "hbar":
-    case "line":
-    case "area":
+    case CHART_KIND.bar:
+    case CHART_KIND.hbar:
+    case CHART_KIND.line:
+    case CHART_KIND.area:
       if (rows) {
         if (spec.x === undefined) return `${spec.kind} data needs x: the label field`
         if (spec.group !== undefined && typeof spec.y !== "string")
@@ -192,7 +191,6 @@ const DiagramFields = z.object({
 
 export type DiagramSpec = z.infer<typeof DiagramFields>
 
-/** A diagram spec: nodes and edges, at most 40 nodes in all. */
 export const DiagramSpec = DiagramFields.superRefine((spec, ctx) => {
   if ((spec.nodes?.length ?? 0) === 0 && spec.edges.length === 0) {
     ctx.addIssue({ code: "custom", message: "a diagram needs nodes or edges" })

@@ -17,6 +17,11 @@ import type {
   SessionSummary,
   SessionThreadSource
 } from "./states.js"
+export const SESSION_FORK_DISPOSITION = { retained: "retained", disposable: "disposable" } as const
+
+export type SessionForkDisposition =
+  (typeof SESSION_FORK_DISPOSITION)[keyof typeof SESSION_FORK_DISPOSITION]
+
 export * from "./states.js"
 
 export const SESSION_LIST_FILTER = {
@@ -60,7 +65,8 @@ export interface SessionListOptions {
 
 export type SessionListScope = "primary" | "agent" | "all"
 
-export type SessionListSort = "activity" | "accessed"
+export const SESSION_LIST_SORT = { activity: "activity", accessed: "accessed" } as const
+export type SessionListSort = (typeof SESSION_LIST_SORT)[keyof typeof SESSION_LIST_SORT]
 
 export interface SessionListCursor extends JsonRecord {
   readonly at: string
@@ -86,33 +92,32 @@ export interface CreateSessionRequest {
   readonly origin: SessionOrigin
 }
 
-/** A screenshot handed to Arden (⇧ + both ⌘), with the user's note, for `POST /captures`. */
 export interface HandCaptureRequest {
-  /** The desktop's id for this press: a retry routes and delivers once. */
   readonly capture_id: string
   readonly image: { readonly media_type: "image/png" | "image/jpeg"; readonly data: string }
   readonly note: string
 }
 
-/**
- * Where a capture went. `moved`: the router matched the chat it belongs to and delivered it
- * there as the user's message (`client_id` reverts it). `kept`: a new capture chat (only when no Space exists), where the
- * agent now works on it; `line` is the router's description when it had one.
- */
+export const HAND_CAPTURE = { moved: "moved", kept: "kept" } as const
+
 export type HandCaptureResponse =
   | {
-      readonly kind: "moved"
+      readonly kind: typeof HAND_CAPTURE.moved
       readonly session_id: string
       readonly name: string
       readonly line: string
       readonly client_id: string
     }
-  | { readonly kind: "kept"; readonly session_id: string; readonly line: CaptureLine }
+  | {
+      readonly kind: typeof HAND_CAPTURE.kept
+      readonly session_id: string
+      readonly line: CaptureLine
+    }
 
 export const CAPTURE_LINE = { none: "none", line: "line" } as const
 
 export const keptCapture = (sessionId: string): HandCaptureResponse => ({
-  kind: "kept",
+  kind: HAND_CAPTURE.kept,
   session_id: sessionId,
   line: { kind: CAPTURE_LINE.none }
 })
@@ -200,9 +205,6 @@ export interface SessionLifecycleResponse extends JsonRecord {
   readonly session_id: string
 }
 
-/** What a chat still has running, by kind: its own replies (paused or
- *  waiting ones too), its agents at any depth, the runs of Automations that
- *  live in it, workflows and terminal commands. */
 export interface ChatRunningWork extends JsonRecord {
   readonly replies: number
   readonly agents: number
@@ -211,9 +213,6 @@ export interface ChatRunningWork extends JsonRecord {
   readonly commands: number
 }
 
-/** The 409 of an archive or a permanent delete: the reason worded for the
- *  user, and what runs when only running work refused it. Sending the same
- *  request with `stop=true` stops that work first. */
 export const RUNNING_WORK = { none: "none", running: "running" } as const
 
 export type SessionEndRunning =
@@ -272,43 +271,45 @@ export interface MoveSessionToSpaceResponse extends JsonRecord {
   readonly space: SessionSpace
 }
 
-export type SessionExportFormat = "archive" | "markdown" | "json" | "jsonl"
+export const SESSION_EXPORT_FORMAT = {
+  archive: "archive",
+  markdown: "markdown",
+  json: "json",
+  jsonl: "jsonl"
+} as const
+export type SessionExportFormat = (typeof SESSION_EXPORT_FORMAT)[keyof typeof SESSION_EXPORT_FORMAT]
 
-/** Rendered by the server, then handed to the Desktop download flow. */
+export const SESSION_EXPORT_MEDIA_TYPE = {
+  archive: "application/vnd.arden.session+json",
+  json: "application/json",
+  jsonl: "application/x-ndjson",
+  markdown: "text/markdown"
+} as const satisfies Record<SessionExportFormat, string>
+export type SessionExportMediaType =
+  (typeof SESSION_EXPORT_MEDIA_TYPE)[keyof typeof SESSION_EXPORT_MEDIA_TYPE]
+
 export interface SessionExportResponse extends JsonRecord {
   readonly format: SessionExportFormat
   readonly filename: string
-  readonly media_type:
-    | "application/vnd.arden.session+json"
-    | "application/json"
-    | "application/x-ndjson"
-    | "text/markdown"
+  readonly media_type: SessionExportMediaType
   readonly content: string
   readonly warnings: ReadonlyArray<string>
 }
 
-/** One conversation message of a chat that holds the find query, and how many
- *  times (`findTextRanges`). */
 export interface ChatFindHit extends JsonRecord {
   readonly message_id: string
   readonly seq: number
   readonly count: number
 }
 
-/** `GET /sessions/:id/find`: every conversation message of one chat that holds
- *  the query, oldest first, loaded or not. `truncated` says the chat had more
- *  than the server reads or returns in one find. */
 export interface ChatFindResponse extends JsonRecord {
   readonly hits: ReadonlyArray<ChatFindHit>
   readonly truncated: boolean
 }
 
-/** One message that matches a find across all chats. */
 export interface ChatSearchHit extends JsonRecord {
   readonly message_id: string
-  /** One line of the message, cut to start a little before its first match. */
   readonly snippet: string
-  /** Each match in `snippet`, as [start, end) offsets, to highlight. */
   readonly ranges: ReadonlyArray<readonly [start: number, end: number]>
   readonly created_at: string
 }
@@ -316,21 +317,19 @@ export interface ChatSearchHit extends JsonRecord {
 interface ChatSearchChatBase extends JsonRecord {
   readonly session_id: string
   readonly session_name: SessionName
-  /** Each match in `session_name`, as [start, end) offsets; empty when it does not match. */
   readonly name_ranges: ReadonlyArray<readonly [start: number, end: number]>
   readonly last_activity: string
 }
 
-/** A chat with a matching message, its newest one in `hit`; its name may match too. */
+export const CHAT_SEARCH_MATCH = { message: "message", name: "name" } as const
+
 export interface ChatSearchByMessage extends ChatSearchChatBase {
-  readonly match: "message"
+  readonly match: typeof CHAT_SEARCH_MATCH.message
   readonly hit: ChatSearchHit
 }
 
-/** A chat whose name matches and no message does; `preview` is its newest message
- * (no `ranges`), null when it has none to show. */
 export interface ChatSearchByName extends ChatSearchChatBase {
-  readonly match: "name"
+  readonly match: typeof CHAT_SEARCH_MATCH.name
   readonly preview: ChatSearchPreview
 }
 
@@ -340,11 +339,8 @@ export type ChatSearchPreview =
   | { readonly kind: typeof SEARCH_PREVIEW.none }
   | { readonly kind: typeof SEARCH_PREVIEW.message; readonly hit: ChatSearchHit }
 
-/** One chat that matches a find across all chats. */
 export type ChatSearchChat = ChatSearchByMessage | ChatSearchByName
 
-/** `GET /sessions/search`: chats whose name matches first, then chats whose messages
- * match, the chat with the newest match first. One entry per chat. */
 export interface ChatSearchResponse extends JsonRecord {
   readonly chats: ReadonlyArray<ChatSearchChat>
   readonly has_more: boolean
@@ -355,32 +351,36 @@ export interface SessionTriageTarget extends JsonRecord {
   readonly title: string
 }
 
+export const SESSION_TRIAGE_DECISION = {
+  move: "move",
+  create: "create",
+  none: "none",
+  moved: "moved"
+} as const
+
 export interface MoveSessionTriageDecision extends JsonRecord {
-  readonly decision: "move"
+  readonly decision: typeof SESSION_TRIAGE_DECISION.move
   readonly target: SessionTriageTarget
   readonly new_title: null
   readonly rationale: string
 }
 
 export interface CreateSessionTriageDecision extends JsonRecord {
-  readonly decision: "create"
+  readonly decision: typeof SESSION_TRIAGE_DECISION.create
   readonly target: null
   readonly new_title: string
   readonly rationale: string
 }
 
 export interface NoSessionTriageDecision extends JsonRecord {
-  readonly decision: "none"
+  readonly decision: typeof SESSION_TRIAGE_DECISION.none
   readonly target: null
   readonly new_title: null
   readonly rationale: string
 }
 
-/** Triage filed the Chat on this Space: automatically for a certain fit, or
- *  because the user accepted the suggestion ("Make it a space" names the Space
- *  it made, whose conversation the Chat now is). */
 export interface MovedSessionTriageDecision extends JsonRecord {
-  readonly decision: "moved"
+  readonly decision: typeof SESSION_TRIAGE_DECISION.moved
   readonly target: SessionTriageTarget
   readonly new_title: null
   readonly rationale: string
@@ -392,15 +392,14 @@ export type SessionTriageDecision =
   | NoSessionTriageDecision
   | MovedSessionTriageDecision
 
-/** What the user did with a suggestion: "Not this", Move / Make it a space, or
- *  Undo of a filing triage made. The server remembers each one. */
 export type SessionTriageAction = "dismiss" | "accept" | "undo"
 
 export interface SessionTriageActionRequest {
   readonly action: SessionTriageAction
 }
 
-export type SessionType = "chat" | "channel" | "agent"
+export const SESSION_TYPE = { chat: "chat", channel: "channel", agent: "agent" } as const
+export type SessionType = (typeof SESSION_TYPE)[keyof typeof SESSION_TYPE]
 
 export const SESSION_TRIAGE_STATE = { none: "none", decided: "decided" } as const
 

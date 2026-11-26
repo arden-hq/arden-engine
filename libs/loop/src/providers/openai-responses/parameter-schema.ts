@@ -1,3 +1,4 @@
+import { isSchemaKeyword, JSON_SCHEMA_KEYWORD } from "../../contracts/tools.js"
 import { asRecord } from "./items.js"
 
 const schemaMaps = new Set([
@@ -5,7 +6,8 @@ const schemaMaps = new Set([
   "patternProperties",
   "$defs",
   "definitions",
-  "dependentSchemas"
+  "dependentSchemas",
+  "dependencies"
 ])
 const schemaArrays = new Set(["allOf", "anyOf", "oneOf", "prefixItems"])
 const schemaValues = new Set([
@@ -58,15 +60,6 @@ interface SchemaNode {
   readonly value: Schema
 }
 
-/**
- * The Responses backend rejects some valid JS patterns. Omit that assertion only
- * on function parameters. Schema maps contain names; annotations contain opaque
- * data. Neither may be treated as a recursively nested schema.
- *
- * Removing pattern can strengthen not/oneOf/conditionals/counts, including through
- * recursive refs. A changed document deliberately widens those assertions at every
- * schema node. Unsupported reference scopes use open object guidance instead.
- */
 export const projectFunctionParameters = (
   parameters: Readonly<Record<string, unknown>>
 ): Readonly<Record<string, unknown>> => {
@@ -95,13 +88,12 @@ export const projectFunctionParameters = (
     typeof value === "boolean"
       ? []
       : Object.keys(value).flatMap((key) =>
-          widened.has(key) || key === "oneOf" ? [childPath(path, key)] : []
+          widened.has(key) || isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.oneOf)
+            ? [childPath(path, key)]
+            : []
         )
   )
   const replaced = new Set<string>()
-  // A ref into an omitted applicator becomes {} as a whole. Deleting only $ref
-  // could activate siblings ignored by older dialects. Its descendants disappear
-  // too, so close that finite set before building the provider copy.
   let changed = true
   while (changed) {
     changed = false
@@ -133,7 +125,7 @@ const isSchema = (value: unknown): value is Schema =>
 const children = (value: Readonly<Record<string, unknown>>, path: string): Array<SchemaNode> =>
   Object.entries(value).flatMap(([key, child]): Array<SchemaNode> => {
     const location = childPath(path, key)
-    if (schemaMaps.has(key) || key === "dependencies") {
+    if (schemaMaps.has(key)) {
       const map = asRecord(child)
       return map === null
         ? []
@@ -141,13 +133,16 @@ const children = (value: Readonly<Record<string, unknown>>, path: string): Array
             isSchema(schema) ? [{ path: childPath(location, name), value: schema }] : []
           )
     }
-    if (schemaArrays.has(key) || (key === "items" && Array.isArray(child)))
+    if (
+      schemaArrays.has(key) ||
+      (isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.items) && Array.isArray(child))
+    )
       return Array.isArray(child)
         ? child.flatMap((schema, index) =>
             isSchema(schema) ? [{ path: childPath(location, String(index)), value: schema }] : []
           )
         : []
-    if (schemaValues.has(key) || key === "items")
+    if (schemaValues.has(key) || isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.items))
       return isSchema(child) ? [{ path: location, value: child }] : []
     return []
   })
@@ -185,10 +180,13 @@ const project = (
   return Object.fromEntries(
     Object.entries(value).flatMap(([key, child]): Array<[string, unknown]> => {
       if (widened.has(key)) return []
-      if (key === "oneOf" && "anyOf" in value) return []
+      if (isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.oneOf) && JSON_SCHEMA_KEYWORD.anyOf in value)
+        return []
       const location = childPath(path, key)
-      const outputKey = key === "oneOf" ? "anyOf" : key
-      if (schemaMaps.has(key) || key === "dependencies") {
+      const outputKey = isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.oneOf)
+        ? JSON_SCHEMA_KEYWORD.anyOf
+        : key
+      if (schemaMaps.has(key)) {
         const map = asRecord(child)
         return [
           [
@@ -204,7 +202,10 @@ const project = (
           ]
         ]
       }
-      if (Array.isArray(child) && (schemaArrays.has(key) || key === "items"))
+      if (
+        Array.isArray(child) &&
+        (schemaArrays.has(key) || isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.items))
+      )
         return [
           [
             outputKey,

@@ -1,6 +1,6 @@
 import type { JobDriver } from "@arden-hq/jobs"
 import type { ChatRunErrorCode } from "@arden-hq/protocol/chat"
-import { Context, type Effect } from "effect"
+import { Context, type Effect, Schema } from "effect"
 import type {
   AutomationEventScreen,
   AutomationEventScreenOutcome,
@@ -12,13 +12,15 @@ import type {
 import type { AutomationId } from "./model.js"
 import type { RunEvents } from "./event-batch.js"
 
-export const AUTOMATION_BLOCKED_KINDS = [
-  "transient",
-  "needs_input",
-  "capability",
-  "dependency"
-] as const
-type AutomationBlockedKind = (typeof AUTOMATION_BLOCKED_KINDS)[number]
+const AUTOMATION_BLOCKED_KIND = {
+  transient: "transient",
+  needs_input: "needs_input",
+  capability: "capability",
+  dependency: "dependency"
+} as const
+type AutomationBlockedKind = (typeof AUTOMATION_BLOCKED_KIND)[keyof typeof AUTOMATION_BLOCKED_KIND]
+export const AutomationBlockedKindSchema = Schema.Literals(Object.values(AUTOMATION_BLOCKED_KIND))
+export const isAutomationBlockedKind = Schema.is(AutomationBlockedKindSchema)
 
 export const HANDLER_TOOL_NAMES = ["publish_home_letter", "post_message"] as const
 export type HandlerToolName = (typeof HANDLER_TOOL_NAMES)[number]
@@ -28,9 +30,11 @@ export interface AutomationBlockedReport {
   readonly reason: string
 }
 
+export const AUTOMATION_FOLLOWUP = { stop: "stop", check_again: "check_again" } as const
+
 export type AutomationFollowup =
-  | { readonly action: "stop" }
-  | { readonly action: "check_again"; readonly at: string }
+  | { readonly action: typeof AUTOMATION_FOLLOWUP.stop }
+  | { readonly action: typeof AUTOMATION_FOLLOWUP.check_again; readonly at: string }
 
 export interface FollowupOwner {
   readonly task_id: string
@@ -43,8 +47,19 @@ export interface ForkSession {
   readonly sourceSessionId: string
 }
 
+export const OBSERVED_RUN = {
+  running: "running",
+  paused: "paused",
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled"
+} as const
+
 export interface TerminalAutomationChatRun {
-  readonly status: "completed" | "failed" | "cancelled"
+  readonly status:
+    | typeof OBSERVED_RUN.completed
+    | typeof OBSERVED_RUN.failed
+    | typeof OBSERVED_RUN.cancelled
   readonly result: string | null
   readonly error: string | null
   readonly errorCode: ChatRunErrorCode | null
@@ -54,13 +69,13 @@ export interface TerminalAutomationChatRun {
 }
 
 interface PausedAutomationChatRun {
-  readonly status: "paused"
+  readonly status: typeof OBSERVED_RUN.paused
   readonly sessionId: string
   readonly until: string
 }
 
 export type ObservedAutomationChatRun =
-  | { readonly status: "running" }
+  | { readonly status: typeof OBSERVED_RUN.running }
   | PausedAutomationChatRun
   | TerminalAutomationChatRun
 
@@ -70,7 +85,7 @@ interface SettledAutomationOccurrence extends TerminalAutomationChatRun {
 }
 
 export type ObservedAutomationOccurrence =
-  | { readonly status: "running" }
+  | { readonly status: typeof OBSERVED_RUN.running }
   | PausedAutomationChatRun
   | SettledAutomationOccurrence
 

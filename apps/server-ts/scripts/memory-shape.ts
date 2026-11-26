@@ -5,11 +5,11 @@ import { it } from "vitest"
 import { FINDING_KINDS, FINDINGS, memoryFindings } from "./memory-shape/findings.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
 import { UNTRACKED_PAGES } from "../src/wiki/untracked.js"
-import { locateReplayCopy } from "../test/fixtures/replay-copy.js"
+import { locateReplayCopy, REPLAY_COPY } from "../test/fixtures/replay-copy.js"
 
 it("prints the findings on the copy's Memory, paths and counts only", async () => {
   const located = locateReplayCopy()
-  if (located.kind === "absent") throw new Error(located.reason)
+  if (located.kind === REPLAY_COPY.absent) throw new Error(located.reason)
   const copy = located.copy
   const roots = {
     workingRoot: join(copy.wiki, "pages"),

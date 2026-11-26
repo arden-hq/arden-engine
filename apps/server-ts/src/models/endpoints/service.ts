@@ -11,28 +11,15 @@ import type {
   ModelEndpointSaveResult
 } from "@arden-hq/protocol/model-endpoints"
 import { SEARCH_ENDPOINT_MODEL_ID } from "@arden-hq/protocol/model-endpoints"
-import { Context, DateTime, Duration, Effect, Layer, Redacted, Schema, Semaphore } from "effect"
+import { Context, Duration, Effect, Layer, Schema, Semaphore } from "effect"
 
-import {
-  type CredentialVault,
-  decodeVaultValue,
-  readSecureDocument,
-  requireVault,
-  type SecureDocumentTarget,
-  vaultOperation,
-  writeSecureDocument
-} from "../../credentials/vault.js"
+import type { CredentialVault } from "../../credentials/vault.js"
 import { EmbeddingModels } from "../../embedding/models.js"
 import {
   checkEmbeddingEndpoint,
   openAiCompatibleSource
 } from "../../embedding/openai-compatible.js"
-import {
-  type EndpointHealth,
-  ModelEndpointStore,
-  type ModelEndpointSettings,
-  type StoredEndpoint
-} from "../../persistence/model-endpoints/store.js"
+import { ModelEndpointStore, type StoredEndpoint } from "../../persistence/model-endpoints/store.js"
 import type { DecisionEndpoint } from "../decisions/endpoint.js"
 import { LocalDecisionEndpoint } from "../decisions/local.js"
 import { checkDecisionEndpoint } from "../decisions/service.js"
@@ -40,8 +27,12 @@ import { DecisionEndpointSource, type SelectedDecisionEndpoint } from "../decisi
 import { decisionSiteStatuses } from "../decisions/sites.js"
 import { ModelProviderSwitch } from "../provider-switch.js"
 import { makeChatEndpoint, type ChatEndpointRequest } from "./chat-service.js"
+import { decisionBackendState } from "./decision-backend.js"
+import type { EndpointFailureReason } from "./failure.js"
+import { nextHealth } from "./health.js"
+import { decisionEndpointOf, headersOf, type ResolvedEndpoint } from "./resolved.js"
+import { endpointSecrets } from "./secrets.js"
 import { view, viewAll } from "./views.js"
-import { type EndpointFailureReason, runtimeFailure } from "./failure.js"
 
 export class ModelEndpointsError extends Schema.TaggedError<ModelEndpointsError>()(
   "ModelEndpointsError",
@@ -67,10 +58,6 @@ export class ModelEndpoints extends Context.Service<
     readonly remove: (
       kind: ModelEndpointKind
     ) => Effect.Effect<ModelEndpointsView, ModelEndpointsError>
-    /**
-     * The model servers: a Check of a new one or of an edit (which also
-     * re-asks the saved one), adding or replacing one, removing one.
-     */
     readonly checkChat: (
       request: ChatEndpointRequest
     ) => Effect.Effect<ChatEndpointCheck, ModelEndpointsError>
@@ -95,34 +82,17 @@ export class ModelEndpoints extends Context.Service<
 
 export interface ModelEndpointsOptions {
   readonly vault: CredentialVault | undefined
-  /** Transport for search and decision calls: one JSON request each, retried by it. */
   readonly fetch: typeof globalThis.fetch
-  /** Transport for the model server, whose chat adapters retry on their own. */
   readonly chatFetch: typeof globalThis.fetch
-  /** Called after the model server changed the model list (saved, removed, re-read at start). */
   readonly modelListChanged: () => void
 }
 
 const DECISION_TIMEOUT_MS = 3_000
 const CHECK_TIMEOUT_MS = 15_000
 
-/** Where a key is in the vault: a search or decision endpoint's, or one model server's. */
-type SecretOwner = ModelEndpointKind | { readonly chat: string }
-
-const secretTarget = (owner: SecretOwner): SecureDocumentTarget => {
-  const name = typeof owner === "string" ? owner : `chat:${owner.chat}`
-  return { documentKey: `model-endpoint:${name}`, binding: `model-endpoint:${name}:v1` }
-}
-
-const SecretDocumentSchema = Schema.Struct({ secret: Schema.NonEmptyString })
-
 interface CheckedEndpoint {
   readonly check: ModelEndpointCheck
   readonly dimensions: StoredEndpoint["dimensions"]
-}
-
-interface ResolvedEndpoint extends Omit<StoredEndpoint, "dimensions" | "health"> {
-  readonly secret: string
 }
 
 const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpointsOptions) {
@@ -146,45 +116,13 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       .updateSettings(patch)
       .pipe(Effect.mapError(storage("Could not save model endpoint settings")))
 
-  const readSecret = (owner: SecretOwner) =>
-    Effect.tryPromise({
-      try: async () => {
-        const value = await readSecureDocument(options.vault, secretTarget(owner))
-        if (value === null) return undefined
-        const decoded = await decodeVaultValue(
-          SecretDocumentSchema,
-          value,
-          "The saved endpoint key is unreadable"
-        )
-        return decoded.secret
-      },
-      catch: storage("Could not read the endpoint key")
-    })
-  const writeSecret = (owner: SecretOwner, secret: string) =>
-    Effect.tryPromise({
-      try: () => writeSecureDocument(options.vault, secretTarget(owner), { secret }),
-      catch: storage("Could not save the endpoint key")
-    })
-  const clearSecret = (owner: SecretOwner) =>
-    Effect.tryPromise({
-      try: () =>
-        vaultOperation("Could not delete the endpoint key", () =>
-          requireVault(options.vault).clearDocument(secretTarget(owner))
-        ),
-      catch: storage("Could not delete the endpoint key")
-    })
-  const readDocument = (owner: SecretOwner) =>
-    Effect.tryPromise({
-      try: () => readSecureDocument(options.vault, secretTarget(owner)),
-      catch: storage("Could not read the endpoint key")
-    })
-  const restoreDocument = (owner: SecretOwner, value: unknown | null) =>
-    value === null
-      ? clearSecret(owner)
-      : Effect.tryPromise({
-          try: () => writeSecureDocument(options.vault, secretTarget(owner), value),
-          catch: storage("Could not restore the endpoint key")
-        })
+  const {
+    read: readSecret,
+    write: writeSecret,
+    clear: clearSecret,
+    readDocument,
+    restore: restoreDocument
+  } = endpointSecrets(options.vault, storage)
 
   const reportUnlocked = Effect.fn("ModelEndpoints.report")(function* (
     kind: ModelEndpointKind,
@@ -413,46 +351,9 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
     return viewAll(next)
   })
 
-  const backendState = Effect.fn("ModelEndpoints.backendState")(function* (
-    current: ModelEndpointSettings
-  ) {
-    switch (current.decisionSource) {
-      case "off":
-        return { state: "off" } satisfies DecisionBackendState
-      case "local": {
-        const endpoint = yield* local.endpoint()
-        return endpoint === undefined
-          ? ({ state: "unavailable", reason: "no_local_model" } satisfies DecisionBackendState)
-          : ({
-              state: "ready",
-              model: endpoint.model,
-              input: endpoint.input
-            } satisfies DecisionBackendState)
-      }
-      case "endpoint": {
-        const stored = current.decision
-        if (stored === null)
-          return { state: "unavailable", reason: "no_endpoint" } satisfies DecisionBackendState
-        return stored.health.state === "failing"
-          ? ({
-              state: "failing",
-              model: stored.model,
-              input: stored.input,
-              reason: stored.health.reason,
-              since: stored.health.since
-            } satisfies DecisionBackendState)
-          : ({
-              state: "ready",
-              model: stored.model,
-              input: stored.input
-            } satisfies DecisionBackendState)
-      }
-    }
-  })
-
   const decisionStatus = Effect.fn("ModelEndpoints.decisionStatus")(function* () {
     const current = yield* settings()
-    const backend: DecisionBackendState = yield* backendState(current)
+    const backend: DecisionBackendState = yield* decisionBackendState(current, local)
     return {
       source: current.decisionSource,
       backend,
@@ -571,49 +472,4 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       })
     )
   )
-})
-
-const nextHealth = (
-  health: EndpointHealth,
-  failure: EndpointFailureReason | undefined
-): Effect.Effect<EndpointHealth | undefined> => {
-  if (failure === undefined)
-    return Effect.succeed(health.state === "works" ? undefined : { state: "works" })
-  const reason = runtimeFailure(failure)
-  if (health.state === "failing" && health.reason === reason) return Effect.succeed(undefined)
-  return DateTime.now.pipe(
-    Effect.map((now): EndpointHealth => ({
-      state: "failing",
-      reason,
-      since: DateTime.formatIso(now),
-      message:
-        reason === "key_refused" ? "The service refused the key" : "The endpoint stopped answering"
-    }))
-  )
-}
-
-const headersOf = (auth: StoredEndpoint["auth"], secret: string): Record<string, string> =>
-  auth.kind === "bearer" ? { authorization: `Bearer ${secret}` } : { [auth.name]: secret }
-
-const decisionEndpointOf = (
-  endpoint: ResolvedEndpoint,
-  fetch: typeof globalThis.fetch,
-  timeoutMs: number
-): DecisionEndpoint => ({
-  id: "endpoint",
-  format: {
-    "openai-decisions": "decisions",
-    "openrouter-decisions": "openrouter-decisions",
-    systemone: "systemone",
-    "openai-embeddings": "systemone"
-  }[endpoint.format] as DecisionEndpoint["format"],
-  baseUrl: endpoint.baseUrl,
-  auth:
-    endpoint.auth.kind === "bearer"
-      ? { kind: "bearer", apiKey: Redacted.make(endpoint.secret) }
-      : { kind: "header", name: endpoint.auth.name, value: Redacted.make(endpoint.secret) },
-  model: endpoint.model,
-  input: endpoint.input,
-  timeoutMs,
-  fetch
 })

@@ -6,16 +6,9 @@ import { Effect } from "effect"
 import { expect, it } from "vitest"
 
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
-import {
-  archivePage,
-  commitWiki,
-  createPage,
-  mergePage,
-  movePage,
-  ownerInApp,
-  type WikiCommitIdentity,
-  type WikiWrite
-} from "../src/wiki/commit.js"
+import { archivePage, commitWiki, createPage, mergePage, movePage } from "../src/wiki/commit.js"
+import { type WikiWrite } from "../src/wiki/commit-write-types.js"
+import { ownerInApp, type WikiCommitIdentity } from "../src/wiki/origin.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { partialService } from "./kit.js"

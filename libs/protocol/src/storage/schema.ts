@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import {
   IsoDateTimeStringSchema,
   withExtras,
@@ -6,6 +6,8 @@ import {
   PositiveIntSchema
 } from "../common/schema.js"
 import {
+  STORAGE_CATEGORY,
+  STORAGE_CLEANUP_ACTION,
   STORAGE_CURRENT_SESSION,
   STORAGE_LIMIT,
   type StorageCategory,
@@ -18,7 +20,7 @@ import {
   type StorageStatus
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const NonEmptyTextSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4_096))
 const SessionIdSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(255))
 const MaxSpaceGiBSchema = Schema.Number.check(
@@ -38,15 +40,7 @@ const CurrentSessionSchema = Schema.Union([
 ])
 export const StoragePlanIdSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 
-const StorageCategoryIdSchema = Schema.Literals([
-  "chats",
-  "channels",
-  "agents",
-  "knowledge",
-  "skills",
-  "housekeeping",
-  "other"
-] as const)
+const StorageCategoryIdSchema = Schema.Literals(Object.values(STORAGE_CATEGORY))
 
 export const StorageCategoryResponseSchema = withExtras({
   id: StorageCategoryIdSchema,
@@ -101,7 +95,7 @@ export const StorageOverviewResponseSchema = withExtras({
 })
 
 export const StorageCleanupActionResponseSchema = withExtras({
-  kind: Schema.Literals(["delete_archived_session", "delete_inactive_session"] as const),
+  kind: Schema.Literals(Object.values(STORAGE_CLEANUP_ACTION)),
   resource_id: NonEmptyTextSchema,
   name: NonEmptyTextSchema,
   size_bytes: NonNegativeIntSchema,

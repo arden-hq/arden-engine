@@ -1,5 +1,5 @@
 import { timerSleep } from "../../lib/timer-sleep.js"
-import { DateTime, Effect, Layer, Queue } from "effect"
+import { DateTime, Effect, Layer, Option, Queue } from "effect"
 import type { PowerHost } from "../../config/options.js"
 import { GoogleConnections } from "../../google/service.js"
 import { McpConnections } from "../../mcp/service.js"
@@ -130,7 +130,7 @@ export const connectionItemsRuntime = (options: {
 
       const next = Queue.take(wakes).pipe(
         Effect.timeoutOption(FETCH_EVERY),
-        Effect.flatMap((woken) => (woken._tag === "Some" ? timerSleep(AFTER_WAKE) : Effect.void))
+        Effect.flatMap((woken) => (Option.isSome(woken) ? timerSleep(AFTER_WAKE) : Effect.void))
       )
 
       yield* Effect.forkScoped(

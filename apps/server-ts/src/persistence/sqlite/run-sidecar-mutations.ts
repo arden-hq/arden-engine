@@ -43,13 +43,10 @@ export const deleteRunSidecarsBySessionInTransaction = Effect.fn("RunSidecars.de
   }
 )
 
-// `run_sidecars.context_manifest_json` holds every composition of the run's Memory context, in
-// order. `'[]'` (the column default) means none was sent.
 const MemoryContextJson = Schema.fromJsonString(Schema.Array(RunMemoryContextSchema))
 const CompositionJson = Schema.fromJsonString(RunMemoryContextSchema)
 const decodeRecord = Schema.decodeUnknownEffect(MemoryContextJson)
 
-/** What the run was sent from Memory, in order; empty when it was sent none or ran before records. */
 export const readMemoryContext = Effect.fn("RunSidecars.readMemoryContext")(function* (
   sql: SqlClient.SqlClient,
   runId: string
@@ -61,10 +58,6 @@ export const readMemoryContext = Effect.fn("RunSidecars.readMemoryContext")(func
   return yield* decodeRecord(row.context_manifest_json)
 })
 
-/**
- * Adds a composition to the run's record. A rebuilt context that repeats the last composition
- * adds nothing, and a run whose first composition holds nothing adds no row.
- */
 export const recordMemoryContextInTransaction = Effect.fn("RunSidecars.recordMemoryContext")(
   function* (
     sql: SqlClient.SqlClient,

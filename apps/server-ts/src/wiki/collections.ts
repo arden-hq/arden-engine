@@ -1,4 +1,5 @@
-import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
+import { PATH_SEGMENT, RESOURCE_STATE } from "@arden-hq/revisions/effect"
+import { WIKI_REPORT_FIELDS, WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { parseCalendarDay } from "@arden-hq/std/time"
 import { byteLength, clipLine } from "@arden-hq/std/text"
 import type { Nodes } from "mdast"
@@ -67,15 +68,28 @@ const IMPORTED_FOLDER: RecordFolder = {
   producer: { kind: "import" }
 }
 
-export type PageKind =
-  | { readonly kind: "knowledge" }
-  | { readonly kind: "contract"; readonly folder: RecordFolder }
-  | { readonly kind: "record"; readonly folder: RecordFolder; readonly day: string | undefined }
+export const PAGE_KIND = { knowledge: "knowledge", contract: "contract", record: "record" } as const
 
-/** The record folders of Memory, by directory as `normal` spells it. */
+export const MDAST_NODE = { heading: "heading", paragraph: "paragraph" } as const
+
+type MdastNodeType = (typeof MDAST_NODE)[keyof typeof MDAST_NODE]
+
+export const isMdastNode = <Type extends MdastNodeType>(
+  node: Nodes,
+  type: Type
+): node is Extract<Nodes, { readonly type: Type }> => node.type === type
+
+export type PageKind =
+  | { readonly kind: typeof PAGE_KIND.knowledge }
+  | { readonly kind: typeof PAGE_KIND.contract; readonly folder: RecordFolder }
+  | {
+      readonly kind: typeof PAGE_KIND.record
+      readonly folder: RecordFolder
+      readonly day: string | undefined
+    }
+
 export type RecordFolders = ReadonlyMap<string, RecordFolder>
 
-/** The Automation a page names as its producer: on a contract, the folder's; on a record, its. */
 export const markedProducer = (page: ParsedWikiPage): string | undefined => {
   const producer = page.metadata[WIKI_REPORT_FIELDS.automationId]
   return typeof producer === "string" && producer.length > 0 ? producer : undefined
@@ -92,10 +106,10 @@ export const recordFolders = (pages: ReadonlyArray<PageRecord>): RecordFolders =
   for (const record of pages) {
     const path = record.resource.path
     if (
-      record.resource.state !== "active" ||
-      record.page.lifecycle !== "active" ||
+      record.resource.state !== RESOURCE_STATE.active ||
+      record.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active ||
       !isReadme(path) ||
-      posix.dirname(path) === "."
+      posix.dirname(path) === PATH_SEGMENT.current
     )
       continue
     const directory = posix.dirname(path)
@@ -112,19 +126,23 @@ const dayOfName = (path: string): string | undefined => {
   return day !== undefined && parseCalendarDay(day) !== undefined ? day : undefined
 }
 
-const KNOWLEDGE_PAGE: PageKind = { kind: "knowledge" }
+const KNOWLEDGE_PAGE: PageKind = { kind: PAGE_KIND.knowledge }
 
 const folderContract = (folders: RecordFolders, path: string): PageKind | undefined => {
   const own = folders.get(normal(posix.dirname(path)))
-  return own !== undefined && isReadme(path) ? { kind: "contract", folder: own } : undefined
+  return own !== undefined && isReadme(path) ? { kind: PAGE_KIND.contract, folder: own } : undefined
 }
 
 const recordPage = (folders: RecordFolders, path: string): PageKind | undefined => {
-  for (let at = posix.dirname(path); at !== "." && at !== "/"; at = posix.dirname(at)) {
+  for (
+    let at = posix.dirname(path);
+    at !== PATH_SEGMENT.current && at !== posix.sep;
+    at = posix.dirname(at)
+  ) {
     const folder = folders.get(normal(at))
     if (folder !== undefined)
       return {
-        kind: "record",
+        kind: PAGE_KIND.record,
         folder,
         day: folder.producer.kind === "automation" ? dayOfName(path) : undefined
       }
@@ -135,10 +153,9 @@ const recordPage = (folders: RecordFolders, path: string): PageKind | undefined 
 export const pageKind = (folders: RecordFolders, path: string): PageKind =>
   folderContract(folders, path) ?? recordPage(folders, path) ?? KNOWLEDGE_PAGE
 
-/** The Automation whose folder holds this page, as a record or as the contract; undefined otherwise. */
 export const producingAutomation = (folders: RecordFolders, path: string): string | undefined => {
   const kind = pageKind(folders, path)
-  return kind.kind !== "knowledge" && kind.folder.producer.kind === "automation"
+  return kind.kind !== PAGE_KIND.knowledge && kind.folder.producer.kind === "automation"
     ? kind.folder.producer.automationId
     : undefined
 }
@@ -170,7 +187,9 @@ export const wikiCollections = (pages: ReadonlyArray<RunPage>): ReadonlyArray<Wi
   }
   return active
     .filter(
-      (record) => isReadme(record.resource.path) && posix.dirname(record.resource.path) !== "."
+      (record) =>
+        isReadme(record.resource.path) &&
+        posix.dirname(record.resource.path) !== PATH_SEGMENT.current
     )
     .map((record): WikiCollection => {
       const directory = posix.dirname(record.resource.path)
@@ -187,7 +206,7 @@ export const wikiCollections = (pages: ReadonlyArray<RunPage>): ReadonlyArray<Wi
         consumers: excerpt(sections.get("Consumers")),
         records: excerpt(sections.get("Records")),
         producer:
-          kind.kind === "contract" && kind.folder.producer.kind === "automation"
+          kind.kind === PAGE_KIND.contract && kind.folder.producer.kind === "automation"
             ? kind.folder.producer.automationId
             : undefined,
         contract: DIRECTORY_CONTRACT_HEADINGS.every((heading) => sections.get(heading))
@@ -218,12 +237,6 @@ interface MemoryIndexFold {
   readonly pages: number
 }
 
-/**
- * The generated list of the pages under one folder: every active page has a line, falls under
- * a folded folder's line, or is `unlisted`, past the size once every folder is folded.
- * `folded` is in the order folders were folded; `text` holds the lines in path order and names
- * no count, so a page that joins or leaves a folded folder leaves the text as it was.
- */
 export interface MemoryIndex {
   readonly root: string
   readonly lines: ReadonlyArray<MemoryIndexLine>
@@ -240,18 +253,11 @@ const indexLine = ({ path, summary }: MemoryIndexLine): string =>
 
 const foldLine = (folder: string): string => `- ${folder === "" ? "(top level)" : folder}/ (folded)`
 
-/**
- * The index of the active pages under `root` ("" for all of Memory), in at most `maxBytes`.
- * Over the size it folds the folder with the most direct pages, one at a time, and the root
- * folder last, until it fits. When every folder that can fold is folded and it still does not
- * fit, lines are left out from the end. Pure: the same pages give the same index.
- */
 export const memoryIndex = (
   pages: ReadonlyArray<RunPage>,
   options: {
     readonly root: string
     readonly maxBytes: number
-    /** Pages the caller sends another way; they are neither listed nor counted. */
     readonly leaveOut?: (record: PageRecord) => boolean
   }
 ): MemoryIndex => {
@@ -269,7 +275,7 @@ export const memoryIndex = (
   const byFolder = new Map<string, Array<MemoryIndexLine>>()
   for (const line of listed) {
     const folder = posix.dirname(line.path)
-    const key = folder === "." ? "" : folder
+    const key = folder === PATH_SEGMENT.current ? "" : folder
     byFolder.set(key, [...(byFolder.get(key) ?? []), line])
   }
   const lineBytes = (lines: ReadonlyArray<MemoryIndexLine>): number =>
@@ -298,7 +304,7 @@ export const memoryIndex = (
   const foldedFolders = new Set(folded.map((fold) => fold.folder))
   const lines = listed.filter((line) => {
     const folder = posix.dirname(line.path)
-    return !foldedFolders.has(folder === "." ? "" : folder)
+    return !foldedFolders.has(folder === PATH_SEGMENT.current ? "" : folder)
   })
   const entries = [
     ...lines.map((line) => ({ key: line.path, text: indexLine(line), line, fold: undefined })),

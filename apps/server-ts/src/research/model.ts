@@ -43,11 +43,13 @@ const ResearchSourceSnapshotSchema = Schema.Struct({
 
 export type ResearchSourceSnapshot = (typeof ResearchSourceSnapshotSchema)["Type"]
 
-const ResearchEvidenceRelationSchema = Schema.Literals([
-  "supports",
-  "contradicts",
-  "qualifies"
-] as const)
+const RESEARCH_EVIDENCE_RELATION = {
+  supports: "supports",
+  contradicts: "contradicts",
+  qualifies: "qualifies"
+} as const
+
+const ResearchEvidenceRelationSchema = Schema.Literals(Object.values(RESEARCH_EVIDENCE_RELATION))
 
 const ResearchEvidenceSchema = Schema.Struct({
   evidenceRef: IdentifierSchema,
@@ -69,12 +71,12 @@ const ResearchEvidenceSchema = Schema.Struct({
 
 export type ResearchEvidence = (typeof ResearchEvidenceSchema)["Type"]
 
-const ResearchCheckVerdictSchema = Schema.Literals([
-  "supports",
-  "contradicts",
-  "qualifies",
-  "irrelevant"
-] as const)
+export const RESEARCH_CHECK_VERDICT = {
+  ...RESEARCH_EVIDENCE_RELATION,
+  irrelevant: "irrelevant"
+} as const
+
+const ResearchCheckVerdictSchema = Schema.Literals(Object.values(RESEARCH_CHECK_VERDICT))
 
 const ResearchCheckSchema = Schema.Struct({
   checkRef: IdentifierSchema,
@@ -121,3 +123,11 @@ export const emptyResearchState = (): ResearchState => ({
   checks: [],
   operations: []
 })
+
+export const opposingRelations = (
+  left: ResearchEvidence["relation"],
+  right: ResearchEvidence["relation"]
+): boolean =>
+  (left === RESEARCH_EVIDENCE_RELATION.supports &&
+    right === RESEARCH_EVIDENCE_RELATION.contradicts) ||
+  (left === RESEARCH_EVIDENCE_RELATION.contradicts && right === RESEARCH_EVIDENCE_RELATION.supports)

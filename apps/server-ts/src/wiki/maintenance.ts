@@ -1,8 +1,13 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { cutBytes } from "@arden-hq/std/text"
-import type { Commit, ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
+import {
+  CHANGE_ACTION,
+  type Commit,
+  type ManagedFileRepositoryShape
+} from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 
-import { decodeWikiOrigin, wikiOriginSource } from "./commit.js"
+import { decodeWikiOrigin, wikiOriginSource } from "./origin.js"
 import { isContentStepOrigin } from "./content-steps.js"
 import { mapRevisionError, wikiError, type WikiError, type WikiOperation } from "./errors.js"
 import { pageKind, recordFolders, type RecordFolders } from "./collections.js"
@@ -137,7 +142,9 @@ const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(functi
 const directReferences = (
   snapshot: Snapshot
 ): ReadonlyMap<string, ReadonlyArray<{ readonly targetPageId: string | null }>> => {
-  const pages = snapshot.pages.filter((record) => record.page.lifecycle === "active")
+  const pages = snapshot.pages.filter(
+    (record) => record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
+  )
   const byId = new Map(snapshot.pages.map((record) => [record.page.pageId, record] as const))
   const names = pageNameIndex(snapshot.pages)
   return new Map(
@@ -331,11 +338,15 @@ export const makeWikiMaintenanceMethods = (
       const resource = change.after ?? change.before
       if (resource === null) continue
       const diff = yield* repository
-        .diffVersionsPage(change.before, change.action === "archive" ? null : change.after, {
-          offset: 0,
-          limit: MAX_DIFF_BYTES + 1,
-          sourceByteLimit: MAX_CURRENT_PAGE_BYTES
-        })
+        .diffVersionsPage(
+          change.before,
+          change.action === CHANGE_ACTION.archive ? null : change.after,
+          {
+            offset: 0,
+            limit: MAX_DIFF_BYTES + 1,
+            sourceByteLimit: MAX_CURRENT_PAGE_BYTES
+          }
+        )
         .pipe(Effect.mapError(mapRevisionError("list", resource.resourceId)))
       const section = [
         `### Revision ${source.commitId}: ${change.action} ${resource.path}${readOnlyMark(folders, resource.path)}`,

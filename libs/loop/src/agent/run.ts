@@ -1,26 +1,20 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isBackgroundCall } from "./streaming-tools.js"
 import { harnessNotice } from "./harness-notice.js"
-import { pendingBackgroundCalls } from "./background-tools.js"
 import { isAbortError } from "../abort.js"
-import { decorateToolResult, type DispatchOutput } from "../tools/dispatch.js"
+import type { DispatchOutput } from "../tools/dispatch.js"
 import { admitToolCalls, loadDeferredCalls } from "./tool-admission.js"
-import { providerErrorCode, StructuredOutputError } from "../errors.js"
+import { PROVIDER_ERROR_CODE, providerErrorCode, StructuredOutputError } from "../errors.js"
 import { messageId, type ChatMessage } from "../contracts/messages.js"
-import { ToolChoice, type ProviderMessage } from "../contracts/provider.js"
-import { StopReason, type AgentEvent, type ToolPaused } from "../contracts/events.js"
-import { incompleteToolStep } from "./recovery.js"
-import { normalizeToolResult } from "../internal/validate.js"
+import { FinishReason, ToolChoice, type ProviderMessage } from "../contracts/provider.js"
+import { StopReason, type AgentEvent } from "../contracts/events.js"
 import { hookCall, invoke } from "./guards.js"
 import {
   appendBudgetDenials,
   appendOutputLimitContinuation,
-  budgetDenialResult,
   maxOutputLimitContinuations,
   nextNoProgressCount,
-  recoveredTerminalText,
   terminalCompletionText,
-  turnEndingToolBatchRejection,
   turnEndingBatchRefusal
 } from "./policy.js"
 import {
@@ -34,7 +28,8 @@ import {
   type StepView
 } from "./run-state.js"
 import { stopForBudget } from "./run-cost.js"
-import { finalize, pauseResult } from "./run-result.js"
+import { finalize, finalizePaused } from "./run-result.js"
+import { launchPendingBackground, resumeIncomplete } from "./run-resume.js"
 import { announceInputTaken, drainPending, isOwnerMessage, stepFinished } from "./run-input.js"
 import {
   correctionContent,
@@ -43,7 +38,8 @@ import {
   type AgentOutputOptions
 } from "./structured-output.js"
 
-type StepOutcome = "continue" | "done"
+const STEP_OUTCOME = { continue: "continue", done: "done" } as const
+type StepOutcome = (typeof STEP_OUTCOME)[keyof typeof STEP_OUTCOME]
 
 export const runLoop = async (
   wiring: AgentWiring,
@@ -60,7 +56,7 @@ export const runLoop = async (
     await launchPendingBackground(run)
     if (await resumeIncomplete(run)) return
     while (true) {
-      if ((await step(run)) === "done") return
+      if ((await step(run)) === STEP_OUTCOME.done) return
     }
   } catch (cause) {
     failed = true
@@ -82,165 +78,6 @@ export const runLoop = async (
   }
 }
 
-const launchPendingBackground = async (run: Run): Promise<void> => {
-  const { wiring } = run
-  const pendingBackground = pendingBackgroundCalls(run.messages, {
-    displayTitle: wiring.toolset.displayTitle
-  })
-  if (pendingBackground.length === 0) return
-  const entries = await wiring.toolset.entries()
-  const claimed = await hookCall(
-    "claimBackgroundCalls",
-    async () =>
-      new Map(
-        (await wiring.hooks.claimBackgroundCalls?.(
-          pendingBackground.map((call) => call.toolCall.id)
-        )) ?? []
-      )
-  )
-  for (const held of claimed.values()) {
-    if (run.backgroundSignal.aborted) held.stop()
-    else run.backgroundSignal.addEventListener("abort", held.stop, { once: true })
-  }
-  const unclaimed = pendingBackground.filter((call) => !claimed.has(call.toolCall.id))
-  const recovered = await hookCall(
-    "recoverToolCalls",
-    async () =>
-      new Map(
-        [
-          ...((unclaimed.length === 0
-            ? undefined
-            : await wiring.hooks.recoverToolCalls?.(unclaimed)) ?? [])
-        ].map(([id, value]) => [id, normalizeToolResult(value)])
-      )
-  )
-  await run.background.launch({
-    calls: pendingBackground,
-    metas: new Map(entries.map((entry) => [entry.meta.name, entry.meta])),
-    recovered,
-    claimed
-  })
-}
-
-const resumeIncomplete = async (run: Run): Promise<boolean> => {
-  const { wiring, state, messages } = run
-  const incomplete = incompleteToolStep(messages, wiring.toolset.displayTitle)
-  if (incomplete === null) return false
-  const entries = await wiring.toolset.entries()
-  const metas = new Map(entries.map((entry) => [entry.meta.name, entry.meta]))
-  const metadata = wiring.toolset.metadata
-  if (metadata !== undefined) {
-    const hiddenNames = new Set(
-      incomplete.pendingCalls.map((call) => call.name).filter((name) => !metas.has(name))
-    )
-    for (const name of hiddenNames) {
-      const meta = await metadata(name)
-      if (meta?.name === name) metas.set(name, meta)
-    }
-  }
-  const deferredPendingNames = new Set(
-    incomplete.pendingCalls
-      .filter((call) => metas.get(call.name)?.deferred === true)
-      .map((call) => call.name)
-  )
-  await loadDeferredCalls({
-    calls: incomplete.pendingCalls,
-    deferredNames: deferredPendingNames,
-    load: (names) =>
-      wiring.toolset.seedLoadedNames === undefined
-        ? wiring.toolset.load(names)
-        : wiring.toolset.seedLoadedNames(names)
-  })
-  const recovered = await hookCall("recoverToolCalls", async () => {
-    const raw = new Map((await wiring.hooks.recoverToolCalls?.(incomplete.pendingCalls)) ?? [])
-    const callsById = new Map(
-      incomplete.pendingCalls.map((call) => [call.toolCall.id, call] as const)
-    )
-    return new Map(
-      [...raw].map(([id, value]) => {
-        const call = callsById.get(id)
-        if (call === undefined) return [id, normalizeToolResult(value)]
-        return [
-          id,
-          decorateToolResult(
-            {
-              name: call.name,
-              args: structuredClone(call.args),
-              toolCallId: id,
-              signal: run.signal,
-              messages
-            },
-            value,
-            wiring.toolset
-          )
-        ]
-      })
-    )
-  })
-  const callsToExecute = incomplete.pendingCalls.filter((call) => !recovered.has(call.toolCall.id))
-  const missingIds = new Set(incomplete.pendingCalls.map((call) => call.toolCall.id))
-  const missingRaw = incomplete.rawToolCalls.filter((call) => missingIds.has(call.id))
-  const rejection = turnEndingToolBatchRejection(incomplete.pendingCalls, metas)
-  if (rejection === null) {
-    const reserved = await run.budget.reserveToolCalls(
-      callsToExecute.length,
-      wiring.config.maxToolCalls
-    )
-    if (!reserved) {
-      const denial = invoke("policy.budgetDenialContent", () =>
-        budgetDenialResult(StopReason.MAX_TOOL_CALLS, wiring.config.policy)
-      )
-      const settled = new Map(recovered)
-      for (const call of callsToExecute) settled.set(call.toolCall.id, denial)
-      await runTools(run, [], missingRaw, metas, { recoveredResults: settled })
-      state.step = 1
-      await stepFinished(run)
-      await finalize(run, state.resultText, StopReason.MAX_TOOL_CALLS, 1)
-      return true
-    }
-  }
-  const executed = await runTools(run, callsToExecute, missingRaw, metas, {
-    recoveredResults: recovered,
-    ...(rejection === null ? { foreground: true } : { rejection })
-  })
-  state.step = 1
-  if (executed.paused.length > 0) {
-    await finalizePaused(run, 1, executed.paused)
-    return true
-  }
-  if (rejection === null) {
-    const terminal =
-      recoveredTerminalText(incomplete.pendingCalls, recovered, metas) ??
-      terminalCompletionText(executed.completions)
-    if (terminal !== undefined) {
-      await stepFinished(run)
-      await finalize(run, terminal, StopReason.END_TURN, 1)
-      return true
-    }
-  }
-  await stepFinished(run)
-  return false
-}
-
-const finalizePaused = async (
-  run: Run,
-  steps: number,
-  paused: ReadonlyArray<ToolPaused>
-): Promise<void> => {
-  const running = run.background.running()
-  const hold = run.wiring.hooks.holdBackgroundCalls
-  if (running.length > 0 && hold !== undefined) {
-    try {
-      await hookCall("holdBackgroundCalls", () => hold(running))
-    } catch (error) {
-      for (const call of running) call.stop()
-      throw error
-    }
-  }
-  run.detachBackground()
-  await finalize(run, "", StopReason.PAUSED, steps, pauseResult(paused))
-}
-
 const remainingWallTime = (run: Run): { readonly maxWaitMs?: number } => {
   const { wiring, state } = run
   return wiring.config.maxWallTimeMs === undefined
@@ -260,11 +97,11 @@ const step = async (run: Run): Promise<StepOutcome> => {
     state.noProgressSteps >= wiring.config.maxNoProgressSteps
   ) {
     await finalize(run, state.resultText, StopReason.NO_PROGRESS, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
   if (settled.paused.length > 0) {
     await finalizePaused(run, state.step, settled.paused)
-    return "done"
+    return STEP_OUTCOME.done
   }
   const drained = await drainPending(run)
   state.inputAdmission = { pending: false }
@@ -279,19 +116,19 @@ const step = async (run: Run): Promise<StepOutcome> => {
 
   if (wiring.config.maxIterations !== undefined && state.step >= wiring.config.maxIterations) {
     await finalize(run, state.resultText, StopReason.MAX_ITERATIONS, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
   const initialBudgetStop = await stopForBudget(run)
   if (initialBudgetStop !== null) {
     await finalize(run, state.resultText, initialBudgetStop, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
   const prepared = await prepare(run)
   const preparedBudgetStop = await stopForBudget(run)
   if (preparedBudgetStop !== null) {
     await finalize(run, state.resultText, preparedBudgetStop, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
   const { view, turn, turnStart } = await callModelPastOverflow(run, prepared)
@@ -301,7 +138,7 @@ const step = async (run: Run): Promise<StepOutcome> => {
   const undispatched = rawCalls.filter((call) => !state.streamedTools.ids.has(call.id))
   if (state.streamedTools.output.paused.length > 0) {
     await finalizePaused(run, state.step + 1, state.streamedTools.output.paused)
-    return "done"
+    return STEP_OUTCOME.done
   }
   const afterModelBudgetStop = await stopForBudget(run)
   if (afterModelBudgetStop !== null) {
@@ -311,17 +148,20 @@ const step = async (run: Run): Promise<StepOutcome> => {
       })
     }
     await finalize(run, state.resultText, afterModelBudgetStop, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
-  if (response.finish_reason === "length") {
-    // A cut-off structured reply cannot be continued into one valid value, so that run stops.
-    if (run.output === undefined && state.outputLimitContinuations < maxOutputLimitContinuations) {
+  if (response.finish_reason === FinishReason.LENGTH) {
+    const structuredReplyCannotResume = run.output !== undefined
+    if (
+      !structuredReplyCannotResume &&
+      state.outputLimitContinuations < maxOutputLimitContinuations
+    ) {
       state.outputLimitContinuations += 1
       appendOutputLimitContinuation(messages, undispatched)
       state.step += 1
       await stepFinished(run)
-      return "continue"
+      return STEP_OUTCOME.continue
     }
     if (rawCalls.length > 0) {
       invoke("policy.budgetDenialContent", () => {
@@ -334,38 +174,32 @@ const step = async (run: Run): Promise<StepOutcome> => {
       })
     }
     await finalize(run, (message.content ?? "").trim(), StopReason.MAX_OUTPUT_LENGTH, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
   state.outputLimitContinuations = 0
 
   if (rawCalls.length === 0 && response.continuation === true && !run.background.pending) {
     state.step += 1
-    return "continue"
+    return STEP_OUTCOME.continue
   }
   return rawCalls.length === 0
     ? settleTextTurn(run, view, message, turnStart)
     : runToolTurn(run, view, message)
 }
 
-/**
- * Calls the model. When the provider refuses the request as longer than its context window before
- * any reply, the request is prepared again with `contextOverflow` set and sent once more; unless a
- * middleware shortened the history in answer, the refusal stands.
- */
 const callModelPastOverflow = async (run: Run, view: StepView) => {
   const turnStart = run.messages.length
   try {
     return { view, turn: await callModel(run, view), turnStart }
   } catch (cause) {
     if (
-      providerErrorCode(cause) !== "context_length_exceeded" ||
+      providerErrorCode(cause) !== PROVIDER_ERROR_CODE.contextLengthExceeded ||
       run.signal.aborted ||
       run.messages.slice(turnStart).some((message) => message.role === ROLE.assistant)
     )
       throw cause
     const shortened = await prepare(run, { contextOverflow: true })
     if (!shortened.overflowAnswered) throw cause
-    // The refused call produced no message, so the retry mints its ids as that same turn.
     run.state.modelTurnCount -= 1
     return {
       view: shortened,
@@ -397,7 +231,7 @@ const settleTextTurn = async (
   if (providerLoaded.size > 0 || silentMiss) {
     state.step += 1
     await stepFinished(run)
-    return "continue"
+    return STEP_OUTCOME.continue
   }
   if (run.background.pending) {
     const arrival = new AbortController()
@@ -419,15 +253,15 @@ const settleTextTurn = async (
     }
     if (settled.paused.length > 0) {
       await finalizePaused(run, state.step, settled.paused)
-      return "done"
+      return STEP_OUTCOME.done
     }
     if (settled.completions.length > 0)
       state.noProgressSteps = nextNoProgressCount(state.noProgressSteps, settled.completions)
     state.step += 1
-    return "continue"
+    return STEP_OUTCOME.continue
   }
   const pendingCount = await drainPending(run)
-  if (pendingCount > 0) return "continue"
+  if (pendingCount > 0) return STEP_OUTCOME.continue
   const finalText = (message.content ?? "").trim()
   if (
     !state.finalTextChecked &&
@@ -460,7 +294,7 @@ const settleTextTurn = async (
       })
       state.step += 1
       await stepFinished(run)
-      return "continue"
+      return STEP_OUTCOME.continue
     }
   }
   if (run.output !== undefined) {
@@ -471,7 +305,7 @@ const settleTextTurn = async (
         messages.push(harnessNotice("output_schema", correctionContent(validated.issues)))
         state.step += 1
         await stepFinished(run)
-        return "continue"
+        return STEP_OUTCOME.continue
       }
       throw new StructuredOutputError(
         `structured output failed validation after one correction retry: ${
@@ -483,7 +317,7 @@ const settleTextTurn = async (
     state.structuredObject = { value: validated.value }
   }
   await finalize(run, finalText, StopReason.END_TURN, state.step)
-  return "done"
+  return STEP_OUTCOME.done
 }
 
 const runToolTurn = async (
@@ -526,10 +360,10 @@ const runToolTurn = async (
       state.noProgressSteps >= wiring.config.maxNoProgressSteps
     ) {
       await finalize(run, state.resultText, StopReason.NO_PROGRESS, state.step)
-      return "done"
+      return STEP_OUTCOME.done
     }
     await stepFinished(run)
-    return "continue"
+    return STEP_OUTCOME.continue
   }
 
   const reserved = await run.budget.reserveToolCalls(others.length, wiring.config.maxToolCalls)
@@ -538,7 +372,7 @@ const runToolTurn = async (
       appendBudgetDenials(messages, othersRaw, StopReason.MAX_TOOL_CALLS, wiring.config.policy)
     })
     await finalize(run, state.resultText, StopReason.MAX_TOOL_CALLS, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
   const backgroundCalls = others.filter((call) =>
@@ -567,7 +401,7 @@ const runToolTurn = async (
   if (executed.paused.length > 0) {
     state.step += 1
     await finalizePaused(run, state.step, executed.paused)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
   const terminal = terminalCompletionText(executed.completions)
@@ -575,7 +409,7 @@ const runToolTurn = async (
     state.step += 1
     await stepFinished(run)
     await finalize(run, terminal, StopReason.END_TURN, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
   if (executed.completions.length > 0)
@@ -586,7 +420,7 @@ const runToolTurn = async (
   ) {
     state.step += 1
     await finalize(run, state.resultText, StopReason.NO_PROGRESS, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
   const afterToolsBudgetStop = await stopForBudget(run)
@@ -605,10 +439,10 @@ const runToolTurn = async (
       state.resultText = (finalTurn.response.message.content ?? "").trim()
     }
     await finalize(run, state.resultText, afterToolsBudgetStop, state.step)
-    return "done"
+    return STEP_OUTCOME.done
   }
 
   state.step += 1
   await stepFinished(run)
-  return "continue"
+  return STEP_OUTCOME.continue
 }

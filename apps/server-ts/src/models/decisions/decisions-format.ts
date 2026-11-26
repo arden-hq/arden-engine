@@ -14,15 +14,6 @@ import {
 } from "./questions.js"
 import { stateText } from "./state-text.js"
 
-/**
- * The Decisions wire format (`POST {base}/v1/decisions`), as OpenAI serves
- * `gpt-6-luna` (public beta since 2026-10-06; an API key, the ChatGPT/Codex
- * sign-in is refused) and gateways route other decision models through it.
- * Images go inline as base64 data URLs. Questions are an array with a `name`
- * each; answers come back as an array under the same names, and a question
- * the model will not answer comes back as `{ type: "refusal", name }`.
- * Shapes: developers.openai.com/api/docs/guides/decisions (checked 2026-10-10).
- */
 export const decisionsFormatBackend = (endpoint: DecisionEndpoint): DecisionBackend => ({
   id: endpoint.id,
   input: endpoint.input,

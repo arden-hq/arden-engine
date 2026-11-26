@@ -1,9 +1,5 @@
 import type { JsonRecord } from "../../common/json.js"
 
-/* A chat's Goal, as older chat journals carry it in `focus_updated`. Goals
-   became the Task a chat works on in place (goal-task-merge, migration 0044);
-   nothing writes these now, and they are read only so old journals decode. */
-
 type SessionFocusStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete"
 
 interface FocusEvidence extends JsonRecord {

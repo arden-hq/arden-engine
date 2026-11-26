@@ -1,13 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { link, open, rm } from "node:fs/promises"
 import path from "node:path"
+import { ERRNO, isErrnoCode } from "./errors.js"
 
-/**
- * Writes `content` to `target` once: the bytes go to a fsynced sibling file and
- * are linked into place, so a reader sees all of them or none, and a file that
- * is already there is never replaced. True when this call published; false
- * when `target` already existed (the caller decides whether that is fine).
- */
 export const publishNoReplace = async (
   target: string,
   content: string | Uint8Array,
@@ -26,14 +21,7 @@ export const publishNoReplace = async (
       await link(temporary, target)
       return true
     } catch (cause) {
-      if (
-        typeof cause === "object" &&
-        cause !== null &&
-        "code" in cause &&
-        cause.code === "EEXIST"
-      ) {
-        return false
-      }
+      if (isErrnoCode(cause, ERRNO.EEXIST)) return false
       throw cause
     }
   } finally {

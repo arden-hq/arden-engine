@@ -1,11 +1,7 @@
-import { toB64url, utf8 } from "@arden-hq/relay-protocol"
-import type { Pusher, PushRequest, PushResult } from "../core/pusher.js"
+import { APNS_REASON, PUSH_STATUS, toB64url, utf8 } from "@arden-hq/relay-protocol"
+import type { ApnsEnvironment, PushOutcome, PushPriority } from "@arden-hq/relay-protocol"
+import type { Pusher, PushRequest } from "../core/pusher.js"
 import { parseJsonText } from "@arden-hq/std/json-text"
-
-// The APNs sender, free of any host: a provider token signed with WebCrypto
-// (Bun and Workers both have it) and an injected HTTP/2 transport, since APNs
-// refuses HTTP/1.1. Cloudflare's fetch speaks HTTP/2 to Apple; Bun's does not,
-// so the Bun host passes a node:http2 transport.
 
 interface ApnsHttpRequest {
   readonly url: string
@@ -16,6 +12,7 @@ export interface ApnsHttpResponse {
   readonly status: number
   readonly body: string
 }
+// APNs takes HTTP/2 only: https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns
 export type ApnsTransport = (request: ApnsHttpRequest) => Promise<ApnsHttpResponse>
 
 export interface ApnsCredentials {
@@ -24,13 +21,15 @@ export interface ApnsCredentials {
   readonly teamId: string
 }
 
-/** Apple accepts a token for 60 min and throttles refreshes under 20 min. */
+// Refresh between 20 and 60 minutes: https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns
 const tokenLifetimeMs = 50 * 60_000
 
-const hosts = {
+const hosts: Readonly<Record<ApnsEnvironment, string>> = {
   sandbox: "https://api.sandbox.push.apple.com",
   production: "https://api.push.apple.com"
-} as const
+}
+
+const apnsPriority: Readonly<Record<PushPriority, string>> = { high: "10", normal: "5" }
 
 export const createApnsPusher = ({
   credentials,
@@ -41,7 +40,6 @@ export const createApnsPusher = ({
 }): Pusher => {
   const key = importP8(credentials.keyPem)
   key.catch(() => {})
-  // The promise is cached so concurrent pushes share one token (Apple throttles new ones).
   let cached: { readonly jwt: Promise<string | undefined>; readonly issued: number } | undefined
   const providerToken = (): Promise<string | undefined> => {
     const at = Date.now()
@@ -65,11 +63,15 @@ export const createApnsPusher = ({
   return {
     push: async (request) => {
       const jwt = await providerToken()
-      if (jwt === undefined) return { status: "unavailable", reason: "InvalidProviderKey" }
+      if (jwt === undefined)
+        return { status: PUSH_STATUS.unavailable, reason: "InvalidProviderKey" }
       const response = await transport(buildApnsRequest(request, jwt)).catch(() => undefined)
-      if (response === undefined) return { status: "unavailable", reason: "NetworkError" }
+      if (response === undefined) return { status: PUSH_STATUS.unavailable, reason: "NetworkError" }
       const result = mapApnsResponse(response)
-      if (result.status === "rejected" && result.reason === "ExpiredProviderToken")
+      if (
+        result.status === PUSH_STATUS.rejected &&
+        result.reason === APNS_REASON.ExpiredProviderToken
+      )
         cached = undefined
       return result
     }
@@ -108,7 +110,7 @@ const buildApnsRequest = (request: PushRequest, jwt: string): ApnsHttpRequest =>
     authorization: `bearer ${jwt}`,
     "apns-topic": request.topic,
     "apns-push-type": "alert",
-    "apns-priority": request.priority === "high" ? "10" : "5",
+    "apns-priority": apnsPriority[request.priority],
     "apns-collapse-id": request.collapseId,
     "apns-expiration": "0",
     "content-type": "application/json"
@@ -116,17 +118,17 @@ const buildApnsRequest = (request: PushRequest, jwt: string): ApnsHttpRequest =>
   body: request.body
 })
 
-/** 400/403/410 are Apple refusing this push (410 Unregistered: drop the token); the rest may pass on retry. */
-const mapApnsResponse = (response: ApnsHttpResponse): PushResult => {
-  if (response.status === 200) return { status: "accepted" }
+// https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns
+const mapApnsResponse = (response: ApnsHttpResponse): PushOutcome => {
+  if (response.status === 200) return { status: PUSH_STATUS.accepted }
   const reason = appleReason(response.body) ?? `HTTP ${response.status}`
   switch (response.status) {
     case 400:
     case 403:
     case 410:
-      return { status: "rejected", reason }
+      return { status: PUSH_STATUS.rejected, reason }
     default:
-      return { status: "unavailable", reason }
+      return { status: PUSH_STATUS.unavailable, reason }
   }
 }
 

@@ -4,9 +4,6 @@ import { expect, it } from "vitest"
 import { RunQueries } from "../src/persistence/runs/queries.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// The Run list returned every Run the server holds, which reads the whole
-// table. It now returns a page from a cursor, one chat's Runs, or the Runs
-// still going; `anyActive` speaks for the whole server whatever the filter.
 it("lists Runs a page at a time, by chat, and only those still going", async () => {
   const result = await withTempDatabase(
     Effect.gen(function* () {
@@ -15,7 +12,6 @@ it("lists Runs a page at a time, by chat, and only those still going", async () 
       yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type, name)
         VALUES ('one', 'ref-one', '2026-09-01', '2026-09-01', 'chat', 'One'),
                ('two', 'ref-two', '2026-09-01', '2026-09-01', 'chat', 'Two')`
-      // r2 and r3 start at the same moment: the cursor must not skip or repeat either.
       for (const [id, session, at, status] of [
         ["r1", "one", "2026-09-02T00:00:01.000Z", "completed"],
         ["r2", "two", "2026-09-02T00:00:02.000Z", "completed"],

@@ -1,11 +1,14 @@
-/** Whether a child can lead its own process group (so the whole group can be signalled); Windows has none. */
-export const canDetach = process.platform !== "win32"
+export const PLATFORM = {
+  darwin: "darwin",
+  linux: "linux",
+  windows: "win32"
+} as const satisfies Record<string, NodeJS.Platform>
+export type Platform = (typeof PLATFORM)[keyof typeof PLATFORM]
 
-/**
- * Signals a child's whole process group (the child and what it started). Where
- * there are no groups (Windows) or the group is gone, `fallback` signals the
- * child alone. A signal to a process that already exited is not an error.
- */
+export const onWindows = process.platform === PLATFORM.windows
+
+export const canDetach = !onWindows
+
 export const signalProcessGroup = (
   pid: number | undefined,
   signal: NodeJS.Signals,
@@ -18,18 +21,12 @@ export const signalProcessGroup = (
   } catch {
     try {
       fallback?.(signal)
-    } catch {
-      // Already exited.
-    }
+    } catch {}
   }
 }
 
 const KILL_GRACE_MS = 3_000
 
-/**
- * SIGTERM first, so a wrapper can record how it ended (a `lab run` marks its
- * run stopped); SIGKILL once the grace passes if it still has not exited.
- */
 export const terminate = (
   send: (signal: NodeJS.Signals) => void,
   ended: () => boolean,

@@ -8,12 +8,6 @@ import type { Backfill } from "./backfills/backfill.js"
 
 const MESSAGE_AUTHORS_BACKFILL = "message_authors"
 
-/**
- * Stores the author of each user message that has none: every message saved before the column
- * existed. A writer's mark tells the author. An unmarked turn or answer is the owner's only with
- * proof: a chat-started run of the turn or a resolved question, in the chat or a chat it was
- * copied from. With no proof kept it is `unknown`. Cursor: the last message rowid looked at.
- */
 export const messageAuthorsBackfill: Backfill = {
   name: MESSAGE_AUTHORS_BACKFILL,
   landed: "2026-11-16",
@@ -81,7 +75,6 @@ const proofKey = (
   return `question:${isRecord(answer) && typeof answer.question_id === "string" ? answer.question_id : ""}`
 }
 
-/** The turns a chat started and the questions it resolved, in `sessionId` and its sources. */
 const ownerProofs = Effect.fn("MessageAuthors.ownerProofs")(function* (
   sql: SqlClient.SqlClient,
   sessionId: string

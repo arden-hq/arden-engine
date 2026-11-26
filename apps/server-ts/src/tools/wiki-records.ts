@@ -120,7 +120,6 @@ export const directoryReceipt = (
     href: memoryHref(page.path)
   })
 
-/** The version of a page this run read. A page is changed only after the run has read it. */
 export const requireObserved = (ctx: ServerRunContext, record: PageRecord): string => {
   const observed = ctx.observations.observed(record.page.pageId)
   if (observed !== undefined) return observed
@@ -130,7 +129,6 @@ export const requireObserved = (ctx: ServerRunContext, record: PageRecord): stri
   })
 }
 
-/** What a published report says about itself: the period it covers, who made it, its sources. */
 export const reportProvenanceLines = (record: PageRecord): ReadonlyArray<string> => [
   ...(typeof record.page.metadata["observation_period"] === "string"
     ? [`Observation period: ${record.page.metadata["observation_period"]}`]

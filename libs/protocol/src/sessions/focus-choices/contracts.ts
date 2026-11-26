@@ -1,20 +1,29 @@
 import { cutText } from "@arden-hq/std/text"
 import type { JsonRecord } from "../../common/json.js"
 
+export const FOCUS_CHOICE_TARGET = { existing: "existing", create: "create" } as const
+
 export type FocusChoiceTarget =
   | {
-      readonly kind: "existing"
+      readonly kind: typeof FOCUS_CHOICE_TARGET.existing
       readonly session_ref: string
       readonly label: string
     }
   | {
-      readonly kind: "create"
+      readonly kind: typeof FOCUS_CHOICE_TARGET.create
       readonly name: string
     }
 
 export const FOCUS_CHOICE_STATUS = { offered: "offered", settled: "settled" } as const
 
-export type FocusChoiceDecision = "continue_here" | "open_target"
+export type FocusChoiceStatus = (typeof FOCUS_CHOICE_STATUS)[keyof typeof FOCUS_CHOICE_STATUS]
+
+export const FOCUS_CHOICE_DECISION = {
+  continueHere: "continue_here",
+  openTarget: "open_target"
+} as const
+
+export type FocusChoiceDecision = (typeof FOCUS_CHOICE_DECISION)[keyof typeof FOCUS_CHOICE_DECISION]
 
 interface FocusChoiceFields extends JsonRecord {
   readonly choice_id: string
@@ -54,10 +63,10 @@ export interface ResolveFocusChoiceResponse extends JsonRecord {
 
 const CHOICE_LABEL_MAX = 160
 
-/** The "open" door's words, named for where it goes: the button, the stored
- *  answer label and the answered line all say this, never "Open target". */
 export function focusOpenLabel(target: FocusChoiceTarget): string {
   const label =
-    target.kind === "existing" ? `Continue in ${target.label}` : `Open a new chat: ${target.name}`
+    target.kind === FOCUS_CHOICE_TARGET.existing
+      ? `Continue in ${target.label}`
+      : `Open a new chat: ${target.name}`
   return cutText(label, CHOICE_LABEL_MAX)
 }

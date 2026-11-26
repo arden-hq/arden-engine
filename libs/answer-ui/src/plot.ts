@@ -1,11 +1,13 @@
 import { z } from "zod"
 import { Format } from "./format.js"
-import { evaluateFormula, missingVariables, readFormula, type FormulaValue } from "./formula.js"
-
-/** A line chart whose series are formulas over x: the `spec` a `Plot` part
- *  carries. Fields may be expressions over the block's `$variables` (a
- *  slider's value flows in through `vars` or `x.to`); the part checks the
- *  evaluated spec before it draws. */
+import {
+  evaluateFormula,
+  FORMULA_READ_KIND,
+  FORMULA_VALUE_KIND,
+  missingVariables,
+  readFormula,
+  type FormulaValue
+} from "./formula.js"
 
 const Text = z.string().max(200)
 
@@ -26,7 +28,6 @@ export const PlotSpec = z.object({
   }),
   series: z.array(PlotSeries).min(1).max(4),
   format: Format.optional(),
-  /** A fixed y range, so lines move instead of the axis rescaling. */
   min: z.number().optional(),
   max: z.number().optional(),
   height: z.number().optional()
@@ -36,17 +37,18 @@ export type PlotSpec = z.infer<typeof PlotSpec>
 const PLOT_MAX_POINTS = 200
 const DEFAULT_POINTS = 61
 
+export const PLOT_DATA_KIND = { plot: "plot", invalid: "invalid" } as const
+
 export type PlotData =
   | {
-      readonly kind: "plot"
+      readonly kind: typeof PLOT_DATA_KIND.plot
       readonly xs: readonly number[]
-      /** One value per x; undefined where the formula has no finite value. */
       readonly series: ReadonlyArray<{
         readonly name: string
         readonly values: ReadonlyArray<number | undefined>
       }>
     }
-  | { readonly kind: "invalid"; readonly reason: string }
+  | { readonly kind: typeof PLOT_DATA_KIND.invalid; readonly reason: string }
 
 function plotXs(from: number, to: number, step: number | undefined): number[] {
   const steps = step === undefined ? DEFAULT_POINTS - 1 : Math.floor((to - from) / step + 1e-9)
@@ -60,35 +62,38 @@ function plotXs(from: number, to: number, step: number | undefined): number[] {
   return xs
 }
 
-/** Every series of a plot spec evaluated at its x values, or why it cannot be. */
 export function plotData(spec: PlotSpec): PlotData {
   const { from, to, step } = spec.x
-  if (!(to > from)) return { kind: "invalid", reason: "x.to must be larger than x.from" }
+  if (!(to > from))
+    return { kind: PLOT_DATA_KIND.invalid, reason: "x.to must be larger than x.from" }
   const xs = plotXs(from, to, step)
   const series = []
   for (const line of spec.series) {
     const read = readFormula(line.fn)
-    if (read.kind === "invalid") return { kind: "invalid", reason: `${line.name}: ${read.reason}` }
+    if (read.kind === FORMULA_READ_KIND.invalid)
+      return { kind: PLOT_DATA_KIND.invalid, reason: `${line.name}: ${read.reason}` }
     const vars = line.vars ?? {}
     const missing = missingVariables(read.formula, [...Object.keys(vars), "x"])
     if (missing.length > 0)
       return {
-        kind: "invalid",
+        kind: PLOT_DATA_KIND.invalid,
         reason: `${line.name}: ${missing.map((name) => `\`${name}\``).join(", ")} not in vars`
       }
     const values = xs.map((x) => {
       const value = evaluateFormula(read.formula, { ...vars, x })
-      return value.kind === "value" ? value.value : undefined
+      return value.kind === FORMULA_VALUE_KIND.value ? value.value : undefined
     })
     if (values.every((value) => value === undefined))
-      return { kind: "invalid", reason: `${line.name}: no finite value anywhere on the range` }
+      return {
+        kind: PLOT_DATA_KIND.invalid,
+        reason: `${line.name}: no finite value anywhere on the range`
+      }
     series.push({ name: line.name, values })
   }
-  return { kind: "plot", xs, series }
+  return { kind: PLOT_DATA_KIND.plot, xs, series }
 }
 
-/** A `Formula` part's value: its formula read and evaluated for `vars`. */
 export function formulaValue(fn: string, vars: Readonly<Record<string, unknown>>): FormulaValue {
   const read = readFormula(fn)
-  return read.kind === "formula" ? evaluateFormula(read.formula, vars) : read
+  return read.kind === FORMULA_READ_KIND.formula ? evaluateFormula(read.formula, vars) : read
 }

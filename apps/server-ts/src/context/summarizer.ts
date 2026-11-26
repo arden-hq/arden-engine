@@ -53,7 +53,6 @@ export interface SummarizeContextInput {
   readonly priorSummary?: string
   readonly contextWindow: number
   readonly maxOutputTokens: number
-  /** The model's `context.outputCap`. */
   readonly outputCap: number | undefined
   readonly signal?: AbortSignal
   readonly onResponse: (response: CompletionResponse) => void
@@ -61,20 +60,16 @@ export interface SummarizeContextInput {
   readonly fallback?: "standalone" | "none"
 }
 
+const HANDOFF_WINDOW_DIVISOR = 4
+
 export const summarizeContext = async (input: SummarizeContextInput): Promise<string> => {
-  // The handoff's own size: at most a quarter of the window, and never more
-  // than the model writes.
-  const maxOutputTokens = Math.min(
+  const handoffTokens = Math.min(
     input.maxOutputTokens,
-    Math.max(1, Math.floor(input.contextWindow / 4)),
+    Math.max(1, Math.floor(input.contextWindow / HANDOFF_WINDOW_DIVISOR)),
     input.outputCap ?? Number.POSITIVE_INFINITY
   )
-  // The request's limit leaves room for thinking on top of the handoff (the
-  // effort stays the chat's, see `sideCallEffort`). The source gives way to
-  // what is actually sent: the whole limit where the route sends it, only
-  // the handoff where it does not (Codex), as before the thinking room.
   const requestTokens = sideCallOutputLimit({
-    answerTokens: maxOutputTokens,
+    answerTokens: handoffTokens,
     effort: input.reasoningEffort ?? undefined,
     outputCap: input.outputCap
   })
@@ -82,9 +77,9 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
     provider: input.provider,
     model: input.model
   })
-  const reservedTokens =
-    outputLimitDelivery(capabilities) === "sent" ? requestTokens : maxOutputTokens
-  const maxBytes = maxOutputTokens * HANDOFF_BYTES_PER_TOKEN
+  const tokensActuallySent =
+    outputLimitDelivery(capabilities) === "sent" ? requestTokens : handoffTokens
+  const maxBytes = handoffTokens * HANDOFF_BYTES_PER_TOKEN
   const summaryBytes = maxBytes - Buffer.byteLength(handoffContent({ ...input, summary: "" }))
   if (summaryBytes <= 0) throw new Error("Compaction budget cannot fit its recovery reference")
   const instruction = `${withUntrustedDataRule(PROMPTS.compaction)}\n\nReturn only the handoff, targeting at most ${Math.floor(summaryBytes / 20)} words and never exceeding ${summaryBytes} UTF-8 bytes. The full transcript is recoverable through session_search_transcripts and session_read using session_ref ${JSON.stringify(input.sessionRef)}. Include short, distinctive lookup hints for omitted details. Recent messages will also be retained verbatim, so keep their detail concise. Do not call tools.`
@@ -98,7 +93,7 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
           input.sourceText,
           input.priorSummary,
           input.contextWindow,
-          reservedTokens
+          tokensActuallySent
         )
       }
     ],

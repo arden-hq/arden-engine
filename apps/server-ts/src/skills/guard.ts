@@ -1,6 +1,10 @@
 import type { ModelContentBlock, ToolCallRequest, ToolResult } from "@arden-hq/loop"
 import type { ToolsetMiddleware } from "../execution/toolset-middleware.js"
 
+export const SKILL_CREATE_TOOL_NAME = "skill_create"
+
+export const SKILL_UPDATE_TOOL_NAME = "skill_update"
+
 export const SKILL_TOOL_NAME = "skill"
 export const TRUSTED_SKILL_CONTENT_TYPE = "trusted_skill_instructions"
 export const BUILT_IN_SKILL_SOURCE = "arden_builtin_skill"

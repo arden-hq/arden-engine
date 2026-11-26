@@ -2,15 +2,17 @@ import { Schema } from "effect"
 import { ChatWriteConflictError, type ChatWriteError } from "../persistence/chat/store.js"
 import type { ToolExecutionStoreError } from "../persistence/tools/store.js"
 
+export const CHAT_MESSAGE_FAILURE = {
+  invalid: "invalid",
+  conflict: "conflict",
+  unavailable: "unavailable",
+  not_found: "not_found",
+  storage: "storage",
+  runner: "runner"
+} as const
+
 export class ChatMessageError extends Schema.TaggedError<ChatMessageError>()("ChatMessageError", {
-  reason: Schema.Literals([
-    "invalid",
-    "conflict",
-    "unavailable",
-    "not_found",
-    "storage",
-    "runner"
-  ] as const),
+  reason: Schema.Literals(Object.values(CHAT_MESSAGE_FAILURE)),
   message: Schema.String,
   sessionId: Schema.optionalKey(Schema.NonEmptyString),
   cause: Schema.optionalKey(Schema.Defect())

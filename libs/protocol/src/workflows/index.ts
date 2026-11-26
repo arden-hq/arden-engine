@@ -19,7 +19,6 @@ export const scriptDecoders = {
   summary: decoderFor(ScriptSummarySchema, "Invalid script response")
 } as const
 
-/** Serialize one stable mutation body; reuse it for HTTP retries. */
 export const scriptRequests = {
   retry: makeEncoder<ScriptRetryRequest>(
     encodeScriptRetryRequestEffect,

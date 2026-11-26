@@ -112,11 +112,7 @@ const requireDay = (value: string, field: string): Date => {
   return day
 }
 
-/**
- * An all-day event in Google's shape. Callers give the first and last day
- * inclusive (`end` defaults to `start`); Google's `end.date` is the day after
- * the last day.
- */
+// Google's all-day end.date is exclusive: https://developers.google.com/workspace/calendar/api/v3/reference/events
 export const allDayTimes = (
   start: string,
   end: string | undefined
@@ -129,10 +125,6 @@ export const allDayTimes = (
   return { start: { date: dayString(first) }, end: { date: dayString(addDays(last, 1)) } }
 }
 
-/**
- * An all-day event's days as callers read them: Google's exclusive `end.date`
- * becomes the last day inclusive. A missing or unreadable end is a one-day event.
- */
 export const allDayDays = (
   start: string,
   endExclusive: string | undefined
@@ -159,7 +151,6 @@ export const checkRecurrence = (lines: ReadonlyArray<string>): ReadonlyArray<str
   return trimmed
 }
 
-/** Google's popup reminder overrides; an empty list means no reminders. */
 export const reminderBody = (
   minutes: ReadonlyArray<number>
 ): {
@@ -177,7 +168,6 @@ export type RsvpPlan =
   | { readonly kind: "not_attendee" }
   | {
       readonly kind: "answer"
-      /** The PATCH body: attendeesOmitted limits the update to this participant. */
       readonly body: {
         readonly attendees: ReadonlyArray<Readonly<Record<string, unknown>>>
         readonly attendeesOmitted: true
@@ -187,11 +177,6 @@ export type RsvpPlan =
 const isEntry = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-/**
- * An RSVP changes the one attendee entry marked `self` (the account the call is
- * made as) and nothing else of the event. Only the person's own entry is sent, with
- * `attendeesOmitted` so concurrent responses by other guests are preserved. The organizer has no response to give.
- */
 export const planRsvp = (input: {
   readonly organizerIsSelf: boolean
   readonly attendees: unknown

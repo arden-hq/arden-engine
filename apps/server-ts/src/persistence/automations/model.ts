@@ -18,16 +18,19 @@ import type { AutomationStoreError } from "./store.js"
 import type { EffectTarget } from "../../execution/tool-effect.js"
 import type { HandlerItemKind } from "./handler-item.js"
 
-export const SYSTEM_HANDLER_IDS = [
-  "memory_capture",
-  "daily_summary",
-  "home_letter",
-  "managed_history_collection",
-  "wiki_maintenance",
-  "chat_summaries",
-  "events"
-] as const
-export type SystemHandlerId = (typeof SYSTEM_HANDLER_IDS)[number]
+export const SYSTEM_HANDLER = {
+  memoryCapture: "memory_capture",
+  dailySummary: "daily_summary",
+  homeLetter: "home_letter",
+  managedHistoryCollection: "managed_history_collection",
+  wikiMaintenance: "wiki_maintenance",
+  chatSummaries: "chat_summaries",
+  events: "events"
+} as const
+export type SystemHandlerId = (typeof SYSTEM_HANDLER)[keyof typeof SYSTEM_HANDLER]
+const SYSTEM_HANDLER_IDS: ReadonlyArray<SystemHandlerId> = Object.values(SYSTEM_HANDLER)
+export const SystemHandlerIdSchema = Schema.Literals(SYSTEM_HANDLER_IDS)
+export const isSystemHandlerId = Schema.is(SystemHandlerIdSchema)
 
 export const AutomationId = Schema.NonEmptyString.pipe(Schema.brand("AutomationId"))
 export type AutomationId = typeof AutomationId.Type

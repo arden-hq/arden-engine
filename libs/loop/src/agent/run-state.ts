@@ -11,7 +11,8 @@ import { renderInteraction } from "./interactions.js"
 import { makeToolSearch, type ToolSearchStrategy } from "../tools/search.js"
 import { applyModelRequestMiddlewares } from "./middleware.js"
 import { prepareProviderRequest, resolveModelCapabilities } from "./provider-capabilities.js"
-import { runModelTurn, type ModelTurnOutput } from "./model-turn.js"
+import { runModelTurn } from "./model-turn.js"
+import type { ModelTurnOutput } from "./model-turn-types.js"
 import {
   type ChatMessage,
   type JsonObject,
@@ -30,8 +31,11 @@ import {
 } from "../contracts/tools.js"
 import {
   addUsage,
+  DELIVERY_MODE,
+  TOOL_SEARCH_MODE,
   zeroUsage,
   type CompletionResponse,
+  type DeliveryMode,
   type ModelProvider,
   type ModelProviderRequest,
   type ModelRequest,
@@ -114,11 +118,10 @@ export type StepView = Omit<
   ModelRequest,
   "step" | "previousResponse" | "compactionReplacement" | "contextOverflow"
 > & {
-  /** A middleware shortened the history in answer to `ModelRequest.contextOverflow`. */
   readonly overflowAnswered: boolean
   readonly toolSearch?: ToolSearch
   readonly metas: ReadonlyMap<string, ToolMeta>
-  readonly asyncMode: "native" | "message"
+  readonly asyncMode: DeliveryMode
 }
 
 export const makeRun = (input: {
@@ -234,7 +237,7 @@ export const prepare = async (
   }
   const searches =
     (await resolveModelCapabilities({ provider: wiring.provider, model: wiring.config.model }))
-      .toolSearch === "client"
+      .toolSearch === TOOL_SEARCH_MODE.client
   const changed = searches ? toolsChangedRecord(state.deferredNames, deferred) : undefined
   state.deferredNames = new Set(deferred.map((tool) => tool.name))
   if (changed !== undefined) {
@@ -311,7 +314,7 @@ export const prepare = async (
     ...(prepared.responseFormat === undefined ? {} : { responseFormat: prepared.responseFormat }),
     asyncMode:
       (await resolveModelCapabilities({ provider: wiring.provider, model: prepared.model }))
-        .asyncTools ?? "message",
+        .asyncTools ?? DELIVERY_MODE.message,
     metas
   }
 }

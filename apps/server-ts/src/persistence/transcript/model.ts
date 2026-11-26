@@ -49,11 +49,8 @@ export const StoredMessageEnvelopeSchema = Schema.StructWithRest(
 
 export type StoredMessageEnvelope = (typeof StoredMessageEnvelopeSchema)["Type"]
 
-/** Who wrote a user message, stored with it as `session_messages.author`. `unknown` is only
- *  for old turns that kept no proof; no writer produces it. */
 export type MessageAuthor = "owner" | "answer" | "copy" | "automation" | "agent" | "app" | "unknown"
 
-/** The author a writer's own marks give its message; null for the roles Arden writes. */
 export const messageAuthor = (message: Readonly<Record<string, unknown>>): MessageAuthor | null => {
   if (message.role !== ROLE.user && message.role !== ROLE.interaction) return null
   if (message.forked_from !== undefined) return "copy"
@@ -359,7 +356,6 @@ const TranscriptSearchHitSchema = Schema.Struct({
 export const TranscriptSearchPageSchema = Schema.Struct({
   hits: Schema.Array(TranscriptSearchHitSchema),
   hasMore: Schema.Boolean,
-  /** The index is still being filled in the background: older messages may be missing. */
   indexing: Schema.Boolean
 })
 

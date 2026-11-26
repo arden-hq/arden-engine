@@ -1,8 +1,13 @@
 import { PauseRequested } from "@arden-hq/loop"
-import { DateTime, Effect, Schema } from "effect"
+import { DateTime, Effect, Option, Schema } from "effect"
 import { TOOL_OUTCOME_UNCERTAIN } from "../persistence/tools/store.js"
 import type { GoogleToolConnections } from "./google-accounts.js"
 import { googleToolFailure, recordGoogleAnswer } from "./google-request.js"
+import {
+  GOOGLE_CONNECTION_REASON,
+  GOOGLE_DIAGNOSTIC,
+  GOOGLE_API_ERROR_REASON
+} from "../google/errors.js"
 import type { CallEffects } from "../execution/tool-effect.js"
 import { gmailThreadTarget } from "../connections/items/gmail.js"
 import { gmailThreadUrl } from "@arden-hq/protocol/google"
@@ -52,10 +57,12 @@ export const gmailSend = async ({
         Effect.tapError((error) => Effect.sync(() => recordGoogleAnswer(effects, error))),
         Effect.mapError((error) => {
           if (
-            (error.reason === "invalid_response" && error.diagnostic.kind === "http") ||
-            (error.reason === "provider" &&
-              (error.diagnostic.kind === "transport" ||
-                (error.diagnostic.kind === "http" && error.diagnostic.reason === "provider")))
+            (error.reason === GOOGLE_CONNECTION_REASON.invalidResponse &&
+              error.diagnostic.kind === GOOGLE_DIAGNOSTIC.http) ||
+            (error.reason === GOOGLE_CONNECTION_REASON.provider &&
+              (error.diagnostic.kind === GOOGLE_DIAGNOSTIC.transport ||
+                (error.diagnostic.kind === GOOGLE_DIAGNOSTIC.http &&
+                  error.diagnostic.reason === GOOGLE_API_ERROR_REASON.provider)))
           ) {
             return new PauseRequested(TOOL_OUTCOME_UNCERTAIN)
           }
@@ -66,7 +73,7 @@ export const gmailSend = async ({
   )
   const decoded = Schema.decodeUnknownOption(SentMessage)(sent.value)
   if (
-    decoded._tag === "None" ||
+    Option.isNone(decoded) ||
     (body.threadId !== undefined && decoded.value.threadId !== body.threadId)
   ) {
     effects.sent()

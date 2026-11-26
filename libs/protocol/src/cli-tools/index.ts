@@ -8,8 +8,6 @@ export const cliToolDecoders = {
 } as const
 
 export const cliToolRoutes = {
-  /** The last detection; the first read runs one. */
   list: "/cli-tools",
-  /** Detects again and answers the new report. */
   refresh: "/cli-tools/refresh"
-} as const
+}

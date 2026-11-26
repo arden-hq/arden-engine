@@ -2,6 +2,7 @@ import type {
   ComputerApp,
   ComputerFeedback,
   ComputerFrameCapture,
+  ComputerMode,
   ComputerOperation,
   ComputerPreview,
   ComputerSession,
@@ -10,12 +11,12 @@ import type {
 import {
   COMPUTER_APP,
   COMPUTER_FEEDBACK,
+  COMPUTER_MODE,
   COMPUTER_OPERATION,
   COMPUTER_PREVIEW,
   COMPUTER_SESSION
 } from "@arden-hq/protocol/computer"
 
-const MODE = { ready: "ready", paused: "paused" } as const
 const SURFACE = { desktop: "desktop", window: "window" } as const
 const UNCLAIMED: ComputerSession = { kind: COMPUTER_SESSION.unclaimed }
 const UNIDENTIFIED: ComputerApp = { kind: COMPUTER_APP.unidentified }
@@ -23,8 +24,8 @@ const UNLABELLED: ComputerOperation = { kind: COMPUTER_OPERATION.unlabelled }
 const EMPTY: ComputerPreview = { kind: COMPUTER_PREVIEW.empty }
 
 export type ComputerSurface =
-  | { readonly kind: "desktop" }
-  | { readonly kind: "window"; readonly id: string }
+  | { readonly kind: typeof SURFACE.desktop }
+  | { readonly kind: typeof SURFACE.window; readonly id: string }
 
 type LabelledOperation = Extract<ComputerOperation, { kind: typeof COMPUTER_OPERATION.labelled }>
 
@@ -59,7 +60,7 @@ export class ComputerControl {
   }
   #session: ComputerSession = UNCLAIMED
   #preview: ComputerPreview = EMPTY
-  #surface: ComputerSurface = { kind: "desktop" }
+  #surface: ComputerSurface = DESKTOP
 
   preview(): ComputerPreview {
     return this.#preview
@@ -93,7 +94,7 @@ export class ComputerControl {
     }
   }
 
-  #mode: ComputerStatus["mode"] = "ready"
+  #mode: ComputerMode = COMPUTER_MODE.ready
   #active: object | undefined
   #activity: ComputerStatus["activity"] = "idle"
 
@@ -110,7 +111,7 @@ export class ComputerControl {
   }
 
   signal(signal: AbortSignal): AbortSignal {
-    if (this.#mode === MODE.paused)
+    if (this.#mode === COMPUTER_MODE.paused)
       throw new Error("Computer control paused by the user. Wait for them to resume it in Arden.")
     return AbortSignal.any([signal, this.#epoch.signal])
   }
@@ -131,7 +132,7 @@ export class ComputerControl {
     operation: LabelledOperation
   }): () => void {
     signal.throwIfAborted()
-    if (this.#mode === MODE.paused) throw new Error("Computer control paused by the user")
+    if (this.#mode === COMPUTER_MODE.paused) throw new Error("Computer control paused by the user")
     const token = {}
     const previous = this.#session
     const same =
@@ -180,7 +181,7 @@ export class ComputerControl {
 
   allowForeground(sessionId: string): boolean {
     if (
-      this.#mode === MODE.paused ||
+      this.#mode === COMPUTER_MODE.paused ||
       this.#session.kind === COMPUTER_SESSION.unclaimed ||
       this.#session.session_id !== sessionId
     )
@@ -190,11 +191,11 @@ export class ComputerControl {
   }
 
   foregroundAllowed(sessionId: string): boolean {
-    return this.#mode === MODE.ready && this.#foregroundSession === sessionId
+    return this.#mode === COMPUTER_MODE.ready && this.#foregroundSession === sessionId
   }
 
   requireForeground(sessionId: string): void {
-    if (this.#mode === MODE.ready && this.#foregroundSession === sessionId) return
+    if (this.#mode === COMPUTER_MODE.ready && this.#foregroundSession === sessionId) return
     if (this.#session.kind === COMPUTER_SESSION.claimed)
       this.#session = {
         ...this.#session,
@@ -213,7 +214,7 @@ export class ComputerControl {
   pause(): void {
     this.#foregroundSession = undefined
     this.#generation++
-    this.#mode = "paused"
+    this.#mode = COMPUTER_MODE.paused
     this.#epoch.abort(
       new Error("Computer control taken over by the user; reacquire and observe after they resume")
     )
@@ -222,9 +223,9 @@ export class ComputerControl {
   }
 
   resume(): void {
-    if (this.#mode !== MODE.paused) return
+    if (this.#mode !== COMPUTER_MODE.paused) return
     this.#epoch = new AbortController()
-    this.#mode = "ready"
+    this.#mode = COMPUTER_MODE.ready
     this.#session = UNCLAIMED
     this.#preview = EMPTY
     this.#surface = { kind: "desktop" }

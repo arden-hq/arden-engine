@@ -87,7 +87,7 @@ export const storageRequests = {
   )
 } as const
 
-export const storageRoutes = {
+export const storageRoutes = Object.freeze({
   backfills: "/storage/backfills",
   files: "/storage/files",
   retention: "/storage/retention",
@@ -96,7 +96,7 @@ export const storageRoutes = {
   cleanupPreview: "/storage/cleanup/preview",
   cleanup: "/storage/cleanup",
   tidy: "/storage/tidy"
-} as const
+})
 
 export {
   DEFAULT_STORAGE_RETENTION,

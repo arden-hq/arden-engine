@@ -49,10 +49,8 @@ type WikiShape = WikiListingMethods &
   WikiImportMethods &
   WikiForgetMethods & {
     readonly publishChanges: () => Effect.Effect<{ readonly queued: number }, WikiError>
-    /** Makes the owner's rules page from the rules file it replaces. */
     readonly createRulesPage: (body: string) => Effect.Effect<void, WikiError>
     readonly checkOutsideEdits: () => Effect.Effect<OutsideEditCheck, WikiError>
-    /** Where a page whose file was changed outside Arden stands, as of the last check. */
     readonly outsideEditState: (path: string) => OutsideEditState | undefined
     readonly prepareMaintenance: (
       input: WikiMaintenancePrepareInput

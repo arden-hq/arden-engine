@@ -1,28 +1,45 @@
 import {
+  ACTOR,
   actsAsPerson,
   isUserAutomation,
   rootOf,
   type Actor,
   type RunAuthority
 } from "./authority.js"
-import type { ApprovalMode } from "@arden-hq/protocol/permissions"
-import type { ToolEffect } from "./tool-effect.js"
+import {
+  APPROVAL_MODE,
+  PERMISSION_RULE_DECISION,
+  type ApprovalMode
+} from "@arden-hq/protocol/permissions"
+import {
+  TOOL_ACTION,
+  TOOL_APPROVAL_OVERRIDE,
+  type ToolAction,
+  type ToolDefaultApproval
+} from "@arden-hq/protocol/tools"
+import { TOOL_EFFECT, type ToolEffect } from "./tool-effect.js"
 import type { RuleDecision } from "../persistence/permissions/rules.js"
-import { readsOnly, type CallImpact } from "./impact.js"
+import { CALL_IMPACT, readsOnly, type CallImpact } from "./impact.js"
 import { firstAnswer, type Rung } from "./ladder.js"
+
+const READ_ONLY_MODE = { selfGated: "self_gated" } as const
+type ReadOnlyMode = (typeof READ_ONLY_MODE)[keyof typeof READ_ONLY_MODE]
+
+const TOOL_STANDING = { always: "always", requirement: "requirement" } as const
+type ToolStanding = (typeof TOOL_STANDING)[keyof typeof TOOL_STANDING]
 
 export interface ToolFacts {
   readonly name: string
   readonly effect: ToolEffect
-  readonly action: "read" | "write" | "execute"
+  readonly action: Exclude<ToolAction, typeof TOOL_ACTION.draft>
   readonly changes_state: boolean
-  readonly read_only_mode: "self_gated" | undefined
-  readonly default_approval: "approve" | "ask"
+  readonly read_only_mode: ReadOnlyMode | undefined
+  readonly default_approval: ToolDefaultApproval
   readonly always_ask: boolean
   readonly approval_bypass: boolean
   readonly refuse_unattended: boolean
   readonly per_call: boolean
-  readonly standing: "always" | "requirement" | undefined
+  readonly standing: ToolStanding | undefined
 }
 
 export interface CallFacts {
@@ -38,36 +55,66 @@ export interface CallFacts {
   readonly approved: boolean
 }
 
+const AUTHORITY_STATE = {
+  active: "active",
+  settling: "settling",
+  revoked: "revoked"
+} as const
+type AuthorityState = (typeof AUTHORITY_STATE)[keyof typeof AUTHORITY_STATE]
+
 export interface LiveSettings {
-  readonly state: "active" | "settling" | "revoked"
+  readonly state: AuthorityState
   readonly mode: ApprovalMode
   readonly rule: RuleDecision | undefined
 }
 
 type Floor = "destructive_command"
 
+const TARGET = {
+  spaceWork: "space_work",
+  spaceControl: "space_control",
+  directives: "directives",
+  memoryForget: "memory_forget",
+  chatBrowse: "chat_browse",
+  chat: "chat"
+} as const
+
+const SPACE_WORK_OP = { create: "create", change: "change" } as const
+type SpaceWorkOp = (typeof SPACE_WORK_OP)[keyof typeof SPACE_WORK_OP]
+
+const CHAT_BROWSE_SCOPE = { space: "space", allSpaces: "all_spaces" } as const
+type ChatBrowseScope = (typeof CHAT_BROWSE_SCOPE)[keyof typeof CHAT_BROWSE_SCOPE]
+
+const CHAT_VERB = { message: "message", change: "change", open: "open" } as const
+type ChatVerb = (typeof CHAT_VERB)[keyof typeof CHAT_VERB]
+
 export type Target =
   | {
-      readonly kind: "space_work"
+      readonly kind: typeof TARGET.spaceWork
       readonly requested_space_id: string | undefined
       readonly chat_space_id: string | undefined
-      readonly op: "create" | "change"
+      readonly op: SpaceWorkOp
     }
-  | { readonly kind: "space_control" }
-  | { readonly kind: "directives" }
-  | { readonly kind: "memory_forget" }
-  | { readonly kind: "chat_browse"; readonly scope: "space" | "all_spaces" }
+  | { readonly kind: typeof TARGET.spaceControl }
+  | { readonly kind: typeof TARGET.directives }
+  | { readonly kind: typeof TARGET.memoryForget }
+  | { readonly kind: typeof TARGET.chatBrowse; readonly scope: ChatBrowseScope }
   | {
-      readonly kind: "chat"
-      readonly verb: "message" | "change" | "open"
+      readonly kind: typeof TARGET.chat
+      readonly verb: ChatVerb
       readonly other_space: boolean
       readonly handed: boolean
     }
 
+export const PATH = { tool: "tool", askUser: "ask_user", report: "report" } as const
+
 export type Path =
-  | { readonly kind: "tool"; readonly name: string }
-  | { readonly kind: "ask_user" }
-  | { readonly kind: "report" }
+  | { readonly kind: typeof PATH.tool; readonly name: string }
+  | { readonly kind: typeof PATH.askUser }
+  | { readonly kind: typeof PATH.report }
+
+const ASK_USER: Path = { kind: PATH.askUser }
+const REPORT: Path = { kind: PATH.report }
 
 export type DenyRule =
   | "revoked"
@@ -87,21 +134,31 @@ export type AskReason =
   | "locked"
   | "default"
 
+export const VERDICT = { allow: "allow", ask: "ask", deny: "deny" } as const
+export type Verdict = (typeof VERDICT)[keyof typeof VERDICT]
+
 export type Decision =
-  | { readonly kind: "allow"; readonly by: "rule" | "mode" | "grant" | "user" | "default" }
   | {
-      readonly kind: "ask"
+      readonly kind: typeof VERDICT.allow
+      readonly by: "rule" | "mode" | "grant" | "user" | "default"
+    }
+  | {
+      readonly kind: typeof VERDICT.ask
       readonly reason: AskReason
       readonly presentation: {
         readonly helper: boolean
         readonly delivery: "pause" | "chat" | "refuse"
       }
     }
-  | { readonly kind: "deny"; readonly rule: DenyRule; readonly instead: ReadonlyArray<Path> }
+  | {
+      readonly kind: typeof VERDICT.deny
+      readonly rule: DenyRule
+      readonly instead: ReadonlyArray<Path>
+    }
 
 type Answer =
-  | Exclude<Decision, { readonly kind: "ask" }>
-  | { readonly kind: "ask"; readonly reason: AskReason; readonly helper: boolean }
+  | Exclude<Decision, { readonly kind: typeof VERDICT.ask }>
+  | { readonly kind: typeof VERDICT.ask; readonly reason: AskReason; readonly helper: boolean }
 
 interface CallContext {
   readonly authority: RunAuthority
@@ -114,31 +171,37 @@ interface CallContext {
 
 type DecisionRung = Rung<CallContext, Answer>
 
-const allow = (by: Extract<Decision, { kind: "allow" }>["by"]): Answer => ({ kind: "allow", by })
+const allow = (by: Extract<Decision, { kind: typeof VERDICT.allow }>["by"]): Answer => ({
+  kind: VERDICT.allow,
+  by
+})
 
-const ask = (reason: AskReason, helper: boolean): Answer => ({ kind: "ask", reason, helper })
+const ask = (reason: AskReason, helper: boolean): Answer => ({
+  kind: VERDICT.ask,
+  reason,
+  helper
+})
 
 const revoked: DecisionRung = {
   name: "revoked",
-  answer: ({ live }) => (live.state === "revoked" ? deny("revoked", []) : undefined)
+  answer: ({ live }) => (live.state === AUTHORITY_STATE.revoked ? deny("revoked", []) : undefined)
 }
 
 const settling: DecisionRung = {
   name: "settling",
   answer: ({ live, runRecord }) =>
-    live.state === "settling" && !runRecord ? deny("settling", []) : undefined
+    live.state === AUTHORITY_STATE.settling && !runRecord ? deny("settling", []) : undefined
 }
 
 const userNever: DecisionRung = {
   name: "user_never",
   answer: ({ live }) =>
-    live.rule === "never" ? deny("user_deny", [{ kind: "ask_user" }]) : undefined
+    live.rule === PERMISSION_RULE_DECISION.never ? deny("user_deny", [ASK_USER]) : undefined
 }
 
 const destructiveFloor: DecisionRung = {
   name: "destructive_floor",
-  answer: ({ call }) =>
-    call.floor !== undefined ? deny("floor", [{ kind: "ask_user" }]) : undefined
+  answer: ({ call }) => (call.floor !== undefined ? deny("floor", [ASK_USER]) : undefined)
 }
 
 const toolOutOfReach: DecisionRung = {
@@ -150,7 +213,7 @@ const toolOutOfReach: DecisionRung = {
 const targetOutOfBounds: DecisionRung = {
   name: "target_out_of_bounds",
   answer: ({ bounded }) =>
-    bounded?.kind === "deny" ? deny("boundary", bounded.instead) : undefined
+    bounded?.kind === VERDICT.deny ? deny("boundary", bounded.instead) : undefined
 }
 
 const ownRunRecord: DecisionRung = {
@@ -162,8 +225,9 @@ const readOnlyRefusesChanges: DecisionRung = {
   name: "read_only_refuses_changes",
   answer: ({ authority, live, call }) => {
     const reads =
-      readsOnly(call.tool) || (call.tool.read_only_mode === "self_gated" && call.reads_only)
-    return live.mode === "read_only" && !reads
+      readsOnly(call.tool) ||
+      (call.tool.read_only_mode === READ_ONLY_MODE.selfGated && call.reads_only)
+    return live.mode === APPROVAL_MODE.readOnly && !reads
       ? deny("read_only", refusalPath(authority.actor))
       : undefined
   }
@@ -183,18 +247,18 @@ const automationStandingChange: DecisionRung = {
 const boundaryAsks: DecisionRung = {
   name: "boundary_asks",
   answer: ({ live, bounded }) =>
-    bounded?.kind === "ask" && !skipsCards(live.mode) ? ask("boundary", false) : undefined
+    bounded?.kind === VERDICT.ask && !skipsCards(live.mode) ? ask("boundary", false) : undefined
 }
 
 const lockedImpact: DecisionRung = {
   name: "locked_impact",
-  answer: ({ call }) => (call.impact.kind === "locked" ? ask("locked", false) : undefined)
+  answer: ({ call }) => (call.impact.kind === CALL_IMPACT.locked ? ask("locked", false) : undefined)
 }
 
 const readOnlyMode: DecisionRung = {
   name: "read_only_mode",
   answer: ({ live, call, helper }) => {
-    if (live.mode !== "read_only") return undefined
+    if (live.mode !== APPROVAL_MODE.readOnly) return undefined
     return call.requirement ? ask("requirement", helper) : allow("rule")
   }
 }
@@ -209,17 +273,18 @@ const callRequirement: DecisionRung = {
 
 const ruleAsks: DecisionRung = {
   name: "rule_asks",
-  answer: ({ live, helper }) => (live.rule === "ask" ? ask("override", helper) : undefined)
+  answer: ({ live, helper }) =>
+    live.rule === PERMISSION_RULE_DECISION.ask ? ask("override", helper) : undefined
 }
 
 const ruleAllows: DecisionRung = {
   name: "rule_allows",
-  answer: ({ live }) => (live.rule === "allow" ? allow("grant") : undefined)
+  answer: ({ live }) => (live.rule === PERMISSION_RULE_DECISION.allow ? allow("grant") : undefined)
 }
 
 const allowMode: DecisionRung = {
   name: "allow_mode",
-  answer: ({ live }) => (live.mode === "allow" ? allow("mode") : undefined)
+  answer: ({ live }) => (live.mode === APPROVAL_MODE.allow ? allow("mode") : undefined)
 }
 
 const unattendedScope: DecisionRung = {
@@ -233,7 +298,9 @@ const impactSettles: DecisionRung = {
 }
 
 const toolDefault = ({ call, helper }: CallContext): Answer =>
-  call.tool.default_approval === "ask" ? ask("default", helper) : allow("default")
+  call.tool.default_approval === TOOL_APPROVAL_OVERRIDE.ask
+    ? ask("default", helper)
+    : allow("default")
 
 const DECISION_RUNGS: ReadonlyArray<DecisionRung> = [
   revoked,
@@ -263,14 +330,14 @@ export const decide = (authority: RunAuthority, live: LiveSettings, call: CallFa
     live,
     call,
     bounded: call.target === undefined ? undefined : boundary(authority, call.target),
-    runRecord: call.tool.effect === "run_record",
-    helper: live.mode === "safe" && !(call.requirement && call.user_only)
+    runRecord: call.tool.effect === TOOL_EFFECT.runRecord,
+    helper: live.mode === APPROVAL_MODE.safe && !(call.requirement && call.user_only)
   }
   const answer = firstAnswer(DECISION_RUNGS, context) ?? toolDefault(context)
-  if (answer.kind !== "ask") return answer
-  if (call.approved) return { kind: "allow", by: "user" }
+  if (answer.kind !== VERDICT.ask) return answer
+  if (call.approved) return { kind: VERDICT.allow, by: "user" }
   return {
-    kind: "ask",
+    kind: VERDICT.ask,
     reason: answer.reason,
     presentation: { helper: answer.helper, delivery: delivery(authority, call) }
   }
@@ -278,13 +345,14 @@ export const decide = (authority: RunAuthority, live: LiveSettings, call: CallFa
 
 const delivery = (authority: RunAuthority, call: CallFacts): "pause" | "chat" | "refuse" => {
   if (authority.unattended) return call.tool.refuse_unattended ? "refuse" : "chat"
-  return authority.actor.kind === "agent" && !call.tool.refuse_unattended ? "chat" : "pause"
+  return authority.actor.kind === ACTOR.agent && !call.tool.refuse_unattended ? "chat" : "pause"
 }
 
 const settledByImpact = (mode: ApprovalMode, impact: CallImpact): boolean =>
-  impact.kind === "inert" || (impact.kind === "contained" && mode === "safe")
+  impact.kind === CALL_IMPACT.inert ||
+  (impact.kind === CALL_IMPACT.contained && mode === APPROVAL_MODE.safe)
 
-export const skipsCards = (mode: ApprovalMode): boolean => mode === "allow"
+export const skipsCards = (mode: ApprovalMode): boolean => mode === APPROVAL_MODE.allow
 
 export const waivesRequirement = (
   mode: ApprovalMode,
@@ -294,7 +362,7 @@ export const waivesRequirement = (
 export type PersonCardOutcome = "ask" | "never_ask" | "read_only"
 
 export const personCard = (mode: ApprovalMode): PersonCardOutcome => {
-  if (mode === "read_only") return "read_only"
+  if (mode === APPROVAL_MODE.readOnly) return "read_only"
   return skipsCards(mode) ? "never_ask" : "ask"
 }
 
@@ -302,50 +370,54 @@ export const boundaryReach = (
   authority: RunAuthority,
   target: Target,
   input: { readonly mode: ApprovalMode; readonly approved: boolean }
-): "allow" | "ask" | "deny" => {
+): Verdict => {
   const verdict = boundary(authority, target)
-  if (verdict.kind !== "ask") return verdict.kind
-  return input.approved || skipsCards(input.mode) ? "allow" : "ask"
+  if (verdict.kind !== VERDICT.ask) return verdict.kind
+  return input.approved || skipsCards(input.mode) ? VERDICT.allow : VERDICT.ask
 }
 
 const standingChange = (call: CallFacts): boolean =>
-  call.tool.standing === "always" || (call.tool.standing === "requirement" && call.requirement)
+  call.tool.standing === TOOL_STANDING.always ||
+  (call.tool.standing === TOOL_STANDING.requirement && call.requirement)
 
 const deny = (
   rule: DenyRule,
   instead: ReadonlyArray<Path>
-): Extract<Decision, { kind: "deny" }> => ({
-  kind: "deny",
+): Extract<Decision, { kind: typeof VERDICT.deny }> => ({
+  kind: VERDICT.deny,
   rule,
   instead
 })
 
 export const refusalPath = (actor: Actor): ReadonlyArray<Path> => {
   switch (actor.kind) {
-    case "person":
-      return [{ kind: "ask_user" }]
-    case "agent":
-      return [{ kind: "report" }]
-    case "automation":
-      return [{ kind: "ask_user" }, { kind: "report" }]
-    case "task_worker":
-      return [{ kind: "tool", name: "task_comment" }, { kind: "ask_user" }, { kind: "report" }]
-    case "space_review":
-    case "unrecorded":
-      return [{ kind: "report" }]
+    case ACTOR.person:
+      return [ASK_USER]
+    case ACTOR.agent:
+      return [REPORT]
+    case ACTOR.automation:
+      return [ASK_USER, REPORT]
+    case ACTOR.taskWorker:
+      return [{ kind: PATH.tool, name: "task_comment" }, ASK_USER, REPORT]
+    case ACTOR.spaceReview:
+    case ACTOR.unrecorded:
+      return [REPORT]
   }
 }
 
 type WorkReach = "full" | "job" | "delegate"
 
 export type BoundaryVerdict =
-  | { readonly kind: "allow"; readonly reach: WorkReach | undefined }
-  | { readonly kind: "ask" }
-  | { readonly kind: "deny"; readonly instead: ReadonlyArray<Path> }
+  | { readonly kind: typeof VERDICT.allow; readonly reach: WorkReach | undefined }
+  | { readonly kind: typeof VERDICT.ask }
+  | { readonly kind: typeof VERDICT.deny; readonly instead: ReadonlyArray<Path> }
 
-const ALLOW: BoundaryVerdict = { kind: "allow", reach: undefined }
+const ALLOW: BoundaryVerdict = { kind: VERDICT.allow, reach: undefined }
 
-const deniedTo = (instead: ReadonlyArray<Path>): BoundaryVerdict => ({ kind: "deny", instead })
+const deniedTo = (instead: ReadonlyArray<Path>): BoundaryVerdict => ({
+  kind: VERDICT.deny,
+  instead
+})
 
 interface BoundaryInput<Kind extends Target["kind"]> {
   readonly authority: RunAuthority
@@ -354,52 +426,52 @@ interface BoundaryInput<Kind extends Target["kind"]> {
 
 type BoundaryRule<Kind extends Target["kind"]> = Rung<BoundaryInput<Kind>, BoundaryVerdict>
 
-const ownSpaceOrChatSpace = ({ authority, target }: BoundaryInput<"space_work">) =>
+const ownSpaceOrChatSpace = ({ authority, target }: BoundaryInput<typeof TARGET.spaceWork>) =>
   authority.owns.space_id ?? target.chat_space_id
 
-const namesAnotherSpace = (input: BoundaryInput<"space_work">): boolean => {
+const namesAnotherSpace = (input: BoundaryInput<typeof TARGET.spaceWork>): boolean => {
   const own = ownSpaceOrChatSpace(input)
   const requested = input.target.requested_space_id
   return requested !== undefined && own !== undefined && requested !== own
 }
 
-const personReachesEverySpace: BoundaryRule<"space_work"> = {
+const personReachesEverySpace: BoundaryRule<typeof TARGET.spaceWork> = {
   name: "person_reaches_every_space",
   answer: ({ authority }) =>
-    actsAsPerson(authority.actor) ? { kind: "allow", reach: "full" } : undefined
+    actsAsPerson(authority.actor) ? { kind: VERDICT.allow, reach: "full" } : undefined
 }
 
-const unrecordedOnlyReports: BoundaryRule<"space_work"> = {
+const unrecordedOnlyReports: BoundaryRule<typeof TARGET.spaceWork> = {
   name: "unrecorded_only_reports",
   answer: ({ authority }) =>
-    rootOf(authority.actor) === "unrecorded" ? deniedTo([{ kind: "report" }]) : undefined
+    rootOf(authority.actor) === ACTOR.unrecorded ? deniedTo([REPORT]) : undefined
 }
 
-const onlyPersonStartsTasks: BoundaryRule<"space_work"> = {
+const onlyPersonStartsTasks: BoundaryRule<typeof TARGET.spaceWork> = {
   name: "only_person_starts_tasks",
   answer: ({ authority, target }) =>
-    target.op === "create" ? deniedTo(refusalPath(authority.actor)) : undefined
+    target.op === SPACE_WORK_OP.create ? deniedTo(refusalPath(authority.actor)) : undefined
 }
 
-const personsAgentKeepsGrantedSpace: BoundaryRule<"space_work"> = {
+const personsAgentKeepsGrantedSpace: BoundaryRule<typeof TARGET.spaceWork> = {
   name: "persons_agent_keeps_granted_space",
   answer: (input) => {
-    if (rootOf(input.authority.actor) !== "person") return undefined
+    if (rootOf(input.authority.actor) !== ACTOR.person) return undefined
     return namesAnotherSpace(input)
-      ? deniedTo([{ kind: "report" }])
-      : { kind: "allow", reach: "delegate" }
+      ? deniedTo([REPORT])
+      : { kind: VERDICT.allow, reach: "delegate" }
   }
 }
 
-const jobKeepsToOwnSpace: BoundaryRule<"space_work"> = {
+const jobKeepsToOwnSpace: BoundaryRule<typeof TARGET.spaceWork> = {
   name: "job_keeps_to_own_space",
   answer: (input) =>
-    namesAnotherSpace(input) && input.target.op === "change"
+    namesAnotherSpace(input) && input.target.op === SPACE_WORK_OP.change
       ? deniedTo(refusalPath(input.authority.actor))
       : undefined
 }
 
-const SPACE_WORK_RULES: ReadonlyArray<BoundaryRule<"space_work">> = [
+const SPACE_WORK_RULES: ReadonlyArray<BoundaryRule<typeof TARGET.spaceWork>> = [
   personReachesEverySpace,
   unrecordedOnlyReports,
   onlyPersonStartsTasks,
@@ -407,58 +479,58 @@ const SPACE_WORK_RULES: ReadonlyArray<BoundaryRule<"space_work">> = [
   jobKeepsToOwnSpace
 ]
 
-const JOB_REACH: BoundaryVerdict = { kind: "allow", reach: "job" }
+const JOB_REACH: BoundaryVerdict = { kind: VERDICT.allow, reach: "job" }
 
 const personOnlyControl = (authority: RunAuthority): BoundaryVerdict =>
-  actsAsPerson(authority.actor) ? ALLOW : deniedTo([{ kind: "ask_user" }])
+  actsAsPerson(authority.actor) ? ALLOW : deniedTo([ASK_USER])
 
-const personBrowsesEveryChat: BoundaryRule<"chat_browse"> = {
+const personBrowsesEveryChat: BoundaryRule<typeof TARGET.chatBrowse> = {
   name: "person_browses_every_chat",
   answer: ({ authority }) => (actsAsPerson(authority.actor) ? ALLOW : undefined)
 }
 
-const anyoneBrowsesOwnSpace: BoundaryRule<"chat_browse"> = {
+const anyoneBrowsesOwnSpace: BoundaryRule<typeof TARGET.chatBrowse> = {
   name: "anyone_browses_own_space",
-  answer: ({ target }) => (target.scope === "space" ? ALLOW : undefined)
+  answer: ({ target }) => (target.scope === CHAT_BROWSE_SCOPE.space ? ALLOW : undefined)
 }
 
-const spaceReviewReadsEveryChat: BoundaryRule<"chat_browse"> = {
+const spaceReviewReadsEveryChat: BoundaryRule<typeof TARGET.chatBrowse> = {
   name: "space_review_reads_every_chat",
-  answer: ({ authority }) => (rootOf(authority.actor) === "space_review" ? ALLOW : undefined)
+  answer: ({ authority }) => (rootOf(authority.actor) === ACTOR.spaceReview ? ALLOW : undefined)
 }
 
-const CHAT_BROWSE_RULES: ReadonlyArray<BoundaryRule<"chat_browse">> = [
+const CHAT_BROWSE_RULES: ReadonlyArray<BoundaryRule<typeof TARGET.chatBrowse>> = [
   personBrowsesEveryChat,
   anyoneBrowsesOwnSpace,
   spaceReviewReadsEveryChat
 ]
 
-const sameSpaceChat: BoundaryRule<"chat"> = {
+const sameSpaceChat: BoundaryRule<typeof TARGET.chat> = {
   name: "same_space_chat",
   answer: ({ target }) => (!target.other_space ? ALLOW : undefined)
 }
 
-const userAutomationActsAsPerson: BoundaryRule<"chat"> = {
+const userAutomationActsAsPerson: BoundaryRule<typeof TARGET.chat> = {
   name: "user_automation_acts_as_person",
   answer: ({ authority, target }) =>
-    isUserAutomation(authority.actor) && target.verb !== "open" ? ALLOW : undefined
+    isUserAutomation(authority.actor) && target.verb !== CHAT_VERB.open ? ALLOW : undefined
 }
 
-const personMessagesAnotherSpace: BoundaryRule<"chat"> = {
+const personMessagesAnotherSpace: BoundaryRule<typeof TARGET.chat> = {
   name: "person_messages_another_space",
   answer: ({ authority, target }) => {
-    if (authority.actor.kind !== "person" || target.verb !== "message") return undefined
-    return target.handed ? ALLOW : { kind: "ask" }
+    if (authority.actor.kind !== ACTOR.person || target.verb !== CHAT_VERB.message) return undefined
+    return target.handed ? ALLOW : { kind: VERDICT.ask }
   }
 }
 
-const personOpensAnyChat: BoundaryRule<"chat"> = {
+const personOpensAnyChat: BoundaryRule<typeof TARGET.chat> = {
   name: "person_opens_any_chat",
   answer: ({ authority, target }) =>
-    authority.actor.kind === "person" && target.verb === "open" ? ALLOW : undefined
+    authority.actor.kind === ACTOR.person && target.verb === CHAT_VERB.open ? ALLOW : undefined
 }
 
-const CHAT_RULES: ReadonlyArray<BoundaryRule<"chat">> = [
+const CHAT_RULES: ReadonlyArray<BoundaryRule<typeof TARGET.chat>> = [
   sameSpaceChat,
   userAutomationActsAsPerson,
   personMessagesAnotherSpace,
@@ -467,18 +539,18 @@ const CHAT_RULES: ReadonlyArray<BoundaryRule<"chat">> = [
 
 export const boundary = (authority: RunAuthority, target: Target): BoundaryVerdict => {
   switch (target.kind) {
-    case "space_work":
+    case TARGET.spaceWork:
       return firstAnswer(SPACE_WORK_RULES, { authority, target }) ?? JOB_REACH
-    case "space_control":
-    case "directives":
-    case "memory_forget":
+    case TARGET.spaceControl:
+    case TARGET.directives:
+    case TARGET.memoryForget:
       return personOnlyControl(authority)
-    case "chat_browse":
+    case TARGET.chatBrowse:
       return (
         firstAnswer(CHAT_BROWSE_RULES, { authority, target }) ??
-        deniedTo([{ kind: "tool", name: "session_read" }])
+        deniedTo([{ kind: PATH.tool, name: "session_read" }])
       )
-    case "chat":
+    case TARGET.chat:
       return (
         firstAnswer(CHAT_RULES, { authority, target }) ?? deniedTo(refusalPath(authority.actor))
       )

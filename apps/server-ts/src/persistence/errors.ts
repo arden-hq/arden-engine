@@ -1,15 +1,17 @@
 import { Schema } from "effect"
 
-export const StoreReason = Schema.Literals([
-  "invalid",
-  "not_found",
-  "conflict",
-  "corrupt",
-  "unavailable",
-  "storage"
-] as const)
+export const STORE_REASON = {
+  invalid: "invalid",
+  not_found: "not_found",
+  conflict: "conflict",
+  corrupt: "corrupt",
+  unavailable: "unavailable",
+  storage: "storage"
+} as const
 
-export type StoreReason = typeof StoreReason.Type
+export const StoreReason = Schema.Literals(Object.values(STORE_REASON))
+
+export type StoreReason = (typeof STORE_REASON)[keyof typeof STORE_REASON]
 
 export const storeReasons = <const R extends ReadonlyArray<StoreReason>>(
   reasons: R

@@ -1,5 +1,5 @@
 import {
-  DEFAULT_TOOL_KIND,
+  toolKindOf,
   GMAIL_SEND,
   TOOL_DATA,
   TOOL_EXECUTION,
@@ -30,6 +30,8 @@ const withExecution: ToolEventUpgrade = (event) => ({
       : TOOL_EXECUTION.runtime
 })
 
+const withKnownKind: ToolEventUpgrade = (event) => ({ ...event, kind: toolKindOf(event["kind"]) })
+
 const toolData = (value: unknown) =>
   isJsonObject(value) ? { kind: TOOL_DATA.attached, value } : { kind: TOOL_DATA.none }
 
@@ -44,7 +46,7 @@ const labelled = <Plain extends string, Named extends string, Key extends string
 }
 
 const toolStart: ToolEventUpgrade = (event) => {
-  if (isJsonObject(event["parent"])) return event
+  if (isJsonObject(event["parent"])) return withKnownKind(event)
   const parent = text(event["parent_id"])
   const presentation = event["presentation"]
   return {
@@ -57,7 +59,7 @@ const toolStart: ToolEventUpgrade = (event) => {
         : { kind: TOOL_PARENT.child, parent_id: parent },
     display_name: text(event["display_name"]) ?? text(event["tool_call_name"]) ?? "",
     title: labelled(event["display_title"], TOOL_TITLE.untitled, TOOL_TITLE.titled, "text"),
-    kind: text(event["kind"]) ?? DEFAULT_TOOL_KIND,
+    kind: toolKindOf(event["kind"]),
     icon: labelled(event["icon"], TOOL_ICON.plain, TOOL_ICON.icon, "name"),
     noun: labelled(event["noun"], TOOL_NOUN.unnamed, TOOL_NOUN.noun, "text"),
     source: labelled(event["source"], TOOL_SOURCE.unsourced, TOOL_SOURCE.source, "name"),
@@ -98,7 +100,7 @@ const legacyToolResult: ToolEventUpgrade = (event) => {
     content: typeof event["content"] === "string" ? event["content"] : "",
     preview: typeof event["preview"] === "string" ? event["preview"] : "",
     display_name: text(event["display_name"]) ?? text(event["name"]) ?? "",
-    kind: text(event["kind"]) ?? DEFAULT_TOOL_KIND,
+    kind: toolKindOf(event["kind"]),
     is_error: event["is_error"] === true,
     retry: toolRetry(typeof retryable === "boolean" ? retryable : null),
     duration_ms: typeof event["duration_ms"] === "number" ? event["duration_ms"] : 0,
@@ -111,7 +113,7 @@ const legacyToolResult: ToolEventUpgrade = (event) => {
 }
 
 const toolResult: ToolEventUpgrade = (event) =>
-  withQuestion(isJsonObject(event["gmail_send"]) ? event : legacyToolResult(event))
+  withQuestion(isJsonObject(event["gmail_send"]) ? withKnownKind(event) : legacyToolResult(event))
 
 export const storedToolEventUpgrades = {
   TOOL_CALL_START: toolStart,

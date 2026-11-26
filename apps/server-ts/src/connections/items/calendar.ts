@@ -4,11 +4,12 @@ import { Clock, Effect, Option, Schema } from "effect"
 
 import {
   calendarSyncUrl,
+  isCancelledStatus,
   CalendarSyncPageSchema,
   PRIMARY_CALENDAR,
   type CalendarSyncEvent
 } from "../../google/calendar-client.js"
-import type { GoogleConnectionError } from "../../google/errors.js"
+import { GOOGLE_DIAGNOSTIC, type GoogleConnectionError } from "../../google/errors.js"
 import type { GoogleConnections } from "../../google/service.js"
 import type {
   ConnectionItemDetail,
@@ -22,8 +23,6 @@ const CREATED_WITHIN_MS = 2 * 60_000
 const SUMMARY_CHARS = 200
 const KEPT_ATTENDEES = 20
 
-/** The account a calendar's items and cursor are stored under: the Google
- *  account, plus the calendar when it is not the primary one. */
 export const calendarItemAccount = (accountId: string, calendarId: string): string =>
   calendarId === PRIMARY_CALENDAR ? accountId : `${accountId}:${calendarId}`
 
@@ -51,7 +50,9 @@ const SyncCursorSchema = Schema.Struct({
 })
 const decodeCursor = Schema.decodeUnknownOption(Schema.fromJsonString(SyncCursorSchema))
 
-type CalendarChange = "created" | "changed" | "cancelled"
+const CALENDAR_CHANGE = { created: "created", changed: "changed", cancelled: "cancelled" } as const
+
+type CalendarChange = (typeof CALENDAR_CHANGE)[keyof typeof CALENDAR_CHANGE]
 
 const timeOf = (value: string | undefined) => {
   const ms = Date.parse(value ?? "")
@@ -90,19 +91,18 @@ const calendarChange = (
   known: KnownEvent | undefined,
   nowMs: number
 ): CalendarChange | undefined => {
-  if (event.status === "cancelled")
-    return known === undefined || endedBefore(known, nowMs) ? undefined : "cancelled"
+  if (isCancelledStatus(event.status))
+    return known === undefined || endedBefore(known, nowMs) ? undefined : CALENDAR_CHANGE.cancelled
   if (endedBefore(knownEvent(event), nowMs)) return undefined
   const created = Date.parse(event.created ?? "")
   const updated = Date.parse(event.updated ?? "")
   return Number.isFinite(created) &&
     Number.isFinite(updated) &&
     updated - created <= CREATED_WITHIN_MS
-    ? "created"
-    : "changed"
+    ? CALENDAR_CHANGE.created
+    : CALENDAR_CHANGE.changed
 }
 
-/** What one calendar change says, as the `calendar.changed` event's fields. */
 const changeDetail = (input: {
   readonly account: Pick<GoogleAccount, "email">
   readonly calendarId: string
@@ -118,7 +118,9 @@ const changeDetail = (input: {
     ...(input.calendarId === PRIMARY_CALENDAR ? {} : { calendar_id: input.calendarId }),
     summary: fields.summary,
     ...(fields.start === undefined ? {} : { start: fields.start }),
-    ...(change === "cancelled" && fields.end !== undefined ? { end: fields.end } : {}),
+    ...(change === CALENDAR_CHANGE.cancelled && fields.end !== undefined
+      ? { end: fields.end }
+      : {}),
     location: fields.location,
     attendees: [...fields.attendees],
     recurring: fields.recurring,
@@ -144,9 +146,12 @@ const calendarItem = (input: {
   const { event } = input
   const change = calendarChange(event, input.known, input.nowMs)
   if (change === undefined) return undefined
-  const fields = change === "cancelled" ? input.known : knownEvent(event)
+  const fields = change === CALENDAR_CHANGE.cancelled ? input.known : knownEvent(event)
   if (fields === undefined) return undefined
-  const revision = change === "created" ? "created" : (event.updated ?? event.status ?? "")
+  const revision =
+    change === CALENDAR_CHANGE.created
+      ? CALENDAR_CHANGE.created
+      : (event.updated ?? event.status ?? "")
   const when = fields.start === undefined ? "" : `, starts ${fields.start}`
   const where = fields.location === "" ? "" : `, at ${fields.location}`
   return {
@@ -184,7 +189,7 @@ const calendarSyncChanges = (input: {
       })
   const kept = new Map(Object.entries(input.known))
   for (const event of input.items) {
-    if (event.status === "cancelled") kept.delete(event.id)
+    if (isCancelledStatus(event.status)) kept.delete(event.id)
     else kept.set(event.id, knownEvent(event))
   }
   return {
@@ -193,11 +198,6 @@ const calendarSyncChanges = (input: {
   }
 }
 
-/**
- * The changes of one calendar since its cursor, as items. The first fetch of a
- * calendar (no cursor, or one Google no longer accepts) only takes a baseline:
- * it returns no items, so old history never arrives as new.
- */
 export const fetchCalendar = Effect.fn("ConnectionItems.fetchCalendar")(function* (input: {
   readonly google: Pick<GoogleConnections["Service"], "request">
   readonly account: GoogleAccount
@@ -217,7 +217,7 @@ export const fetchCalendar = Effect.fn("ConnectionItems.fetchCalendar")(function
       : yield* read({ syncToken: cursor.sync_token }).pipe(
           Effect.map((pages) => ({ ...pages, baseline: false })),
           Effect.catchTag("GoogleConnectionError", (error) =>
-            error.diagnostic.kind === "http" && error.diagnostic.status === 410
+            error.diagnostic.kind === GOOGLE_DIAGNOSTIC.http && error.diagnostic.status === 410
               ? read(fresh).pipe(Effect.map((pages) => ({ ...pages, baseline: true })))
               : Effect.fail(error)
           )

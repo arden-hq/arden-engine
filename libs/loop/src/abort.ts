@@ -1,17 +1,18 @@
+const ERROR_NAME = { abort: "AbortError" } as const
+type ErrorName = (typeof ERROR_NAME)[keyof typeof ERROR_NAME]
+
+export const hasAbortName = (cause: { readonly name: string }): cause is { name: ErrorName } =>
+  cause.name === ERROR_NAME.abort
+
 export const abortError = (): Error => {
   const error = new Error("The operation was aborted")
-  error.name = "AbortError"
+  error.name = ERROR_NAME.abort
   return error
 }
 
 export const isAbortError = (cause: unknown): cause is Error =>
-  cause instanceof Error && cause.name === "AbortError"
+  cause instanceof Error && hasAbortName(cause)
 
-/**
- * Race a promise against an AbortSignal. Rejects with a name-based AbortError
- * as soon as the signal fires; otherwise settles with the promise. The ONE
- * shared abort helper — every consumer-facing await goes through it.
- */
 export const raceAbort = <A>(promise: Promise<A>, signal?: AbortSignal): Promise<A> => {
   if (signal === undefined) return promise
   if (signal.aborted) {

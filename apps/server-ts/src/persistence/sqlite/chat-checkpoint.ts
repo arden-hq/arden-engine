@@ -100,9 +100,6 @@ export const makeChatCheckpoint = ({
           if (pending.events.length === 0 && news === undefined) {
             return pending.messages
           }
-          // A resumed tool result must checkpoint before injected user input.
-          // Otherwise the durable prefix can place that input between the call
-          // and its output, which neither the next checkpoint nor OpenAI accepts.
           if (hasToolIntent(yield* loadLastActiveMessageFor(sql, run.session_id, "drain"))) {
             return []
           }

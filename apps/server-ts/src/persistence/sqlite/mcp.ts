@@ -1,4 +1,4 @@
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect, Schema, type SchemaAST } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { McpPresetId } from "@arden-hq/protocol/mcp"
 
@@ -12,7 +12,7 @@ import {
 import type { PersistenceDeps } from "./deps.js"
 import { iso } from "../../runtime/clock.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const TransportJsonSchema = Schema.fromJsonString(McpStoredTransportSchema)
 
 interface ServerRow {

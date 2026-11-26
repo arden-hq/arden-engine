@@ -18,7 +18,7 @@ import {
   TASK_OWNER_DESCRIPTION,
   TASK_TEXT_DESCRIPTION
 } from "./task-wording.js"
-import { loadSnapshot } from "./wiki.js"
+import { loadSnapshot } from "./wiki-access.js"
 import { observedKey, type ServerRunContext } from "./run-context.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { toolFailure, toolRefusal } from "./tool-failure.js"
@@ -393,8 +393,6 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
 
 const unread = (message: string): ToolExecutionError => failure({ reason: "conflict", message })
 
-// Fills in the version of each cited record from what this run read, so the
-// store still checks "unchanged since read" and the model passes no version.
 const observedSource = (
   run: ServerRunContext,
   source: CitedSource,

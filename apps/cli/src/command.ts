@@ -35,7 +35,6 @@ export type CliClient = Pick<
 
 interface StartServerInput {
   readonly config: string
-  /** A file that takes the server's log lines; without it they are dropped. */
   readonly logFile: string | undefined
   readonly env: Readonly<Record<string, string | undefined>>
 }
@@ -59,10 +58,7 @@ export interface CliDependencies {
   readonly writeStderr: (value: string) => void
   readonly onSigint: (listener: () => void) => () => void
   readonly createClient?: (connection: ServerConnection) => CliClient
-  /** Where the server is, for a command that brings its own (`arden exec`);
-   *  it replaces the lookup by --url, ARDEN_URL and the access file. */
   readonly connect?: (() => Promise<ServerConnection>) | undefined
-  /** Starts the configured server for `arden exec`; the default spawns it. */
   readonly startServer?: StartServer
   readonly startLogin?: () => Promise<PendingChatGptLogin>
   readonly openUrl?: (url: string) => void
@@ -107,7 +103,6 @@ export class ServerUnavailableError extends Error {
   override readonly name = "ServerUnavailableError"
 }
 
-/** The model server a configured server needs did not answer when it started. */
 export class ProviderUnavailableError extends Error {
   override readonly name = "ProviderUnavailableError"
 }

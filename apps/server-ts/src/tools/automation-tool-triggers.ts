@@ -26,15 +26,15 @@ import type {
 type ToolTime = (typeof ToolTimeTriggerSchema)["Type"]
 type ToolEvent = (typeof ToolEventTriggerSchema)["Type"]
 
+export const CONVERSION = { converted: "converted", refused: "refused" } as const
+
 export type ToolTriggers<Trigger> =
-  | { readonly kind: "converted"; readonly triggers: ReadonlyArray<Trigger> }
-  | { readonly kind: "refused"; readonly message: string }
+  | { readonly kind: typeof CONVERSION.converted; readonly triggers: ReadonlyArray<Trigger> }
+  | { readonly kind: typeof CONVERSION.refused; readonly message: string }
 
 export type Converted<Trigger> =
-  | { readonly kind: "converted"; readonly trigger: Trigger }
-  | { readonly kind: "refused"; readonly message: string }
-
-export const CONVERSION = { converted: "converted", refused: "refused" } as const
+  | { readonly kind: typeof CONVERSION.converted; readonly trigger: Trigger }
+  | { readonly kind: typeof CONVERSION.refused; readonly message: string }
 
 const KEPT: KeptField = { kind: "kept" }
 const ANY_EVENT: RunOnlyIf = { kind: "any_event" }
@@ -208,7 +208,7 @@ export const toolTriggerInputs = (
 
 export type CardTrigger = { readonly input: AutomationTriggerInput; readonly appless: boolean }
 
-const UNNAMED_APP = { server: "", event: "" } as const
+const UNNAMED_APP: NonNullable<ToolEvent["mcp_event"]> = { server: "", event: "" }
 
 const withoutApp = (trigger: ToolEvent): ToolEvent => {
   const { mcp_event: _app, ...rest } = trigger

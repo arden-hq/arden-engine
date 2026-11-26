@@ -1,15 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** Indexes for lookups that read a whole table without them.
- *
- * The first group is one per foreign key whose referencing column had no
- * index: SQLite looks up child rows on every delete of a parent row, and with
- * no index that reads the whole child table inside that write
- * (test/foreign-key-indexes.test.ts). The second group serves statements the
- * scan check found reading a growing table from start to end
- * (test/sql-scans). The last part adds `automation_delivery_runs`, kept by
- * triggers, so "does a delivery name this run?" is a lookup. */
 const up = (database: DatabaseSync): void => {
   database.exec(
     "CREATE INDEX idx_browser_procedure_invocations_procedure_id_revision ON browser_procedure_invocations(procedure_id, revision)"
@@ -78,11 +69,9 @@ const up = (database: DatabaseSync): void => {
   database.exec(
     "CREATE INDEX idx_automation_deliveries_session ON automation_deliveries(json_extract(payload, '$.sessionId')) WHERE json_extract(payload, '$.sessionId') IS NOT NULL"
   )
-  // The short list of browser tool calls, for the browser-procedure job.
   database.exec(
     `CREATE INDEX idx_tool_calls_browser ON tool_calls(run_id) WHERE tool_name IN ('browser_open', 'browser_snapshot', 'browser_act')`
   )
-  // Which run a delivery names, as rows: `payload.runIds` is a JSON list, which no index can reach.
   database.exec(`CREATE TABLE automation_delivery_runs (
       run_id TEXT NOT NULL CHECK(length(run_id) > 0),
       delivery_id TEXT NOT NULL REFERENCES automation_deliveries(delivery_id) ON DELETE CASCADE,

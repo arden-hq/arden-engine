@@ -26,6 +26,11 @@ const NotificationSchema = Schema.Struct({
 })
 type Notification = typeof NotificationSchema.Type
 
+const NOTIFICATION_REASON = { ciActivity: "ci_activity" } as const
+
+const isCiActivity = (reason: string): reason is typeof NOTIFICATION_REASON.ciActivity =>
+  reason === NOTIFICATION_REASON.ciActivity
+
 const SUBJECT_URL = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/(?:issues|pulls)\/(\d+)$/
 
 const githubThreadKey = (notification: {
@@ -117,7 +122,7 @@ export const fetchGitHub = Effect.fn("ConnectionItems.fetchGitHub")(function* (i
     next = nextPage(more.headers.get("link"))
   }
   const fresh = notifications.filter((notification) => !later(since, notification.updated_at))
-  const items = fresh.filter((notification) => notification.reason !== "ci_activity").map(toItem)
+  const items = fresh.filter((notification) => !isCiActivity(notification.reason)).map(toItem)
   return {
     cursor: response.headers.get("last-modified") ?? input.cursor,
     since: fresh.reduce(

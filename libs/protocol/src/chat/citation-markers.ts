@@ -12,9 +12,6 @@
  *
  *  @see https://developers.openai.com/api/docs/guides/citation-formatting */
 
-/** A marker with the spaces a model puts before it (`scale. ⟨cite⟩`). Ids
- *  and locators are short words (`turn4view0`, `L12-L20`); a marker cut
- *  before its stop ends where its ids end, never eating the prose after it. */
 const CITATION = /[ \t]*\uE200cite(?:\uE202[\w.:-]*)*\uE201?/gu
 const CUT_PREFIX = /[ \t]*\uE200(?:c(?:i(?:t(?:e)?)?)?)?$/u
 

@@ -2,6 +2,7 @@ export const CODE_MODE_TOOL = "code_mode"
 export const WORKFLOW_RETRY_TOOL = "workflow_retry"
 export const WORKFLOW_CANCEL_TOOL = "workflow_cancel"
 export const SPAWN_AGENT_TOOL = "spawn_agent"
+export const AGENT_MESSAGE_TOOL = "agent_message"
 export const BROWSER_TASK_TOOL = "browser_task"
 export const COMPUTER_TOOL = "computer_repl"
 
@@ -21,6 +22,8 @@ export const NESTED_CALL_MARKERS = {
   [BROWSER_TASK_TOOL]: ":task:",
   [COMPUTER_TOOL]: ":computer:"
 } as const
+
+export type NestedCallMarker = (typeof NESTED_CALL_MARKERS)[keyof typeof NESTED_CALL_MARKERS]
 
 export const DETACHED_WORKFLOW_OWNER_TOOLS = [
   CODE_MODE_TOOL,

@@ -1,4 +1,5 @@
 import type { ChatMessage, ToolCall } from "../contracts/messages.js"
+import { DELIVERY_MODE, type DeliveryMode } from "../contracts/provider.js"
 import {
   canRunInBackground,
   mayEndTurn,
@@ -13,25 +14,27 @@ import type { Run, StepView } from "./run-state.js"
 export const isBackgroundCall = (
   call: PendingToolCall,
   meta: ToolMeta | undefined,
-  mode: "native" | "message"
+  mode: DeliveryMode
 ): boolean =>
   call.argumentError === undefined &&
   meta?.background === true &&
   canRunInBackground(meta) &&
-  (mode === "message" || call.toolCall.async === true)
+  (mode === DELIVERY_MODE.message || call.toolCall.async === true)
 
 export interface StreamedToolResults {
   readonly ids: ReadonlySet<string>
   readonly output: DispatchOutput
 }
 
+const SETTLEMENT = { completed: "completed", failed: "failed" } as const
+
 type Settlement =
   | {
-      readonly kind: "completed"
+      readonly kind: typeof SETTLEMENT.completed
       readonly output: DispatchOutput
       readonly messages: ReadonlyArray<ChatMessage>
     }
-  | { readonly kind: "failed"; readonly cause: unknown }
+  | { readonly kind: typeof SETTLEMENT.failed; readonly cause: unknown }
 
 export class StreamingTools {
   private readonly ids = new Set<string>()
@@ -89,7 +92,7 @@ export class StreamingTools {
     const paused: Array<DispatchOutput["paused"][number]> = []
     for (const pending of this.pending) {
       const settled = await pending
-      if (settled.kind === "failed") throw settled.cause
+      if (settled.kind === SETTLEMENT.failed) throw settled.cause
       this.options.run.messages.push(...settled.messages)
       completions.push(...settled.output.completions)
       paused.push(...settled.output.paused)

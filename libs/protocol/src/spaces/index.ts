@@ -23,10 +23,8 @@ import {
 
 export * from "./contracts.js"
 
-/** The 409 body of a Space archive refused for work running in its chats. */
 export const isSpaceEndConflict = Schema.is(SpaceEndConflictSchema)
 
-/** Plain decoders for the live Space projections. */
 export const spaceDecoders = {
   conversation: decoderFor(SpaceConversationResponseSchema, "Invalid Space conversation"),
   space: decoderFor(SpaceSchema, "Invalid Space response"),
@@ -36,7 +34,6 @@ export const spaceDecoders = {
   archived: decoderFor(SpaceArchiveResponseSchema, "Invalid Space archive response")
 } as const
 
-/** Strict request encoders; callers receive reusable JSON bodies. */
 export const spaceRequests = {
   create: makeEncoder<CreateSpaceInput>(
     encodeCreateSpaceRequestEffect,
@@ -49,7 +46,6 @@ export const spaceRequests = {
 const route = (program: ReturnType<typeof encodeSpaceItemPathEffect>, message: string): string =>
   runBoundary(program, message, "encode")
 
-/** The item path serves detail, update, and archive operations. */
 export const spaceRoutes = {
   collection: "/spaces",
   overview: "/spaces/overview",
@@ -64,7 +60,6 @@ export const spaceRoutes = {
   page(spaceId: string): string {
     return route(encodeSpacePagePathEffect(spaceId), "Invalid Space-page route")
   },
-  /** `stop`: stop the work running in the Space's chats first. */
   archive(spaceId: string, { stop }: { readonly stop: boolean }): string {
     return `${route(encodeSpaceItemPathEffect(spaceId), "Invalid Space route")}${stop ? "?stop=true" : ""}`
   },

@@ -4,6 +4,13 @@ import { IsoDateTimeStringSchema, NonNegativeIntSchema } from "../common/schema.
 
 export const RELAY_PRESENCE = { online: "online", offline: "offline", unseen: "unseen" } as const
 export const RELAY_PAIR_REQUEST = { none: "none", waiting: "waiting" } as const
+export const RELAY_CONNECTION = {
+  off: "off",
+  unavailable: "unavailable",
+  idle: "idle",
+  connecting: "connecting",
+  connected: "connected"
+} as const
 export const RELAY_SETTING = {
   enabled: "enabled",
   relay_url: "relay_url",
@@ -36,31 +43,18 @@ export const RelayPairRequestSchema = Schema.Union([
   })
 ])
 
-/**
- * `off` — turned off in settings; `unavailable` — this Mac has no secure
- * storage for its keys (no desktop host); `idle` — on, but nothing needs the
- * relay yet (no phone paired, no pairing open); `connecting`, `connected`.
- */
-export const RelayConnectionSchema = Schema.Literals([
-  "off",
-  "unavailable",
-  "idle",
-  "connecting",
-  "connected"
-])
+export const RelayConnectionSchema = Schema.Literals(Object.values(RELAY_CONNECTION))
 
 export const RelayStatusSchema = Schema.Struct({
   connection: RelayConnectionSchema,
   enabled: Schema.Boolean,
   relay_url: Schema.String,
   keep_awake: Schema.Boolean,
-  /** Runs the Mac is kept awake for now; 0 when it is not held awake. */
   keeping_awake: NonNegativeIntSchema,
   pair_request: RelayPairRequestSchema,
   devices: Schema.Array(RelayDeviceSchema)
 })
 
-/** What the pairing QR code encodes, and when it stops working. */
 export const RelayPairOfferSchema = Schema.Struct({
   link: Schema.String,
   expires_at: IsoDateTimeStringSchema

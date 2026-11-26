@@ -16,7 +16,8 @@ import { holdQuestionTask } from "./work-holds.js"
 import { readOpenTaskQuestionIds } from "./question-events.js"
 import { journalAskChange } from "./ask-changes.js"
 import { makeEnsureSpaceConversation } from "./space-conversation.js"
-import { matchesRecordedFocusTarget, recordFocusChoiceInTransaction } from "./focus-choices.js"
+import { recordFocusChoiceInTransaction } from "./focus-choices.js"
+import { matchesRecordedFocusTarget } from "./focus-choice-rows.js"
 import { offerAnswerMisfit, recordPermissionOfferInTransaction } from "./permission-offers.js"
 import {
   contractAnswerMisfit,

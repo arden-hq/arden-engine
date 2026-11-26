@@ -4,7 +4,8 @@ import {
   classifySchemaManifest,
   manifestOf,
   readForeignTableReferences,
-  readSchemaManifest
+  readSchemaManifest,
+  SCHEMA_MANIFEST_VERDICT
 } from "../schema/manifest.js"
 import {
   applySchemaTransitions,
@@ -15,21 +16,30 @@ import { baselineStatements } from "./0001_baseline.js"
 import {
   BASELINE_VERSION,
   checkMigrationOrder,
+  FOREIGN_KEY_CHECK,
   migrations,
   type Migration,
   type MigrationForeignKeys
 } from "./index.js"
 
+export const MIGRATION_PLAN = {
+  fresh: "fresh",
+  current: "current",
+  newer: "newer",
+  pending: "pending",
+  unsupported: "unsupported"
+} as const
+
 export type MigrationPlan =
-  | { readonly kind: "fresh" }
-  | { readonly kind: "current" }
-  | { readonly kind: "newer"; readonly version: number }
+  | { readonly kind: typeof MIGRATION_PLAN.fresh }
+  | { readonly kind: typeof MIGRATION_PLAN.current }
+  | { readonly kind: typeof MIGRATION_PLAN.newer; readonly version: number }
   | {
-      readonly kind: "pending"
+      readonly kind: typeof MIGRATION_PLAN.pending
       readonly from: number
       readonly bridge: SchemaTransitionPath | undefined
     }
-  | { readonly kind: "unsupported"; readonly problems: ReadonlyArray<string> }
+  | { readonly kind: typeof MIGRATION_PLAN.unsupported; readonly problems: ReadonlyArray<string> }
 
 export const planMigrations = (
   database: DatabaseSync,
@@ -37,21 +47,22 @@ export const planMigrations = (
 ): MigrationPlan => {
   const latest = checkMigrationOrder(list)
   const version = readUserVersion(database)
-  if (version > latest) return { kind: "newer", version }
-  if (version === latest) return { kind: "current" }
-  if (version > 0) return { kind: "pending", from: version, bridge: undefined }
+  if (version > latest) return { kind: MIGRATION_PLAN.newer, version }
+  if (version === latest) return { kind: MIGRATION_PLAN.current }
+  if (version > 0) return { kind: MIGRATION_PLAN.pending, from: version, bridge: undefined }
   const live = readSchemaManifest(database)
-  if (live.length === 0) return { kind: "fresh" }
+  if (live.length === 0) return { kind: MIGRATION_PLAN.fresh }
   const baseline = manifestOf(baselineStatements)
   const foreign = readForeignTableReferences(database, baseline, live)
   const verdict = classifySchemaManifest(baseline, live, foreign)
-  if (verdict.kind === "current") return { kind: "pending", from: 0, bridge: undefined }
+  if (verdict.kind === SCHEMA_MANIFEST_VERDICT.current)
+    return { kind: MIGRATION_PLAN.pending, from: 0, bridge: undefined }
   const bridge = findSchemaTransition(baseline, live, foreign)
-  if (bridge !== undefined) return { kind: "pending", from: 0, bridge }
+  if (bridge !== undefined) return { kind: MIGRATION_PLAN.pending, from: 0, bridge }
   return {
-    kind: "unsupported",
+    kind: MIGRATION_PLAN.unsupported,
     problems:
-      verdict.kind === "incompatible"
+      verdict.kind === SCHEMA_MANIFEST_VERDICT.incompatible
         ? verdict.problems
         : verdict.missing.map((row) => `${row.type}:${row.name} is missing`)
   }
@@ -74,7 +85,7 @@ export interface MigrationStep {
 }
 
 export const pendingMigrationSteps = (
-  plan: Extract<MigrationPlan, { kind: "pending" }>,
+  plan: Extract<MigrationPlan, { kind: typeof MIGRATION_PLAN.pending }>,
   list: ReadonlyArray<Migration> = migrations
 ): ReadonlyArray<MigrationStep> => {
   const bridge = plan.bridge
@@ -110,7 +121,7 @@ export const pendingMigrationSteps = (
   ]
 }
 
-const WHOLE: MigrationForeignKeys = { kind: "whole" }
+const WHOLE: MigrationForeignKeys = { kind: FOREIGN_KEY_CHECK.whole }
 
 const migrateInTransaction = (
   database: DatabaseSync,
@@ -119,11 +130,10 @@ const migrateInTransaction = (
   foreignKeys: MigrationForeignKeys,
   up: () => void
 ): void => {
-  // A table rebuild drops the old table; with enforcement on, that drop runs
-  // every child table's ON DELETE action. Enforcement goes off for those, and
-  // the check before the commit verifies the references instead. The pragma
-  // is a no-op inside a transaction, so it is set before BEGIN.
-  database.exec(`PRAGMA foreign_keys = ${foreignKeys.kind === "enforced" ? "ON" : "OFF"}`)
+  // PRAGMA foreign_keys is a no-op inside a transaction, so it is set before BEGIN: https://www.sqlite.org/pragma.html#pragma_foreign_keys
+  database.exec(
+    `PRAGMA foreign_keys = ${foreignKeys.kind === FOREIGN_KEY_CHECK.enforced ? "ON" : "OFF"}`
+  )
   database.exec("BEGIN IMMEDIATE")
   try {
     up()
@@ -141,21 +151,17 @@ interface ForeignKeyReference {
   readonly parent: string
 }
 
-// SQLite table names compare case-insensitively.
-/**
- * The tables to check after `rebuilt` were dropped and recreated: each of
- * them (their own references) and every table that references one of them
- * (a row they lost). SQLite table names compare case-insensitively.
- */
+const sqliteTableKey = (table: string): string => table.toLowerCase()
+
 const tablesToCheckAfterRebuild = (
   rebuilt: ReadonlyArray<string>,
   references: ReadonlyArray<ForeignKeyReference>
 ): ReadonlyArray<string> => {
-  const names = new Map(rebuilt.map((table) => [table.toLowerCase(), table]))
+  const names = new Map(rebuilt.map((table) => [sqliteTableKey(table), table]))
   const parents = new Set(names.keys())
   for (const reference of references) {
-    if (parents.has(reference.parent.toLowerCase()))
-      names.set(reference.child.toLowerCase(), reference.child)
+    if (parents.has(sqliteTableKey(reference.parent)))
+      names.set(sqliteTableKey(reference.child), reference.child)
   }
   return [...names.values()].sort()
 }
@@ -172,11 +178,11 @@ const readForeignKeyReferences = (database: DatabaseSync): ReadonlyArray<Foreign
 
 const hasBrokenReference = (database: DatabaseSync, foreignKeys: MigrationForeignKeys): boolean => {
   switch (foreignKeys.kind) {
-    case "enforced":
+    case FOREIGN_KEY_CHECK.enforced:
       return false
-    case "whole":
+    case FOREIGN_KEY_CHECK.whole:
       return database.prepare("PRAGMA foreign_key_check").all().length > 0
-    case "rebuilds": {
+    case FOREIGN_KEY_CHECK.rebuilds: {
       const check = database.prepare("SELECT 1 FROM pragma_foreign_key_check(?) LIMIT 1")
       return tablesToCheckAfterRebuild(foreignKeys.tables, readForeignKeyReferences(database)).some(
         (table) => check.get(table) !== undefined
@@ -185,9 +191,8 @@ const hasBrokenReference = (database: DatabaseSync, foreignKeys: MigrationForeig
   }
 }
 
-/** The pre-migration schema transitions rename a table aside and rebuild it;
- *  legacy ALTER TABLE leaves the child tables' REFERENCES text alone. */
 const bridgeToBaseline = (database: DatabaseSync, bridge: SchemaTransitionPath): void => {
+  // A table renamed aside keeps the REFERENCES text of its child tables: https://www.sqlite.org/pragma.html#pragma_legacy_alter_table
   database.exec("PRAGMA legacy_alter_table = ON")
   try {
     applySchemaTransitions(database, bridge)
@@ -202,17 +207,15 @@ const readUserVersion = (database: DatabaseSync): number => {
   return version
 }
 
-/**
- * Opens `filename` to migrate it. Exclusive locking takes the file lock on the
- * first read and keeps it until close, so this fails as busy while any other
- * connection, in this process or another, has the database open, and no
- * connection can open it until the migrations are done.
- */
+const holdFileLockUntilClose = (database: DatabaseSync): void => {
+  database.exec("PRAGMA locking_mode = EXCLUSIVE")
+  database.prepare("SELECT count(*) FROM sqlite_schema").get()
+}
+
 export const openDatabaseForMigration = (filename: string): DatabaseSync => {
   const database = new DatabaseSync(filename, { timeout: 0 })
   try {
-    database.exec("PRAGMA locking_mode = EXCLUSIVE")
-    database.prepare("SELECT count(*) FROM sqlite_schema").get()
+    holdFileLockUntilClose(database)
     return database
   } catch (cause) {
     database.close()
@@ -220,10 +223,13 @@ export const openDatabaseForMigration = (filename: string): DatabaseSync => {
   }
 }
 
-/** SQLITE_BUSY or SQLITE_LOCKED (extended codes included): another connection holds the lock. */
+const SQLITE_BUSY = 5
+const SQLITE_LOCKED = 6
+const primaryResultCode = (extendedCode: number): number => extendedCode & 0xff
+
 export const isDatabaseBusy = (cause: unknown): boolean => {
   if (!(cause instanceof Error) || !("errcode" in cause) || typeof cause.errcode !== "number")
     return false
-  const primary = cause.errcode & 0xff
-  return primary === 5 || primary === 6
+  const primary = primaryResultCode(cause.errcode)
+  return primary === SQLITE_BUSY || primary === SQLITE_LOCKED
 }

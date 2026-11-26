@@ -2,12 +2,14 @@ import { Deferred, Effect, Layer } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { lock as lockFile } from "proper-lockfile"
 
-import { RevisionLockFactory, type RevisionLockFactoryShape } from "./service.js"
+import { RevisionLockFactory, type RevisionLockFactoryShape } from "./service-types.js"
 import { managedFileRepositoryLayer, ManagedFileRepository } from "../repository/service.js"
-import type { ManagedFileRepositoryOptions as RepositoryOptions } from "../repository/service.js"
-import type { RepositoryError } from "../repository/service.js"
+import type { ManagedFileRepositoryOptions as RepositoryOptions } from "../repository/service-types.js"
+import type { RepositoryError } from "../repository/service-types.js"
 import { RevisionConflictError, RevisionStorageError } from "../domain/errors.js"
 import { errorMessage } from "@arden-hq/std/errors"
+
+const LOCKED_CODE = "ELOCKED"
 
 const lockFailure = (
   operation: string,
@@ -17,7 +19,7 @@ const lockFailure = (
     typeof cause === "object" && cause !== null && "code" in cause
       ? (cause as { readonly code?: unknown }).code
       : undefined
-  if (code === "ELOCKED")
+  if (code === LOCKED_CODE)
     return new RevisionConflictError({ message: "repository is already locked" })
   return new RevisionStorageError({
     message: `${operation}: ${errorMessage(cause)}`,
@@ -64,7 +66,6 @@ const nodeLockFactory: RevisionLockFactoryShape = {
   })
 }
 
-/** Node/Electron layer for the complete durable repository service. */
 export const managedFileRepositoryNodeLayer = (
   options: RepositoryOptions
 ): Layer.Layer<ManagedFileRepository, RepositoryError> =>

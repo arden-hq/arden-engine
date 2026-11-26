@@ -147,7 +147,6 @@ export async function stageCuaApp(options: {
   }
 }
 
-/** Keep the upstream notices outside the signed bundle so its seal is unchanged. */
 export async function preserveCuaNotices(options: {
   readonly root: string
   readonly stagedDirectory: string

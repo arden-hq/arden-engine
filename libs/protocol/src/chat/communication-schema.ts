@@ -5,7 +5,13 @@ import {
   NonNegativeIntSchema,
   PositiveIntSchema
 } from "../common/schema.js"
-import type { ChatUpdate, CommunicationEnvelope } from "./communication.js"
+import {
+  ARRIVAL_EVENT,
+  UPDATE_WEIGHT,
+  COMMUNICATION_DOOR,
+  type ChatUpdate,
+  type CommunicationEnvelope
+} from "./communication.js"
 
 const IdentifierSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const LabelSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(160))
@@ -31,28 +37,28 @@ const route = (
 const TASK_ROUTES = ["arden:task/", "arden:work/"]
 
 export const TaskCommunicationDoorSchema = withExtras({
-  kind: Schema.Literal("task"),
+  kind: Schema.Literal(COMMUNICATION_DOOR.task),
   label: LabelSchema,
   item_id: IdentifierSchema,
   href: Schema.String
 }).check(route(TASK_ROUTES, (door) => door.item_id))
 
 export const SessionCommunicationDoorSchema = withExtras({
-  kind: Schema.Literal("session"),
+  kind: Schema.Literal(COMMUNICATION_DOOR.session),
   label: LabelSchema,
   session_ref: IdentifierSchema,
   href: Schema.String
 }).check(route(["arden:session/"], (door) => door.session_ref))
 
 export const AutomationCommunicationDoorSchema = withExtras({
-  kind: Schema.Literal("automation"),
+  kind: Schema.Literal(COMMUNICATION_DOOR.automation),
   label: LabelSchema,
   automation_ref: IdentifierSchema,
   href: Schema.String
 }).check(route(["arden:automation/"], (door) => door.automation_ref))
 
 export const RunCommunicationDoorSchema = withExtras({
-  kind: Schema.Literal("run"),
+  kind: Schema.Literal(COMMUNICATION_DOOR.run),
   label: LabelSchema,
   run_id: IdentifierSchema,
   session_ref: IdentifierSchema,
@@ -60,7 +66,7 @@ export const RunCommunicationDoorSchema = withExtras({
 }).check(route(["arden:session/"], (door) => door.session_ref))
 
 export const AutomationRunCommunicationDoorSchema = withExtras({
-  kind: Schema.Literal("automation_run"),
+  kind: Schema.Literal(COMMUNICATION_DOOR.automationRun),
   label: LabelSchema,
   automation_ref: IdentifierSchema,
   run_id: IdentifierSchema,
@@ -69,7 +75,7 @@ export const AutomationRunCommunicationDoorSchema = withExtras({
 }).check(route(["arden:session/"], (door) => door.session_ref))
 
 export const ArtifactCommunicationDoorSchema = withExtras({
-  kind: Schema.Literal("artifact"),
+  kind: Schema.Literal(COMMUNICATION_DOOR.artifact),
   label: LabelSchema,
   item_id: IdentifierSchema,
   attachment_id: PositiveIntSchema,
@@ -109,29 +115,29 @@ const arrivalBase = {
 } as const
 
 export const CommunicationArrivalSchema = Schema.Union([
-  withExtras({ ...arrivalBase, event: Schema.Literal("finished") }),
-  withExtras({ ...arrivalBase, event: Schema.Literal("blocked") }),
+  withExtras({ ...arrivalBase, event: Schema.Literal(ARRIVAL_EVENT.finished) }),
+  withExtras({ ...arrivalBase, event: Schema.Literal(ARRIVAL_EVENT.blocked) }),
   withExtras({
     ...arrivalBase,
-    event: Schema.Literal("needs_you"),
+    event: Schema.Literal(ARRIVAL_EVENT.needsYou),
     attention: CommunicationAttentionReferenceSchema
   }),
-  withExtras({ ...arrivalBase, event: Schema.Literal("failed") }),
-  withExtras({ ...arrivalBase, event: Schema.Literal("paused") }),
-  withExtras({ ...arrivalBase, event: Schema.Literal("told") }),
-  withExtras({ ...arrivalBase, event: Schema.Literal("met") })
+  withExtras({ ...arrivalBase, event: Schema.Literal(ARRIVAL_EVENT.failed) }),
+  withExtras({ ...arrivalBase, event: Schema.Literal(ARRIVAL_EVENT.paused) }),
+  withExtras({ ...arrivalBase, event: Schema.Literal(ARRIVAL_EVENT.told) }),
+  withExtras({ ...arrivalBase, event: Schema.Literal(ARRIVAL_EVENT.met) })
 ]).pipe(Schema.toTaggedUnion("event"))
 
 export const UpdateEventSchema = Schema.Literals([
-  "finished",
-  "blocked",
-  "failed",
-  "paused",
-  "told",
-  "met"
-] as const)
+  ARRIVAL_EVENT.finished,
+  ARRIVAL_EVENT.blocked,
+  ARRIVAL_EVENT.failed,
+  ARRIVAL_EVENT.paused,
+  ARRIVAL_EVENT.told,
+  ARRIVAL_EVENT.met
+])
 
-export const UpdateDrawnWeightSchema = Schema.Literals(["owed", "news"] as const)
+export const UpdateDrawnWeightSchema = Schema.Literals(Object.values(UPDATE_WEIGHT))
 
 export const ChatUpdateSchema: Schema.Codec<ChatUpdate> = withExtras({
   key: IdentifierSchema,

@@ -1,12 +1,20 @@
 import type { JsonRecord } from "../common/json.js"
 import type { ToolDisplay } from "./display.js"
 
-export type ToolAction = "read" | "draft" | "write" | "execute"
-export type ToolScope = "internal" | "external"
-export type ToolApprovalOverride = "approve" | "ask" | "deny"
-export type ToolDefaultApproval = Exclude<ToolApprovalOverride, "deny">
+export const TOOL_ACTION = {
+  read: "read",
+  draft: "draft",
+  write: "write",
+  execute: "execute"
+} as const
+export type ToolAction = (typeof TOOL_ACTION)[keyof typeof TOOL_ACTION]
+export const TOOL_SCOPE = { internal: "internal", external: "external" } as const
+export type ToolScope = (typeof TOOL_SCOPE)[keyof typeof TOOL_SCOPE]
+export const TOOL_APPROVAL_OVERRIDE = { approve: "approve", ask: "ask", deny: "deny" } as const
+export type ToolApprovalOverride =
+  (typeof TOOL_APPROVAL_OVERRIDE)[keyof typeof TOOL_APPROVAL_OVERRIDE]
+export type ToolDefaultApproval = Exclude<ToolApprovalOverride, typeof TOOL_APPROVAL_OVERRIDE.deny>
 
-/** The policy currently enforced by the server. */
 export interface ToolPolicy extends JsonRecord {
   readonly action: ToolAction
   readonly scope: ToolScope
@@ -14,8 +22,6 @@ export interface ToolPolicy extends JsonRecord {
   readonly permissions: ReadonlyArray<string>
 }
 
-/** One registered tool as shown in application settings. This catalog is not
- * the filtered set of tools available to a particular model run. */
 export interface ToolCatalogEntry extends JsonRecord {
   readonly name: string
   readonly displayName: string
@@ -23,15 +29,11 @@ export interface ToolCatalogEntry extends JsonRecord {
   readonly kind: string
   readonly source: string
   readonly effectivePolicy: ToolPolicy
-  /** The declared policy expressed in the same vocabulary as the settings UI. */
   readonly defaultApproval: ToolDefaultApproval
-  /** How its calls are shown (`display` in its metadata); empty for the generic row and card. */
   readonly display: ToolDisplay
 }
 
 export interface ToolCatalogResponse extends JsonRecord {
   readonly tools: ReadonlyArray<ToolCatalogEntry>
-  /** Display facts for names a chat may carry that no listed tool has: a
-   *  retired tool (`bash`, now `exec_command`) or one the model provider runs. */
   readonly unlisted: Readonly<Record<string, ToolDisplay>>
 }

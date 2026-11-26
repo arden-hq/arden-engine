@@ -99,7 +99,6 @@ const convertedStatus = `CASE
 
 const up = (database: DatabaseSync): void => {
   database.exec("DROP TRIGGER worker_attempt_state")
-  // Renaming the table must not rewrite other objects' references to it.
   database.exec("PRAGMA legacy_alter_table = ON")
   try {
     rebuild(database, "automation_runs", automationRuns, { status: convertedStatus })
@@ -128,7 +127,6 @@ const rebuild = (
   const values = columns.map((column) => converted[column] ?? `prior.${column}`)
   database.exec(`INSERT INTO ${table} (rowid, ${columns.join(", ")})
     SELECT prior.rowid, ${values.join(", ")} FROM ${prior} AS prior`)
-  // AUTOINCREMENT: the old counter carries over, so an id a deleted row once
   database.exec(`DELETE FROM sqlite_sequence WHERE name = '${table}'`)
   database.exec(`UPDATE sqlite_sequence SET name = '${table}' WHERE name = '${prior}'`)
   database.exec(`DROP TABLE ${prior}`)

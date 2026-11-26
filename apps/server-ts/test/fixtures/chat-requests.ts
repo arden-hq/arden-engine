@@ -32,7 +32,11 @@ export const decision = (approved: boolean): ToolDecision =>
 export const decisionBody = (
   approved: boolean,
   asking: { readonly askedAt: string | undefined; readonly commandId: string | undefined }
-) => ({
+): {
+  readonly decision: ToolDecision
+  readonly asked: { readonly kind: "unstated" } | { readonly kind: "at"; readonly at: string }
+  readonly command: { readonly kind: "none" } | { readonly kind: "command"; readonly id: string }
+} => ({
   decision: decision(approved),
   asked:
     asking.askedAt === undefined

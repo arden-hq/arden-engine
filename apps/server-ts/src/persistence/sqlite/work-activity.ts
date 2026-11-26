@@ -6,24 +6,13 @@ import type { SpaceTaskActivity, SpaceTaskStopKind } from "@arden-hq/protocol/sp
 import { workError } from "./work-records.js"
 import { taskHasHold } from "./task-hold-state.js"
 import { hasPendingTaskQuestion } from "./task-question-state.js"
-import { activeRunStatusList } from "./status-sets.js"
+import { activeRunStatusList, STORED_RUN_STATUS, type StoredRunStatus } from "./status-sets.js"
 import { inTaskWords } from "@arden-hq/protocol/chat"
 import { failureWords, type TaskStopCause } from "./task-next-move.js"
 import { inArdenWords } from "../restart-notice.js"
 import { taskOpenSql } from "./task-status-sql.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
-// The unary `+` drops the column's TEXT affinity, which otherwise keeps SQLite off
-// `idx_chat_runs_task_item`.
-/** One current-state projection for every Task surface. A completed attempt
- * does not complete the Task; questions outlive their Run, not their generation.
- * Runs are found by `idx_chat_runs_task_item`; the unary `+` drops the
- * column's TEXT affinity, which otherwise keeps SQLite off that index.
- *
- * A Task is stopped when its last attempt failed, and also when Arden's Task
- * has run (in any generation: a Space setting change bumps every Task's) but
- * nothing will run it again: no next check, nothing queued, nothing asked, no
- * answer on its way. Nothing else would show that state. */
 export const workActivitySql = (
   sql: SqlClient.SqlClient,
   task: Statement.Fragment
@@ -58,7 +47,7 @@ interface StopFacts {
   readonly stop_cause: TaskStopCause | null
   readonly event_summary: string | null
   readonly event_at: string | null
-  readonly run_status: string | null
+  readonly run_status: StoredRunStatus | null
   readonly run_error_code: string | null
   readonly run_error: string | null
   readonly run_at: string | null
@@ -97,6 +86,9 @@ const stopOf = (facts: StopFacts): Stop => {
               `Its last run failed, and nothing tried it again: ${failureWords(facts.run_error, facts.run_error_code)}`
             )
           }
+    case STORED_RUN_STATUS.pending:
+    case STORED_RUN_STATUS.running:
+    case STORED_RUN_STATUS.completed:
     case null:
     default:
       return {

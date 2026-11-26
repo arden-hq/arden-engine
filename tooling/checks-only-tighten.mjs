@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { parseJson, readJsonFileSync } from "./json-edge.mjs"
 
 const root = process.cwd()
 const args = process.argv.slice(2)
@@ -36,12 +37,12 @@ try {
 
 const atBase = (path) => {
   try {
-    return JSON.parse(git(["show", `${base}:${path}`]))
+    return parseJson(git(["show", `${base}:${path}`]))
   } catch {
     return undefined
   }
 }
-const atHead = (path) => (existsSync(resolve(root, path)) ? JSON.parse(readFileSync(resolve(root, path), "utf8")) : undefined)
+const atHead = (path) => (existsSync(resolve(root, path)) ? readJsonFileSync(resolve(root, path)) : undefined)
 
 const changed = []
 const fields = git(["diff", "-z", "--name-status", "-M", base, "--"]).split("\0")

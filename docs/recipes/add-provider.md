@@ -71,7 +71,7 @@ in `apps/server-ts/src/models/endpoints/chat.ts`. Test: `apps/server-ts/test/mod
 Read "Writing a provider" in `libs/loop/README.md`. The example is `d51df8a`: an adapter
 folder like `libs/loop/src/providers/chat-completions/` (`provider.ts`, `request.ts`,
 `stream.ts`, `errors.ts`, `compat.ts`), an export in `libs/loop/package.json` and `libs/loop/src/index.ts`,
-and `libs/loop/test/chat-completions.test.ts` with recorded chunks. The host adds a
+and `libs/loop/test/chat-completions-stream.test.ts` with recorded chunks. The host adds a
 `kind` in `settings.ts` and a route in `models.ts`.
 
 - Use the kit in `libs/loop/src/providers/kit/` (`streamSse`, `classifyRejection`, `orderToolHistory`, `answerToolSearch`, `reportedCost`). A copy fails `libs/loop/test/provider-kit.test.ts`.
@@ -85,7 +85,7 @@ and `libs/loop/test/chat-completions.test.ts` with recorded chunks. The host add
 
 ```bash
 (cd apps/server-ts && bun run typecheck) \
-  && (cd libs/loop && bunx vitest run test/chat-completions.test.ts test/provider-kit.test.ts) \
+  && (cd libs/loop && bunx vitest run test/chat-completions-stream.test.ts test/chat-completions-request.test.ts test/provider-kit.test.ts) \
   && (cd apps/server-ts && bunx vitest run test/chat-completions-discovery.test.ts test/serve-models.test.ts test/serve-settings.test.ts test/model-server-check.test.ts)
 ```
 

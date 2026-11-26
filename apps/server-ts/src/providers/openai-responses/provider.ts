@@ -29,17 +29,11 @@ export interface OpenAiResponsesProviderOptions {
   readonly baseUrl: string
   readonly credentials: OpenAiCredentialSource
   readonly headers?: Readonly<Record<string, string>>
-  /** Maximum silence between SSE events before the one transport retry. */
   readonly idleTimeoutMs?: number
-  /** Optional host-owned catalog prefix that the upstream API does not accept. */
   readonly modelPrefix?: string
-  /** Instructions used only when the request history has no system message. */
   readonly defaultInstructions?: string
-  /** Omit the Responses API token-limit field for endpoints that reject it. */
   readonly omitMaxOutputTokens?: boolean
-  /** Request header that also carries the prompt cache key (Codex: `session-id`). */
   readonly cacheScopeHeader?: string
-  /** Transport for model requests; defaults to the global fetch. */
   readonly fetch?: typeof globalThis.fetch
 }
 

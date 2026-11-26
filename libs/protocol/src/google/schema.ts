@@ -1,20 +1,23 @@
-import { serverUrlIssue } from "@arden-hq/std/url"
+import { PLAIN_HTTP, SERVER_URL_ISSUE, serverUrlIssue } from "@arden-hq/std/url"
+import { strict } from "../common/boundary.js"
 import { Effect, Schema } from "effect"
 import { encodeSegment } from "../common/routes.js"
 import type { Agrees, Assert } from "../common/type-agreement.js"
-import type {
-  GoogleAccount,
-  GoogleAuthorizationStatus,
-  GoogleAccountListResponse,
-  GoogleDisconnectReceipt,
-  GoogleOAuthStartResponse,
-  GoogleServiceAuthorization
+import {
+  GOOGLE_AUTHORIZATION_STATUS,
+  GOOGLE_GRANT,
+  GOOGLE_SERVICE_ID,
+  type GoogleAccount,
+  type GoogleAuthorizationStatus,
+  type GoogleAccountListResponse,
+  type GoogleDisconnectReceipt,
+  type GoogleOAuthStartResponse,
+  type GoogleServiceAuthorization
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
 const googlePath = "/google"
 
-export const GoogleServiceIdSchema = Schema.Literals(["gmail", "calendar", "google_drive"] as const)
+export const GoogleServiceIdSchema = Schema.Literals(Object.values(GOOGLE_SERVICE_ID))
 
 export const GoogleAccountIdSchema = Schema.Trimmed.check(
   Schema.isMinLength(1),
@@ -54,7 +57,7 @@ const GoogleScopeSchema = Schema.String.check(
   Schema.isPattern(/^[\x21-\x7E]+$/u)
 )
 
-const GoogleAuthorizationStatusSchema = Schema.Literals(["ready", "needs_auth"] as const)
+const GoogleAuthorizationStatusSchema = Schema.Literals(Object.values(GOOGLE_AUTHORIZATION_STATUS))
 
 const GoogleAuthorizationSchema = Schema.Struct({
   service: GoogleServiceIdSchema,
@@ -108,8 +111,8 @@ export const GoogleAccountListResponseSchema = Schema.Struct({
 const GoogleAuthorizationUrlSchema = Schema.String.check(
   Schema.isMaxLength(8_192),
   Schema.makeFilter((value) => {
-    const issue = serverUrlIssue(value, { http: "never" })
-    if (issue === "invalid") return "must be an absolute HTTPS URL"
+    const issue = serverUrlIssue(value, { http: PLAIN_HTTP.never })
+    if (issue === SERVER_URL_ISSUE.invalid) return "must be an absolute HTTPS URL"
     return issue === undefined
       ? undefined
       : "must be an HTTPS URL without embedded credentials or a fragment"
@@ -175,14 +178,7 @@ export const encodeGoogleOAuthPathEffect = (
     Effect.map((service) => `${googlePath}/${encodeSegment(service)}/oauth`)
   )
 
-export const GoogleGrantSchema = Schema.Literals([
-  "gmail_drafts",
-  "gmail_modify",
-  "calendar_list",
-  "calendar_freebusy",
-  "drive_read",
-  "drive_manage"
-] as const)
+export const GoogleGrantSchema = Schema.Literals(Object.values(GOOGLE_GRANT))
 
 export const encodeGoogleGrantPathEffect = (
   value: unknown
@@ -210,7 +206,6 @@ export const encodeGoogleAccountPathEffect = (
     )
   )
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type GoogleAuthorizationStatusAgrees = Assert<
   Agrees<(typeof GoogleAuthorizationStatusSchema)["Type"], GoogleAuthorizationStatus>
 >

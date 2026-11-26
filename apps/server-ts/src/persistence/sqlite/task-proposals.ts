@@ -5,6 +5,7 @@ import { decodeKeyedTaskDraftEffect } from "../work/task-input.js"
 import { captureMutationVersions } from "./mutation-links.js"
 import type { SqlClient } from "effect/unstable/sql"
 import { readRecordedHistory } from "./recorded-history.js"
+import { UNSTARTED } from "./proposal-task.js"
 import type {
   TaskProposal,
   TaskProposalRetirement,
@@ -20,8 +21,7 @@ import { DateTime, Effect, Schema } from "effect"
 import {
   TaskProposalStore,
   TaskProposalStoreError,
-  type ProposeSpaceTaskInput,
-  type TaskProposalSettlementAuthority
+  type ProposeSpaceTaskInput
 } from "../proposals/store.js"
 import { TaskProposalConflictError } from "../proposals/conflict.js"
 import { TASK_PROPOSAL_ID_PREFIX } from "../automations/space-review.js"
@@ -34,7 +34,7 @@ import { makeWorkCaptureSql } from "./work-capture.js"
 import { makeWorkEvents } from "./work-events.js"
 import { assertInferenceAdmission, assertMainProposalAdmission } from "./work-inference.js"
 import { mainSpaceId } from "./main-space.js"
-import { sourceIdentity, sourceRevision, normalized, evidenceKey } from "./proposal-evidence.js"
+import { sourceIdentity, normalized, evidenceKey } from "./proposal-evidence.js"
 import { retireProposal } from "./proposal-retirement.js"
 import { pruneChatLinks } from "./space-chat-links.js"
 import { projectRetirements } from "./proposal-retirement-view.js"
@@ -46,77 +46,9 @@ import {
 } from "./proposal-projection.js"
 import { isOrdinaryChat } from "./in-chat-task.js"
 import { makeProposalRevision, proposalHash } from "./proposal-revision.js"
-import { userChatSql } from "./chat-ownership.js"
 import { refusedProposalStatusList } from "./status-sets.js"
-
-export interface ProposalRow {
-  readonly proposal_id: string
-  readonly place: "space" | "chat"
-  readonly space_id: string | null
-  readonly chat_session_id: string | null
-  readonly dedupe_key: string
-  readonly stable_key: string
-  readonly text: string
-  readonly body: string | null
-  readonly owner: "worker" | "user" | "external"
-  readonly capture_json: string
-  readonly sources_json: string
-  readonly signal_json: string | null
-  readonly evidence_revision_key: string
-  readonly candidate_hash: string
-  readonly source_run_id: string | null
-  readonly source_session_id: string | null
-  readonly source_turn_id: string | null
-  readonly source_tool_call_id: string | null
-  readonly capture_policy_json: string | null
-  readonly revision: number
-  readonly seq: number
-  readonly status: "held" | "offered" | "accepted" | "rejected" | "expired" | "retired"
-  readonly retirement_json: string | null
-  readonly item_id: string | null
-  readonly settlement_client_id: string | null
-  readonly settlement_decision: string | null
-  readonly settlement_task_json: string | null
-  readonly created_at: string
-  readonly updated_at: string
-  readonly settled_at: string | null
-  readonly put_off_until: string | null
-  readonly waiting_since: string | null
-}
-
-const UNSTARTED = { kind: "unstarted" } as const
-
-const failure = (
-  reason: TaskProposalStoreError["reason"],
-  message: string,
-  cause?: unknown
-): TaskProposalStoreError =>
-  new TaskProposalStoreError({
-    reason,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
-
-const canonicalizeSources = (
-  sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>
-): Effect.Effect<ReadonlyArray<typeof TaskSourceRecordSchema.Type>, TaskProposalStoreError> => {
-  const byIdentity = new Map<string, typeof TaskSourceRecordSchema.Type>()
-  for (const source of sources) {
-    const identity = sourceIdentity(source)
-    const prior = byIdentity.get(identity)
-    if (prior !== undefined && sourceRevision(prior) !== sourceRevision(source)) {
-      return Effect.fail(
-        failure("invalid", "Task proposal evidence contains conflicting revisions for one source")
-      )
-    }
-    byIdentity.set(identity, source)
-  }
-  return Effect.succeed(
-    [...byIdentity.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([, source]) => source)
-  )
-}
+import { type ProposalRow, canonicalizeSources, failure } from "./task-proposal-support.js"
+import { makeTaskProposalStart } from "./task-proposal-start.js"
 
 export const makeTaskProposalStore = (options: {
   readonly reader: SqlClient.SqlClient
@@ -386,132 +318,10 @@ export const makeTaskProposalStore = (options: {
       )
   })
 
-  const assertItemsStored = Effect.fn("TaskProposal.assertItemsStored")(function* (
-    sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>
-  ) {
-    for (const source of sources) {
-      if (source.kind !== "connection_item") continue
-      const stored = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}`
-      if (stored.length === 0)
-        return yield* new TaskProposalConflictError({
-          kind: "source_unavailable",
-          message: "That item expired"
-        })
-    }
+  const { startOnSpace, authoredWithoutSpace, startWithoutSpace } = makeTaskProposalStart({
+    sql,
+    work
   })
-
-  const validateStoredSources = Effect.fn("TaskProposal.validateSources")(function* (
-    spaceId: string,
-    sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>,
-    authority: TaskProposalSettlementAuthority
-  ) {
-    for (const source of sources) {
-      if (source.kind === "chat") {
-        const available = yield* sql`SELECT 1 FROM sessions AS session
-          JOIN chat_runs AS run ON run.session_id = session.session_id
-          WHERE session.space_id = ${spaceId} AND session.session_id = ${source.session_id}
-            AND ${userChatSql("session")}
-            AND session.archived_at IS NULL
-            AND json_extract(run.metadata_json, '$.turn_id') = ${source.turn_id}
-            AND ${source.revision} = ${source.turn_id}
-          LIMIT 1`
-        if (available.length === 0) {
-          return yield* new TaskProposalConflictError({
-            kind: "source_unavailable",
-            message: "Task proposal evidence is no longer available"
-          })
-        }
-      } else if (
-        source.kind === "memory" &&
-        !authority.memory.some(
-          (candidate) =>
-            candidate.page_ref === source.page_ref && candidate.revision === source.revision
-        )
-      ) {
-        return yield* new TaskProposalConflictError({
-          kind: "source_changed",
-          message: "Task proposal Memory evidence changed or left this Space"
-        })
-      }
-    }
-  })
-
-  const startOnSpace = Effect.fn("TaskProposal.startOnSpace")(function* (
-    row: ProposalRow,
-    spaceId: string,
-    picked: string | undefined,
-    authority: TaskProposalSettlementAuthority
-  ) {
-    if (picked !== undefined && picked !== spaceId)
-      return yield* failure("invalid", "A Space's proposal starts on that Space")
-    const spaces = yield* sql`SELECT 1 FROM spaces
-      WHERE space_id = ${spaceId} AND archived_at IS NULL`
-    if (spaces.length === 0) {
-      return yield* new TaskProposalConflictError({
-        kind: "space_unavailable",
-        message: "This Space is no longer available"
-      })
-    }
-    const authoringSources = yield* sql`SELECT 1
-      FROM sessions AS session
-      JOIN chat_runs AS run ON run.session_id = session.session_id
-      WHERE session.session_id = ${row.source_session_id}
-        AND session.space_id = ${spaceId}
-        AND session.archived_at IS NULL
-        AND run.run_id = ${row.source_run_id}
-        AND json_extract(run.metadata_json, '$.turn_id') = ${row.source_turn_id}
-      LIMIT 1`
-    if (authoringSources.length === 0) {
-      return yield* new TaskProposalConflictError({
-        kind: "source_unavailable",
-        message: "The Task proposal source is no longer available"
-      })
-    }
-    const sources = yield* decodeJson(Schema.Array(TaskSourceRecordSchema), row.sources_json)
-    yield* assertItemsStored(sources)
-    yield* validateStoredSources(spaceId, sources, authority)
-    return yield* work.createInTransaction({
-      scope: { kind: "space", spaceId },
-      input: { key: row.stable_key, text: row.text, body: row.body, owner: row.owner },
-      actor: "user",
-      taskSources: sources,
-      capture: yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json),
-      settledInference: true,
-      reuseExisting: true
-    })
-  })
-
-  const authoredWithoutSpace = (row: ProposalRow) =>
-    sql`SELECT 1 FROM chat_runs WHERE run_id = ${row.source_run_id}
-      AND json_extract(metadata_json, '$.run_policy.space.space_id') IS NULL`.pipe(
-      Effect.map((rows) => rows.length > 0)
-    )
-
-  const startWithoutSpace = Effect.fn("TaskProposal.startWithoutSpace")(function* (
-    row: ProposalRow,
-    spaceId: string
-  ) {
-    const spaces =
-      yield* sql`SELECT 1 FROM spaces WHERE space_id = ${spaceId} AND archived_at IS NULL`
-    if (spaces.length === 0) {
-      return yield* new TaskProposalConflictError({
-        kind: "space_unavailable",
-        message: "That Space is archived"
-      })
-    }
-    const sources = yield* decodeJson(Schema.Array(TaskSourceRecordSchema), row.sources_json)
-    yield* assertItemsStored(sources)
-    return yield* work.createInTransaction({
-      scope: { kind: "space", spaceId },
-      input: { key: row.stable_key, text: row.text, body: row.body, owner: row.owner },
-      actor: "user",
-      taskSources: sources,
-      capture: yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json),
-      settledInference: true,
-      reuseExisting: true
-    })
-  })
-
   const memoryScope: TaskProposalStore["Service"]["memoryScope"] = Effect.fn(
     "TaskProposal.memoryScope"
   )(

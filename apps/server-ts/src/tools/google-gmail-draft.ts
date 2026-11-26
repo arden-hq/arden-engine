@@ -28,7 +28,9 @@ import {
   type GoogleGrantDescription
 } from "./google-tool-grant.js"
 import { parseMessageRef, threadRef } from "./google-gmail-refs.js"
-import { localMessageId, prepareReply, recipientPresentationFields } from "./google-gmail-send.js"
+import { localMessageId } from "./google-gmail-send.js"
+import { recipientPresentationFields } from "./google-gmail-recipients.js"
+import { prepareReply } from "./google-gmail-reply.js"
 import { decodeGoogle, googleCall } from "./google-request.js"
 import { toolRefusal } from "./tool-failure.js"
 
@@ -80,11 +82,11 @@ const draftRequestBody = (
   }
 })
 
-const DRAFT_GRANT = {
+const DRAFT_GRANT: GoogleGrantDescription = {
   grant: "gmail_drafts",
   what: "save Gmail drafts",
   note: "Approving asks Google to let Arden save drafts."
-} as const satisfies GoogleGrantDescription
+}
 
 const checkAddresses = (addresses: ReadonlyArray<string>, label: string): void => {
   if (addresses.some((address) => !validRecipient(address))) {

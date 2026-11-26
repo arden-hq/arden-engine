@@ -63,7 +63,6 @@ export const readFullMessage = async ({
   return { account: response.account.email, message: original, id: ref.id }
 }
 
-/** The bytes of one attachment part: inline data, or Gmail's attachment endpoint. */
 export const attachmentBytes = async ({
   google,
   account,

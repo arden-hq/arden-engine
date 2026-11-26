@@ -1,26 +1,10 @@
 import { randomUUID } from "node:crypto"
 
 import { parseIdempotencyRecord } from "../domain/transaction.js"
-import {
-  Clock,
-  Context,
-  Effect,
-  Layer,
-  Result,
-  Semaphore,
-  type FileSystem,
-  type Path,
-  type Scope
-} from "effect"
+import { Context, Effect, Layer, Semaphore, type FileSystem, type Path, type Scope } from "effect"
 
 import { parseCommitObject } from "../domain/codec.js"
-import {
-  ChangeSet,
-  Commit,
-  Restore,
-  ResourceVersion,
-  normalizeRelativePath
-} from "../domain/model.js"
+import { ChangeSet, Restore, isActive, normalizeRelativePath } from "../domain/model.js"
 import {
   CorruptRepositoryError,
   IdempotencyConflictError,
@@ -28,38 +12,23 @@ import {
   RepositoryClosedError,
   RevisionConflictError
 } from "../domain/errors.js"
-import type { RevisionError } from "../domain/errors.js"
 import { encodeUtf8 } from "../domain/format.js"
-import {
-  adoptWorkingChange,
-  commit,
-  decodeChangeSet,
-  type AdoptWorkingChangeOptions,
-  type CommitInput,
-  type CommitResult
-} from "./commit.js"
+import { adoptWorkingChange, commit, decodeChangeSet } from "./commit.js"
 import { makeHistoryQuery } from "./history.js"
 import {
   diff as queryDiff,
   diffPage as queryDiffPage,
   diffVersionsPage as queryDiffVersionsPage
 } from "../domain/query.js"
-import type { ResourceDiff, ResourceDiffPage } from "../domain/query.js"
 import { maintenanceStorageFromRevisionStorage } from "../storage/maintenance-adapter.js"
+import { collect as collectObjects } from "../storage/maintenance-collect.js"
 import {
-  collect as collectObjects,
   integrityReport as inspectIntegrity,
-  storageReport as inspectStorage,
-  type CollectionReport,
-  type IntegrityReport,
-  type StorageReport
+  storageReport as inspectStorage
 } from "../storage/maintenance.js"
-import {
-  RevisionStorage,
-  revisionStorageLayer,
-  type RevisionLockFactory,
-  type RevisionStorageOptions
-} from "../storage/service.js"
+import { revisionStorageLayer } from "../storage/service.js"
+import { RevisionStorage } from "../storage/service-types.js"
+import { type RevisionLockFactory } from "../storage/service-types.js"
 import {
   currentMap,
   readCommit,
@@ -70,157 +39,15 @@ import {
   validHash
 } from "./state.js"
 import { recoverTransactions, writeIdempotencyRecord } from "./transaction.js"
+import { newWorkingScan, scanWorkingTree, adoptedChange } from "./working.js"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
-
-export type RepositoryError = RevisionError
-
-export type RepositoryOpenPhase =
-  | "revision_storage_ready"
-  | "revision_lock_acquired"
-  | "revision_initialized"
-  | "revision_recovered"
-  | "revision_ref_checked"
-
-export interface ManagedFileRepositoryOptions extends RevisionStorageOptions {
-  /** Unreachable objects newer than this are retained. Defaults to 30 days. */
-  readonly gcGracePeriodMs?: number
-  /** Test/diagnostic hook. Production callers normally leave this unset. */
-  readonly checkpoint?: (stage: string) => Effect.Effect<void, RepositoryError>
-  /** Startup diagnostics only; callback failures never block repository opening. */
-  readonly onOpenPhase?: (phase: RepositoryOpenPhase) => void
-}
-
-/** One active resource whose working file differs from history. */
-export type WorkingFileChange =
-  | {
-      readonly kind: "changed"
-      readonly resource: ResourceVersion
-      readonly content: Uint8Array
-    }
-  | { readonly kind: "missing"; readonly resource: ResourceVersion }
-  | { readonly kind: "unreadable"; readonly resource: ResourceVersion; readonly reason: string }
-
-/** A change the repository can take in: an update or an archive of one resource. */
-export type AdoptableWorkingChange = Exclude<WorkingFileChange, { readonly kind: "unreadable" }>
-
-/** A file under the working root that no active resource names: `read` when the caller asked
- *  for its content, `listed` when not, `unreadable` when it or its folder could not be read. */
-export type UntrackedFile =
-  | { readonly kind: "listed"; readonly path: string }
-  | { readonly kind: "read"; readonly path: string; readonly content: Uint8Array }
-  | { readonly kind: "unreadable"; readonly path: string; readonly reason: string }
-
-export interface WorkingTreeStatus {
-  readonly revision: string | null
-  readonly changes: ReadonlyArray<WorkingFileChange>
-  /** Sorted by path. */
-  readonly untracked: ReadonlyArray<UntrackedFile>
-}
-
-export interface WorkingTreeStatusOptions {
-  /** Which untracked files to read, under the same lock as the scan. */
-  readonly readUntracked?: (path: string) => boolean
-}
-
-export interface ManagedFileRepositoryShape {
-  readonly head: Effect.Effect<string | null, RepositoryError>
-  readonly currentRevision: Effect.Effect<string | null, RepositoryError>
-  readonly isReachable: (commitId: string) => Effect.Effect<boolean, RepositoryError>
-  readonly get: (
-    resourceId: string,
-    options?: { readonly at?: string | null }
-  ) => Effect.Effect<ResourceVersion | null, RepositoryError>
-  readonly findByPath: (
-    path: string,
-    options?: { readonly at?: string | null; readonly includeArchived?: boolean }
-  ) => Effect.Effect<ResourceVersion | null, RepositoryError>
-  readonly listResources: (options?: {
-    readonly at?: string | null
-    readonly includeArchived?: boolean
-  }) => Effect.Effect<readonly ResourceVersion[], RepositoryError>
-  readonly read: (
-    resourceId: string,
-    options?: { readonly at?: string | null }
-  ) => Effect.Effect<Uint8Array, RepositoryError>
-  readonly readVersion: (version: ResourceVersion) => Effect.Effect<Uint8Array, RepositoryError>
-  readonly contentSize: (
-    resource: ResourceVersion | string,
-    options?: { readonly at?: string | null }
-  ) => Effect.Effect<number, RepositoryError>
-  readonly inspectCommit: (commitId: string) => Effect.Effect<Commit, RepositoryError>
-  readonly commit: (request: CommitInput) => Effect.Effect<CommitResult, RepositoryError>
-  readonly idempotencyReceipt: (
-    idempotencyKey: string
-  ) => Effect.Effect<
-    { readonly requestHash: string; readonly commitId: string } | null,
-    RepositoryError
-  >
-  readonly finalizeIdempotencyReceipt: (
-    idempotencyKey: string,
-    requestIdentity: string
-  ) => Effect.Effect<{ readonly requestHash: string; readonly commitId: string }, RepositoryError>
-  /** Every active resource whose file differs from history, and every untracked file. One
-   *  file or folder never fails the scan: what cannot be read is reported with the reason. */
-  readonly workingTreeStatus: (
-    options?: WorkingTreeStatusOptions
-  ) => Effect.Effect<WorkingTreeStatus, RepositoryError>
-  /** Record one outside change as one commit, guarded by that resource's version and by the head
-   *  the caller decided on. Fails when either moved or the file changed again after the scan. */
-  readonly adoptWorkingChange: (
-    change: AdoptableWorkingChange,
-    options: AdoptWorkingChangeOptions
-  ) => Effect.Effect<CommitResult, RepositoryError>
-  readonly history: (options?: {
-    readonly resourceId?: string | null
-    readonly start?: string | null
-    readonly stopBefore?: string | null
-    readonly limit?: number | null
-  }) => Effect.Effect<readonly Commit[], RepositoryError>
-  /** Prepare derived history metadata; returned commits still receive full validation on read. */
-  readonly prepareHistory: () => Effect.Effect<void, RepositoryError>
-  readonly diff: (
-    base: string | null,
-    target: string | null,
-    options?: { readonly resourceIds?: Iterable<string> | null }
-  ) => Effect.Effect<readonly ResourceDiff[], RepositoryError>
-  readonly diffPage: (
-    base: string | null,
-    target: string | null,
-    resourceId: string,
-    options?: { readonly offset?: number; readonly limit?: number; readonly tail?: boolean }
-  ) => Effect.Effect<ResourceDiffPage, RepositoryError>
-  readonly diffVersionsPage: (
-    before: ResourceVersion | null,
-    after: ResourceVersion | null,
-    options?: {
-      readonly offset?: number
-      readonly limit?: number
-      readonly tail?: boolean
-      readonly sourceByteLimit?: number | null
-    }
-  ) => Effect.Effect<ResourceDiffPage, RepositoryError>
-  readonly restoreFromCommit: (
-    resourceId: string,
-    sourceCommit: string,
-    options: {
-      readonly expectedVersion: string
-      readonly expectedHead?: string | null
-      readonly enforceExpectedHead?: boolean
-      readonly actor: string
-      readonly origin: string
-      readonly reason: string
-      readonly idempotencyKey?: string
-      readonly path?: string
-    }
-  ) => Effect.Effect<CommitResult, RepositoryError>
-  readonly integrityReport: Effect.Effect<IntegrityReport, RepositoryError>
-  readonly storageReport: Effect.Effect<StorageReport, RepositoryError>
-  readonly collect: (options?: {
-    readonly nowMillis?: number
-    readonly gracePeriodMs?: number
-  }) => Effect.Effect<CollectionReport, RepositoryError>
-}
+import {
+  type RepositoryError,
+  type RepositoryOpenPhase,
+  type ManagedFileRepositoryOptions,
+  type ManagedFileRepositoryShape
+} from "./service-types.js"
 
 export class ManagedFileRepository extends Context.Service<
   ManagedFileRepository,
@@ -229,23 +56,12 @@ export class ManagedFileRepository extends Context.Service<
 
 const defaultGcGracePeriodMs = 30 * 24 * 60 * 60 * 1_000
 
-/**
- * A scan reads a tracked file only when its stamp (identity, size, modification time) differs
- * from the last scan that found it matching history. A file modified within `SETTLED_MS` of a
- * scan is read again at the next, since a same-size write in the same instant keeps its stamp.
- * Every `FULL_SCAN_EVERY`th scan reads every file, which bounds how long an edit that restores
- * a file's size and time goes unseen.
- */
-const SETTLED_MS = 2_000
-const FULL_SCAN_EVERY = 60
-
 const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
   options: ManagedFileRepositoryOptions
 ): Effect.fn.Return<ManagedFileRepositoryShape, RepositoryError, RevisionStorage | Scope.Scope> {
   const storage = yield* RevisionStorage
   const withLockQueue = (yield* Semaphore.make(1)).withPermit
-  let matched = new Map<string, { readonly stamp: string; readonly blobId: string }>()
-  let scans = 0
+  const scan = newWorkingScan()
   let closed = false
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -255,9 +71,7 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
   const reportOpen = (phase: RepositoryOpenPhase): void => {
     try {
       options.onOpenPhase?.(phase)
-    } catch {
-      // Diagnostics cannot prevent repository recovery.
-    }
+    } catch {}
   }
   reportOpen("revision_storage_ready")
   const gcGracePeriodMs = options.gcGracePeriodMs ?? defaultGcGracePeriodMs
@@ -346,8 +160,7 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
       return (
         [...resources.values()].find(
           (resource) =>
-            resource.path === normalized &&
-            (options.includeArchived === true || resource.state === "active")
+            resource.path === normalized && (options.includeArchived === true || isActive(resource))
         ) ?? null
       )
     }),
@@ -356,7 +169,7 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
         ? currentSnapshot
         : snapshotAt(storage, options.at)
       return [...resources.values()]
-        .filter((resource) => options.includeArchived === true || resource.state === "active")
+        .filter((resource) => options.includeArchived === true || isActive(resource))
         .sort((left, right) => compareCodePoints(left.resourceId, right.resourceId))
     }),
     read: Effect.fn("RevisionRepository.read")(function* (resourceId, options = {}) {
@@ -452,91 +265,13 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
             yield* recoverTransactions(storage)
             const revision = yield* readPublishedHead
             const resources = yield* currentMap(storage, revision)
-            const active = [...resources.values()]
-              .filter((resource) => resource.state === "active")
-              .sort((left, right) => compareCodePoints(left.resourceId, right.resourceId))
-            const changes: WorkingFileChange[] = []
-            const startedAt = yield* Clock.currentTimeMillis
-            const rehashAll = scans % FULL_SCAN_EVERY === 0
-            scans += 1
-            const listing = yield* storage.listWorkingFiles
-            const stamps = new Map(
-              listing.flatMap((entry) =>
-                entry.kind === "file" && entry.stamp !== undefined
-                  ? [[entry.path, entry.stamp] as const]
-                  : []
-              )
-            )
-            const stillMatched = new Map<
-              string,
-              { readonly stamp: string; readonly blobId: string }
-            >()
-            for (const resource of active) {
-              const stamp = stamps.get(resource.path)
-              const known = matched.get(resource.path)
-              if (
-                !rehashAll &&
-                stamp !== undefined &&
-                known?.stamp === stamp.id &&
-                known.blobId === resource.blobId
-              ) {
-                stillMatched.set(resource.path, known)
-                continue
-              }
-              const read = yield* Effect.result(storage.readWorking(resource.path, true, true))
-              if (Result.isFailure(read)) {
-                changes.push({ kind: "unreadable", resource, reason: read.failure.message })
-              } else if (read.success === null) {
-                changes.push({ kind: "missing", resource })
-              } else if (sha256Hex(read.success) !== resource.blobId) {
-                changes.push({ kind: "changed", resource, content: new Uint8Array(read.success) })
-              } else if (stamp !== undefined && stamp.modifiedAt < startedAt - SETTLED_MS) {
-                stillMatched.set(resource.path, { stamp: stamp.id, blobId: resource.blobId })
-              }
-            }
-            matched = stillMatched
-            const tracked = new Set(active.map((resource) => resource.path))
-            const untracked: UntrackedFile[] = []
-            for (const entry of listing) {
-              if (tracked.has(entry.path)) continue
-              if (
-                entry.kind === "unreadable" ||
-                statusOptions.readUntracked?.(entry.path) !== true
-              ) {
-                untracked.push(entry.kind === "file" ? { kind: "listed", path: entry.path } : entry)
-                continue
-              }
-              const read = yield* Effect.result(storage.readWorking(entry.path, true, true))
-              if (Result.isFailure(read))
-                untracked.push({
-                  kind: "unreadable",
-                  path: entry.path,
-                  reason: read.failure.message
-                })
-              else if (read.success !== null)
-                untracked.push({
-                  kind: "read",
-                  path: entry.path,
-                  content: new Uint8Array(read.success)
-                })
-            }
-            return { revision, changes, untracked }
+            return yield* scanWorkingTree(storage, scan, revision, resources, statusOptions)
           })
         )
       ),
     adoptWorkingChange: (change, input) =>
       withLockQueue(
-        adoptWorkingChange(
-          storage,
-          head,
-          {
-            resourceId: change.resource.resourceId,
-            expectedVersion: change.resource.versionId,
-            content: change.kind === "changed" ? change.content : null
-          },
-          input,
-          options.checkpoint
-        )
+        adoptWorkingChange(storage, head, adoptedChange(change), input, options.checkpoint)
       ),
     prepareHistory: Effect.fn("RevisionRepository.prepareHistory")(function* () {
       const cache: RevisionReadCache = { trees: new Map(), commits: new Map(), parsed }

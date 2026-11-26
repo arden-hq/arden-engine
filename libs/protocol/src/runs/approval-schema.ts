@@ -8,15 +8,19 @@ import {
   ApprovalPreviewSchema
 } from "../chat/approval-fields-schema.js"
 import { RuntimeConnectionSnapshotSchema } from "../chat/schema.js"
-import { APPROVAL_CONNECTION, APPROVAL_TEXT, type RunApproval } from "./approvals.js"
+import {
+  APPROVAL_CONNECTION,
+  APPROVAL_TEXT,
+  DECISION_DELIVERY,
+  isConnectionApproval,
+  type RunApproval
+} from "./approvals.js"
 import { RuleSavedInSchema } from "./questions.js"
 
 const ApprovalTextSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal(APPROVAL_TEXT.none) }),
   Schema.Struct({ kind: Schema.Literal(APPROVAL_TEXT.text), text: Schema.String })
 ])
-
-const INTEGRATION_CONNECTION = "integration_connection"
 
 export const runApprovalFields = {
   at: IsoDateTimeStringSchema,
@@ -25,7 +29,7 @@ export const runApprovalFields = {
   destination_session_id: Schema.String,
   asker: ApprovalAskerSchema,
   tool_call_id: Schema.String,
-  decision_delivery: Schema.Literals(["blocking", "deferred"] as const),
+  decision_delivery: Schema.Literals(Object.values(DECISION_DELIVERY)),
   kind: Schema.String,
   connection: Schema.Union([
     Schema.Struct({ kind: Schema.Literal(APPROVAL_CONNECTION.none) }),
@@ -51,7 +55,7 @@ export const checkRunApprovalConnection = (
   approval: Pick<RunApproval, "kind" | "connection" | "run_id" | "tool_call_id">
 ): string | undefined => {
   const connection = approval.connection
-  if (approval.kind !== INTEGRATION_CONNECTION)
+  if (!isConnectionApproval(approval))
     return connection.kind === APPROVAL_CONNECTION.none
       ? undefined
       : "Only a connection decision may carry connection details"

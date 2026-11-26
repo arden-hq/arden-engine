@@ -1,4 +1,5 @@
-import type { UntrackedFile } from "@arden-hq/revisions/effect"
+import { PATH_SEGMENT, RESOURCE_STATE, type UntrackedFile } from "@arden-hq/revisions/effect"
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { foldSpace } from "@arden-hq/std/text"
 import { Effect } from "effect"
@@ -6,7 +7,16 @@ import type { Nodes } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
-import { hasText, pageKind, recordFolders, type RecordFolders } from "../../src/wiki/collections.js"
+import {
+  hasText,
+  isMdastNode,
+  MDAST_NODE,
+  PAGE_KIND,
+  pageKind,
+  recordFolders,
+  type PageKind,
+  type RecordFolders
+} from "../../src/wiki/collections.js"
 import { overPageLimit } from "../../src/wiki/commit.js"
 import { pageWikiLinks } from "../../src/wiki/links.js"
 import { isReadme, normal, textSentences, visibleText } from "../../src/wiki/page.js"
@@ -20,13 +30,11 @@ import {
 } from "../../src/wiki/snapshot.js"
 import { untrackedFiles, untrackedPageIds } from "../../src/wiki/untracked.js"
 
-/** Memory as it stands: the pages in history and the other files in the Memory folder. */
 export interface MemoryFolder {
   readonly pages: ReadonlyArray<RunPage>
   readonly untracked: ReadonlyArray<UntrackedFile>
 }
 
-/** Each kind of finding, in report order, with what it names. */
 export const FINDINGS = {
   duplicate_sentence: "knowledge pages that share one long sentence (one finding per sentence)",
   orphan: "knowledge pages no other page links to",
@@ -46,7 +54,6 @@ export const FINDINGS = {
 export type FindingKind = keyof typeof FINDINGS
 export const FINDING_KINDS = Object.keys(FINDINGS) as ReadonlyArray<FindingKind>
 
-/** One finding: its kind and the paths it names, never page text. */
 export interface Finding {
   readonly kind: FindingKind
   readonly paths: ReadonlyArray<string>
@@ -54,7 +61,7 @@ export interface Finding {
 
 interface PageShape {
   readonly record: PageRecord
-  readonly kind: "knowledge" | "record" | "contract"
+  readonly kind: PageKind["kind"]
   readonly datedStatusLines: number
   readonly logSections: number
   readonly sentenceKeys: ReadonlySet<string>
@@ -72,15 +79,15 @@ const LOG_HEADING = /\b(?:timeline|history|log|changelog|updates|progress)\b/iu
 
 const folderOf = (path: string): string => {
   const folder = posix.dirname(path)
-  return folder === "." ? "" : folder
+  return folder === PATH_SEGMENT.current ? "" : folder
 }
 
 const readableParts = (body: string) => {
   const lines: Array<string> = []
   const headings: Array<string> = []
   const visit = (node: Nodes): void => {
-    if (node.type === "heading") headings.push(visibleText(node))
-    else if (node.type === "paragraph") lines.push(...visibleText(node).split("\n"))
+    if (isMdastNode(node, MDAST_NODE.heading)) headings.push(visibleText(node))
+    else if (isMdastNode(node, MDAST_NODE.paragraph)) lines.push(...visibleText(node).split("\n"))
     else if ("children" in node) for (const child of node.children) visit(child)
   }
   const tree = fromMarkdown(body)
@@ -88,7 +95,7 @@ const readableParts = (body: string) => {
   return {
     lines,
     headings,
-    empty: !tree.children.some((node) => node.type !== "heading" && hasText(node))
+    empty: !tree.children.some((node) => !isMdastNode(node, MDAST_NODE.heading) && hasText(node))
   }
 }
 
@@ -119,11 +126,11 @@ const groupsOf = (entries: ReadonlyArray<readonly [key: string, path: string]>) 
 }
 
 export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => {
-  const pages = folder.pages.filter((record) => record.resource.state === "active")
+  const pages = folder.pages.filter((record) => record.resource.state === RESOURCE_STATE.active)
   const active = activeRunPages(pages)
   const folders = recordFolders(pages)
   const shapes = active.map((record) => pageShape(record, folders))
-  const knowledge = shapes.filter((shape) => shape.kind === "knowledge")
+  const knowledge = shapes.filter((shape) => shape.kind === PAGE_KIND.knowledge)
   const pathOf = (shape: PageShape) => shape.record.resource.path
 
   const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
@@ -164,7 +171,7 @@ export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => 
     ),
     orphan: each(
       knowledge
-        .filter((shape) => pathOf(shape).toLowerCase() !== "readme.md")
+        .filter((shape) => folderOf(pathOf(shape)) !== "" || !isReadme(pathOf(shape)))
         .filter((shape) => (inbound.get(shape.record.page.pageId) ?? 0) === 0)
         .map(pathOf)
     ),
@@ -187,7 +194,7 @@ export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => 
       pages
         .filter(
           (record) =>
-            record.page.lifecycle === "redirect" &&
+            record.page.lifecycle === WIKI_PAGE_LIFECYCLE.redirect &&
             followRedirect(byId, record.page.pageId) === null
         )
         .map((record) => record.resource.path)

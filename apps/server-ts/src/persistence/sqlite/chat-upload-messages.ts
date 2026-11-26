@@ -48,12 +48,6 @@ export const chatUploadMessagesBackfill: Backfill = {
 
 const UNLISTED_CHUNK = 64
 
-/**
- * Reads up to one chunk of the messages the triggers noted in
- * `chat_upload_unlisted` and writes the upload folders each one names to
- * `chat_upload_refs`. Returns whether more are waiting. Run it to the end, in
- * the same transaction as the question, before asking who names an upload.
- */
 export const listUploadRefsChunk = Effect.fn("ChatUploadRefs.listChunk")(function* (
   sql: SqlClient.SqlClient
 ) {

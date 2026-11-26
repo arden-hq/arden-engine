@@ -1,9 +1,24 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { AssistantMessage, ChatMessage, ProviderToolCall } from "../../contracts/messages.js"
+import {
+  CONTENT_BLOCK_TYPE,
+  type AssistantMessage,
+  type ChatMessage,
+  type ProviderToolCall
+} from "../../contracts/messages.js"
 import type { ToolDeclaration, ToolSearch } from "../../contracts/tools.js"
-import type { ModelCapabilities, ModelProviderRequest } from "../../contracts/provider.js"
+import {
+  DELIVERY_MODE,
+  INTERACTION_FORM,
+  REASONING_EFFORT,
+  ToolChoice,
+  type DeliveryMode,
+  type ModelCapabilities,
+  type ModelProviderRequest,
+  type ReasoningEffort
+} from "../../contracts/provider.js"
 import {
   contextBlockText,
+  isImageMediaType,
   isToolSearchCall,
   MISSING_TOOL_OUTPUT,
   orderToolHistory,
@@ -13,19 +28,21 @@ import {
   projectToolHistory,
   rendersAsText
 } from "../kit/index.js"
+import { PROVIDER_ERROR_CODE } from "../../errors.js"
 import { OpenAiResponsesProviderError } from "./errors.js"
-import { API, asRecord, WEB_SEARCH_TOOL_NAME, type InputItem } from "./items.js"
+import { API, asRecord, RESPONSE_ITEM_TYPE, WEB_SEARCH_TOOL_NAME, type InputItem } from "./items.js"
 import { responseItems } from "./stored-items.js"
 import {
   clientToolSearchTool,
   functionTool,
   namespacedTools,
+  RESPONSES_TOOL_TYPE,
   type ClientToolSearchTool,
   type FunctionTool
 } from "./tools.js"
 
 interface HostedWebSearchTool {
-  readonly type: "web_search"
+  readonly type: typeof RESPONSES_TOOL_TYPE.webSearch
   readonly external_web_access: true
 }
 
@@ -54,16 +71,9 @@ export interface ResponsesPayload {
   }
 }
 
-const REASONING_EFFORTS = new Set([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "ultra"
-])
+const REASONING_EFFORTS: ReadonlySet<string> = new Set<ReasoningEffort>(
+  Object.values(REASONING_EFFORT)
+)
 
 const decodeTools = (
   declarations: ReadonlyArray<ToolDeclaration>
@@ -112,14 +122,14 @@ const userContent = (message: ChatMessage): string | ReadonlyArray<InputItem> =>
   }
   return message.content.map((value) => {
     const block = asRecord(value)
-    if (block?.type === "text" && typeof block.text === "string") {
+    if (block?.type === CONTENT_BLOCK_TYPE.text && typeof block.text === "string") {
       return { type: "input_text", text: block.text }
     }
     const context = contextBlockText(block)
     if (context !== undefined) return { type: "input_text", text: context }
     if (
-      block?.type === "image" &&
-      (block.media_type === "image/png" || block.media_type === "image/jpeg") &&
+      block?.type === CONTENT_BLOCK_TYPE.image &&
+      isImageMediaType(block.media_type) &&
       typeof block.data === "string" &&
       block.data.length > 0
     ) {
@@ -133,13 +143,13 @@ const userContent = (message: ChatMessage): string | ReadonlyArray<InputItem> =>
 }
 
 export interface ResponsesRoute {
-  readonly agentMessages: "native" | "message"
-  readonly asyncTools: "native" | "message"
+  readonly agentMessages: DeliveryMode
+  readonly asyncTools: DeliveryMode
 }
 
 export const responsesRoute = (capabilities: ModelCapabilities): ResponsesRoute => ({
-  agentMessages: capabilities.agentMessages ?? "message",
-  asyncTools: capabilities.asyncTools ?? "message"
+  agentMessages: capabilities.agentMessages ?? DELIVERY_MODE.message,
+  asyncTools: capabilities.asyncTools ?? DELIVERY_MODE.message
 })
 
 const convertMessages = (
@@ -153,7 +163,7 @@ const convertMessages = (
   const batches: Array<ToolHistoryBatch<InputItem>> = []
   const messages = projectToolHistory({
     messages: stored,
-    nativeAsync: route.asyncTools === "native"
+    nativeAsync: route.asyncTools === DELIVERY_MODE.native
   })
 
   for (const message of messages) {
@@ -195,14 +205,20 @@ const convertMessages = (
       continue
     }
     if (message.role === ROLE.interaction) {
-      if (route.agentMessages === "native" && isAgentMail(message) && message.to !== undefined) {
+      if (
+        route.agentMessages === DELIVERY_MODE.native &&
+        isAgentMail(message) &&
+        message.to !== undefined
+      ) {
         batches.push({
           items: [
             {
               type: "agent_message",
               author: message.from.id,
               recipient: message.to.id,
-              content: [{ type: "input_text", text: renderInteraction(message, "native") }]
+              content: [
+                { type: "input_text", text: renderInteraction(message, INTERACTION_FORM.native) }
+              ]
             }
           ],
           deferWhileCallsPending: false
@@ -214,7 +230,7 @@ const convertMessages = (
           {
             role: ROLE.user,
             content: rendersAsText(message)
-              ? renderInteraction(message, "text")
+              ? renderInteraction(message, INTERACTION_FORM.text)
               : userContent(message)
           }
         ],
@@ -249,8 +265,6 @@ const convertMessages = (
     if (!Array.isArray(providerCalls)) {
       throw new OpenAiResponsesProviderError("Stored provider tool history is invalid")
     }
-    // This wire's own turns replay from their stored items; a turn this wire
-    // wrote (or one from before origins) that lost them cannot be rebuilt.
     if (replay === undefined && providerCalls.length > 0 && writtenHere(message)) {
       throw new OpenAiResponsesProviderError(
         "Stored provider tool history requires matching OpenAI response items"
@@ -290,11 +304,6 @@ const convertMessages = (
 const writtenHere = (message: AssistantMessage): boolean =>
   message.origin === undefined || message.origin.api === API
 
-/**
- * One client search and its output: how a search reaches the model on this
- * wire when no stored items hold it (a compaction's `loaded_tools` record, or
- * a search another wire answered).
- */
 const clientSearchExchange = (
   callId: string,
   args: unknown,
@@ -317,15 +326,6 @@ const clientSearchExchange = (
   }
 ]
 
-/**
- * The provider calls of a turn another wire wrote. Its tool searches are
- * rebuilt as native search items from the provider-neutral fields, so the
- * tools they loaded stay in the conversation. Without a search on this
- * request there is no deferred catalog: every tool is declared already, and
- * a search item would name a tool the request does not have, so the exchange
- * is left out. Any other provider call (another route's hosted tool) reached
- * the model as that turn's text and has no item here.
- */
 const foreignToolSearches = (
   calls: ReadonlyArray<ProviderToolCall>,
   toolSearch: ToolSearch | undefined
@@ -343,12 +343,14 @@ const foreignToolSearches = (
           )
         )
 
-/** Responses items open calls with `function_call` and answer them with `function_call_output`. */
 const FUNCTION_CALL_HISTORY: ToolHistoryWire<InputItem> = {
   name: "OpenAI tool history",
   calls: (item) =>
-    item.type === "function_call" ? [{ id: item.call_id, async: item.async === true }] : [],
-  answers: (item) => (item.type === "function_call_output" ? { id: item.call_id } : undefined),
+    item.type === RESPONSE_ITEM_TYPE.functionCall
+      ? [{ id: item.call_id, async: item.async === true }]
+      : [],
+  answers: (item) =>
+    item.type === RESPONSE_ITEM_TYPE.functionCallOutput ? { id: item.call_id } : undefined,
   missingOutput: (callId) => ({
     type: "function_call_output",
     call_id: callId,
@@ -358,11 +360,6 @@ const FUNCTION_CALL_HISTORY: ToolHistoryWire<InputItem> = {
   fail: (message) => new OpenAiResponsesProviderError(message)
 }
 
-/**
- * The request body for one model step. A request this adapter cannot build
- * from the stored history or the tool catalog is Arden's own defect, never
- * the person's: it fails as `request_invalid`, like a request OpenAI refuses.
- */
 export const makePayload = (
   request: ModelProviderRequest,
   modelPrefix: string,
@@ -372,8 +369,11 @@ export const makePayload = (
   try {
     return buildPayload(request, modelPrefix, defaultInstructions, route)
   } catch (error) {
-    if (error instanceof OpenAiResponsesProviderError && error.code === "provider_error") {
-      throw new OpenAiResponsesProviderError(error.message, "request_invalid")
+    if (
+      error instanceof OpenAiResponsesProviderError &&
+      error.code === PROVIDER_ERROR_CODE.providerError
+    ) {
+      throw new OpenAiResponsesProviderError(error.message, PROVIDER_ERROR_CODE.requestInvalid)
     }
     throw error
   }
@@ -402,7 +402,7 @@ const buildPayload = (
     request.toolSearch === undefined
       ? catalog.tools
       : [...catalog.tools, clientToolSearchTool(request.toolSearch)]
-  if (request.toolChoice === "required" && tools.length === 0) {
+  if (request.toolChoice === ToolChoice.REQUIRED && tools.length === 0) {
     throw new OpenAiResponsesProviderError(
       "A required tool choice needs at least one function tool"
     )

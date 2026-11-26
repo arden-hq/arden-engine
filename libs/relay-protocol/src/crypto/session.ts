@@ -19,7 +19,6 @@ export class RelayCryptoError extends Error {
 }
 
 export interface X25519KeyPair {
-  /** 32 raw bytes; CryptoKit's `Curve25519.KeyAgreement.PrivateKey.rawRepresentation`. */
   readonly secretKey: Uint8Array
   readonly publicKey: Uint8Array
 }
@@ -29,12 +28,6 @@ export const generateX25519 = (secretKey: Uint8Array = randomBytes(32)): X25519K
   publicKey: x25519.getPublicKey(secretKey)
 })
 
-/**
- * AEAD associated data for session frames and sealed blobs. The relay
- * rewrites `{to}` into `{from}`, so raw header bytes cannot be the AAD; both
- * ends bind the two device ids instead (a Mac's device id is its mac id):
- * UTF8("arden-e2e/1 aad") ‖ 0x00 ‖ UTF8(senderDev) ‖ 0x00 ‖ UTF8(receiverDev).
- */
 export const bodyAad = (input: { sender: string; receiver: string }): Uint8Array =>
   concat(
     utf8("arden-e2e/1 aad"),
@@ -55,10 +48,8 @@ const dh = (secretKey: Uint8Array, publicKey: Uint8Array): Uint8Array => {
 }
 
 export interface SessionKeys {
-  /** phone → Mac */
-  readonly p2m: Uint8Array
-  /** Mac → phone */
-  readonly m2p: Uint8Array
+  readonly phoneToMac: Uint8Array
+  readonly macToPhone: Uint8Array
 }
 
 const deriveSessionKeys = (input: {
@@ -86,10 +77,9 @@ const deriveSessionKeys = (input: {
     utf8("arden-e2e/1 keys"),
     64
   )
-  return { p2m: okm.slice(0, 32), m2p: okm.slice(32, 64) }
+  return { phoneToMac: okm.slice(0, 32), macToPhone: okm.slice(32, 64) }
 }
 
-/** ikm = DH(eP,eM) ‖ DH(eP,SM) ‖ DH(SP,eM), computed on the phone. */
 export const phoneSessionKeys = (input: {
   phoneStatic: X25519KeyPair
   phoneEphemeral: X25519KeyPair
@@ -106,7 +96,6 @@ export const phoneSessionKeys = (input: {
     macEphemeral: input.macEphemeralPublic
   })
 
-/** The same keys, computed on the Mac. */
 export const macSessionKeys = (input: {
   macStatic: X25519KeyPair
   macEphemeral: X25519KeyPair
@@ -130,12 +119,6 @@ const frameNonce = (counter: number): Uint8Array => {
   return nonce
 }
 
-/**
- * One direction pair of a live session. Counters are implicit (never on the
- * wire) and start at 0; a frame that fails to open — tampered, replayed,
- * reordered or dropped — closes the cipher for good, and the phone reconnects
- * and runs a new handshake.
- */
 export class SessionCipher {
   readonly #sendKey: Uint8Array
   readonly #receiveKey: Uint8Array
@@ -149,11 +132,11 @@ export class SessionCipher {
   }
 
   static forPhone(keys: SessionKeys): SessionCipher {
-    return new SessionCipher(keys.p2m, keys.m2p)
+    return new SessionCipher(keys.phoneToMac, keys.macToPhone)
   }
 
   static forMac(keys: SessionKeys): SessionCipher {
-    return new SessionCipher(keys.m2p, keys.p2m)
+    return new SessionCipher(keys.macToPhone, keys.phoneToMac)
   }
 
   get closed(): boolean {
@@ -213,7 +196,6 @@ const sealKey = (input: {
     32
   )
 
-/** key = HKDF(DH(eph,SM) ‖ DH(SP,SM), salt = sha256("arden-seal/1" ‖ eph ‖ SP ‖ SM), "seal", 32). */
 export const sealQueued = (input: {
   phoneStatic: X25519KeyPair
   macStaticPublic: Uint8Array

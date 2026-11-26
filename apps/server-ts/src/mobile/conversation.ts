@@ -46,7 +46,8 @@ import {
   isCommandArrival,
   isInternalWorkMessage,
   isCorrespondence,
-  isSenderArrival
+  isSenderArrival,
+  VIEWED_TOOL
 } from "@arden-hq/protocol/views"
 
 import type { JsonObject } from "../persistence/json.js"
@@ -196,7 +197,6 @@ function messageItems(
 
 function userItem(message: HistoryMessage): MobileConversationItem {
   const sent = splitAttachedFiles(message.content)
-  // The phone shows one quoted line: the first of the messages this one quotes.
   const quoted = message.reply_to[0]
   return {
     kind: "user",
@@ -279,7 +279,7 @@ const handoffOf = (
     : undefined
 
 function sendOf(call: HistoryToolCall): { ref: string; title: string } | undefined {
-  if (call.name !== "session_send_message") return undefined
+  if (call.name !== VIEWED_TOOL.session_send_message) return undefined
   if (call.status.kind === TOOL_CALL_STATUS.settled && call.status.is_error) return undefined
   if (call.data.kind !== TOOL_DATA.attached) return undefined
   const data = call.data.value

@@ -1,15 +1,16 @@
-import type { ToolDeclaration, ToolMeta, ToolSearch } from "../contracts/tools.js"
+import {
+  isSchemaKeyword,
+  JSON_SCHEMA_KEYWORD,
+  type ToolDeclaration,
+  type ToolMeta,
+  type ToolSearch
+} from "../contracts/tools.js"
 
-/** One deferred tool as search sees it. */
 export interface ToolSearchDocument {
   readonly declaration: ToolDeclaration
   readonly meta: ToolMeta
 }
 
-/**
- * Returns ordered candidates for one query. Search filters catalog membership,
- * deduplicates, and enforces the primary-match limit before adding companions.
- */
 export interface ToolSearchStrategy {
   readonly rank: (input: {
     readonly query: string
@@ -22,10 +23,6 @@ const DEFAULT_TOOL_SEARCH_LIMIT = 8
 const MAX_TOOL_SEARCH_LIMIT = 20
 const LISTING_BUDGET = 6_000
 
-/**
- * Build the search for one model request. The catalog is the request's
- * deferred tools; `loaded` names the ones already in the conversation.
- */
 export const makeToolSearch = (options: {
   readonly catalog: ReadonlyArray<ToolSearchDocument>
   readonly loaded: ReadonlySet<string>
@@ -133,14 +130,6 @@ const BM25_B = 0.75
 const NAME_WEIGHT = 3
 const COVERAGE_QUERY_WORDS = 4
 
-/**
- * Exact tool names precede residual BM25 hits, preferring hits in named groups;
- * remaining group members follow in name order. `select:a,b` preserves exact
- * selection order. BM25 covers names, groups, descriptions and parameter text.
- * A BM25 result must contain the query's rarest known word,
- * and a long query must also match half its words, so one common word cannot
- * flood the result.
- */
 export const defaultToolSearchStrategy: ToolSearchStrategy = {
   rank: ({ query, catalog }) => {
     const trimmed = query.trim()
@@ -237,8 +226,13 @@ const schemaText = (schema: unknown): string => {
   if (Array.isArray(schema)) return schema.map(schemaText).join(" ")
   return Object.entries(schema)
     .map(([key, value]) => {
-      if (key === "description" && typeof value === "string") return value
-      if (key === "properties" && typeof value === "object" && value !== null) {
+      if (isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.description) && typeof value === "string")
+        return value
+      if (
+        isSchemaKeyword(key, JSON_SCHEMA_KEYWORD.properties) &&
+        typeof value === "object" &&
+        value !== null
+      ) {
         return Object.entries(value)
           .map(([property, nested]) => `${property} ${schemaText(nested)}`)
           .join(" ")

@@ -3,13 +3,6 @@ import type { SqlClient, Statement } from "effect/unstable/sql"
 import { REQUEST_HASH_VERSION } from "../chat/store.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
-// A chat idempotency key holds its message only while the message is not in
-// the transcript (queued input, or a transcript cleared or reverted past it).
-// Once the message is in session_messages, that row is the one copy, and every
-// reader reads the key's message through keyMessageJson.
-
-/** The message of the key row `alias`: its own copy, or the transcript message
- * with its id. */
 export const keyMessageJson = (sql: SqlClient.SqlClient, alias: string): Statement.Fragment =>
   sql`COALESCE(${sql(alias)}.message_json, (
     SELECT transcript.message_json FROM session_messages AS transcript
@@ -17,8 +10,6 @@ export const keyMessageJson = (sql: SqlClient.SqlClient, alias: string): Stateme
       AND transcript.message_id = ${sql(alias)}.message_id
   ))`
 
-/** Records a chat idempotency key. It keeps a copy of its message only when
- * the message is not in the transcript yet. */
 export const insertChatKey = (
   sql: SqlClient.SqlClient,
   key: {
@@ -46,9 +37,6 @@ export const insertChatKey = (
   )
 `
 
-/** Drops the copies of the keys whose messages were just written to the
- * transcript, in the transaction that wrote them. An admitted message carries
- * its key's client id. */
 export const releaseKeyMessageCopies = Effect.fn("SqlitePersistence.releaseKeyMessageCopies")(
   function* (
     sql: SqlClient.SqlClient,
@@ -66,8 +54,6 @@ export const releaseKeyMessageCopies = Effect.fn("SqlitePersistence.releaseKeyMe
   }
 )
 
-/** Gives keys back their message before the transcript messages are deleted:
- * every message of the session, or only `messageIds`. */
 export const restoreKeyMessageCopies = Effect.fn("SqlitePersistence.restoreKeyMessageCopies")(
   function* (sql: SqlClient.SqlClient, sessionId: string, messageIds?: ReadonlyArray<string>) {
     if (messageIds !== undefined && messageIds.length === 0) return

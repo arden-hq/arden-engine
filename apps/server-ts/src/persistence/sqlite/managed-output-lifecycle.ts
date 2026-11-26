@@ -8,11 +8,6 @@ import { makeManagedOutputFence } from "./managed-output-fence.js"
 
 const UPLOAD_REMOVAL_TRIES = 5
 
-/**
- * Whether a sent or queued message names an upload folder. Sent messages are
- * a lookup in `chat_upload_refs`, written when the message is stored. Queued
- * messages are few and short-lived, so their text is searched.
- */
 const UPLOAD_NAMED_SQL = `SELECT 1 AS named FROM chat_upload_refs WHERE upload_id = ?
   UNION ALL
   SELECT 1 AS named FROM session_queued_messages WHERE instr(message, ?) > 0
@@ -158,8 +153,6 @@ export const makeManagedOutputLifecycleStore = ({
   const decideUpload: ManagedOutputLifecycleStore["Service"]["decideUpload"] = (uploadId) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        // A large backlog (first run after the upgrade) is listed in short
-        // transactions, so a chat open never waits behind all of it.
         while (yield* writer.transact(listUploadRefsChunk(sql))) yield* Effect.yieldNow
         return yield* writer.transact(decideUploadInTransaction(uploadId))
       })
@@ -174,7 +167,6 @@ export const makeManagedOutputLifecycleStore = ({
         SELECT 1 AS done FROM data_backfills
         WHERE name = ${CHAT_UPLOAD_MESSAGES_BACKFILL} AND finished_at IS NOT NULL`
     if (listed.length === 0) return "wait" as const
-    // Messages stored since the last chunk above, in this same transaction.
     while (yield* listUploadRefsChunk(sql)) yield* Effect.yieldNow
     const named = yield* sql.unsafe<{ readonly named: number }>(UPLOAD_NAMED_SQL, [
       uploadId,

@@ -1,5 +1,5 @@
 import { countOf, formatBytes } from "@arden-hq/std/count"
-import { Effect, Option, Schema } from "effect"
+import { Schema } from "effect"
 import { lstat, readdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -7,9 +7,8 @@ import { pathToFileURL } from "node:url"
 import type { ManagedOutputWriter } from "../artifacts/managed-output/managed-output.js"
 import { isManagedObjectRef } from "../persistence/managed-output/object-store.js"
 import { neverFoldersWithin, type LocalPathServices } from "../storage/local-paths.js"
-import { bodyFields } from "./code-mode-result.js"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { cwdFor, displayFor, filesystemError, PathSchema, resolveFor } from "./file-tool-support.js"
+import { cwdFor, displayFor, filesystemError, resolveFor } from "./file-tool-support.js"
 import {
   binaryRefusal,
   fileKind,
@@ -20,9 +19,6 @@ import {
   pdfRefusal,
   readPdfText
 } from "./read-binary.js"
-import { readTextPage } from "./read-text.js"
-import type { ServerRunContext } from "./run-context.js"
-import { selectText, textSelectFields } from "./text-select.js"
 import {
   ripgrepFind,
   ripgrepSearchContent,
@@ -30,240 +26,26 @@ import {
   ripgrepSearchFiles
 } from "./ripgrep.js"
 import { sha256Hex } from "@arden-hq/std/hash"
-import { decodeOpaque, encodeOpaque } from "../lib/opaque-ref.js"
 import { toolRefusal } from "./tool-failure.js"
-
-const offerPage = (
-  ctx: { readonly toolCallId: string; readonly run: ServerRunContext },
-  source: string,
-  window: { readonly offset: number; readonly limit: number }
-): void =>
-  ctx.run.codeMode.scriptFields(ctx.toolCallId, () =>
-    bodyFields(readTextPage(source, { ...window, format: "plain" }).content)
-  )
-
-const MAX_DISCOVERY_ENTRIES = 100_000
-const MAX_READ_BYTES = 64 * 1024 * 1024
-
-const ReadOffsetSchema = Schema.Int.check(
-  Schema.isBetween({ minimum: 1, maximum: 10_000_000 })
-).pipe(
-  Schema.withDecodingDefault(Effect.succeed(1)),
-  Schema.annotateEncoded({
-    description: "First 1-based line to return (1-10,000,000). Defaults to 1."
-  })
-)
-
-const ReadLimitSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10_000 })).pipe(
-  Schema.withDecodingDefault(Effect.succeed(500)),
-  Schema.annotateEncoded({
-    description: "Maximum lines to return (1-10,000). Defaults to 500."
-  })
-)
-
-const EntryLimitSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000 })).pipe(
-  Schema.withDecodingDefault(Effect.succeed(200)),
-  Schema.annotateEncoded({
-    description: "Maximum entries to return (1-1,000). Defaults to 200."
-  })
-)
-
-const MatchLimitSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000 })).pipe(
-  Schema.withDecodingDefault(Effect.succeed(100)),
-  Schema.annotateEncoded({
-    description: "Maximum match records to return (1-1,000). Defaults to 100."
-  })
-)
-
-const CursorSchema = Schema.optionalKey(
-  Schema.String.check(Schema.isMaxLength(1_000)).annotate({
-    description:
-      "Opaque next_cursor from the preceding page; reuse only with the identical request."
-  })
-)
-
-const ReadParametersSchema = Schema.Struct({
-  path: PathSchema.annotate({
-    description:
-      "Local file path or an arden:managed-output reference from this chat. Relative file paths use the current Local folder."
-  }),
-  offset: ReadOffsetSchema,
-  limit: ReadLimitSchema,
-  line_numbers: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(true)),
-    Schema.annotateEncoded({
-      description:
-        "Prefix each source line with its 1-based number (number|text). Defaults to true. Set false for plain text."
-    })
-  ),
-  ...textSelectFields
-})
-
-const ListParametersSchema = Schema.Struct({
-  path: PathSchema.pipe(
-    Schema.withDecodingDefault(Effect.succeed(".")),
-    Schema.annotateEncoded({
-      description:
-        "Directory to list. Relative paths use the current Local folder; defaults to '.'."
-    })
-  ),
-  limit: EntryLimitSchema,
-  include_hidden: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(false)),
-    Schema.annotateEncoded({
-      description: "Include entries whose names start with '.'. Defaults to false."
-    })
-  ),
-  cursor: CursorSchema
-})
-
-const FindParametersSchema = Schema.Struct({
-  path: PathSchema.pipe(
-    Schema.withDecodingDefault(Effect.succeed(".")),
-    Schema.annotateEncoded({
-      description:
-        "Directory root for recursive discovery. Relative paths use the current Local folder; defaults to '.'."
-    })
-  ),
-  pattern: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024)).pipe(
-    Schema.withDecodingDefault(Effect.succeed("*")),
-    Schema.annotateEncoded({
-      description: "File-path glob such as '**/*.ts' (1-1,024 characters). Defaults to '*'."
-    })
-  ),
-  limit: EntryLimitSchema,
-  include_hidden: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(false)),
-    Schema.annotateEncoded({
-      description:
-        "Include hidden files while still respecting ignore files and fixed exclusions. Defaults to false."
-    })
-  )
-})
-
-const SearchParametersSchema = Schema.Struct({
-  query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
-    description:
-      "Literal, case-sensitive text to search for; not a regular expression (1-4,096 characters)."
-  }),
-  path: PathSchema.pipe(
-    Schema.withDecodingDefault(Effect.succeed(".")),
-    Schema.annotateEncoded({
-      description:
-        "File or directory to search. Relative paths use the current Local folder; defaults to '.'."
-    })
-  ),
-  file_glob: Schema.optionalKey(
-    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024)).annotate({
-      description: "Optional file-path glob such as '**/*.ts'; it filters files, not matched text."
-    })
-  ),
-  output_mode: Schema.Literals(["content", "files_only", "count"] as const).pipe(
-    Schema.withDecodingDefault(Effect.succeed("content" as const)),
-    Schema.annotateEncoded({
-      description:
-        "Return matching lines, matching file paths, or per-file counts. Defaults to content."
-    })
-  ),
-  include_hidden: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(true)),
-    Schema.annotateEncoded({
-      description:
-        "Search hidden files while still excluding ignored files and VCS/dependency/cache directories. Defaults to true."
-    })
-  ),
-  limit: MatchLimitSchema,
-  cursor: CursorSchema
-})
-
-const renderRead = (
-  text: string,
-  input: Schema.Schema.Type<typeof ReadParametersSchema>
-): {
-  readonly result: string
-  readonly preview: string
-  readonly total_lines: number
-  readonly has_more: boolean
-  readonly matches?: number
-} => {
-  if (input.grep !== undefined) {
-    const selected = selectText(text, input)
-    return {
-      result: selected.text,
-      preview: `${countOf(selected.matches, "matching line")} of ${selected.lines}`,
-      total_lines: selected.lines,
-      has_more: selected.truncated,
-      matches: selected.matches
-    }
-  }
-  const rendered = readTextPage(text, {
-    ...input,
-    format: input.line_numbers ? "numbered" : "plain"
-  })
-  return {
-    result: rendered.notice ? `${rendered.content}\n\n${rendered.notice}` : rendered.content,
-    preview: `Read ${rendered.shown} of ${rendered.total} lines`,
-    total_lines: rendered.total,
-    has_more: rendered.hasMore
-  }
-}
-
-const PageCursorSchema = Schema.Struct({
-  version: Schema.Literal(1),
-  offset: Schema.Int.check(
-    Schema.isGreaterThanOrEqualTo(0),
-    Schema.isLessThanOrEqualTo(MAX_DISCOVERY_ENTRIES)
-  ),
-  fingerprint: Schema.String
-})
-
-const encodeCursor = (offset: number, fingerprint: string): string =>
-  encodeOpaque({ version: 1, offset, fingerprint })
-
-const decodeCursor = (cursor: string | undefined, fingerprint: string): number => {
-  if (cursor === undefined) return 0
-  const value = Option.getOrUndefined(decodeOpaque(PageCursorSchema, cursor))
-  if (value === undefined || value.fingerprint !== fingerprint) {
-    throw toolRefusal(
-      "The pagination cursor is invalid or belongs to another request.",
-      "Invalid cursor"
-    )
-  }
-  return value.offset
-}
-
-const entryKind = (entry: {
-  readonly isDirectory: () => boolean
-  readonly isFile: () => boolean
-}): string => {
-  if (entry.isDirectory()) return "directory"
-  if (entry.isFile()) return "file"
-  return "other"
-}
-
-const MAX_FOUND_SOURCES = 50
-
-const UNREADABLE_NOTE = "Some paths could not be read and were skipped."
-
-const foundSource = (absolute: string, title: string) => ({
-  provider: "file",
-  kind: "file",
-  ref: absolute,
-  title,
-  use: "found" as const,
-  href: pathToFileURL(absolute).href
-})
-
-const renderSearchRecord = (
-  record: Readonly<Record<string, string | number | boolean>>,
-  mode: "content" | "files_only" | "count"
-): string => {
-  if (mode === "content") {
-    return `${record.relative_path}:${record.line}:${record.column}: ${record.snippet}`
-  }
-  if (mode === "count") return `${record.relative_path}: ${record.count}`
-  return String(record.relative_path)
-}
+import {
+  FindParametersSchema,
+  ListParametersSchema,
+  MAX_DISCOVERY_ENTRIES,
+  MAX_READ_BYTES,
+  ReadParametersSchema,
+  SearchParametersSchema
+} from "./files-read-parameters.js"
+import {
+  MAX_FOUND_SOURCES,
+  UNREADABLE_NOTE,
+  decodeCursor,
+  encodeCursor,
+  entryKind,
+  foundSource,
+  offerPage,
+  renderRead,
+  renderSearchRecord
+} from "./files-read-render.js"
 
 export const fileReadTools = ({
   outputs,

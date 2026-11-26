@@ -1,3 +1,4 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 
 import { posix } from "node:path"
@@ -11,9 +12,10 @@ export type WikiLocationAuthority =
   | { readonly _tag: "Global" }
   | { readonly _tag: "Space"; readonly spaceId: string }
 
-export const GLOBAL_WIKI_LOCATION_AUTHORITY = {
-  _tag: "Global"
-} as const satisfies WikiLocationAuthority
+export const GLOBAL_WIKI_LOCATION_AUTHORITY: Extract<
+  WikiLocationAuthority,
+  { readonly _tag: "Global" }
+> = { _tag: "Global" }
 
 export interface WikiWriteBoundary {
   readonly spaceId: string
@@ -44,7 +46,7 @@ export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(f
     (record) =>
       record.page.pageId === space.page_id &&
       record.resource.path.toLowerCase() === space.page_path?.toLowerCase() &&
-      record.page.lifecycle === "active"
+      record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
   )
   if (boundaryPage === undefined) {
     return yield* wikiError(
@@ -96,7 +98,6 @@ export const requireWikiWritePaths = Effect.fn("Wiki.requireWritePaths")(functio
   )
 })
 
-/** A new page at `path` goes in a mapped directory that is not another Space's, under a free name. */
 export const requireNewPagePlace = Effect.fn("Wiki.requireNewPagePlace")(function* (
   snapshot: Snapshot,
   boundary: WikiWriteBoundary | undefined,

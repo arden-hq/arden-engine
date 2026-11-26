@@ -1,9 +1,14 @@
 import { errorMessage } from "@arden-hq/std/errors"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
+import type {
+  AutomationStoreError,
+  ClaimedAutomationJobLease
+} from "../src/persistence/automations/store.js"
 import { spaceJobId } from "../src/persistence/space-job-id.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
@@ -12,7 +17,13 @@ export const LATER = Date.now() + 60 * 60_000
 
 const LEASE_MS = 60_000
 
-export const claim = (workerId: string, limit: number, now = LATER) =>
+export type Lease = ClaimedAutomationJobLease
+
+export const claim = (
+  workerId: string,
+  limit: number,
+  now = LATER
+): Effect.Effect<ReadonlyArray<Lease>, never, AutomationQueue> =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
     return yield* Effect.promise(async () =>
@@ -20,7 +31,9 @@ export const claim = (workerId: string, limit: number, now = LATER) =>
     )
   })
 
-export type Lease = Effect.Success<ReturnType<typeof claim>>[number]
+type Attempt<A> =
+  | { readonly kind: "done"; readonly value: A }
+  | { readonly kind: "refused"; readonly message: string }
 
 const attempted = <A>(call: () => Promise<A>) =>
   Effect.promise(async () =>
@@ -30,7 +43,10 @@ const attempted = <A>(call: () => Promise<A>) =>
     )
   )
 
-export const tryClaim = (workerId: string, now: number) =>
+export const tryClaim = (
+  workerId: string,
+  now: number
+): Effect.Effect<Attempt<ReadonlyArray<Lease>>, never, AutomationQueue> =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
     return yield* attempted(async () =>
@@ -38,7 +54,10 @@ export const tryClaim = (workerId: string, now: number) =>
     )
   })
 
-export const tryRenew = (lease: Lease, now: number) =>
+export const tryRenew = (
+  lease: Lease,
+  now: number
+): Effect.Effect<Attempt<Lease>, never, AutomationQueue> =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
     return yield* attempted(async () =>
@@ -72,7 +91,10 @@ export const makeAutomation = Effect.gen(function* () {
   return automation.task_id
 })
 
-export const storeUnderKey = (automationId: string, key: string) =>
+export const storeUnderKey = (
+  automationId: string,
+  key: string
+): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql`CREATE TEMP TABLE under_key AS
@@ -85,7 +107,9 @@ export const storeUnderKey = (automationId: string, key: string) =>
     yield* sql`UPDATE automation_event_queue SET task_id = ${key} WHERE task_id = ${automationId}`
   })
 
-export const requestRun = (key: string) =>
+export const requestRun = (
+  key: string
+): Effect.Effect<void, AutomationStoreError, AutomationQueue> =>
   Effect.gen(function* () {
     yield* (yield* AutomationQueue).requestRun(AutomationId.make(key))
   })
@@ -95,7 +119,10 @@ export type AttemptCorruption =
   | { readonly kind: "origin"; readonly origin: Readonly<Record<string, string>> }
   | { readonly kind: "unbound" }
 
-export const corruptAttempt = (attemptId: number, change: AttemptCorruption) =>
+export const corruptAttempt = (
+  attemptId: number,
+  change: AttemptCorruption
+): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql`DROP TRIGGER IF EXISTS automation_runs_immutable_context`

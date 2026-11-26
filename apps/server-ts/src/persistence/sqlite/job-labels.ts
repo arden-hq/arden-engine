@@ -13,7 +13,6 @@ export const chatsFollowJobName = Effect.fn("JobLabels.chatsFollow")(function* (
       AND name IS (SELECT name FROM scheduled_tasks WHERE task_id = ${automationId})`
 })
 
-/** Renames a job, and its chats that carry its name. */
 export const renameOwnedJob = Effect.fn("JobLabels.rename")(function* (
   sql: SqlClient.SqlClient,
   automationId: string,

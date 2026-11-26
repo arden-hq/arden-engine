@@ -12,14 +12,6 @@ interface Taker<T> {
   readonly reject: (cause: unknown) => void
 }
 
-/**
- * Bounded async push-queue with waiting-consumer handoff.
- *
- * `push()` resolves immediately while the buffer is under its bound, otherwise
- * suspends until the consumer pulls — real backpressure without making the loop
- * strictly pull-driven. `fail(error)`/`end()` terminate; `abort()` rejects both
- * waiting sides with an AbortError.
- */
 export class EventQueue<T> {
   readonly #bound: number
   readonly #buffer: T[] = []
@@ -47,12 +39,6 @@ export class EventQueue<T> {
     })
   }
 
-  /**
-   * Non-suspending push for lossy channels (tool progress): delivers to a
-   * waiting consumer or buffers below the bound; returns false — dropping the
-   * item — when the queue is full or terminal, so a spamming producer cannot
-   * grow the buffer past its bound.
-   */
   tryPush(item: T): boolean {
     if (this.#terminal !== null) return false
     const taker = this.#takers.shift()

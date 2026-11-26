@@ -5,8 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { ConfiguredServerError, startConfiguredServer } from "../src/index.js"
 
-// Each entry is a real process standing in for the server's `main.js --config`:
-// it prints what the server prints, so the reader is tested on the real pipe.
 const CAPABILITY = "c".repeat(43)
 
 let directory = ""
@@ -91,7 +89,6 @@ describe("startConfiguredServer", () => {
       "arden: Missing environment variable KEY, named by `provider.apiKeyEnv`\n"
     )
 
-    // Exit 3: the model server did not answer. The settings may be right; the model server is down.
     const unreachable = startConfiguredServer({
       entry: await entry(
         "unreachable.mjs",

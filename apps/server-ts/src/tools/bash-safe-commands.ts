@@ -1,6 +1,15 @@
 import { basename } from "node:path"
 import { textBefore } from "../lib/text.js"
-import { ASSIGNMENT, hasShellExpansion, parseCommandSegments } from "./bash-permissions.js"
+import { ASSIGNMENT, hasShellExpansion, parseCommandSegments } from "./shell-parse.js"
+import {
+  COMMAND,
+  isSubshellMark,
+  NULL_DEVICE,
+  OPTION,
+  SEGMENT_READING,
+  SHELL_FRAME,
+  type Option
+} from "./shell-words.js"
 import { changesFolder, globsIntoFlag, hasGlob } from "./bash-globs.js"
 import { sedReadsOnly } from "./bash-sed.js"
 
@@ -176,21 +185,24 @@ const hasUnsafeFlag = (name: string, args: ReadonlyArray<string>): boolean => {
   if (unsafe === undefined) return false
   return args.some((token) => {
     if (unsafe.includes(flagName(token))) return true
-    // An attached output: sort -ofile.
-    if (name === "sort" && /^-[a-zA-Z]*o/.test(token)) return true
-    if (name === "date" && (/^-[a-zA-Z]*s/.test(token) || flagName(token) === "--set")) return true
-    if (name === "git" && flagName(token) === "--output") return true
+    if (name === COMMAND.sort && /^-[a-zA-Z]*o/.test(token)) return true
+    if (name === COMMAND.date && (/^-[a-zA-Z]*s/.test(token) || flagName(token) === OPTION.set))
+      return true
+    if (name === COMMAND.git && flagName(token) === OPTION.output) return true
     return false
   })
 }
 
 const runsProgram = (name: string, args: ReadonlyArray<string>): boolean =>
-  name === "awk" && args.some((token) => /system\s*\(|\|\s*"|>\s*"/.test(token))
+  name === COMMAND.awk && args.some((token) => /system\s*\(|\|\s*"|>\s*"/.test(token))
+
+const ENV_CLEARS: ReadonlySet<string> = new Set<Option>([
+  OPTION.ignoreEnvironmentShort,
+  OPTION.ignoreEnvironment
+])
 
 const envReadsOnly = (args: ReadonlyArray<string>): boolean => {
-  const command = args.findIndex(
-    (arg) => arg !== "-i" && arg !== "--ignore-environment" && !ASSIGNMENT.test(arg)
-  )
+  const command = args.findIndex((arg) => !ENV_CLEARS.has(arg) && !ASSIGNMENT.test(arg))
   if (command === -1) return true
   return !(args[command] ?? "").startsWith("-") && isReadOnlySegment(args.slice(command))
 }
@@ -200,8 +212,8 @@ const isReadOnlySegment = (segment: ReadonlyArray<string>): boolean => {
   if (executable === undefined) return false
   const name = basename(executable).toLowerCase()
   const args = segment.slice(1)
-  if (name === "env") return envReadsOnly(args)
-  if (name === "sed") return sedReadsOnly(args)
+  if (name === COMMAND.env) return envReadsOnly(args)
+  if (name === COMMAND.sed) return sedReadsOnly(args)
   if (hasUnsafeFlag(name, args)) return false
   if (runsProgram(name, args)) return false
   if (READ_ONLY.has(name)) return true
@@ -223,27 +235,33 @@ export const isReadOnlyCommand = (
   segments.length > 0 &&
   segments.every((segment) => isReadOnlySegment(segment) && !globsIntoFlag(segment, cwd))
 
+export const commandReadsOnly = (command: string, cwd: string): boolean =>
+  isReadOnlyCommand(parseCommandSegments(command), cwd)
+
+const READ_METHOD = "GET"
+const GH_AUTH_READS: ReadonlySet<string> = new Set(["status"])
+const GH_RELEASE_READS: ReadonlySet<string> = new Set(["list", "view"])
+
+const firstWord = (rest: ReadonlyArray<string>): string =>
+  rest.find((token) => !token.startsWith("-")) ?? ""
+
 const GH_NETWORK_READS: Readonly<Record<string, (rest: ReadonlyArray<string>) => boolean>> = {
-  // A REST call is a GET unless a method says otherwise; fields make it a
-  // POST unless the method is GET, where they are the query.
   api: (rest) => {
     const method = ghApiMethod(rest)
-    if (method !== undefined) return method === "GET"
+    if (method !== undefined) return method === READ_METHOD
     return !rest.some((token) => /^-[fF]/.test(token) || /^--(field|raw-field|input)\b/.test(token))
   },
-  auth: (rest) => rest.find((token) => !token.startsWith("-")) === "status",
-  release: (rest) => ["list", "view"].includes(rest.find((token) => !token.startsWith("-")) ?? ""),
+  auth: (rest) => GH_AUTH_READS.has(firstWord(rest)),
+  release: (rest) => GH_RELEASE_READS.has(firstWord(rest)),
   search: () => true,
   status: () => true
 }
 
-/** The method a `gh api` call names last (gh reads the last one), if any:
- *  `-X POST`, `-XPOST`, `-X=POST`, `--method POST`, `--method=POST`. */
 const ghApiMethod = (rest: ReadonlyArray<string>): string | undefined => {
   let method: string | undefined
   rest.forEach((token, index) => {
-    if (token === "-X" || token === "--method") method = rest[index + 1]
-    else if (token.startsWith("--method=")) method = token.slice("--method=".length)
+    if (token === OPTION.methodShort || token === OPTION.method) method = rest[index + 1]
+    else if (token.startsWith(`${OPTION.method}=`)) method = token.slice(OPTION.method.length + 1)
     else if (/^-X./.test(token)) method = token.slice(2).replace(/^=/, "")
   })
   return method?.toUpperCase()
@@ -302,14 +320,13 @@ const curlReadsOnly = (args: ReadonlyArray<string>): boolean => {
 }
 
 const isNetworkReadSegment = (name: string, args: ReadonlyArray<string>): boolean => {
-  if (name === "curl") return curlReadsOnly(args)
-  if (name !== "gh" || hasUnsafeFlag(name, args)) return false
+  if (name === COMMAND.curl) return curlReadsOnly(args)
+  if (name !== COMMAND.gh || hasUnsafeFlag(name, args)) return false
   const at = args.findIndex((token) => !token.startsWith("-"))
   const read = at === -1 ? undefined : GH_NETWORK_READS[args[at] ?? ""]
   return read !== undefined && read(args.slice(at + 1))
 }
 
-export const SHELL_FRAME = new Set(["do", "then", "else", "elif", "if", "while", "until", "!"])
 const SHELL_ONLY = new Set(["done", "fi", "set", "cd", "export", "true", ":"])
 const STDOUT_ONLY = new Set([
   "base64",
@@ -330,24 +347,24 @@ const changesNothingSegment = (segment: ReadonlyArray<string>): boolean => {
   let words = segment
   while (words[0] !== undefined && SHELL_FRAME.has(words[0])) words = words.slice(1)
   const [first] = words
-  if (first === undefined || first === "(" || first === ")") return true
-  if (words.some((token, index) => token.startsWith(">") && words[index + 1] !== "/dev/null"))
+  if (first === undefined || isSubshellMark(first)) return true
+  if (words.some((token, index) => token.startsWith(">") && words[index + 1] !== NULL_DEVICE))
     return false
   const bare = words.filter(
     (token, index) => !(token.startsWith(">") || words[index - 1]?.startsWith(">"))
   )
   const name = basename(first).toLowerCase()
-  if (name === "for") return bare.includes("in")
+  if (name === COMMAND.for) return bare.includes("in")
   if (SHELL_ONLY.has(first)) return true
   if (STDOUT_ONLY.has(name))
-    return !(name === "base64" && bare.some((token) => /^(-o|--output)/.test(token)))
+    return !(name === COMMAND.base64 && bare.some((token) => /^(-o|--output)/.test(token)))
   return isReadOnlySegment(bare) || isNetworkReadSegment(name, bare.slice(1))
 }
 
 export const changesNothing = (command: string, cwd: string): boolean => {
   const exact = parseCommandSegments(command)
   if (exact !== undefined) return everyChangesNothing(exact, cwd)
-  const segments = parseCommandSegments(command, { reading: "loose" })
+  const segments = parseCommandSegments(command, { reading: SEGMENT_READING.loose })
   return segments !== undefined && everyChangesNothing(segments, cwd)
 }
 

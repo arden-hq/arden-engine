@@ -1,7 +1,5 @@
 import type { JsonRecord } from "../common/json.js"
 
-/** Compatibility numbers between the desktop and its server, not product versions:
- *  the product version is apps/desktop/package.json (see docs/releasing.md). */
 export const daemonHandshake = {
   daemonVersion: "1.0.0",
   protocolVersion: 1,
@@ -13,12 +11,6 @@ export const daemonHandshake = {
   }
 } as const
 
-/**
- * The response header naming the server boot that answered: one random ID per
- * server start, on every HTTP response and every event stream. A client that
- * sees a different ID knows the server started over from what it recovered,
- * so every read it holds from the last boot is stale.
- */
 export const SERVER_BOOT_HEADER = "x-arden-boot"
 
 export interface DaemonClientHandshake extends JsonRecord {
@@ -204,15 +196,8 @@ export interface OperationalEventMessage extends JsonRecord {
   readonly event: OperationalEvent
 }
 
-/** The request header carrying the desktop host's grant (http/middleware/local-only.ts). */
 export const LOCAL_CAPABILITY_HEADER = "x-arden-local-capability"
 
-/**
- * The file, in the Arden data folder, that tells a command-line client where
- * the running daemon listens and which capability to send. The daemon writes
- * it (owner-only) once it listens and removes it when it stops; a file left by
- * a crash names a server that no longer answers.
- */
 export const CLI_ACCESS_FILE = "cli-access.json"
 
 export interface CliAccess extends JsonRecord {
@@ -222,21 +207,8 @@ export interface CliAccess extends JsonRecord {
   readonly pid: number
 }
 
-/**
- * How a configured server (`main.js --config <file>`) that did not start says
- * why, by its exit code; any other failure exits 1. `settings`: a settings
- * file the caller can fix (a field, an unset key variable, a model its
- * provider does not list). `providerUnreachable`: the model server named by
- * `provider.baseUrl` did not answer, so the file may be right and the model
- * server is not running.
- */
 export const CONFIGURED_SERVER_EXIT = { settings: 2, providerUnreachable: 3 } as const
 
-/**
- * The one JSON line a configured server prints on stdout once every setting
- * is in place. The server writes it (`apps/server-ts/src/serve/main.ts`);
- * `@arden-hq/headless` reads it.
- */
 export const OFFERED_TOOLS = { all: "all", listed: "listed" } as const
 
 export type OfferedTools =
@@ -247,18 +219,12 @@ export interface ConfiguredServerReady extends JsonRecord {
   readonly type: "ready"
   readonly url: string
   readonly dataDirectory: string
-  /** Holds the server URL and the owner's secret (`cli-access.json`). */
   readonly accessFile: string
-  /** The data folder's model requests and tokens, rewritten after every request. */
   readonly usageFile: string
   readonly offeredTools: OfferedTools
-  /** Tools that always ask on a card, so the settings could give them no rule. */
   readonly toolsWithoutRule: ReadonlyArray<string>
   readonly mcpServers: ReadonlyArray<string>
-  /** The provider a new chat runs on, by the id the model list gives it (`llama.cpp`, `openrouter`, `chat-completions`, `responses`, `openai`). */
   readonly provider: string
-  /** The model a new chat runs on, by the id `--model` and `chat_model` take. */
   readonly model: string
-  /** That model's context window in tokens, after `contextLimit`. */
   readonly contextWindow: number
 }

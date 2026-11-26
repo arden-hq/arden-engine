@@ -5,9 +5,6 @@ import type { Backfill } from "./backfills/backfill.js"
 
 const SPACE_WORDS_BACKFILL = "space_words"
 
-/** The large history tables migration 0141 leaves for after start, with the
- * columns that hold the app's names. message_turns follows session_messages
- * through its message_turns_au trigger. */
 const TABLES: ReadonlyArray<{ readonly table: string; readonly columns: ReadonlyArray<string> }> = [
   { table: "tool_calls", columns: ["tool_name", "arguments_json", "result_json"] },
   { table: "session_messages", columns: ["message_json"] },
@@ -16,13 +13,11 @@ const TABLES: ReadonlyArray<{ readonly table: string; readonly columns: Readonly
   { table: "journal_records", columns: ["event_type", "data_json", "attributes_json"] }
 ]
 
-/** SQLite picks the rows that hold an old word, so only those reach the converter. */
 const oldWordFilter = (columns: ReadonlyArray<string>): string =>
   columns
     .flatMap((column) => ["desk", "Desk", "DESK"].map((word) => `instr(${column}, '${word}') > 0`))
     .join(" OR ")
 
-/** Cursor "<table index>:<rowid>": the last row looked at. */
 const parseCursor = (
   cursor: string | undefined
 ): { readonly table: number; readonly rowid: number } => {
@@ -30,8 +25,6 @@ const parseCursor = (
   return { table: Number(table ?? 0), rowid: Number(rowid ?? 0) }
 }
 
-/** Converts the app's old "desk" names in those tables to "space", the same way
- * migration 0141 converted every other table. */
 export const spaceWordsBackfill: Backfill = {
   name: SPACE_WORDS_BACKFILL,
   landed: "2026-11-09",

@@ -1,11 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/**
- * The model endpoint settings document gains `chat`, the saved model servers
- * (`StoredChatEndpoint`s), empty until one is saved. A JSON document in
- * `monitor_state`, so no table changes and no schema section.
- */
 const up = (database: DatabaseSync): void => {
   database.exec(`UPDATE monitor_state SET state = json_set(state, '$.chat', json('[]'))
     WHERE namespace = 'model_endpoint_settings' AND json_valid(state)`)

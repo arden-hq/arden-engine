@@ -1,12 +1,9 @@
 import type { JsonRecord } from "../common/json.js"
 
-/** Live agent and context controls shared by the server and Desktop. */
 export interface IntelligenceSettings extends JsonRecord {
-  /** What the assistant calls itself, everywhere it says so. */
   readonly assistantName: string
   readonly maxAgentDepth: number
   readonly maxConcurrentAgents: number
-  /** Shared slots for Tasks, Space workers, and Automations. */
   readonly maxConcurrentWorkers: number
   readonly compactionThreshold: number
   readonly compactionKeepRatio: number
@@ -24,13 +21,25 @@ export const INTELLIGENCE_SETTINGS_CHANGE = {
 } as const
 
 export type IntelligenceSettingsChange =
-  | { readonly kind: "assistant_name"; readonly value: string }
-  | { readonly kind: "max_agent_depth"; readonly value: number }
-  | { readonly kind: "max_concurrent_agents"; readonly value: number }
-  | { readonly kind: "max_concurrent_workers"; readonly value: number }
-  | { readonly kind: "compaction_threshold"; readonly value: number }
-  | { readonly kind: "compaction_keep_ratio"; readonly value: number }
-  | { readonly kind: "summary_max_tokens"; readonly value: number }
+  | { readonly kind: typeof INTELLIGENCE_SETTINGS_CHANGE.assistantName; readonly value: string }
+  | { readonly kind: typeof INTELLIGENCE_SETTINGS_CHANGE.maxAgentDepth; readonly value: number }
+  | {
+      readonly kind: typeof INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentAgents
+      readonly value: number
+    }
+  | {
+      readonly kind: typeof INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentWorkers
+      readonly value: number
+    }
+  | {
+      readonly kind: typeof INTELLIGENCE_SETTINGS_CHANGE.compactionThreshold
+      readonly value: number
+    }
+  | {
+      readonly kind: typeof INTELLIGENCE_SETTINGS_CHANGE.compactionKeepRatio
+      readonly value: number
+    }
+  | { readonly kind: typeof INTELLIGENCE_SETTINGS_CHANGE.summaryMaxTokens; readonly value: number }
 
 export type IntelligenceSettingsPatch = ReadonlyArray<IntelligenceSettingsChange>
 
@@ -61,8 +70,6 @@ export const applyIntelligenceSettingsPatch = (
   patch: IntelligenceSettingsPatch
 ): IntelligenceSettings => patch.reduce(applyIntelligenceChange, settings)
 
-/** The factory values. The server seeds a fresh install from these and the
- *  Desktop's "Restore defaults" writes them back, so both read one source. */
 export const DEFAULT_INTELLIGENCE_SETTINGS: IntelligenceSettings = Object.freeze({
   assistantName: "Arden",
   maxAgentDepth: 3,

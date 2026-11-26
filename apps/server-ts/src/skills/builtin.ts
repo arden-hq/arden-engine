@@ -1,5 +1,5 @@
 import { SKILL_PLACE, SKILL_VERSION, type Skill } from "@arden-hq/protocol/skills"
-import type { SkillLoadedContent } from "./service.js"
+import type { SkillLoadedContent } from "./skill-schemas.js"
 import { catalogSignatures } from "@arden-hq/answer-ui"
 import { compilePromptTemplate, renderPromptTemplate } from "@arden-hq/prompt-template"
 import { Effect } from "effect"
@@ -81,7 +81,6 @@ const readBuiltInSkill = (name: BuiltInSkillName): BuiltInSkill => {
   })
 }
 
-/** Skills for a Mac program are left out elsewhere. */
 const MAC_ONLY: ReadonlySet<BuiltInSkillName> = new Set(["apple-apps"])
 
 export const BUILT_IN_SKILLS: ReadonlyArray<BuiltInSkill> = Object.freeze(

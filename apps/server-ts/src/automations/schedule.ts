@@ -7,8 +7,10 @@ import {
 } from "@arden-hq/protocol/automations"
 import {
   APP_EVENT,
+  AUTOMATION_CONDITION,
   LEAD_EVENT,
   TRIGGER_STATE,
+  TRIGGER_TYPE,
   type AutomationComparisonCondition,
   type AutomationCondition,
   type AutomationTrigger,
@@ -39,14 +41,14 @@ const comparisonWithValue = (
 
 const normalizeCondition = (condition: AutomationCondition): AutomationCondition => {
   switch (condition.kind) {
-    case "compare":
+    case AUTOMATION_CONDITION.compare:
       return condition.op === CONDITION_OPERATOR.exists
         ? { kind: "compare", field: condition.field, op: condition.op }
         : comparisonWithValue(condition)
-    case "not":
+    case AUTOMATION_CONDITION.not:
       return { kind: "not", condition: normalizeCondition(condition.condition) }
-    case "and":
-    case "or":
+    case AUTOMATION_CONDITION.and:
+    case AUTOMATION_CONDITION.or:
       return {
         kind: condition.kind,
         conditions: condition.conditions.map(normalizeCondition)
@@ -97,13 +99,13 @@ export const personalAutomationTriggers = (
   const normalized: Array<AutomationTrigger> = []
   for (const trigger of triggers) {
     switch (trigger.type) {
-      case "time": {
+      case TRIGGER_TYPE.time: {
         const { stored, schedule } = decodeTimeTrigger(trigger.schedule) ?? invalidSchedule()
         times.push(schedule)
         normalized.push({ id: trigger.id, type: "time", schedule: stored })
         break
       }
-      case "idle": {
+      case TRIGGER_TYPE.idle: {
         if (idle !== null) {
           throw new InvalidAutomationScheduleError(
             "An Automation can have at most one idle trigger"
@@ -119,7 +121,7 @@ export const personalAutomationTriggers = (
         normalized.push(idle)
         break
       }
-      case "count": {
+      case TRIGGER_TYPE.count: {
         if (count !== null) {
           throw new InvalidAutomationScheduleError(
             "An Automation can have at most one count trigger"
@@ -135,7 +137,7 @@ export const personalAutomationTriggers = (
         normalized.push(count)
         break
       }
-      case "event": {
+      case TRIGGER_TYPE.event: {
         const event = normalizedEvent(trigger)
         const issue = eventTriggerIssue(event)
         if (issue !== null) throw new InvalidAutomationScheduleError(issue)
@@ -154,4 +156,6 @@ export const nextScheduleRunAt = (
 
 export const oneShotSchedule = (schedule: Pick<PersonalAutomationTriggers, "times">): boolean =>
   schedule.times.length > 0 &&
-  schedule.times.every((time) => time.kind === "once" || time.kind === "next")
+  schedule.times.every(
+    (time) => time.kind === TRIGGER_STATE.once || time.kind === TRIGGER_STATE.next
+  )

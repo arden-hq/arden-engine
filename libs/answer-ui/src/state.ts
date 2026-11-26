@@ -1,39 +1,27 @@
 import type { ElementNode, ParseResult } from "@openuidev/lang-core"
-import { unboundFieldName } from "./controls.js"
+import { AST_KIND, isElement } from "./ast.js"
+import { CONTROL_VALUE_PROP, unboundFieldName } from "./controls.js"
 import { readAnswerBlock } from "./read.js"
-import { ANSWER_PARTS, COMPONENT_NAMES, type ComponentName } from "./parts.js"
+import { ANSWER_PARTS, isComponentName } from "./parts.js"
 
-/** The most one block's saved values may take, in UTF-8 bytes of their JSON. */
 export const ANSWER_BLOCK_STATE_MAX_BYTES = 8 * 1024
 
-/** A block's saved values: each `$name` the block declares, and the
- *  `{ value }` of each control that binds no `$variable`, by its field name. */
 export type AnswerBlockState = Readonly<Record<string, unknown>>
 
-export type SavedBlockState =
-  | { readonly kind: "saved"; readonly state: AnswerBlockState }
-  /** The kept values are still over {@link ANSWER_BLOCK_STATE_MAX_BYTES}. */
-  | { readonly kind: "too_large" }
-  /** The block itself is refused by `readAnswerBlock`: it is shown as code,
-   *  so it has no controls to save. */
-  | { readonly kind: "unreadable" }
+export const SAVED_BLOCK_STATE_KIND = {
+  saved: "saved",
+  tooLarge: "too_large",
+  unreadable: "unreadable"
+} as const
 
-/**
- * The part of what a client sent for a block that may be saved. Only the
- * `$name`s the block declares are kept, each only when it has the declared
- * default's kind. A value a control binds must also pass that control's prop
- * schema: a number is clamped to the control's literal `min`/`max`, a choice
- * must be one of its options (a checklist keeps only its own items). Anything
- * else is dropped, so a stale key or a forged value never reaches the store or
- * the model; the block then shows that key's default.
- *
- * A control that binds no `$variable` keeps its choice too: the renderer files
- * it under the control's field name as `{ value }`, kept when the block has
- * such a control and the value passes the same checks.
- */
+export type SavedBlockState =
+  | { readonly kind: typeof SAVED_BLOCK_STATE_KIND.saved; readonly state: AnswerBlockState }
+  | { readonly kind: typeof SAVED_BLOCK_STATE_KIND.tooLarge }
+  | { readonly kind: typeof SAVED_BLOCK_STATE_KIND.unreadable }
+
 export function savedBlockState(source: string, sent: AnswerBlockState): SavedBlockState {
   const parsed = readAnswerBlock(source)
-  if (parsed === undefined) return { kind: "unreadable" }
+  if (parsed === undefined) return { kind: SAVED_BLOCK_STATE_KIND.unreadable }
   const bindings = new Map<string, Array<Binding>>()
   if (parsed.root !== null) collectBindings(parsed.root, bindings)
   const state: Record<string, unknown> = {}
@@ -47,12 +35,12 @@ export function savedBlockState(source: string, sent: AnswerBlockState): SavedBl
   for (const [field, part] of unbound) {
     const sentField = sent[field]
     if (!isFieldValue(sentField)) continue
-    const value = checkedValue(sentField.value, null, [{ part, prop: "value" }])
+    const value = checkedValue(sentField.value, null, [{ part, prop: CONTROL_VALUE_PROP }])
     if (value !== undefined) state[field] = { value }
   }
   return utf8Bytes(JSON.stringify(state)) > ANSWER_BLOCK_STATE_MAX_BYTES
-    ? { kind: "too_large" }
-    : { kind: "saved", state }
+    ? { kind: SAVED_BLOCK_STATE_KIND.tooLarge }
+    : { kind: SAVED_BLOCK_STATE_KIND.saved, state }
 }
 
 interface Binding {
@@ -73,8 +61,6 @@ function collectBindings(value: unknown, into: Map<string, Array<Binding>>): voi
   }
 }
 
-/** Whether a parsed block has anything the person can set: a declared
- *  `$variable`, or a control that binds none. */
 export function blockHasControls(parsed: ParseResult): boolean {
   if (Object.keys(parsed.stateDeclarations).length > 0) return true
   const unbound = new Map<string, ElementNode>()
@@ -106,7 +92,7 @@ function checkedValue(value: unknown, initial: unknown, bindings: ReadonlyArray<
   for (const { part, prop } of bindings) {
     if (checked === undefined) return undefined
     if (propSchema(part.typeName, prop)?.safeParse(checked).success === false) return undefined
-    if (prop === "value") checked = withinControl(checked, part)
+    if (prop === CONTROL_VALUE_PROP) checked = withinControl(checked, part)
   }
   return checked
 }
@@ -149,22 +135,8 @@ function kindOf(value: unknown): string {
 
 function stateRefName(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined
-  if (!("k" in value) || value.k !== "StateRef" || !("n" in value)) return undefined
+  if (!("k" in value) || value.k !== AST_KIND.StateRef || !("n" in value)) return undefined
   return typeof value.n === "string" ? value.n : undefined
-}
-
-function isElement(value: unknown): value is ElementNode {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    value.type === "element" &&
-    "typeName" in value &&
-    typeof value.typeName === "string" &&
-    "props" in value &&
-    typeof value.props === "object" &&
-    value.props !== null
-  )
 }
 
 function utf8Bytes(text: string): number {
@@ -177,6 +149,3 @@ function utf8Bytes(text: string): number {
   }
   return bytes
 }
-
-const isComponentName = (name: string): name is ComponentName =>
-  (COMPONENT_NAMES as ReadonlyArray<string>).includes(name)

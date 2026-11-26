@@ -32,7 +32,12 @@ const taskBindingRevoked = (sql: SqlClient.SqlClient, metadata: Statement.Fragme
         OR authority_space.archived_at IS NULL))
 )`
 
-export type RunAuthorityState = "active" | "settling" | "revoked"
+export const RUN_AUTHORITY_STATE = {
+  active: "active",
+  settling: "settling",
+  revoked: "revoked"
+} as const
+export type RunAuthorityState = (typeof RUN_AUTHORITY_STATE)[keyof typeof RUN_AUTHORITY_STATE]
 
 const taskBindingSettling = (
   sql: SqlClient.SqlClient,

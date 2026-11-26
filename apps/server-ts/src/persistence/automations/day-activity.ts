@@ -1,6 +1,5 @@
 import { Context, type Effect } from "effect"
 
-/** One change to a Task: it was created, finished, failed, or started or stopped waiting. */
 export interface DayTaskEvent {
   readonly itemId: string
   readonly title: string
@@ -10,7 +9,6 @@ export interface DayTaskEvent {
   readonly summary: string | undefined
 }
 
-/** One stored item (a mail, a notification, a calendar change) that arrived. */
 export interface DayItem {
   readonly itemId: string
   readonly source: string
@@ -21,7 +19,6 @@ export interface DayItem {
   readonly sentByOwner: boolean
 }
 
-/** What happened outside the chats between two instants (`end` exclusive), in time order. */
 export class DayActivity extends Context.Service<
   DayActivity,
   {

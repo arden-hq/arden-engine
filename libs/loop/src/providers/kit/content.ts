@@ -1,15 +1,12 @@
 import { isRecord } from "@arden-hq/std/json"
+import { CONTENT_BLOCK_TYPE } from "../../contracts/messages.js"
 
-/**
- * The model-facing text of a `context` content block, or undefined when the
- * value is not a valid one: `<content_type key="value">\n…\n</content_type>`,
- * or `<content_type key="value" />` when it has no content. Every adapter
- * sends context as this tagged text, so a model reads it the same on any wire.
- */
+export { isImageMediaType } from "@arden-hq/std/message-vocabulary"
+
 export const contextBlockText = (block: unknown): string | undefined => {
   if (
     !isRecord(block) ||
-    block.type !== "context" ||
+    block.type !== CONTENT_BLOCK_TYPE.context ||
     typeof block.content_type !== "string" ||
     (block.content !== undefined && block.content !== null && typeof block.content !== "string")
   )

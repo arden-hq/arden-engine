@@ -15,136 +15,28 @@ import {
   type ToolCall
 } from "../contracts/messages.js"
 import {
-  callEndsTurn,
   canRunInBackground,
   type PendingToolCall,
-  type ToolArgumentError,
   type ToolArgumentErrorCode,
   type ToolCallMiddleware,
   type ToolCallRequest,
-  type ToolDisplayTitle,
   type ToolMeta,
+  TOOL_PHASE,
   type ToolPhase,
   type ToolProgressUpdate,
   type ToolResult,
   type Toolset
 } from "../contracts/tools.js"
-import type { AgentEvent, ToolCompleted, ToolPaused, ToolStarted } from "../contracts/events.js"
+import {
+  isToolPaused,
+  type AgentEvent,
+  type ToolCompleted,
+  type ToolPaused
+} from "../contracts/events.js"
 import { EventQueue } from "../internal/stream.js"
+import { completed, makeResolved, paused, started, type ResolvedCall } from "./tool-events.js"
 import { normalizeToolResult } from "../internal/validate.js"
-import { sanitizeToolDisplayTitle, splitToolArguments } from "./display-title.js"
-import { errorMessage } from "@arden-hq/std/errors"
-import { isRecord } from "@arden-hq/std/json"
 import { after, type Timer } from "@arden-hq/std/timer"
-import { parseJsonText } from "@arden-hq/std/json-text"
-
-const invalidArguments = (message: string): ToolArgumentError => ({
-  code: "invalid_tool_arguments",
-  message
-})
-
-const malformedJsonMessage = (source: string, cause: unknown): string => {
-  const detail = errorMessage(cause)
-  return (
-    `Malformed JSON at character ${malformedJsonPosition(source, detail)}: ${normalizedJsonError(detail)}. ` +
-    "Retry the tool call with one valid JSON object matching its schema."
-  )
-}
-
-const expectsPropertyName = /(?:property name|property\s+name|expected ['"]?\})/i
-
-const malformedJsonPosition = (source: string, detail: string): number => {
-  const explicitPosition = /position\s+(\d+)/i.exec(detail)?.[1]
-  if (explicitPosition !== undefined) return Number(explicitPosition)
-  if (/(?:unexpected\s+(?:eof|end)|unexpected end)/i.test(detail)) return source.length
-  if (expectsPropertyName.test(detail)) {
-    return Math.max(0, Math.max(source.lastIndexOf(","), source.lastIndexOf("{")) + 1)
-  }
-  return 0
-}
-
-const normalizedJsonError = (detail: string): string => {
-  if (expectsPropertyName.test(detail)) return "Expecting property name enclosed in double quotes"
-  if (/(?:unexpected\s+(?:eof|end))/i.test(detail)) return "Expecting value"
-  return detail.replace(/\s+at position\s+\d+.*$/i, "")
-}
-
-const nonObjectArguments = (): ToolArgumentError =>
-  invalidArguments(
-    "Tool arguments must be a JSON object. Retry the tool call with one valid JSON object matching its schema."
-  )
-
-/** Parse provider tool arguments without throwing or accepting arrays/primitives. */
-const rejected = (toolCall: ToolCall, argumentError: ToolArgumentError): PendingToolCall => ({
-  toolCall,
-  name: toolCall.function.name,
-  args: {},
-  argumentError
-})
-
-export const parseToolCalls = (
-  calls: ReadonlyArray<ToolCall>,
-  displayTitleArgument: ToolDisplayTitle | undefined
-): ReadonlyArray<PendingToolCall> =>
-  calls.map((toolCall) => {
-    if (toolCall.function.arguments.length === 0) {
-      const displayTitle =
-        displayTitleArgument === undefined
-          ? undefined
-          : sanitizeToolDisplayTitle(toolCall.display_title, displayTitleArgument)
-      return {
-        toolCall,
-        name: toolCall.function.name,
-        args: {},
-        ...(displayTitle === undefined ? {} : { displayTitle })
-      }
-    }
-    let decoded: unknown
-    try {
-      decoded = parseJsonText(toolCall.function.arguments)
-    } catch (cause) {
-      return rejected(
-        toolCall,
-        invalidArguments(malformedJsonMessage(toolCall.function.arguments, cause))
-      )
-    }
-    if (!isRecord(decoded)) {
-      return rejected(toolCall, nonObjectArguments())
-    }
-    const projected = splitToolArguments(decoded, toolCall.display_title, displayTitleArgument)
-    return {
-      toolCall,
-      name: toolCall.function.name,
-      args: projected.args,
-      ...(projected.displayTitle === undefined ? {} : { displayTitle: projected.displayTitle })
-    }
-  })
-
-const visibleToolList = (visibleNames: ReadonlyArray<string>): string => {
-  if (visibleNames.length === 0) return "none"
-  return visibleNames.length <= 10
-    ? visibleNames.join(", ")
-    : `${visibleNames.slice(0, 10).join(", ")}, ... (${visibleNames.length} tools total)`
-}
-
-export const gateUnavailableCalls = (
-  calls: ReadonlyArray<PendingToolCall>,
-  advertisedNames: ReadonlySet<string>,
-  visibleNames: ReadonlyArray<string>
-): ReadonlyArray<PendingToolCall> => {
-  const visible = visibleToolList(visibleNames)
-  return calls.map((call) =>
-    call.argumentError !== undefined || advertisedNames.has(call.name)
-      ? call
-      : {
-          ...call,
-          argumentError: {
-            code: "unavailable_tool" as const,
-            message: `Tool '${call.name}' is not available in this step: it is not in the current tool list. Use one of: ${visible}.`
-          }
-        }
-  )
-}
 
 export interface DispatchInput {
   readonly messages: ChatMessage[]
@@ -155,25 +47,16 @@ export interface DispatchInput {
   readonly beforeExecute?: () => Promise<ToolResult | undefined>
   readonly middleware: ReadonlyArray<ToolCallMiddleware>
   readonly groups?: Map<string, FairReadWriteLock>
-  /** One permit, shared by the run: state-changing calls run one at a time,
-   *  in the order they reach dispatch (the order the model asked for them). */
   readonly stateChanges?: Semaphore
   readonly semaphore: Semaphore
   readonly clock: () => number
   readonly signal: AbortSignal
   readonly emit: (event: AgentEvent) => Promise<void>
-  /** Lossy, non-suspending emit for progress; a full buffer drops the event. */
   readonly tryEmit?: (event: AgentEvent) => boolean
   readonly recoveredResults?: ReadonlyMap<string, Required<ToolResult>>
   readonly rejection?: ToolResult
-  /**
-   * A call that can run in the background and is still executing `afterMs`
-   * after its effect began moves there: the batch settles it with a launch
-   * receipt and hands the in-flight call to `adopt`.
-   */
   readonly background?: {
     readonly afterMs: number
-    /** Stops moved calls once their batch has ended. */
     readonly signal: AbortSignal
     readonly adopt: (call: BackgroundedCall) => void
   }
@@ -184,19 +67,16 @@ export interface DispatchOutput {
   readonly paused: ReadonlyArray<ToolPaused>
 }
 
-/** What one call settles into: its events and the history records it appends. */
 export interface CallSettlement {
   readonly output: DispatchOutput
   readonly messages: ReadonlyArray<ChatMessage>
 }
 
-/** A call moved to the background mid-execution; `settled` follows the same call. */
 export interface BackgroundedCall {
   readonly call: PendingToolCall
   readonly settled: Promise<CallSettlement>
 }
 
-/** The portable receipt that closes a background call on the wire; its result arrives later. */
 export const launchReceipt = (id: string): ChatMessage => ({
   role: ROLE.tool,
   message_id: `async-launch:${id}`,
@@ -206,16 +86,12 @@ export const launchReceipt = (id: string): ChatMessage => ({
     "This is still running in the background. Let the user know in a few words what you started, then end your turn; it will come back to you when it's done."
 })
 
-interface ResolvedCall {
-  readonly call: PendingToolCall
-  readonly meta: ToolMeta
-}
+const SETTLEMENT = { event: "event", cancelled: "cancelled", backgrounded: "backgrounded" } as const
 
 type Settlement =
-  | { readonly kind: "event"; readonly event: ToolCompleted | ToolPaused }
-  | { readonly kind: "cancelled" }
-  /** Still running after the foreground budget; settles later in the background. */
-  | { readonly kind: "backgrounded"; readonly toolId: string }
+  | { readonly kind: typeof SETTLEMENT.event; readonly event: ToolCompleted | ToolPaused }
+  | { readonly kind: typeof SETTLEMENT.cancelled }
+  | { readonly kind: typeof SETTLEMENT.backgrounded; readonly toolId: string }
 
 const unexpectedMissingResult =
   "Tool result unexpectedly missing — this is an internal error, not proof the tool did not run. " +
@@ -251,7 +127,6 @@ const toolRequest = (resolved: ResolvedCall, input: DispatchInput): ToolCallRequ
   messages: input.messages
 })
 
-/** Decoration is advisory and must never erase an already-settled tool outcome. */
 export const decorateToolResult = (
   request: ToolCallRequest,
   result: ToolResult,
@@ -265,63 +140,6 @@ export const decorateToolResult = (
     return normalized
   }
 }
-
-const makeResolved = (
-  call: PendingToolCall,
-  metas: ReadonlyMap<string, ToolMeta>
-): ResolvedCall => ({
-  call,
-  meta: metas.get(call.name) ?? { name: call.name }
-})
-
-const callHost = (resolved: ResolvedCall): Readonly<Record<string, unknown>> => ({
-  ...(resolved.meta.host ?? {}),
-  ...(resolved.call.displayTitle === undefined ? {} : { display_title: resolved.call.displayTitle })
-})
-
-const started = (resolved: ResolvedCall, timestamp: number): ToolStarted => ({
-  timestamp,
-  _tag: "ToolStarted",
-  depth: 0,
-  parent_id: null,
-  tool_id: resolved.call.toolCall.id,
-  name: resolved.call.name,
-  args: { ...resolved.call.args },
-  host: callHost(resolved)
-})
-
-const completed = (
-  resolved: ResolvedCall,
-  result: ToolResult,
-  durationMs: number
-): ToolCompleted => ({
-  _tag: "ToolCompleted",
-  depth: 0,
-  parent_id: null,
-  tool_id: resolved.call.toolCall.id,
-  name: resolved.call.name,
-  result: result.content,
-  preview: result.preview,
-  duration_ms: durationMs,
-  is_error: result.is_error ?? false,
-  data: result.data ?? null,
-  retryable: result.retryable ?? null,
-  message_extras: { ...(result.message_extras ?? {}) },
-  host: { ...callHost(resolved), ...(result.host ?? {}) },
-  model_content: result.model_content ?? [],
-  ends_turn: callEndsTurn(resolved.meta, resolved.call.args)
-})
-
-const paused = (resolved: ResolvedCall, pause: PauseRequested): ToolPaused => ({
-  _tag: "ToolPaused",
-  depth: 0,
-  parent_id: null,
-  tool_id: resolved.call.toolCall.id,
-  name: resolved.call.name,
-  args: { ...resolved.call.args },
-  reason: pause.reason,
-  detail: pause.detail ?? ""
-})
 
 const appendResults = (
   messages: ChatMessage[],
@@ -388,14 +206,14 @@ const executeInGroup = async (
     const backgrounded = new Promise<void>((resolve) => {
       moved = resolve
     })
-    budget.phase("executing")
+    budget.phase(TOOL_PHASE.executing)
     const execution = executeCall(resolved, input, startedAt, {
       phase: budget.phase,
       backgrounded
     })
     const first = await Promise.race([execution, budget.expired])
     budget.stop()
-    if (first !== "expired") return first
+    if (first !== FOREGROUND_EXPIRED) return first
     handedOff = true
     const finish = release
     void execution.finally(() => {
@@ -441,7 +259,7 @@ const executeCall = async (
       const duration = Math.max(0, Math.trunc(input.clock() - startedAt))
       return { kind: "event", event: completed(resolved, result, duration) }
     }
-    const progress = (update: ToolProgressUpdate): void => {
+    const progressSinkThatNeverThrowsIntoTool = (update: ToolProgressUpdate): void => {
       try {
         if (settledCall || input.signal.aborted) return
         if (typeof update?.message !== "string") return
@@ -456,15 +274,13 @@ const executeCall = async (
         }
         if (input.tryEmit !== undefined) input.tryEmit(event)
         else void input.emit(event).catch(() => undefined)
-      } catch {
-        // emit is a contract-free sink: a failing consumer never reaches the tool.
-      }
+      } catch {}
     }
     const request: ToolCallRequest = {
       ...baseRequest,
       ...hooks,
       ...(input.beforeExecute === undefined ? {} : { beforeExecute: input.beforeExecute }),
-      emit: progress
+      emit: progressSinkThatNeverThrowsIntoTool
     }
     const outcome = await applyToolCallMiddleware(
       request,
@@ -498,11 +314,15 @@ const executeCall = async (
   }
 }
 
+const FOREGROUND_EXPIRED = "expired"
+
 const foregroundBudget = (afterMs: number) => {
   let timer: Timer | undefined
   let stopped = false
   let expire = (): void => {}
-  const expired = new Promise<"expired">((resolve) => (expire = () => resolve("expired")))
+  const expired = new Promise<typeof FOREGROUND_EXPIRED>(
+    (resolve) => (expire = () => resolve(FOREGROUND_EXPIRED))
+  )
   return {
     expired,
     stop: (): void => {
@@ -511,7 +331,7 @@ const foregroundBudget = (afterMs: number) => {
     },
     phase: (phase: ToolPhase): void => {
       timer?.cancel()
-      if (stopped || phase === "waiting" || !Number.isFinite(afterMs)) return
+      if (stopped || phase === TOOL_PHASE.waiting || !Number.isFinite(afterMs)) return
       timer = after(afterMs, expire)
     }
   }
@@ -522,11 +342,11 @@ const backgroundSettlement = async (
   input: DispatchInput,
   settlement: Settlement
 ): Promise<CallSettlement> => {
-  if (settlement.kind !== "event") throw abortError()
+  if (settlement.kind !== SETTLEMENT.event) throw abortError()
   const event = settlement.event
   await input.emit(event)
   const messages: ChatMessage[] = []
-  if (event._tag === "ToolPaused") return { output: { completions: [], paused: [event] }, messages }
+  if (isToolPaused(event)) return { output: { completions: [], paused: [event] }, messages }
   const id = event.tool_id
   appendResults(
     messages,
@@ -540,12 +360,6 @@ const backgroundSettlement = async (
   return { output: { completions: [event], paused: [] }, messages }
 }
 
-/**
- * Execute and settle one tool batch into the loop's private history.
- * All starts are emitted before any execution; settlements stream in
- * completion order. Paused calls deliberately receive no tool-result
- * message so recovery can see the trailing incomplete assistant step.
- */
 export const dispatchToolCalls = async (input: DispatchInput): Promise<DispatchOutput> => {
   const results = new Map<string, string>()
   const extras = new Map<string, Readonly<Record<string, unknown>>>()
@@ -563,7 +377,7 @@ export const dispatchToolCalls = async (input: DispatchInput): Promise<DispatchO
   }
 
   const record = (event: ToolCompleted | ToolPaused): void => {
-    if (event._tag === "ToolPaused") {
+    if (isToolPaused(event)) {
       pausedIds.add(event.tool_id)
       pausedEvents.push(event)
       return
@@ -660,8 +474,8 @@ export const dispatchToolCalls = async (input: DispatchInput): Promise<DispatchO
         const next = await raceAbort(settled.next(), input.signal)
         if (next.done) break
         remaining -= 1
-        if (next.value.kind === "cancelled") continue
-        if (next.value.kind === "backgrounded") {
+        if (next.value.kind === SETTLEMENT.cancelled) continue
+        if (next.value.kind === SETTLEMENT.backgrounded) {
           backgroundedIds.add(next.value.toolId)
           continue
         }

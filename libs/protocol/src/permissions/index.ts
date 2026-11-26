@@ -21,7 +21,6 @@ export const permissionDecoders = {
   wordsCompiled: decoderFor(PermissionWordsCompiledSchema, "Invalid compiled rule response")
 } as const
 
-/** Build validated paths for the complete permissions HTTP surface. */
 export const permissionRoutes = {
   rules: "/permissions/rules",
   compileWords: "/permissions/rules/compile",

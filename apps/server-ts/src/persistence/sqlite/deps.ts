@@ -24,13 +24,8 @@ type Transact = <A, E>(
   effect: Effect.Effect<A, E, UnitOfWork>
 ) => Effect.Effect<A, E | SqlError.SqlError>
 
-/** Read-only connections the server opens beside the writer, each on its own thread. */
 export const READER_CONNECTIONS = 4
 
-// A snapshot keeps one reader connection to itself until its transaction ends
-// (`@arden-hq/sqlite-thread` pins the lane). At most half of them at once, so
-// a burst of chat opens or other snapshots leaves two connections for every
-// other read instead of queueing lists and history behind pinned lanes.
 const SNAPSHOT_CONCURRENCY = READER_CONNECTIONS / 2
 
 export interface Writer {
@@ -41,7 +36,6 @@ export interface Writer {
   readonly run: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly waiting: Effect.Effect<number>
   readonly snapshot: <A, E>(read: Effect.Effect<A, E>) => Effect.Effect<A, E | SqlError.SqlError>
-  /** Gives `effect` the store that keeps large tool results; transactions and snapshots have it already. */
   readonly withToolResults: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
@@ -98,7 +92,6 @@ export const makeWriter = (options: {
     transactInteractive: (effect) => queue.runInteractive(unitOfWork(effect)),
     run: queue.run,
     waiting: queue.waiting,
-    // A snapshot inside another one joins its transaction and needs no second permit.
     snapshot: (read) =>
       Effect.serviceOption(reader.transactionService).pipe(
         Effect.flatMap((open) =>

@@ -1,44 +1,36 @@
-// The "sent" score of the memory test: was the page that holds the answer in what a new chat
-// was sent from Memory? Pure: it reads the run's record of what it was sent, the one record
-// `prefetchTurnMemory` writes for every run, and calls nothing.
-
 import {
+  MEMORY_OUTCOME,
+  MEMORY_SOURCE,
   MEMORY_SPACE_PAGE,
   type RunMemoryContext,
   type RunMemorySource
 } from "@arden-hq/protocol/runs"
-import { QUESTION_KINDS, type Question, type QuestionKind } from "./questions.js"
+import { QUESTION_KIND, QUESTION_KINDS, type Question, type QuestionKind } from "./questions.js"
 
-/** The route a page reached the chat by: standing facts, recall or the Space context. */
-export type Via = "core" | "recall" | "space"
+const VIA = { core: "core", recall: "recall", space: "space" } as const
+export type Via = (typeof VIA)[keyof typeof VIA]
 
 export interface Placed {
   readonly path: string
   readonly via: Via
-  /** False when the page reached the chat only in part: cut by its renderer, or a passage. */
   readonly whole: boolean
 }
 
 export interface Delivery {
-  /** Pages whose rendered block reached the chat. A page named only in the Space's list of
-   * pages is not here. */
   readonly pages: ReadonlyArray<Placed>
-  /** Pages left out for lack of room in their source's allowance. */
   readonly cut: ReadonlyArray<Placed>
-  /** Everything the chat was sent from Memory and its Space. */
   readonly text: string
-  /** Bytes sent, by route and for the Space's list of pages, as the record counts them. */
   readonly bytes: Readonly<Record<Via | "index", number>>
 }
 
 const viaOf = (source: Exclude<RunMemorySource, { readonly kind: "index" }>): Via => {
   switch (source.kind) {
-    case "core":
-      return "core"
-    case "recalled":
-      return "recall"
-    case "space":
-      return "space"
+    case MEMORY_SOURCE.core:
+      return VIA.core
+    case MEMORY_SOURCE.recalled:
+      return VIA.recall
+    case MEMORY_SOURCE.space:
+      return VIA.space
   }
 }
 
@@ -47,37 +39,31 @@ const spacePageId = (
 ): string | undefined =>
   source.page.kind === MEMORY_SPACE_PAGE.page ? source.page.page_id : undefined
 
-/**
- * What a new chat was sent, read from one composition of its run's record. A page reached the
- * chat unless its source's allowance had no room for it.
- */
 export const deliveryOf = ({
   composition,
   paths,
   text
 }: {
   readonly composition: RunMemoryContext
-  /** The path of each page the composition names, by page id. */
   readonly paths: ReadonlyMap<string, string>
-  /** The text of the sections the chat was sent from Memory and its Space. */
   readonly text: string
 }): Delivery => {
   const pages: Array<Placed> = []
   const cut: Array<Placed> = []
   const bytes: Record<Via | "index", number> = { core: 0, recall: 0, space: 0, index: 0 }
   for (const source of composition.sources) {
-    if (source.kind === "index") {
+    if (source.kind === MEMORY_SOURCE.index) {
       bytes.index += source.bytes
       continue
     }
     const via = viaOf(source)
     bytes[via] += source.bytes
-    const pageId = source.kind === "space" ? spacePageId(source) : source.page_id
+    const pageId = source.kind === MEMORY_SOURCE.space ? spacePageId(source) : source.page_id
     if (pageId === undefined) continue
     const path = paths.get(pageId)
     if (path === undefined) throw new Error("A recorded Memory page has no path on the copy")
-    const placed = { path, via, whole: source.outcome === "whole" }
-    if (source.outcome !== "dropped") pages.push(placed)
+    const placed = { path, via, whole: source.outcome === MEMORY_OUTCOME.whole }
+    if (source.outcome !== MEMORY_OUTCOME.dropped) pages.push(placed)
     else cut.push(placed)
   }
   return { pages, cut, text, bytes }
@@ -88,24 +74,15 @@ export interface SentResult {
   readonly kind: QuestionKind
   readonly space_id: string | null
   readonly sent: boolean
-  /** Expected pages that did not reach the chat. */
   readonly missing: ReadonlyArray<string>
-  /** Expected pages left out for lack of room in their source's allowance. */
   readonly cut: ReadonlyArray<string>
-  /** Expected pages that reached the chat only in part, cut short by their renderer. Whether
-   * the answer lies in the part sent is not checked: the answered score judges that. */
   readonly inPart: ReadonlyArray<string>
-  /** For a question with no answer: the misleading patterns found in what was sent. */
   readonly misleading: ReadonlyArray<string>
   readonly pages: Delivery["pages"]
   readonly budgetCut: Delivery["cut"]
   readonly bytes: Delivery["bytes"]
 }
 
-/**
- * Sent: every expected page reached the chat. For a question with no answer in Memory: nothing
- * misleading did.
- */
 export const scoreSent = (question: Question, delivery: Delivery): SentResult => {
   const delivered = new Set(delivery.pages.map((page) => page.path))
   const deliveredWhole = new Set(
@@ -114,7 +91,7 @@ export const scoreSent = (question: Question, delivery: Delivery): SentResult =>
   const cutPaths = new Set(delivery.cut.map((page) => page.path))
   const missing = question.expected_pages.filter((path) => !delivered.has(path))
   const misleading =
-    question.kind === "no_answer"
+    question.kind === QUESTION_KIND.noAnswer
       ? question.misleading.filter((pattern) => new RegExp(pattern, "iu").test(delivery.text))
       : []
   return {
@@ -138,13 +115,10 @@ export interface KindCount {
   readonly kind: QuestionKind
   readonly questions: number
   readonly sent: number
-  /** Of the questions sent, those where an expected page reached the chat only in part. */
   readonly inPart: number
-  /** Of the questions not sent, those where an expected page was left out for room. */
   readonly cut: number
 }
 
-/** Counts by kind, every kind in its fixed order, then a total row. */
 export const countByKind = (
   results: ReadonlyArray<SentResult>
 ): ReadonlyArray<KindCount | (Omit<KindCount, "kind"> & { readonly kind: "total" })> => {
@@ -163,7 +137,6 @@ export const countByKind = (
   ]
 }
 
-/** The printed table: counts only, never a question or an answer. */
 export const renderCountTable = (results: ReadonlyArray<SentResult>): string => {
   const rows = countByKind(results)
   const header = ["kind", "questions", "sent", "sent in part", "not sent", "left out for room"]
@@ -197,10 +170,6 @@ export interface Regression {
   readonly now: (typeof LEVEL_NAMES)[number]
 }
 
-/**
- * Expected pages sent less fully than in a baseline run, page by page: whole to in part, or
- * whole or in part to not sent. A page missing or in part now was expected then too.
- */
 export const regressionsFrom = (
   baseline: ReadonlyArray<Pick<SentResult, "id" | "missing" | "inPart">>,
   results: ReadonlyArray<SentResult>

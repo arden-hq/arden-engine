@@ -1,9 +1,5 @@
-/**
- * Idleness and network failures surface as RetryableProviderError so the
- * kit's retry policy classifies them; abort errors pass through.
- */
 import { createParser, type EventSourceParser } from "eventsource-parser"
-import { isAbortError, raceAbort } from "../../abort.js"
+import { hasAbortName, isAbortError, raceAbort } from "../../abort.js"
 import { RetryableProviderError } from "./errors.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { after } from "@arden-hq/std/timer"
@@ -13,11 +9,11 @@ export interface SseEvent {
   readonly data: string
 }
 
-/** Incremental SSE decoder with the same seam the provider consumed before. */
+export const SSE_DONE = "[DONE]"
+
 export class SseParser {
   #events: Array<SseEvent> = []
   #parser: EventSourceParser
-  /** Last `retry:` reconnection hint seen on the wire, in milliseconds. */
   retryDelayMs: number | undefined
 
   constructor() {
@@ -40,7 +36,7 @@ export class SseParser {
 }
 
 const asTransportError = (cause: unknown, streamName: string): unknown =>
-  isAbortError(cause) || (cause instanceof DOMException && cause.name === "AbortError")
+  isAbortError(cause) || (cause instanceof DOMException && hasAbortName(cause))
     ? cause
     : new RetryableProviderError(errorMessage(cause, `${streamName} failed`))
 
@@ -61,10 +57,8 @@ const raceIdle = <A>(promise: Promise<A>, idleTimeoutMs: number, streamName: str
     )
   })
 
-/**
- * Reads `body` as SSE events. `streamName` opens the failure messages
- * ("<streamName> became idle", "<streamName> failed").
- */
+const observeRejectionOfReadAbandonedByAbort = (): void => {}
+
 export async function* readSseEvents(
   body: ReadableStream<Uint8Array>,
   parser: SseParser,
@@ -85,8 +79,7 @@ export async function* readSseEvents(
         options.idleTimeoutMs,
         options.streamName
       )
-      // The abort race can win and abandon the read; observe its late rejection.
-      read.catch(() => {})
+      read.catch(observeRejectionOfReadAbandonedByAbort)
       const next = await raceAbort(read, options.signal)
       if (next.done) break
       yield* parser.feed(decoder.decode(next.value, { stream: true }))

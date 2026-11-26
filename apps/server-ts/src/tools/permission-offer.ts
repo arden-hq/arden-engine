@@ -5,8 +5,8 @@ import { collapseHome } from "@arden-hq/std/paths"
 import { homedir } from "node:os"
 import { canonicalRulePath, tooWide } from "../fs/protected-paths.js"
 import type { CompiledWords } from "./rule-compile.js"
-import { type PathAccess, ruleDecision } from "../execution/rules.js"
-import { personCard, waivesRequirement, type ToolFacts } from "../execution/decide.js"
+import { ruleDecision } from "../execution/rules.js"
+import { personCard, waivesRequirement } from "../execution/decide.js"
 import {
   DECISION_WORD,
   PATH_ACTION,
@@ -19,338 +19,25 @@ import {
 import { parseMcpSource } from "../mcp/naming.js"
 import {
   offerChoiceList,
-  type OfferChoice,
   type OfferHolders,
   type OfferSource,
-  type PermissionChange,
-  type RuleChange
+  type PermissionChange
 } from "../persistence/permissions/offer.js"
-import {
-  COMMAND_TOOL,
-  commandWords,
-  type CommandPolicyRule
-} from "../persistence/permissions/command-policy.js"
+import { COMMAND_TOOL, commandWords } from "../persistence/permissions/command-policy.js"
 import type { PermissionStore } from "../persistence/permissions/store.js"
 import type { WorkStore } from "../persistence/work/store.js"
 import { toolFacts } from "./approval-decision.js"
 import { toolRule, type LiveRead } from "./approval-policy.js"
 import type { RunAuthority } from "../execution/authority.js"
-import {
-  settingOfRule,
-  type PermissionRule,
-  type RuleDecision,
-  type RuleSubject
-} from "../persistence/permissions/rules.js"
+import { type PermissionRule, type RuleSubject } from "../persistence/permissions/rules.js"
 import type { HostCommandGrantPlan } from "./bash-permissions.js"
 import type { ServerTool } from "./define.js"
 import { APPROVAL_MODE_LABEL } from "./onboarding.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
-import { type PermissionOffers } from "./permission-offer-types.js"
-
-export type OfferRequest =
-  | { readonly kind: "tool"; readonly tool: string; readonly decision: ToolApprovalDecision }
-  | { readonly kind: "site"; readonly tool: string; readonly origin: string }
-  | { readonly kind: "connector"; readonly server: string }
-  | { readonly kind: "mode"; readonly mode: ApprovalMode }
-  | { readonly kind: "command"; readonly command: string }
-  | {
-      readonly kind: "words"
-      readonly text: string
-      readonly decision: RuleDecision
-      readonly rules?: ReadonlyArray<CompiledHardRule>
-    }
-  | {
-      readonly kind: "path"
-      readonly path: string
-      readonly access: PathAccess
-      readonly decision: "allow" | "never"
-    }
-  | { readonly kind: "rule"; readonly ruleId: string; readonly decision: RuleChange }
-
-export type OfferFacts =
-  | {
-      readonly kind: "tool"
-      readonly decision: ToolApprovalDecision
-      readonly tool: ToolFacts
-      readonly rule: ToolApprovalDecision | undefined
-      readonly holders: OfferHolders
-    }
-  | {
-      readonly kind: "site"
-      readonly tool: ToolFacts
-      readonly origin: string
-      readonly rule: ToolApprovalDecision | undefined
-      readonly holders: OfferHolders
-    }
-  | {
-      readonly kind: "connector"
-      readonly server: string
-      readonly tools: number
-      readonly rule: ToolApprovalDecision | undefined
-      readonly holders: OfferHolders
-    }
-  | {
-      readonly kind: "mode"
-      readonly requested: ApprovalMode
-      readonly holder:
-        | {
-            readonly principal: string
-            readonly name: string
-            readonly own: boolean
-            readonly mode: ApprovalMode
-          }
-        | undefined
-    }
-  | {
-      readonly kind: "command"
-      readonly grant: HostCommandGrantPlan
-      readonly system: HostCommandGrantPlan
-      readonly alwaysAsk: boolean
-      readonly rule: ToolApprovalDecision | undefined
-      readonly holders: OfferHolders
-    }
-  | {
-      readonly kind: "words"
-      readonly text: string
-      readonly decision: RuleDecision
-      readonly rules: ReadonlyArray<CompiledHardRule>
-      readonly holders: OfferHolders
-    }
-  | {
-      readonly kind: "path"
-      readonly path: string | undefined
-      readonly access: PathAccess
-      readonly decision: "allow" | "never"
-      readonly tooWide: boolean
-      readonly holders: OfferHolders
-    }
-  | {
-      readonly kind: "rule"
-      readonly rule: PermissionRule | undefined
-      readonly decision: RuleChange
-    }
-
-type OfferRefusal =
-  | "always_asks"
-  | "your_setting"
-  | "already_allowed"
-  | "already_set"
-  | "own_rule"
-  | "own_record"
-  | "does_not_ask"
-  | "mode_elsewhere"
-  | "no_rule"
-  | "no_connector"
-  | "no_tool"
-  | "no_rule_id"
-  | "no_words"
-  | "no_path"
-  | "not_compiled"
-  | "too_wide"
-  | "system_list"
-  | "host_commands"
-  | "no_holder"
-  | "not_the_person"
-
-export type OfferPlan =
-  | {
-      readonly kind: "offer"
-      readonly change: PermissionChange
-      readonly choices: ReadonlyArray<OfferChoice>
-    }
-  | { readonly kind: "refuse"; readonly reason: OfferRefusal }
-
-const refuse = (reason: OfferRefusal): OfferPlan => ({ kind: "refuse", reason })
-
-export const planPermissionOffer = (facts: OfferFacts): OfferPlan => {
-  switch (facts.kind) {
-    case "tool":
-      return facts.decision === "approve" ? planAllow(facts) : planToolSetting(facts)
-    case "site":
-      return planSite(facts)
-    case "connector":
-      return planConnector(facts)
-    case "mode":
-      return planMode(facts)
-    case "command":
-      return planCommand(facts)
-    case "words":
-      if (facts.text.length === 0) return refuse("no_words")
-      return {
-        kind: "offer",
-        change: { kind: "words", text: facts.text, decision: facts.decision, rules: facts.rules },
-        choices: ruleChoices(facts.holders)
-      }
-    case "path":
-      if (facts.path === undefined) return refuse("no_path")
-      if (facts.tooWide) return refuse("too_wide")
-      return {
-        kind: "offer",
-        change: {
-          kind: "path",
-          path: facts.path,
-          access: facts.access,
-          decision: facts.decision
-        },
-        choices: ruleChoices(facts.holders)
-      }
-    case "rule":
-      return planRule(facts)
-  }
-}
-
-type ToolOfferFacts = Extract<OfferFacts, { kind: "tool" }>
-
-const settingOf = (rule: RuleDecision | undefined): ToolApprovalDecision | undefined =>
-  rule === undefined ? undefined : settingOfRule(rule)
-
-const ruleChoices = (holders: OfferHolders): ReadonlyArray<OfferChoice> => [
-  ...(holders.shared === null
-    ? []
-    : [
-        {
-          id: "space" as const,
-          principal: holders.shared.principal,
-          label: "This Space",
-          detail: ""
-        }
-      ]),
-  { id: "everywhere", principal: null, label: "Everywhere", detail: "" }
-]
-
-const planAllow = (facts: ToolOfferFacts): OfferPlan => {
-  const { tool, holders } = facts
-  if (tool.always_ask) return refuse("always_asks")
-  if (facts.rule === "ask" || facts.rule === "deny") return refuse("your_setting")
-  if (facts.rule === "approve") return refuse("already_allowed")
-  if (tool.name === COMMAND_TOOL) return refuse("own_rule")
-  if (tool.default_approval === "approve") return refuse("does_not_ask")
-  return {
-    kind: "offer",
-    change: { kind: "tool", tool: tool.name, decision: "approve" },
-    choices: ruleChoices(holders)
-  }
-}
-
-const planSite = (facts: Extract<OfferFacts, { kind: "site" }>): OfferPlan => {
-  const { tool, holders } = facts
-  if (tool.always_ask) return refuse("always_asks")
-  if (facts.rule === "ask" || facts.rule === "deny") return refuse("your_setting")
-  if (facts.rule === "approve") return refuse("already_allowed")
-  if (tool.default_approval === "approve") return refuse("does_not_ask")
-  return {
-    kind: "offer",
-    change: { kind: "site", tool: tool.name, origin: facts.origin },
-    choices: ruleChoices(holders)
-  }
-}
-
-const planToolSetting = (facts: ToolOfferFacts): OfferPlan => {
-  if (facts.rule === facts.decision) return refuse("already_set")
-  if (facts.tool.effect === "run_record") return refuse("own_record")
-  if (facts.decision === "ask" && facts.tool.always_ask) return refuse("always_asks")
-  return {
-    kind: "offer",
-    change: { kind: "tool", tool: facts.tool.name, decision: facts.decision },
-    choices: ruleChoices(facts.holders)
-  }
-}
-
-const planConnector = (facts: Extract<OfferFacts, { kind: "connector" }>): OfferPlan => {
-  if (facts.tools === 0) return refuse("no_connector")
-  if (facts.rule === "ask" || facts.rule === "deny") return refuse("your_setting")
-  if (facts.rule === "approve") return refuse("already_allowed")
-  return {
-    kind: "offer",
-    change: { kind: "connector", server: facts.server },
-    choices: ruleChoices(facts.holders)
-  }
-}
-
-const planMode = (facts: Extract<OfferFacts, { kind: "mode" }>): OfferPlan => {
-  if (facts.holder === undefined) return refuse("mode_elsewhere")
-  if (facts.holder.mode === facts.requested) return refuse("already_set")
-  return {
-    kind: "offer",
-    change: { kind: "mode", mode: facts.requested },
-    choices: [
-      {
-        id: "chat",
-        principal: facts.holder.principal,
-        label: facts.holder.own ? "In this chat" : `In ${facts.holder.name}`,
-        detail: facts.holder.own ? facts.holder.name : ""
-      }
-    ]
-  }
-}
-
-const SYSTEM_CHOICE: OfferChoice = {
-  id: "system",
-  principal: null,
-  label: "Arden's own jobs",
-  detail: ""
-}
-
-const planCommand = (facts: Extract<OfferFacts, { kind: "command" }>): OfferPlan => {
-  if (
-    facts.rule === "ask" ||
-    facts.rule === "deny" ||
-    facts.alwaysAsk ||
-    facts.grant.rule === "ask" ||
-    facts.grant.rule === "never"
-  )
-    return refuse("your_setting")
-  const chatRules = facts.grant.rule === "allow" ? undefined : facts.grant.offer?.rules
-  const key = (rule: CommandPolicyRule) =>
-    JSON.stringify([rule.executable_path, rule.argument_prefix])
-  const sameRules = (
-    left: ReadonlyArray<CommandPolicyRule>,
-    right: ReadonlyArray<CommandPolicyRule>
-  ) =>
-    left.length === right.length &&
-    left.every((rule) => right.some((other) => key(other) === key(rule)))
-  const jobsRules = facts.system.rule === undefined ? facts.system.offer?.rules : undefined
-  const systemRules =
-    chatRules !== undefined && jobsRules !== undefined && !sameRules(chatRules, jobsRules)
-      ? undefined
-      : jobsRules
-  if (chatRules === undefined && systemRules === undefined)
-    return refuse(facts.grant.rule === "allow" ? "already_allowed" : "no_rule")
-  const rules = chatRules ?? systemRules ?? []
-  return {
-    kind: "offer",
-    change: { kind: "command", rules },
-    choices: [
-      ...(chatRules === undefined ? [] : ruleChoices(facts.holders)),
-      ...(systemRules === undefined ? [] : [SYSTEM_CHOICE])
-    ]
-  }
-}
-
-const planRule = (facts: Extract<OfferFacts, { kind: "rule" }>): OfferPlan => {
-  const { rule, decision } = facts
-  if (rule === undefined) return refuse("no_rule_id")
-  if (rule.decision === decision) return refuse("already_set")
-  if (rule.subject.kind === "host_commands" && decision !== "ask" && decision !== "remove")
-    return refuse("host_commands")
-  const label = decision === "remove" ? "Remove" : "Change"
-  switch (rule.list.kind) {
-    case "system":
-      return refuse("system_list")
-    case "global":
-      return {
-        kind: "offer",
-        change: { kind: "rule", ruleId: rule.id, decision },
-        choices: [{ id: "everywhere", principal: null, label, detail: "" }]
-      }
-    case "space":
-      return {
-        kind: "offer",
-        change: { kind: "rule", ruleId: rule.id, decision },
-        choices: [{ id: "space", principal: `space:${rule.list.spaceId}`, label, detail: "" }]
-      }
-  }
-}
+import type { PermissionOffers } from "./permission-offer-types.js"
+import { LIST_WORDS } from "./permission-list-words.js"
+import { type OfferFacts, type OfferRefusal, type OfferRequest } from "./permission-offer-facts.js"
+import { planPermissionOffer, refuse, settingOf } from "./permission-offer-plan.js"
 
 const OFFER_REFUSAL: Record<OfferRefusal, string> = {
   always_asks: "This tool always asks the person; no permission changes that.",
@@ -488,11 +175,6 @@ const offerPrompt = (
         : `Change ${rule} from ${RULE_DECISION_WORD[held.decision]} to ${RULE_DECISION_WORD[change.decision]}?`
     }
   }
-}
-
-interface CompiledHardRule {
-  readonly subject: RuleSubject
-  readonly decision: RuleDecision
 }
 
 const wordsDetail = (
@@ -778,7 +460,5 @@ const modeSetter = (
   if (holder === undefined) return "its Space or job"
   return holder.sessionId === sessionId ? "this chat" : `the chat ${quoted(holder.name, 80)}`
 }
-
-const LIST_WORDS = { global: "Everywhere", system: "Arden's own jobs" } as const
 
 export type PermissionsView = Awaited<ReturnType<ReturnType<typeof makePermissionOffers>["read"]>>

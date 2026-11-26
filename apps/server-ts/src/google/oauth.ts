@@ -9,9 +9,15 @@ import {
 import { Predicate, Schema } from "effect"
 import { randomBytes } from "node:crypto"
 
-import { listenLoopback, type LoopbackListener } from "../connections/loopback-callback.js"
+import {
+  isLoopbackMethod,
+  LOOPBACK_PORT,
+  listenLoopback,
+  type LoopbackListener
+} from "../connections/loopback-callback.js"
 import {
   accountId,
+  GOOGLE_TOKEN_TYPE,
   type GoogleAccountStore,
   sortedUnique,
   type StoredAccount,
@@ -20,46 +26,19 @@ import {
 } from "./account-store.js"
 import type { createGoogleClientConfiguration } from "./client-configuration.js"
 import { currentMillis, iso } from "../runtime/clock.js"
-import { GoogleConnectionError } from "./errors.js"
+import { GOOGLE_CONNECTION_REASON, GoogleConnectionError } from "./errors.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { type GoogleOAuth } from "./oauth-types.js"
+import { GOOGLE_SCOPES, type GoogleEndpoints } from "./oauth-endpoints.js"
 
 const CALLBACK_PATH = "/oauth/callback"
 const CALLBACK_TIMEOUT_MS = 10 * 60 * 1_000
 
-export const DEFAULT_GOOGLE_ENDPOINTS = {
-  authorization: "https://accounts.google.com/o/oauth2/v2/auth",
-  token: "https://oauth2.googleapis.com/token",
-  userInfo: "https://openidconnect.googleapis.com/v1/userinfo"
-} as const
+const GOOGLE_OAUTH_ERROR = { invalidGrant: "invalid_grant" } as const
 
-export interface GoogleEndpoints {
-  readonly authorization: string
-  readonly token: string
-  readonly userInfo: string
-}
-
-export const GOOGLE_SCOPES: Readonly<Record<GoogleServiceId, ReadonlyArray<string>>> = {
-  gmail: [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "openid"
-  ],
-  calendar: [
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "openid"
-  ],
-  google_drive: [
-    "https://www.googleapis.com/auth/documents",
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.metadata.readonly",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "openid"
-  ]
-}
+const isInvalidGrant = (
+  error: string | undefined
+): error is typeof GOOGLE_OAUTH_ERROR.invalidGrant => error === GOOGLE_OAUTH_ERROR.invalidGrant
 
 const TokenResponseSchema = Schema.Struct({
   access_token: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(65_536)),
@@ -145,11 +124,12 @@ const requestJson = async (
     const oauthError =
       Predicate.isObject(body) && typeof body.error === "string" ? body.error : undefined
     throw new GoogleConnectionError({
-      reason: oauthError === "invalid_grant" ? "auth_required" : "provider",
-      message:
-        oauthError === "invalid_grant"
-          ? "Google authorization expired or was revoked"
-          : `Google ${operation} failed (${oauthError ?? "unknown_error"})`
+      reason: isInvalidGrant(oauthError)
+        ? GOOGLE_CONNECTION_REASON.authRequired
+        : GOOGLE_CONNECTION_REASON.provider,
+      message: isInvalidGrant(oauthError)
+        ? "Google authorization expired or was revoked"
+        : `Google ${operation} failed (${oauthError ?? "unknown_error"})`
     })
   }
   return body
@@ -222,7 +202,10 @@ export const makeGoogleOAuth = ({
         cause
       })
     }
-    if (token.token_type.toLowerCase() !== "bearer" || token.expires_in <= 0) {
+    if (
+      token.token_type.toLowerCase() !== GOOGLE_TOKEN_TYPE.bearer.toLowerCase() ||
+      token.expires_in <= 0
+    ) {
       throw new GoogleConnectionError({
         reason: "invalid_response",
         message: "Google returned invalid credentials"
@@ -294,7 +277,7 @@ export const makeGoogleOAuth = ({
           accessToken: token.access_token,
           refreshToken,
           expiresAt: now() + token.expires_in * 1_000,
-          tokenType: "Bearer"
+          tokenType: GOOGLE_TOKEN_TYPE.bearer
         }
       }
       const nextAccount: StoredAccount = {
@@ -335,10 +318,10 @@ export const makeGoogleOAuth = ({
     let listener: LoopbackListener
     try {
       listener = await listenLoopback({
-        port: "ephemeral",
+        port: LOOPBACK_PORT.ephemeral,
         path: CALLBACK_PATH,
         respond: async ({ method, params }) => {
-          if (method !== "GET") return { status: 404, type: "text", body: "Not found" }
+          if (!isLoopbackMethod(method)) return { status: 404, type: "text", body: "Not found" }
           if (params.get("state") !== state) {
             return {
               status: 400,
@@ -452,7 +435,10 @@ export const makeGoogleOAuth = ({
         "token refresh"
       )
     } catch (cause) {
-      if (cause instanceof GoogleConnectionError && cause.reason === "auth_required") {
+      if (
+        cause instanceof GoogleConnectionError &&
+        cause.reason === GOOGLE_CONNECTION_REASON.authRequired
+      ) {
         await store.markNeedsAuth(account.id, authorization.service)
       }
       throw cause
@@ -478,7 +464,7 @@ export const makeGoogleOAuth = ({
         accessToken: token.access_token,
         refreshToken: token.refresh_token ?? authorization.token.refreshToken,
         expiresAt: now() + token.expires_in * 1_000,
-        tokenType: "Bearer"
+        tokenType: GOOGLE_TOKEN_TYPE.bearer
       }
     }
     await store.serial(async () => {

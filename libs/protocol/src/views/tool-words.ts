@@ -3,48 +3,46 @@ import {
   TOOL_GROUP,
   TOOL_GROUP_WORDS,
   TOOL_META,
-  type ToolMeta
+  VIEWED_TOOL,
+  type ToolMeta,
+  type ToolNoun,
+  type ViewedTool
 } from "./tool-registry.js"
+import { TOOL_PRESENTATION, type ToolPresentation } from "../chat/tool-face.js"
 
-/**
- * What a tool NAME alone says about itself, in the words a reader sees: its
- * verb, glyph and grouping noun. One registry for every surface that names a
- * call — the desktop trail and the phone's fold lines read the same entries.
- */
+export const STEP_ICON = {
+  search: "search",
+  globe: "globe",
+  file: "file",
+  edit: "edit",
+  filePlus: "file-plus",
+  folder: "folder",
+  terminal: "terminal",
+  brain: "brain",
+  book: "book",
+  list: "list",
+  mail: "mail",
+  slack: "slack",
+  calendar: "calendar",
+  clock: "clock",
+  bell: "bell",
+  image: "image",
+  wrench: "wrench",
+  history: "history",
+  table: "table",
+  app: "app",
+  browser: "browser",
+  dot: "dot"
+} as const
 
-/** Semantic icon key for a step — mapped to a lucide glyph in the trace row. */
-export type StepIconKey =
-  | "search"
-  | "globe"
-  | "file"
-  | "edit"
-  | "file-plus"
-  | "folder"
-  | "terminal"
-  | "brain"
-  | "book"
-  | "list"
-  | "mail"
-  | "slack"
-  | "calendar"
-  | "clock"
-  | "bell"
-  | "image"
-  | "wrench"
-  | "history"
-  | "table"
-  | "app"
-  | "browser"
-  | "dot"
+export type StepIconKey = (typeof STEP_ICON)[keyof typeof STEP_ICON]
 
-/** The vocabulary entry a send the user kept with Save as draft on its card
- *  reads with: it says a draft was saved, not that mail was sent. */
 export const SAVED_DRAFT_WORDS = "email_draft"
 
-/** `ask_user` and `permission_offer`: the question card is the call's visible
- *  result, drawn by the transcript on its own, so the trail neither draws nor
- *  counts the call. */
-const ASK_CALLS: ReadonlySet<string> = new Set(["ask_user", "permission_offer"])
+const ASK_CALLS: ReadonlySet<string> = new Set<ViewedTool>([
+  VIEWED_TOOL.ask_user,
+  VIEWED_TOOL.permission_offer
+])
 
 export function isAskCall(kind: string | undefined): boolean {
   return kind !== undefined && ASK_CALLS.has(kind.toLowerCase())
@@ -52,19 +50,16 @@ export function isAskCall(kind: string | undefined): boolean {
 
 export function isPublicActivityTool(
   name: string,
-  presentation: "work" | "conversation" | "status" | undefined
+  presentation: ToolPresentation | undefined
 ): boolean {
-  return presentation !== "status" && !INTERNAL_TOOLS.has(name.toLowerCase())
+  return presentation !== TOOL_PRESENTATION.status && !INTERNAL_TOOLS.has(name.toLowerCase())
 }
 
-/** The registry entry for a tool name, if the tool is one the app knows. The
- *  trail summary uses this to decide whether a group can speak in the tool's
- *  own words or falls back to "Called tools". */
 export function toolMeta(kind: string | undefined): ToolMeta | undefined {
   return kind ? TOOL_META[kind.toLowerCase()] : undefined
 }
 
-export function toolNoun(kind: string): string | null {
+export function toolNoun(kind: string): ToolNoun | null {
   const words = TOOL_GROUP_WORDS[kind.toLowerCase()]
   return words?.kind === TOOL_GROUP.noun ? words.noun : null
 }
@@ -114,9 +109,6 @@ function humanize(s: string | null): string | null {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
-/** The step glyph for a progress sentence with no tool record behind it — the
- *  Task peek's live line only has the worker's words. Same verb heuristic the
- *  rail falls back to, so the two surfaces agree. Null = no verb recognised. */
 export function iconKeyForText(text: string): StepIconKey | null {
   const norm = text.toLowerCase()
   if (/\b(mail|inbox|email|thread)\b/.test(norm)) return "mail"
@@ -142,8 +134,6 @@ function iconFrom(lookup: ReturnType<typeof toolMetaFor>): StepIconKey {
   return lookup.meta?.icon ?? lookup.prefixIcon ?? lookup.heuristic?.[2] ?? "dot"
 }
 
-/** A tool's own verb, glyph and grouping noun from its name, then its
- *  display name, then its name's shape. */
 export function toolKindLabel(tool: ToolNaming): {
   verb: string
   iconKey: StepIconKey
@@ -162,16 +152,10 @@ export function toolKindLabel(tool: ToolNaming): {
   }
 }
 
-/** What the reader calls a tool the app has no verb for: its own display
- *  name, or its name — never a bare "a tool". */
 export function namedTool(tool: ToolNaming): string {
   return humanize(tool.displayName) ?? humanize(tool.name) ?? "a tool"
 }
 
-/** The category glyph for a tool NAME alone — the one mapping every surface
- *  that draws a tool reads: the trace row through {@link operationKindLabel},
- *  and the held effect in the Task peek, which only has the approval's
- *  `tool_name`. */
 export function iconKeyForToolName(toolName: string | undefined): StepIconKey {
   return iconFrom(toolMetaFor(toolName))
 }
@@ -253,23 +237,16 @@ function verbIn(verb: string, state: "waiting" | "running"): string {
 
 const isPastVerb = (word: string): word is PastVerb => Object.hasOwn(VERB_FORMS, word)
 
-/** A call waiting on your answer: it has not happened yet. */
 export function waitingVerb(verb: string): string {
   return verbIn(verb, "waiting")
 }
 
-/** A call that failed says so in words, not only in a glyph: "Read" becomes
- *  "Failed to read", "Ran a command" becomes "Failed to run a command". Words
- *  that open with no known verb (a model's own title, a tool's display name)
- *  are kept as written, the glyph and ink still marking the failure. */
 export function failedVerb(verb: string): string {
   const waiting = verbIn(verb, "waiting")
   if (waiting === verb && !isPastVerb(verb.split(" ", 1)[0] ?? "")) return verb
   return `Failed to ${waiting.charAt(0).toLowerCase()}${waiting.slice(1)}`
 }
 
-/** A call still running: it is happening now ("Searched the web" →
- *  "Searching the web"). Settled calls keep the done words. */
 export function runningVerb(verb: string): string {
   return verbIn(verb, "running")
 }

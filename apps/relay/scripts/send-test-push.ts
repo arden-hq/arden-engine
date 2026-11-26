@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util"
-import { utf8 } from "@arden-hq/relay-protocol"
+import { APNS_ENVIRONMENT, PUSH_STATUS, utf8 } from "@arden-hq/relay-protocol"
 import { http2Transport, pusherFromEnv } from "../src/bun/apns.js"
 
 const { values } = parseArgs({
@@ -11,12 +11,12 @@ const { values } = parseArgs({
 })
 
 const token = values.token
-const env = values.env
+const env = Object.values(APNS_ENVIRONMENT).find((candidate) => candidate === values.env)
 if (token === undefined || !/^[0-9a-fA-F]{64,200}$/.test(token)) {
   console.error("usage: send-test-push.ts --token <hex> [--env sandbox|production] [--topic id]")
   process.exit(2)
 }
-if (env !== "sandbox" && env !== "production") {
+if (env === undefined) {
   console.error("--env is sandbox or production")
   process.exit(2)
 }
@@ -40,4 +40,4 @@ const result = await pusher.push({
 })
 apns.close()
 console.log(result)
-process.exit(result.status === "accepted" ? 0 : 1)
+process.exit(result.status === PUSH_STATUS.accepted ? 0 : 1)

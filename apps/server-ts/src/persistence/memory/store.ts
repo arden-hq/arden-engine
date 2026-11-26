@@ -5,11 +5,6 @@ const MemoryCaptureProgressSchema = Schema.Struct({
   offset: Schema.Natural
 })
 
-/**
- * How far Capture has read a chat. `Beginning`: nothing yet. `AfterSequence`: every message up
- * to and including `sequence`. `AtPosition`: the messages before `progress.sequence`, and the
- * first `progress.offset` characters of that message, which is longer than one batch.
- */
 const MemoryCapturePositionSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("Beginning") }),
   Schema.Struct({ _tag: Schema.Literal("AfterSequence"), sequence: Schema.Natural }),
@@ -17,10 +12,6 @@ const MemoryCapturePositionSchema = Schema.Union([
 ])
 export type MemoryCapturePosition = typeof MemoryCapturePositionSchema.Type
 
-/**
- * One batch of a chat: from the position Capture had read to, through `end`. The message at the
- * end is named by id because a revert lets later messages reuse its sequence number.
- */
 export const MemoryCaptureBatchIdentitySchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,
   start: MemoryCapturePositionSchema,
@@ -29,15 +20,9 @@ export const MemoryCaptureBatchIdentitySchema = Schema.Struct({
 })
 export type MemoryCaptureBatchIdentity = typeof MemoryCaptureBatchIdentitySchema.Type
 
-/** An unread range of a chat with messages Capture has not read, or a batch it prepared and did not finish. */
 export interface MemoryCaptureWork {
   readonly sessionId: string
   readonly position: MemoryCapturePosition
-  /**
-   * The last message the work may read: the range's last, the chat's last message when it was
-   * listed for the open range, or, when a revert cut the prepared batch, the last message of it
-   * that is still there.
-   */
   readonly throughSequence: number
   readonly prepared: MemoryCaptureBatchIdentity | undefined
 }
@@ -48,7 +33,6 @@ export const MemoryCaptureBatchSchema = Schema.Struct({
 })
 export type MemoryCaptureBatch = typeof MemoryCaptureBatchSchema.Type
 
-/** `superseded`: the chat moved on since the batch was read, so nothing was written. */
 export type MemoryCaptureMove = "moved" | "superseded"
 
 export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureStoreError>()(
@@ -64,23 +48,16 @@ export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureSto
 export class MemoryCaptureStore extends Context.Service<
   MemoryCaptureStore,
   {
-    /** Work in unread ranges; closed ranges too when `older`. */
     readonly listWork: (
       older: boolean,
       limit?: number
     ) => Effect.Effect<ReadonlyArray<MemoryCaptureWork>, MemoryCaptureStoreError>
-    /** Records the batch before the model reads it, if the chat is still at its start. */
     readonly prepare: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    /**
-     * Moves the range that stopped at the batch's start to its end, or to the last message of it
-     * a revert left; a closed range with nothing left is deleted.
-     */
     readonly advance: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    /** Moves the range as `advance` does, and keeps the batch's messages as a closed range that rests a day. */
     readonly skip: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>

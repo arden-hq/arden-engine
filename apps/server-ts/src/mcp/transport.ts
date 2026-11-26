@@ -323,7 +323,6 @@ export class McpStdioTransport implements Transport {
       throw new Error("MCP stdio transport did not receive pipes")
     }
     stdout.on("data", (chunk: Buffer) => this.receive(chunk))
-    // Always drained, so a chatty server never blocks on a full pipe.
     child.stderr?.setEncoding("utf8")
     child.stderr?.on("data", (chunk: string) => this.stderr.push(chunk))
     child.stderr?.on("error", () => undefined)
@@ -372,9 +371,6 @@ export class McpStdioTransport implements Transport {
       stdin.write(serializeMessage(message), (cause) => resolve(cause ?? undefined))
     })
     if (failure === undefined) return
-    // A write fails (EPIPE) when the process has closed its stdin, usually as
-    // it exits, and can land before its close event. Waiting for that close
-    // lets the caller read the exit and the whole stderr tail, not a bare EPIPE.
     if (!this.ended) await waitForClose(child, PROCESS_EXIT_GRACE_MS)
     throw failure
   }
@@ -404,9 +400,7 @@ export class McpStdioTransport implements Transport {
   private async terminate(child: ChildProcess): Promise<void> {
     try {
       child.stdin?.end()
-    } catch {
-      // Continue to process-group termination.
-    }
+    } catch {}
     await waitForExit(child, PROCESS_EXIT_GRACE_MS)
     signalProcessGroup(child.pid, "SIGTERM", (signal) => child.kill(signal))
     await waitForExit(child, PROCESS_EXIT_GRACE_MS)

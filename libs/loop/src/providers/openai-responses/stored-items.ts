@@ -7,6 +7,7 @@ import {
   messageItemText,
   normalizeOutputItem,
   PROVIDER_STATE_KEY,
+  RESPONSE_ITEM_TYPE,
   stringValue,
   type InputItem,
   type StoredResponseItem,
@@ -15,12 +16,12 @@ import {
 } from "./items.js"
 import { projectFunctionParameters } from "./parameter-schema.js"
 import { OUTPUT_ID_ORIGIN, outputIdOrigin } from "./output-id.js"
-import { providerNamespace } from "./tools.js"
+import { providerNamespace, RESPONSES_TOOL_TYPE } from "./tools.js"
 
 const decodeStoredItem = (value: unknown): StoredResponseItem => {
   const raw = asRecord(value)
   const type = raw === null ? null : stringValue(raw.type)
-  if (type === "tool_search_call") {
+  if (type === RESPONSE_ITEM_TYPE.toolSearchCall) {
     if (
       (typeof raw?.call_id !== "string" && raw?.call_id !== null) ||
       typeof raw.execution !== "string" ||
@@ -32,7 +33,7 @@ const decodeStoredItem = (value: unknown): StoredResponseItem => {
     }
     return raw as ToolSearchCallInputItem
   }
-  if (type === "tool_search_output") {
+  if (type === RESPONSE_ITEM_TYPE.toolSearchOutput) {
     if (
       (typeof raw?.call_id !== "string" && raw?.call_id !== null) ||
       typeof raw.status !== "string" ||
@@ -45,7 +46,9 @@ const decodeStoredItem = (value: unknown): StoredResponseItem => {
     return raw as ToolSearchOutputInputItem
   }
   if (
-    (type === "message" || type === "reasoning" || type === "web_search_call") &&
+    (type === RESPONSE_ITEM_TYPE.message ||
+      type === RESPONSE_ITEM_TYPE.reasoning ||
+      type === RESPONSE_ITEM_TYPE.webSearchCall) &&
     typeof raw?.id !== "string"
   ) {
     throw new SemanticResponseError("Stored output item is missing an id")
@@ -62,16 +65,14 @@ const storedResponseItems = (
   return "openai_response_items" in message ? { items: message.openai_response_items } : undefined
 }
 
-/**
- * A found tool replayed on this request's route: under the namespace this wire
- * accepts, and `async` only when this request declares the tool async. A
- * search answered on a GPT-6 route stored its tools with `async: true`; replayed
- * verbatim to gpt-5.6 the whole request was refused (HTTP 400, 2026-09-29).
- */
 const replayedFoundTool = (tool: unknown, asyncTools: ReadonlySet<string>): unknown => {
   const raw = asRecord(tool)
   if (raw === null) return tool
-  if (raw.type === "namespace" && typeof raw.name === "string" && Array.isArray(raw.tools)) {
+  if (
+    raw.type === RESPONSES_TOOL_TYPE.namespace &&
+    typeof raw.name === "string" &&
+    Array.isArray(raw.tools)
+  ) {
     return {
       ...raw,
       name: providerNamespace(raw.name),
@@ -80,7 +81,7 @@ const replayedFoundTool = (tool: unknown, asyncTools: ReadonlySet<string>): unkn
   }
   const parameters = asRecord(raw.parameters)
   const projected =
-    raw.type === "function" && parameters !== null
+    raw.type === RESPONSES_TOOL_TYPE.function && parameters !== null
       ? { ...raw, parameters: projectFunctionParameters(parameters) }
       : raw
   if (raw.async !== true || (typeof raw.name === "string" && asyncTools.has(raw.name)))
@@ -89,11 +90,6 @@ const replayedFoundTool = (tool: unknown, asyncTools: ReadonlySet<string>): unkn
   return portable
 }
 
-/**
- * `asyncTools` names the tools this request declares `async` — the route's
- * own capability, already applied by the loop. Stored items follow it, never
- * the route that first produced them.
- */
 export const responseItems = (
   message: ChatMessage,
   asyncTools: ReadonlySet<string>
@@ -109,27 +105,26 @@ export const responseItems = (
       throw new SemanticResponseError("Stored output items must be an array")
     const items = stored.items.map(decodeStoredItem)
     return items.flatMap((item): ReadonlyArray<InputItem> => {
-      if (item.type === "tool_search_call") return [{ ...item }]
-      if (item.type === "tool_search_output") {
+      if (item.type === RESPONSE_ITEM_TYPE.toolSearchCall) return [{ ...item }]
+      if (item.type === RESPONSE_ITEM_TYPE.toolSearchOutput) {
         return [{ ...item, tools: item.tools.map((tool) => replayedFoundTool(tool, asyncTools)) }]
       }
-      if (item.type === "function_call") {
-        const native = nativeAsync.has(item.call_id)
+      if (item.type === RESPONSE_ITEM_TYPE.functionCall) {
+        const { async: _, ...portable } = item
+        const kept: InputItem = nativeAsync.has(item.call_id) ? { ...item } : portable
         return [
-          Object.fromEntries(
-            Object.entries(item).flatMap(([key, value]): ReadonlyArray<[string, unknown]> => {
-              if (key === "async") return native ? [[key, value]] : []
-              if (key === "namespace" && typeof value === "string")
-                return [[key, providerNamespace(value)]]
-              return [[key, value]]
-            })
-          )
+          item.namespace === undefined
+            ? kept
+            : { ...kept, namespace: providerNamespace(item.namespace) }
         ]
       }
-      if (item.type === "reasoning" && outputIdOrigin(item.id) === OUTPUT_ID_ORIGIN.arden) {
+      if (
+        item.type === RESPONSE_ITEM_TYPE.reasoning &&
+        outputIdOrigin(item.id) === OUTPUT_ID_ORIGIN.arden
+      ) {
         return []
       }
-      if (item.type === "reasoning") {
+      if (item.type === RESPONSE_ITEM_TYPE.reasoning) {
         return [
           {
             type: "reasoning",
@@ -142,7 +137,10 @@ export const responseItems = (
           }
         ]
       }
-      if (item.type !== "message" || outputIdOrigin(item.id) !== OUTPUT_ID_ORIGIN.arden) {
+      if (
+        item.type !== RESPONSE_ITEM_TYPE.message ||
+        outputIdOrigin(item.id) !== OUTPUT_ID_ORIGIN.arden
+      ) {
         return [item as unknown as InputItem]
       }
       return [

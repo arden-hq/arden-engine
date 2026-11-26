@@ -6,15 +6,6 @@ import { makeSqliteThreadClient, type SqliteThreadClientConfig } from "@arden-hq
 
 const savepointName = (id: number) => `effect_sql_${String(id)}`
 
-/**
- * SQLite keeps a transaction open when its COMMIT fails. That happens when
- * another process holds a read lock on a rollback-journal database the
- * transaction wrote: the attached search.sqlite. Effect's transaction wrapper
- * turns the failed COMMIT into a defect and never rolls back, so every later
- * BEGIN on the connection fails ("cannot start a transaction within a
- * transaction") until restart. Here a failed COMMIT rolls back first: that
- * transaction's writes are lost and it still fails, but the connection works.
- */
 const rollbackOnFailedCommit = <C extends SqlClient.SqlClient>(client: C, retries: number): C => {
   const waitForLock = <A>(operation: Effect.Effect<A, SqlError.SqlError>) =>
     operation.pipe(

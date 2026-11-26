@@ -2,7 +2,14 @@ import { constants } from "node:fs"
 import { chmod, lstat, mkdir, open } from "node:fs/promises"
 import { Predicate } from "effect"
 
-export type PrivateFileViolation = "not_regular" | "too_large" | "not_directory"
+export const PRIVATE_FILE_VIOLATION = {
+  notRegular: "not_regular",
+  tooLarge: "too_large",
+  notDirectory: "not_directory"
+} as const
+
+export type PrivateFileViolation =
+  (typeof PRIVATE_FILE_VIOLATION)[keyof typeof PRIVATE_FILE_VIOLATION]
 
 export class PrivateFileError extends Error {
   readonly reason: PrivateFileViolation

@@ -26,10 +26,6 @@ import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
   readonly sessionId: string
-  /**
-   * What the recall searches for, and how many characters of a page's content from its start the
-   * run is sent elsewhere; undefined for a run with no recall.
-   */
   readonly recall?: {
     readonly query: string
     readonly sent?: { readonly pageId: string; readonly chars: number }
@@ -37,15 +33,12 @@ interface MemorySourcesInput {
 }
 
 export interface MemoryTurn {
-  /** The Memory revision every read in this turn is made at. */
   readonly revision: string | null
   readonly readContent: (pageId: string) => ReturnType<typeof readSnapshotContent>
-  /** The generated list of a Space's pages besides its own, in at most `maxBytes`. */
   readonly spaceList: (space: {
     readonly pageId: string
     readonly pagePath: string
   }) => (maxBytes: number) => RenderedMemory
-  /** What this run may be sent from Memory: standing facts and, if asked, recall. */
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }
 

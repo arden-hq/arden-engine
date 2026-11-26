@@ -2,10 +2,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-// Stands in for the desktop app's `arden-apple`: answers each "app verb" with
-// the JSON it was given, or with a fault on stderr and exit 1, and records
-// every argument list it got.
-const SCRIPT = `
+const ARDEN_APPLE_STAND_IN = `
 const { appendFileSync, readFileSync } = require("node:fs")
 const { join } = require("node:path")
 const args = process.argv.slice(2)
@@ -38,7 +35,7 @@ export const makeFakeMacHelper = async (): Promise<FakeMacHelper> => {
   const directory = await mkdtemp(join(tmpdir(), "arden-mac-apps-"))
   const path = join(directory, "arden-apple")
   await writeFile(path, `#!/bin/sh\nexec "${process.execPath}" "$0.cjs" "$@"\n`)
-  await writeFile(`${path}.cjs`, SCRIPT)
+  await writeFile(`${path}.cjs`, ARDEN_APPLE_STAND_IN)
   await chmod(path, 0o755)
   return {
     directory,

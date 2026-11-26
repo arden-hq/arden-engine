@@ -11,7 +11,7 @@ import type {
   InteractionSender
 } from "./history.js"
 import type { HistoryToolCall, ToolCallStatus } from "./history-tool-call.js"
-import type { ToolData } from "./tool-face.js"
+import type { ToolData, ToolExecution } from "./tool-face.js"
 
 export const CONTEXT_TEXT = { empty: "empty", text: "text" } as const
 
@@ -43,17 +43,21 @@ export const OUTPUT_PART = {
 export const CONTEXT_BLOCK = "context"
 
 export type HistoryAssistantOutputPart =
-  | { readonly type: "reasoning"; readonly text: string; readonly source_index: number }
   | {
-      readonly type: "text"
+      readonly type: typeof OUTPUT_PART.reasoning
+      readonly text: string
+      readonly source_index: number
+    }
+  | {
+      readonly type: typeof OUTPUT_PART.text
       readonly text: string
       readonly phase: OutputTextPhase
       readonly source_index: number
     }
   | {
-      readonly type: "tool_call"
+      readonly type: typeof OUTPUT_PART.toolCall
       readonly tool_call_id: string
-      readonly execution: "runtime" | "provider"
+      readonly execution: ToolExecution
       readonly source_index: number
     }
 

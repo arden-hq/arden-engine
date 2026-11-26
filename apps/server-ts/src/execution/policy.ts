@@ -4,19 +4,20 @@ import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
 import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
 
-export const RunCapabilitySchema = Schema.Literals([
-  "none",
-  "read_only",
-  "reports",
-  "browser",
-  "all",
-  "space",
-  "memory_capture",
-  "chat_summary",
-  "agent_research",
-  "agent_code"
-])
-export type RunCapability = typeof RunCapabilitySchema.Type
+export const RUN_CAPABILITY = {
+  none: "none",
+  readOnly: "read_only",
+  reports: "reports",
+  browser: "browser",
+  all: "all",
+  space: "space",
+  memoryCapture: "memory_capture",
+  chatSummary: "chat_summary",
+  agentResearch: "agent_research",
+  agentCode: "agent_code"
+} as const
+export type RunCapability = (typeof RUN_CAPABILITY)[keyof typeof RUN_CAPABILITY]
+export const RunCapabilitySchema = Schema.Literals(Object.values(RUN_CAPABILITY))
 
 export const SessionResourceReachSchema = Schema.Struct({
   session_id: Schema.NonEmptyString,
@@ -27,14 +28,16 @@ export const SessionResourceReachSchema = Schema.Struct({
 })
 export type SessionResourceReach = typeof SessionResourceReachSchema.Type
 
-export const SCOPE_KEYS = [...RunCapabilitySchema.literals, "worker", "observer"] as const
-
-export type ToolScopeKey = (typeof SCOPE_KEYS)[number]
+export const TOOL_SCOPE_KEY = { ...RUN_CAPABILITY, worker: "worker", observer: "observer" } as const
+export type ToolScopeKey = (typeof TOOL_SCOPE_KEY)[keyof typeof TOOL_SCOPE_KEY]
+export const SCOPE_KEYS: ReadonlyArray<ToolScopeKey> = Object.values(TOOL_SCOPE_KEY)
 
 export const runApprovalMode = (policy: {
   readonly auto_approve: boolean
   readonly approval_mode?: ApprovalMode
 }): ApprovalMode => policy.approval_mode ?? (policy.auto_approve ? "allow" : "ask")
+
+export const RUN_EXECUTION_MODE = { inline: "inline", worker: "worker" } as const
 
 export const RunPolicySchema = Schema.Struct({
   authority_session_id: Schema.optionalKey(Schema.NonEmptyString),
@@ -44,7 +47,7 @@ export const RunPolicySchema = Schema.Struct({
   budget_id: Schema.NonEmptyString,
   budget_generation: Schema.optionalKey(Schema.Natural),
   execution: Schema.Struct({
-    mode: Schema.Literals(["inline", "worker"]),
+    mode: Schema.Literals(Object.values(RUN_EXECUTION_MODE)),
     observe: Schema.Boolean
   }),
   capabilities: Schema.NonEmptyArray(RunCapabilitySchema),
@@ -73,7 +76,9 @@ export const narrowCapabilities = (
 ): RunPolicy["capabilities"] => [
   requested,
   ...inherited.filter(
-    (capability) => capability !== requested && (requested === "all" || capability !== "all")
+    (capability) =>
+      capability !== requested &&
+      (requested === RUN_CAPABILITY.all || capability !== RUN_CAPABILITY.all)
   )
 ]
 

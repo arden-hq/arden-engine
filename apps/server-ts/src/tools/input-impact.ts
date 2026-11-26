@@ -1,45 +1,46 @@
 import { CONTAINED, INERT, OUTWARD, type CallImpact } from "../execution/impact.js"
-import type { NativeAction } from "../computer/contract.js"
+import { NATIVE_ACTION, type NativeAction } from "../computer/contract.js"
+import { BROWSER_ACT_ACTION } from "../browser/service.js"
 import { keyChord } from "../computer/step.js"
 import type { ActParametersSchema } from "./browser-parameters.js"
 
 export const actImpact = (input: typeof ActParametersSchema.Type): CallImpact => {
   if (input.secret !== undefined) return { kind: "locked", category: "passwords" }
   switch (input.action) {
-    case "scroll":
-    case "hover":
-    case "focus":
+    case BROWSER_ACT_ACTION.scroll:
+    case BROWSER_ACT_ACTION.hover:
+    case BROWSER_ACT_ACTION.focus:
       return INERT
-    case "fill":
-    case "check":
-    case "uncheck":
+    case BROWSER_ACT_ACTION.fill:
+    case BROWSER_ACT_ACTION.check:
+    case BROWSER_ACT_ACTION.uncheck:
       return CONTAINED
-    case "type":
+    case BROWSER_ACT_ACTION.type:
       return typedImpact(input.value ?? "")
-    case "press":
+    case BROWSER_ACT_ACTION.press:
       return keyImpact(input.value ?? "")
-    case "click":
-    case "dblclick":
-    case "select":
+    case BROWSER_ACT_ACTION.click:
+    case BROWSER_ACT_ACTION.dblclick:
+    case BROWSER_ACT_ACTION.select:
       return OUTWARD
   }
 }
 
 export const nativeActImpact = (input: NativeAction): CallImpact => {
   switch (input.action) {
-    case "scroll":
+    case NATIVE_ACTION.scroll:
       return INERT
-    case "activate":
-    case "set_value":
+    case NATIVE_ACTION.activate:
+    case NATIVE_ACTION.set_value:
       return CONTAINED
-    case "type":
+    case NATIVE_ACTION.type:
       return typedImpact(input.text)
-    case "key":
+    case NATIVE_ACTION.key:
       return keyImpact(keyChord(input))
-    case "click":
-    case "pixel_click":
-    case "menu":
-    case "drag":
+    case NATIVE_ACTION.click:
+    case NATIVE_ACTION.pixel_click:
+    case NATIVE_ACTION.menu:
+    case NATIVE_ACTION.drag:
       return OUTWARD
   }
 }

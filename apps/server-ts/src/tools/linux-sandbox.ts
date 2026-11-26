@@ -31,15 +31,11 @@ const mountLayers = (options: {
   { name: "reopened", args: options.reopened.flatMap((root) => ["--ro-bind-try", root, root]) }
 ]
 
-// bubblewrap: later mounts cover earlier ones, and it mounts only over existing
-// paths, so a protected file that does not exist yet (a missing ~/.zshrc) can be
-// created on Linux.
 export const linuxSandboxCommand = (options: {
   readonly command: string
   readonly cwd: string
   readonly policy: LocalPathPolicy
   readonly writable: ReadonlyArray<string>
-  /** Existing paths only: bubblewrap cannot mount over a missing one. */
   readonly hidden: ReadonlyArray<HiddenEntry>
   readonly writeProtected: ReadonlyArray<string>
   readonly reopened: ReadonlyArray<string>

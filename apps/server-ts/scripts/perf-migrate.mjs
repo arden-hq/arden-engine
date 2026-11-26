@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { execFileSync } from "node:child_process"
 import { constants, copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
@@ -9,6 +7,7 @@ import { DatabaseSync } from "node:sqlite"
 import { errorMessage } from "@arden-hq/std/errors"
 import { LATEST_SCHEMA_VERSION } from "../dist/persistence/migrations/index.js"
 import {
+  MIGRATION_PLAN,
   openDatabaseForMigration,
   pendingMigrationSteps,
   planMigrations
@@ -119,8 +118,8 @@ let failed = false
 const slow = []
 try {
   const plan = planMigrations(database)
-  const steps = plan.kind === "pending" ? pendingMigrationSteps(plan) : []
-  if (plan.kind !== "pending") {
+  const steps = plan.kind === MIGRATION_PLAN.pending ? pendingMigrationSteps(plan) : []
+  if (plan.kind !== MIGRATION_PLAN.pending) {
     console.error(`perf-migrate: expected pending migrations, found ${plan.kind}`)
     failed = true
   }

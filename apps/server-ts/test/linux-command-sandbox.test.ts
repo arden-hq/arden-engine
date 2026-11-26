@@ -9,7 +9,7 @@ import {
   sandboxUnavailableMessage,
   shellInvocation,
   shellRuntime
-} from "../src/tools/shell-policy.js"
+} from "../src/tools/shell-invocation.js"
 import { runCommandUntil } from "../src/tools/shell-run.js"
 import type { LiveProcess } from "../src/terminals/live-process.js"
 import type { LocalPathPolicy } from "../src/storage/local-paths.js"

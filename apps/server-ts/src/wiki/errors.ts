@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-import type { WikiCommitError } from "./commit.js"
+import type { WikiCommitError } from "./commit-write-types.js"
 
 const WikiOperationSchema = Schema.Literals([
   "open",
@@ -29,17 +29,19 @@ export class WikiPageFormatError extends Schema.TaggedError<WikiPageFormatError>
   }
 ) {}
 
+export const WIKI_ERROR_REASON = {
+  invalid: "invalid",
+  not_found: "not_found",
+  conflict: "conflict",
+  blocked: "blocked",
+  closed: "closed",
+  corrupt: "corrupt",
+  storage: "storage"
+} as const
+
 export class WikiError extends Schema.TaggedError<WikiError>()("WikiError", {
   operation: WikiOperationSchema,
-  reason: Schema.Literals([
-    "invalid",
-    "not_found",
-    "conflict",
-    "blocked",
-    "closed",
-    "corrupt",
-    "storage"
-  ] as const),
+  reason: Schema.Literals(Object.values(WIKI_ERROR_REASON)),
   message: Schema.String,
   pageId: Schema.optionalKey(Schema.NonEmptyString),
   currentContent: Schema.optionalKey(Schema.String),

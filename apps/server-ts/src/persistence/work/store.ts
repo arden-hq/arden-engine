@@ -43,14 +43,16 @@ export interface TaskIntent {
   readonly now: string
 }
 
+const TASK_FINISH_CHECK = { warn: "warn", close: "close" } as const
+
 export type TaskFinishCheck =
   | {
-      readonly kind: "warn"
+      readonly kind: typeof TASK_FINISH_CHECK.warn
       readonly open: ReadonlyArray<TodoListItem>
       readonly request: OriginalRequest | undefined
       readonly record: FinishRecord
     }
-  | { readonly kind: "close"; readonly record: FinishRecord }
+  | { readonly kind: typeof TASK_FINISH_CHECK.close; readonly record: FinishRecord }
 
 export interface WorkAttachmentContent {
   readonly metadata: TaskAttachmentRecord
@@ -77,16 +79,20 @@ export type SpentScope =
   | { readonly sessionId: string }
   | { readonly itemId: string }
 
+export const TASK_SCOPE = { space: "space", chat: "chat", none: "none" } as const
+
 export type TaskScope =
-  | { readonly kind: "space"; readonly spaceId: string }
-  | { readonly kind: "chat"; readonly sessionId: string }
-  | { readonly kind: "none" }
+  | { readonly kind: typeof TASK_SCOPE.space; readonly spaceId: string }
+  | { readonly kind: typeof TASK_SCOPE.chat; readonly sessionId: string }
+  | { readonly kind: typeof TASK_SCOPE.none }
 
 export type CreateTaskInput = TaskDraft & { readonly key?: string }
 
+const TASK_ADDRESS = { key: "key", item: "item" } as const
+
 export type TaskAddress =
-  | { readonly kind: "key"; readonly scope: TaskScope; readonly key: string }
-  | { readonly kind: "item"; readonly itemId: string }
+  | { readonly kind: typeof TASK_ADDRESS.key; readonly scope: TaskScope; readonly key: string }
+  | { readonly kind: typeof TASK_ADDRESS.item; readonly itemId: string }
 
 export type FocusQuestionTargetInput =
   | { readonly kind: "existing"; readonly session_ref: string }
@@ -119,17 +125,39 @@ export const TELL_LIMIT = 5
 
 export const TELL_TEXT_LIMIT = 500
 
+const TELL_OUTCOME = { told: "told", again: "again", refused: "refused" } as const
+
 export type TellOutcome =
-  | { readonly kind: "told"; readonly n: number; readonly left: number; readonly chatId: string }
-  | { readonly kind: "again"; readonly n: number; readonly chatId: string | undefined }
-  | { readonly kind: "refused"; readonly reason: string }
+  | {
+      readonly kind: typeof TELL_OUTCOME.told
+      readonly n: number
+      readonly left: number
+      readonly chatId: string
+    }
+  | {
+      readonly kind: typeof TELL_OUTCOME.again
+      readonly n: number
+      readonly chatId: string | undefined
+    }
+  | { readonly kind: typeof TELL_OUTCOME.refused; readonly reason: string }
+
+export const TASK_EXECUTION_RECEIPT = {
+  saved: "saved",
+  queued: "queued",
+  working: "working",
+  scheduled: "scheduled",
+  inactive: "inactive"
+} as const
 
 export type TaskExecutionReceipt =
-  | { readonly kind: "saved" }
-  | { readonly kind: "queued" }
-  | { readonly kind: "working" }
-  | { readonly kind: "scheduled"; readonly at: string }
-  | { readonly kind: "inactive"; readonly state: TaskRecord["status"] | TaskRecord["activity"] }
+  | { readonly kind: typeof TASK_EXECUTION_RECEIPT.saved }
+  | { readonly kind: typeof TASK_EXECUTION_RECEIPT.queued }
+  | { readonly kind: typeof TASK_EXECUTION_RECEIPT.working }
+  | { readonly kind: typeof TASK_EXECUTION_RECEIPT.scheduled; readonly at: string }
+  | {
+      readonly kind: typeof TASK_EXECUTION_RECEIPT.inactive
+      readonly state: TaskRecord["status"] | TaskRecord["activity"]
+    }
 
 export class WorkStore extends Context.Service<
   WorkStore,

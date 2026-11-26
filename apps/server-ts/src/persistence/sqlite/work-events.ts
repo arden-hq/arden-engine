@@ -1,4 +1,5 @@
 import { outcomeSql } from "./automation-run-outcome.js"
+import type { SpaceTaskEventType } from "@arden-hq/protocol/spaces/work"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
@@ -13,7 +14,7 @@ export interface WorkEvents {
   readonly taskEvent: (
     spaceId: string | null,
     itemId: string,
-    eventType: string,
+    eventType: SpaceTaskEventType,
     summary: string,
     at: string,
     runId?: string,
@@ -29,7 +30,7 @@ export const makeWorkEvents = (
   const taskEvent = (
     spaceId: string | null,
     itemId: string,
-    eventType: string,
+    eventType: SpaceTaskEventType,
     summary: string,
     at: string,
     runId?: string,

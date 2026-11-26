@@ -8,7 +8,7 @@ import type {
 import type { ApprovalAlternativeInput, ApprovalEditsInput } from "../persistence/tools/store.js"
 import type { ChatMessageError, ChatMessageFailure } from "./message-errors.js"
 import type { ChatAutomationStartInput, ChatSendInput } from "./message-input.js"
-import type { TaskContinuationInput } from "./run-driver.js"
+import type { TaskContinuationInput } from "./run-driver-support.js"
 import type { ServerToolRun } from "./runner-contract.js"
 
 export interface ChatMessageShape {

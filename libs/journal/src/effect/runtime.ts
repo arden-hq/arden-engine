@@ -1,546 +1,36 @@
 import { Buffer } from "node:buffer"
+import { Cause, Effect, Queue, Ref, Scope, Semaphore, Stream } from "effect"
+import { SqlClient } from "effect/unstable/sql"
+import type { JournalAppendResult, JournalDelivery, JournalEvent } from "../types.js"
 import {
-  Cause,
-  DateTime,
-  Effect,
-  Option,
-  Queue,
-  Ref,
-  Schema,
-  Scope,
-  Semaphore,
-  Stream
-} from "effect"
-import { SqlClient, type Statement } from "effect/unstable/sql"
-import type {
-  JournalAppendResult,
-  JournalDelivery,
-  JournalEvent,
-  JournalRecord,
-  JsonValue
-} from "../types.js"
-
-const PAGE_SIZE = 512
-const DEFAULT_SUBSCRIBER_CAPACITY = 4_096
-const DEFAULT_SUBSCRIBER_BYTES = 8 * 1024 * 1024
-
-const decodeJsonData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
-const JsonAttributes = Schema.Record(Schema.String, Schema.Json)
-const decodeJsonAttributes = Schema.decodeUnknownSync(Schema.fromJsonString(JsonAttributes))
-const NonEmptyText = Schema.String.check(Schema.isMinLength(1))
-const EventSchema = Schema.Struct({
-  type: NonEmptyText,
-  data: Schema.Json,
-  attributes: Schema.optionalKey(JsonAttributes),
-  durable: Schema.optionalKey(Schema.Boolean)
-})
-const EventBatchSchema = Schema.Array(EventSchema).check(
-  Schema.isMinLength(1),
-  Schema.makeFilter((events) => {
-    let sawTransient = false
-    const issues: Array<Schema.FilterIssue> = []
-    for (const [index, event] of events.entries()) {
-      if (event.durable === false) sawTransient = true
-      else if (sawTransient) {
-        issues.push({
-          path: [index, "durable"],
-          issue: "Durable records must precede live-only records"
-        })
-      }
-    }
-    return issues
-  })
-)
-
-export type JournalOperation = "initialize" | "append" | "read" | "follow" | "retain"
-
-export class JournalError extends Schema.TaggedError<JournalError>()("JournalError", {
-  operation: Schema.Literals(["initialize", "append", "read", "follow", "retain"] as const),
-  kind: Schema.Literals(["invalid_input", "storage", "corrupt_data"] as const),
-  message: Schema.String,
-  cause: Schema.optionalKey(Schema.Defect())
-}) {}
-
-export const journalSqliteSchema = {
-  tables: ["journal_streams", "journal_records"],
-  indexes: [],
-  statements: [
-    `CREATE TABLE IF NOT EXISTS journal_streams (
-      stream_id TEXT PRIMARY KEY,
-      head_sequence INTEGER NOT NULL CHECK (head_sequence >= 0),
-      retained_from_sequence INTEGER CHECK (
-        retained_from_sequence IS NULL OR
-        (retained_from_sequence >= 1 AND retained_from_sequence <= head_sequence)
-      )
-    )`,
-    `CREATE TABLE IF NOT EXISTS journal_records (
-      stream_id TEXT NOT NULL REFERENCES journal_streams(stream_id) ON DELETE CASCADE,
-      sequence INTEGER NOT NULL CHECK (sequence >= 1),
-      event_type TEXT NOT NULL CHECK (length(event_type) > 0),
-      data_json TEXT NOT NULL,
-      attributes_json TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY (stream_id, sequence)
-    )`
-  ]
-} as const
-
-export interface JournalWatermarks {
-  readonly headSequence: number
-  readonly retainedFromSequence: number | null
-}
-
-export interface JournalReadPage {
-  readonly streamId: string
-  readonly afterSequence: number
-  readonly throughSequence: number
-  readonly limit?: number
-}
-
-export interface JournalFollowInput {
-  readonly streamId: string
-  readonly afterSequence?: number
-  readonly startAt?: "beginning" | "latest"
-  readonly replayFloor?: number
-}
-
-export interface JournalRuntimeOptions {
-  readonly initialize?: boolean
-  readonly subscriberCapacity?: number
-  readonly subscriberByteCapacity?: number
-  /** A read-only connection for watermarks, pages and followers, so they do
-   * not wait behind a write transaction on the writer. Appends stay on the
-   * writer. Defaults to the writer (an in-memory database has one connection). */
-  readonly reader?: SqlClient.SqlClient
-}
-
-export interface OpenJournalFollow {
-  /** Cursor held before this stream emits its first replay/reset record. */
-  readonly initialSequence: number
-  readonly stream: Stream.Stream<JournalDelivery, JournalError>
-}
-
-export interface JournalRuntime {
-  readonly append: (
-    streamId: string,
-    events: ReadonlyArray<JournalEvent>
-  ) => Effect.Effect<JournalAppendResult, JournalError>
-  readonly notify: (committed: JournalAppendResult) => Effect.Effect<void>
-  readonly watermarks: (streamId: string) => Effect.Effect<JournalWatermarks, JournalError>
-  readonly readPage: (
-    input: JournalReadPage
-  ) => Effect.Effect<ReadonlyArray<JournalRecord>, JournalError>
-  readonly openFollow: (
-    input: JournalFollowInput
-  ) => Effect.Effect<OpenJournalFollow, JournalError, Scope.Scope>
-  readonly follow: (input: JournalFollowInput) => Stream.Stream<JournalDelivery, JournalError>
-}
-
-interface StreamRow {
-  readonly head_sequence: number
-  readonly retained_from_sequence: number | null
-}
-
-interface RecordRow {
-  readonly stream_id: string
-  readonly sequence: number
-  readonly event_type: string
-  readonly data_json: string
-  readonly attributes_json: string
-  readonly created_at: string
-}
-
-interface WakeSignal {
-  readonly kind: "wake"
-  throughSequence: number
-}
-
-interface TransientSignal {
-  readonly kind: "transient"
-  readonly records: Array<JournalRecord>
-  bytes: number
-}
-
-type SubscriberSignal = WakeSignal | TransientSignal
-
-interface Subscriber {
-  readonly queue: Queue.Queue<SubscriberSignal>
-  pendingTail: SubscriberSignal | undefined
-  overflowed: boolean
-  queuedRecords: number
-  queuedBytes: number
-}
-
-const coalescableTail = <K extends SubscriberSignal["kind"]>(
-  subscriber: Subscriber,
-  kind: K
-): Extract<SubscriberSignal, { readonly kind: K }> | undefined =>
-  subscriber.pendingTail?.kind === kind
-    ? (subscriber.pendingTail as Extract<SubscriberSignal, { readonly kind: K }>)
-    : undefined
-
-type Subscribers = Map<string, Set<Subscriber>>
-
-const journalError = (
-  operation: JournalOperation,
-  kind: "invalid_input" | "storage" | "corrupt_data",
-  message: string,
-  cause?: unknown
-): JournalError =>
-  new JournalError({
-    operation,
-    kind,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
-
-const validateCursor = (
-  value: number,
-  operation: JournalOperation,
-  label: string
-): Effect.Effect<number, JournalError> =>
-  Number.isSafeInteger(value) && value >= 0
-    ? Effect.succeed(value)
-    : Effect.fail(
-        journalError(operation, "invalid_input", `${label} must be a non-negative safe integer`)
-      )
-
-const validateStreamId = (
-  streamId: string,
-  operation: JournalOperation
-): Effect.Effect<string, JournalError> =>
-  typeof streamId === "string" && streamId.length > 0
-    ? Effect.succeed(streamId)
-    : Effect.fail(journalError(operation, "invalid_input", "streamId must be a non-empty string"))
-
-const freezeJson = <A extends JsonValue | Readonly<Record<string, JsonValue>>>(value: A): A => {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value
-  for (const nested of Object.values(value)) freezeJson(nested)
-  return Object.freeze(value)
-}
-
-const freezeRecord = (record: JournalRecord): JournalRecord =>
-  Object.freeze({
-    ...record,
-    data: freezeJson(record.data),
-    attributes: freezeJson(record.attributes)
-  })
-
-const readState = Effect.fn("Journal.readState")(function* (
-  sql: SqlClient.SqlClient,
-  streamId: string,
-  operation: "append" | "read" | "follow"
-): Effect.fn.Return<JournalWatermarks, JournalError> {
-  const rows = yield* sql<StreamRow>`
-    SELECT head_sequence, retained_from_sequence
-    FROM journal_streams
-    WHERE stream_id = ${streamId}
-  `.pipe(
-    Effect.mapError((cause) =>
-      journalError(operation, "storage", "Could not read journal stream", cause)
-    )
-  )
-  const row = rows[0]
-  return row === undefined
-    ? { headSequence: 0, retainedFromSequence: null }
-    : { headSequence: row.head_sequence, retainedFromSequence: row.retained_from_sequence }
-})
-
-const decodeRow = (
-  row: RecordRow,
-  operation: "read" | "follow"
-): Effect.Effect<JournalRecord, JournalError> =>
-  Effect.try({
-    try: () => {
-      const data = decodeJsonData(row.data_json)
-      const attributes = decodeJsonAttributes(row.attributes_json)
-      if (!Number.isSafeInteger(row.sequence) || row.sequence < 1 || row.event_type.length === 0)
-        throw new Error("Invalid journal record fields")
-      if (Number.isNaN(Date.parse(row.created_at))) throw new Error("Invalid journal timestamp")
-      return freezeRecord({
-        streamId: row.stream_id,
-        sequence: row.sequence,
-        type: row.event_type,
-        data,
-        attributes,
-        durable: true,
-        createdAt: row.created_at
-      })
-    },
-    catch: (cause) =>
-      journalError(operation, "corrupt_data", "Stored journal record is corrupt", cause)
-  })
-
-export const initializeJournalSchema = Effect.fn("Journal.initializeSchema")(function* (
-  sql: SqlClient.SqlClient
-): Effect.fn.Return<void, JournalError> {
-  yield* Effect.forEach(journalSqliteSchema.statements, (statement) => sql.unsafe(statement), {
-    discard: true
-  }).pipe(
-    Effect.mapError((cause) =>
-      journalError("initialize", "storage", "Could not initialize journal schema", cause)
-    )
-  )
-  yield* Effect.forEach(
-    [
-      "SELECT stream_id, head_sequence, retained_from_sequence FROM journal_streams LIMIT 0",
-      `SELECT stream_id, sequence, event_type, data_json, attributes_json, created_at
-     FROM journal_records LIMIT 0`
-    ],
-    (statement) => sql.unsafe(statement),
-    { discard: true }
-  ).pipe(
-    Effect.mapError((cause) =>
-      journalError("initialize", "storage", "Existing journal schema is incompatible", cause)
-    )
-  )
-})
-
-/** Write journal state and rows inside a transaction owned by the caller. */
-export const appendInTransaction = Effect.fn("Journal.appendInTransaction")(function* (
-  sql: SqlClient.SqlClient,
-  streamId: string,
-  events: ReadonlyArray<JournalEvent>
-): Effect.fn.Return<JournalAppendResult, JournalError> {
-  const validStreamId = yield* validateStreamId(streamId, "append")
-  const validEvents = yield* Schema.decodeUnknownEffect(EventBatchSchema)(events).pipe(
-    Effect.mapError((cause) =>
-      journalError("append", "invalid_input", "Invalid journal event batch", cause)
-    )
-  )
-  const snapshots = validEvents.map((event) => ({
-    type: event.type,
-    dataJson: JSON.stringify(event.data),
-    attributesJson: JSON.stringify(event.attributes ?? {}),
-    durable: event.durable !== false
-  }))
-  const current = yield* readState(sql, validStreamId, "append")
-  const createdAt = DateTime.formatIso(yield* DateTime.now)
-  const records = snapshots.map((event, index) =>
-    freezeRecord({
-      streamId: validStreamId,
-      sequence: current.headSequence + index + 1,
-      type: event.type,
-      data: decodeJsonData(event.dataJson),
-      attributes: decodeJsonAttributes(event.attributesJson),
-      durable: event.durable,
-      createdAt
-    })
-  )
-  const headSequence = current.headSequence + records.length
-  const firstDurable = records.find((record) => record.durable)?.sequence ?? null
-  const retainedFromSequence = current.retainedFromSequence ?? firstDurable
-
-  yield* sql`
-    INSERT INTO journal_streams (stream_id, head_sequence, retained_from_sequence)
-    VALUES (${validStreamId}, ${headSequence}, ${retainedFromSequence})
-    ON CONFLICT(stream_id) DO UPDATE SET
-      head_sequence = excluded.head_sequence,
-      retained_from_sequence = excluded.retained_from_sequence
-  `.pipe(
-    Effect.mapError((cause) =>
-      journalError("append", "storage", "Could not advance journal stream", cause)
-    )
-  )
-
-  for (const [index, snapshot] of snapshots.entries()) {
-    if (!snapshot.durable) continue
-    yield* sql`
-      INSERT INTO journal_records (
-        stream_id, sequence, event_type, data_json, attributes_json, created_at
-      ) VALUES (
-        ${validStreamId}, ${current.headSequence + index + 1}, ${snapshot.type}, ${snapshot.dataJson},
-        ${snapshot.attributesJson}, ${createdAt}
-      )
-    `.pipe(
-      Effect.mapError((cause) =>
-        journalError("append", "storage", "Could not persist journal record", cause)
-      )
-    )
-  }
-
-  return Object.freeze({ records: Object.freeze(records), headSequence })
-})
-
-/** The records table as a SQL fragment, for callers that filter or join
- * records inside their own queries. Its columns are `stream_id`, `sequence`,
- * `event_type`, `data_json`, `attributes_json` and `created_at`. */
-export const journalRecordsSql = (sql: SqlClient.SqlClient): Statement.Fragment =>
-  sql.literal("journal_records")
-
-/** The streams table as a SQL fragment, for callers that read a stream's
- * watermarks together with their own rows in one statement. Its columns are
- * `stream_id`, `head_sequence` and `retained_from_sequence`. */
-export const journalStreamsSql = (sql: SqlClient.SqlClient): Statement.Fragment =>
-  sql.literal("journal_streams")
-
-/** Scalar subquery: the stream's head sequence, or NULL when the stream has
- * never been appended to. `streamId` may be a column reference. */
-export const journalHeadSequenceSql = (
-  sql: SqlClient.SqlClient,
-  streamId: string | Statement.Fragment
-): Statement.Fragment =>
-  sql`(SELECT head_sequence FROM journal_streams WHERE stream_id = ${streamId})`
-
-/** {@link journalHeadSequenceSql} as plain SQL with one `?` for the stream id,
- * for callers on a raw SQLite handle, such as a schema conversion. */
-export const JOURNAL_HEAD_SEQUENCE_SQL =
-  "(SELECT head_sequence FROM journal_streams WHERE stream_id = ?)"
-
-/** The stream's head sequence, or `undefined` when the stream has never been
- * appended to. Joins the caller's transaction when it runs inside one. */
-export const readHeadSequence = Effect.fn("Journal.readHeadSequence")(function* (
-  sql: SqlClient.SqlClient,
-  streamId: string
-): Effect.fn.Return<number | undefined, JournalError> {
-  const rows = yield* sql<Pick<StreamRow, "head_sequence">>`
-    SELECT head_sequence FROM journal_streams WHERE stream_id = ${streamId} LIMIT 1
-  `.pipe(
-    Effect.mapError((cause) =>
-      journalError("read", "storage", "Could not read journal head", cause)
-    )
-  )
-  return rows[0]?.head_sequence
-})
-
-/** Move the replay floor up to `fromSequence` (at most the head, never down)
- * and delete the records below it. The head record is never deleted. Runs
- * inside a transaction owned by the caller. */
-export const retainFromInTransaction = Effect.fn("Journal.retainFromInTransaction")(function* (
-  sql: SqlClient.SqlClient,
-  input: { readonly streamId: string; readonly fromSequence: number }
-): Effect.fn.Return<void, JournalError> {
-  if (!Number.isSafeInteger(input.fromSequence) || input.fromSequence < 1) {
-    return yield* journalError("retain", "invalid_input", "fromSequence must be a positive integer")
-  }
-  yield* sql`
-    DELETE FROM journal_records
-    WHERE stream_id = ${input.streamId}
-      AND sequence < (
-        SELECT MIN(${input.fromSequence}, head_sequence)
-        FROM journal_streams WHERE stream_id = ${input.streamId}
-      )
-  `.pipe(
-    Effect.mapError((cause) =>
-      journalError("retain", "storage", "Could not delete journal records", cause)
-    )
-  )
-  yield* sql`
-    UPDATE journal_streams
-    SET retained_from_sequence = MAX(
-      COALESCE(retained_from_sequence, 1),
-      MIN(${input.fromSequence}, head_sequence)
-    )
-    WHERE stream_id = ${input.streamId} AND head_sequence > 0
-  `.pipe(
-    Effect.mapError((cause) =>
-      journalError("retain", "storage", "Could not advance journal replay floor", cause)
-    )
-  )
-})
-
-/** Delete the stream and, by cascade, all its records. Runs inside a
- * transaction owned by the caller. */
-export const deleteStreamInTransaction = Effect.fn("Journal.deleteStreamInTransaction")(function* (
-  sql: SqlClient.SqlClient,
-  streamId: string
-): Effect.fn.Return<void, JournalError> {
-  yield* sql`DELETE FROM journal_streams WHERE stream_id = ${streamId}`.pipe(
-    Effect.mapError((cause) =>
-      journalError("retain", "storage", "Could not delete journal stream", cause)
-    )
-  )
-})
-
-/** Delete the records below `beforeSequence` that match `where`, a condition
- * over the record columns, and return how many were deleted. The replay floor
- * does not move: followers skip the gaps. Runs inside a transaction owned by
- * the caller. */
-export const truncateBeforeInTransaction = Effect.fn("Journal.truncateBeforeInTransaction")(
-  function* (
-    sql: SqlClient.SqlClient,
-    input: {
-      readonly streamId: string
-      readonly beforeSequence: number
-      readonly where: Statement.Fragment
-    }
-  ): Effect.fn.Return<number, JournalError> {
-    const deleted = yield* sql<{ readonly sequence: number }>`
-    DELETE FROM journal_records
-    WHERE stream_id = ${input.streamId}
-      AND sequence < ${input.beforeSequence}
-      AND (${input.where})
-    RETURNING sequence
-  `.pipe(
-      Effect.mapError((cause) =>
-        journalError("retain", "storage", "Could not delete journal records", cause)
-      )
-    )
-    return deleted.length
-  }
-)
-
-const readPageWithSql = Effect.fn("Journal.readPage")(function* (
-  sql: SqlClient.SqlClient,
-  input: JournalReadPage,
-  operation: "read" | "follow"
-): Effect.fn.Return<ReadonlyArray<JournalRecord>, JournalError> {
-  const streamId = yield* validateStreamId(input.streamId, operation)
-  const afterSequence = yield* validateCursor(input.afterSequence, operation, "afterSequence")
-  const throughSequence = yield* validateCursor(input.throughSequence, operation, "throughSequence")
-  const limit = input.limit ?? PAGE_SIZE
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) {
-    return yield* journalError(
-      operation,
-      "invalid_input",
-      "limit must be an integer from 1 to 10000"
-    )
-  }
-  const rows = yield* sql<RecordRow>`
-    SELECT stream_id, sequence, event_type, data_json, attributes_json, created_at
-    FROM journal_records
-    WHERE stream_id = ${streamId}
-      AND sequence > ${afterSequence}
-      AND sequence <= ${throughSequence}
-    ORDER BY sequence ASC
-    LIMIT ${limit}
-  `.pipe(
-    Effect.mapError((cause) =>
-      journalError(operation, "storage", "Could not read journal records", cause)
-    )
-  )
-  return yield* Effect.forEach(rows, (row) => decodeRow(row, operation))
-})
-
-const durableRange = (
-  sql: SqlClient.SqlClient,
-  streamId: string,
-  afterSequence: number,
-  throughSequence: number,
-  replayed: boolean
-): Stream.Stream<JournalDelivery, JournalError> =>
-  Stream.paginate(afterSequence, (cursor) =>
-    readPageWithSql(
-      sql,
-      {
-        streamId,
-        afterSequence: cursor,
-        throughSequence,
-        limit: PAGE_SIZE
-      },
-      "follow"
-    ).pipe(
-      Effect.map((records) => {
-        const next = records.at(-1)?.sequence
-        return [
-          records.map((record) => ({ kind: "record", record, replayed }) as const),
-          next === undefined || records.length < PAGE_SIZE
-            ? Option.none<number>()
-            : Option.some(next)
-        ] as const
-      })
-    )
-  )
+  isJournalStartAt,
+  JOURNAL_START_AT,
+  JournalError,
+  journalError,
+  type JournalFollowInput,
+  type JournalReadPage,
+  type JournalRuntime,
+  type JournalRuntimeOptions,
+  type OpenJournalFollow
+} from "./contracts.js"
+import { initializeJournalSchema } from "./schema.js"
+import {
+  coalescableTail,
+  SIGNAL_KIND,
+  type Subscriber,
+  type SubscriberSignal,
+  type Subscribers,
+  type TransientSignal,
+  type WakeSignal
+} from "./subscribers.js"
+import {
+  DEFAULT_SUBSCRIBER_BYTES,
+  DEFAULT_SUBSCRIBER_CAPACITY,
+  validateCursor,
+  validateStreamId,
+  readState
+} from "./records.js"
+import { appendInTransaction, readPageWithSql, durableRange } from "./store.js"
 
 export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
   sql: SqlClient.SqlClient,
@@ -641,11 +131,11 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
 
     for (const subscriber of current) {
       if (lastDurableSequence !== undefined) {
-        const wakeTail = coalescableTail(subscriber, "wake")
+        const wakeTail = coalescableTail(subscriber, SIGNAL_KIND.wake)
         if (wakeTail !== undefined) {
           wakeTail.throughSequence = lastDurableSequence
         } else {
-          const wake: WakeSignal = { kind: "wake", throughSequence: lastDurableSequence }
+          const wake: WakeSignal = { kind: SIGNAL_KIND.wake, throughSequence: lastDurableSequence }
           const accepted = yield* Queue.offer(subscriber.queue, wake)
           if (!accepted) {
             yield* close(first.streamId, subscriber, true)
@@ -665,14 +155,14 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
       }
       subscriber.queuedRecords += transients.length
       subscriber.queuedBytes += transientBytes
-      const transientTail = coalescableTail(subscriber, "transient")
+      const transientTail = coalescableTail(subscriber, SIGNAL_KIND.transient)
       if (transientTail !== undefined) {
         transientTail.records.push(...transients)
         transientTail.bytes += transientBytes
         continue
       }
       const signal: TransientSignal = {
-        kind: "transient",
+        kind: SIGNAL_KIND.transient,
         records: [...transients],
         bytes: transientBytes
       }
@@ -718,8 +208,8 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
     input: JournalFollowInput
   ): Effect.fn.Return<OpenJournalFollow, JournalError, Scope.Scope> {
     const streamId = yield* validateStreamId(input.streamId, "follow")
-    const startAt = input.startAt ?? "beginning"
-    if (startAt !== "beginning" && startAt !== "latest") {
+    const startAt = input.startAt ?? JOURNAL_START_AT.beginning
+    if (!isJournalStartAt(startAt)) {
       return yield* journalError("follow", "invalid_input", "startAt must be beginning or latest")
     }
     if (input.afterSequence !== undefined && input.startAt !== undefined) {
@@ -732,7 +222,7 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
     const replayFloor = yield* validateCursor(input.replayFloor ?? 0, "follow", "replayFloor")
     const subscriber = yield* subscribe(streamId)
     const snapshot = yield* readState(reader, streamId, "follow")
-    let cursor = startAt === "latest" ? snapshot.headSequence : 0
+    let cursor = startAt === JOURNAL_START_AT.latest ? snapshot.headSequence : 0
     if (input.afterSequence !== undefined) {
       cursor = yield* validateCursor(input.afterSequence, "follow", "afterSequence")
     }
@@ -757,7 +247,7 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
     const live = Stream.fromQueue(subscriber.queue).pipe(
       Stream.flatMap((signal) => {
         if (subscriber.pendingTail === signal) subscriber.pendingTail = undefined
-        if (signal.kind === "transient") {
+        if (signal.kind === SIGNAL_KIND.transient) {
           subscriber.queuedRecords -= signal.records.length
           subscriber.queuedBytes -= signal.bytes
           return Stream.unwrap(

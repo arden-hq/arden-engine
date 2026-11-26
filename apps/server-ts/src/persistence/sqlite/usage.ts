@@ -105,14 +105,9 @@ const callUsage = (row: ModelCallRow): RunUsage | null =>
         ...withCost(row.cost)
       }
 
-/** A reported cost read back from SQLite, where NULL is unknown; absent from the answer then. */
 const withCost = (cost: number | null): { readonly cost?: number } =>
   cost === null ? {} : { cost }
 
-/**
- * The sum of `column` over a group, or NULL when any row's cost is unknown
- * (`RunUsage.cost`): a partial sum is never reported as the spend.
- */
 const knownCostSum = (column: string): string =>
   `CASE WHEN count(*) = count(${column}) THEN coalesce(sum(${column}), 0) END`
 

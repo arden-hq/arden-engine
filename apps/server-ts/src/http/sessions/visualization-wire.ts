@@ -4,7 +4,10 @@ import {
   VISUALIZATION_KIND
 } from "@arden-hq/protocol/visualizations"
 import type { VisualizationManifestResponseSchema } from "@arden-hq/protocol/effect/visualizations"
-import { artifactRole, type ConversationArtifactManifest } from "../../artifacts/conversation.js"
+import {
+  artifactRole,
+  type ConversationArtifactManifest
+} from "../../artifacts/conversation-model.js"
 
 type ManifestResponse = typeof VisualizationManifestResponseSchema.Type
 

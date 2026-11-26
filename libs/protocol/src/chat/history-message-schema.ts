@@ -2,7 +2,13 @@ import { Schema } from "effect"
 import { NonNegativeIntSchema, withExtras } from "../common/schema.js"
 import { CHAT_REPLY_QUOTES_MAX } from "./contracts.js"
 import { ChatUpdateSchema, CommunicationEnvelopeSchema } from "./communication-schema.js"
-import { CONTEXT_LIMIT, CONTEXT_MODEL, type ContextBudgetSnapshot } from "./history.js"
+import {
+  CHAT_SENT_FROM,
+  CONNECTION_ARRIVAL,
+  CONTEXT_LIMIT,
+  CONTEXT_MODEL,
+  type ContextBudgetSnapshot
+} from "./history.js"
 import {
   AGENT_RESULT_ROW,
   AUTOMATION_ROW,
@@ -12,6 +18,7 @@ import {
   FORWARDED_FROM,
   FROM_CHAT,
   MESSAGE_CLIENT,
+  OUTPUT_PART,
   QUESTION_ANSWER_ROW,
   REASONING_ROW,
   SENT_FROM,
@@ -29,7 +36,7 @@ import {
   ImageMediaTypeSchema,
   ServedImageDataSchema
 } from "./schema-fields.js"
-import { ToolDataSchema } from "./tool-face.js"
+import { TOOL_EXECUTION, ToolDataSchema } from "./tool-face.js"
 
 const tagged = <const Tag extends string>(kind: Tag) =>
   Schema.Struct({ kind: Schema.Literal(kind) })
@@ -54,12 +61,12 @@ export const ChatForwardedSourceSchema = Schema.Struct({
   message_id: Schema.NonEmptyString
 })
 
-export const ChatSentFromSchema = Schema.Literals(["visualization", "answer", "cli"] as const)
+export const ChatSentFromSchema = Schema.Literals(Object.values(CHAT_SENT_FROM))
 
 export const ConnectionArrivalSchema = Schema.Struct({
   tool_call_id: Schema.NonEmptyString,
   server: Schema.NonEmptyString,
-  outcome: Schema.Literals(["connected", "declined"] as const),
+  outcome: Schema.Literals(Object.values(CONNECTION_ARRIVAL)),
   offered_at: Schema.NonEmptyString,
   at: Schema.NonEmptyString
 })
@@ -91,20 +98,20 @@ const HistoryImageSchema = Schema.Struct({
 
 const historyAssistantOutputPartSchema = Schema.Union([
   withExtras({
-    type: Schema.Literal("reasoning"),
+    type: Schema.Literal(OUTPUT_PART.reasoning),
     text: Schema.NonEmptyString,
     source_index: NonNegativeIntSchema
   }),
   withExtras({
-    type: Schema.Literal("text"),
+    type: Schema.Literal(OUTPUT_PART.text),
     text: Schema.NonEmptyString,
     phase: Schema.Literals([TEXT_PHASE.unmarked, TEXT_PHASE.commentary, TEXT_PHASE.finalAnswer]),
     source_index: NonNegativeIntSchema
   }),
   withExtras({
-    type: Schema.Literal("tool_call"),
+    type: Schema.Literal(OUTPUT_PART.toolCall),
     tool_call_id: Schema.NonEmptyString,
-    execution: Schema.Literals(["runtime", "provider"] as const),
+    execution: Schema.Literals(Object.values(TOOL_EXECUTION)),
     source_index: NonNegativeIntSchema
   })
 ])

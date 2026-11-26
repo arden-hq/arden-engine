@@ -8,7 +8,12 @@ import {
   type ServerApprovalPrompt
 } from "./define.js"
 import type { GoogleToolConnections } from "./google-accounts.js"
-import { googleGrantAccess, grantReadCard, withGrantNeed } from "./google-grant-card.js"
+import {
+  GRANT_ACCESS,
+  googleGrantAccess,
+  grantReadCard,
+  withGrantNeed
+} from "./google-grant-card.js"
 import type { ServerRunContext } from "./run-context.js"
 
 export interface GoogleGrantDescription {
@@ -34,7 +39,7 @@ const missingGrantAccount = (
     GOOGLE_GRANTS[need.grant].service,
     need.grant
   )
-  return access.kind === "missing" ? access.account.email : undefined
+  return access.kind === GRANT_ACCESS.missing ? access.account.email : undefined
 }
 
 export const requireGoogleGrant = ({

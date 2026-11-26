@@ -1,33 +1,42 @@
 import { Schema } from "effect"
 
-const McpOperation = Schema.Literals([
-  "list",
-  "create",
-  "install_preset",
-  "update",
-  "set_enabled",
-  "reconnect",
-  "remove",
-  "oauth",
-  "call",
-  "github"
-] as const)
-export type McpOperation = typeof McpOperation.Type
+export const MCP_OPERATION = {
+  list: "list",
+  create: "create",
+  installPreset: "install_preset",
+  update: "update",
+  setEnabled: "set_enabled",
+  reconnect: "reconnect",
+  remove: "remove",
+  oauth: "oauth",
+  call: "call",
+  github: "github"
+} as const
+
+export type McpOperation = (typeof MCP_OPERATION)[keyof typeof MCP_OPERATION]
+
+export type McpSaveOperation = typeof MCP_OPERATION.create | typeof MCP_OPERATION.update
+
+const McpOperation = Schema.Literals(Object.values(MCP_OPERATION))
+
+const MCP_ERROR_REASON = {
+  notFound: "not_found",
+  conflict: "conflict",
+  invalid: "invalid",
+  unavailable: "unavailable",
+  storage: "storage",
+  authRequired: "auth_required",
+  notSetUp: "not_set_up",
+  rejected: "rejected"
+} as const
+
+export type McpErrorReason = (typeof MCP_ERROR_REASON)[keyof typeof MCP_ERROR_REASON]
 
 export class McpConnectionError extends Schema.TaggedError<McpConnectionError>()(
   "McpConnectionError",
   {
     operation: McpOperation,
-    reason: Schema.Literals([
-      "not_found",
-      "conflict",
-      "invalid",
-      "unavailable",
-      "storage",
-      "auth_required",
-      "not_set_up",
-      "rejected"
-    ] as const),
+    reason: Schema.Literals(Object.values(MCP_ERROR_REASON)),
     message: Schema.String,
     cause: Schema.optionalKey(Schema.Defect())
   }
@@ -35,7 +44,7 @@ export class McpConnectionError extends Schema.TaggedError<McpConnectionError>()
 
 export const mcpError = (
   operation: McpOperation,
-  reason: McpConnectionError["reason"],
+  reason: McpErrorReason,
   message: string,
   cause?: unknown
 ): McpConnectionError =>

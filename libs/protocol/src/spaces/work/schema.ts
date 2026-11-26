@@ -1,16 +1,31 @@
 import { checkRunApprovalConnection, runApprovalFields } from "../../runs/approval-schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import { WikiPageIdSchema } from "../../wiki/schema/shared.js"
-import { Effect, Schema, SchemaTransformation } from "effect"
+import { Effect, Schema, SchemaTransformation, type SchemaAST } from "effect"
 import type {
   SpaceTask,
   SpaceTaskActivity,
   SpaceTaskStatus,
   SpaceTaskComment,
   SpaceTaskAttachment,
-  SpaceWorkPage,
-  StopSpaceTaskResponse
+  SpaceWorkPage
 } from "./contracts.js"
+import {
+  EVENT_CONTENT,
+  EVIDENCE_PROVIDER,
+  SPACE_TASK_CAPTURE_BASIS,
+  SPACE_TASK_COMMENT_KIND,
+  SPACE_TASK_CREATED_BY,
+  SPACE_TASK_EVENT_TYPE,
+  SPACE_TASK_OWNER,
+  SPACE_TASK_RUNS_IN,
+  SPACE_TASK_STOP_KIND,
+  SPACE_TASK_WAITING_ON,
+  TASK_ACTIVITY,
+  TASK_STATUS
+} from "./contracts.js"
+import { STOP_SPACE_TASK_RUN_OUTCOME, STOP_SPACE_TASK_STATE } from "./input-contracts.js"
+import type { StopSpaceTaskResponse } from "./input-contracts.js"
 import {
   IsoDateTimeStringSchema,
   withExtras,
@@ -27,13 +42,11 @@ import {
   WORK_TASK_TEXT_MAX_CHARS
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 type EncodedText = Effect.Effect<string, Schema.SchemaError>
 const NonEmptyStringSchema = Schema.String.check(Schema.isMinLength(1))
 const TrimmedTextSchema = Schema.Trim.check(Schema.isMinLength(1))
 const WorkTimestampSchema = IsoDateTimeStringSchema
-/** `due_at` is display-only in the live server and historically accepts
- * free-form text; `next_attempt_at` is the scheduler-owned parsed field. */
 export const DueAtSchema = Schema.String.check(Schema.isMaxLength(512))
 
 const boundedTrimmed = (maximum: number) => TrimmedTextSchema.check(Schema.isMaxLength(maximum))
@@ -53,24 +66,19 @@ export const WorkTaskKeySchema = boundedTrimmed(WORK_TASK_KEY_MAX_CHARS).check(
 export const TaskTextInputSchema = boundedTrimmed(WORK_TASK_TEXT_MAX_CHARS).check(noLineBreaks)
 export const TaskBodyInputSchema = Schema.String.check(Schema.isMaxLength(WORK_TASK_BODY_MAX_CHARS))
 const commentBodyInputSchema = boundedTrimmed(WORK_COMMENT_BODY_MAX_CHARS)
-export const SpaceTaskStatusSchema = Schema.Literals([
-  "open",
-  "deferred",
-  "done",
-  "cancelled"
-] as const)
-export const SpaceTaskActivitySchema = Schema.Literals([
-  "idle",
-  "working",
-  "needs_you",
-  "waiting",
-  "on_hold",
-  "stopped"
-] as const)
-export const TaskWaitingOnSchema = Schema.Literals(["you", "external"] as const)
-export const TaskOwnerSchema = Schema.Literals(["worker", "user", "external"] as const)
-export const TaskRunsInSchema = Schema.Literals(["chat", "background"] as const)
-export const TaskCommentKindSchema = Schema.Literals(["note", "ask"] as const)
+export const SpaceTaskStatusSchema = Schema.Literals(Object.values(TASK_STATUS))
+export const SpaceTaskActivitySchema = Schema.Literals(Object.values(TASK_ACTIVITY))
+export const TaskWaitingOnSchema = Schema.Literals(Object.values(SPACE_TASK_WAITING_ON))
+export const TaskOwnerSchema = Schema.Literals(Object.values(SPACE_TASK_OWNER))
+export const TaskRunsInSchema = Schema.Literals(Object.values(SPACE_TASK_RUNS_IN))
+export const SpaceTaskEventTypeSchema = Schema.Literals(Object.values(SPACE_TASK_EVENT_TYPE))
+export const isSpaceTaskEventType = Schema.is(SpaceTaskEventTypeSchema)
+export const SpaceTaskEventContentKindSchema = Schema.Literals(Object.values(EVENT_CONTENT))
+export const SpaceTaskCreatedBySchema = Schema.Union([
+  Schema.Literals(Object.values(SPACE_TASK_CREATED_BY)),
+  Schema.TemplateLiteral(["automation:", Schema.String])
+])
+export const TaskCommentKindSchema = Schema.Literals(Object.values(SPACE_TASK_COMMENT_KIND))
 
 const mediaTypeInputSchema = boundedTrimmed(WORK_ATTACHMENT_MEDIA_TYPE_MAX_CHARS).check(
   Schema.makeFilter((value) =>
@@ -106,7 +114,7 @@ const ardenPublicRefSchema = evidenceRefSchema.check(
 )
 
 const ardenEvidenceSourceRefSchema = withExtras({
-  provider: Schema.Literal("arden"),
+  provider: Schema.Literal(EVIDENCE_PROVIDER.arden),
   kind: evidenceKindSchema,
   ref: ardenPublicRefSchema,
   title: evidenceTitleSchema
@@ -115,7 +123,7 @@ const ardenEvidenceSourceRefSchema = withExtras({
 const providerEvidenceSourceRefSchema = withExtras({
   provider: boundedTrimmed(64).check(
     Schema.makeFilter((value) =>
-      /^[a-z0-9][a-z0-9_-]*$/.test(value) && value !== "arden"
+      /^[a-z0-9][a-z0-9_-]*$/.test(value) && value !== EVIDENCE_PROVIDER.arden
         ? undefined
         : "must be a lowercase non-Arden provider"
     )
@@ -132,7 +140,11 @@ export const EvidenceSourceRefSchema = Schema.Union([
 
 const sourceIdentitySchema = boundedTrimmed(4096)
 export const SpaceTaskCaptureInputSchema = Schema.Struct({
-  basis: Schema.Literals(["explicit", "long_horizon", "inferred"]).annotate({
+  basis: Schema.Literals([
+    SPACE_TASK_CAPTURE_BASIS.explicit,
+    SPACE_TASK_CAPTURE_BASIS.long_horizon,
+    SPACE_TASK_CAPTURE_BASIS.inferred
+  ]).annotate({
     description:
       "explicit: requested tracking; long_horizon: ongoing ownership or later follow-up; inferred: agent capture under the Space inference policy."
   }),
@@ -145,7 +157,7 @@ export const SpaceTaskCaptureInputSchema = Schema.Struct({
 })
 export const SpaceTaskCaptureSchema = Schema.Union([
   SpaceTaskCaptureInputSchema,
-  Schema.Struct({ basis: Schema.Literal("unrecorded"), reason: Schema.Null })
+  Schema.Struct({ basis: Schema.Literal(SPACE_TASK_CAPTURE_BASIS.unrecorded), reason: Schema.Null })
 ])
 const tag = <const Tag extends string, Fields extends Schema.Struct.Fields>(
   kind: Tag,
@@ -248,13 +260,19 @@ const spaceTaskFields = {
   body: TaskBodyReadSchema,
   activity: Schema.Union([
     Schema.Struct({
-      kind: Schema.Literals(["idle", "working", "needs_you", "waiting", "on_hold"] as const)
+      kind: Schema.Literals([
+        TASK_ACTIVITY.idle,
+        TASK_ACTIVITY.working,
+        TASK_ACTIVITY.needs_you,
+        TASK_ACTIVITY.waiting,
+        TASK_ACTIVITY.on_hold
+      ])
     }),
     tag("stopped", {
       stop: Schema.Union([
         tag("unrecorded", {}),
         tag("recorded", {
-          stop_kind: Schema.Literals(["restart", "cancelled", "stalled", "failed"] as const),
+          stop_kind: Schema.Literals(Object.values(SPACE_TASK_STOP_KIND)),
           reason: Schema.String
         })
       ]).pipe(Schema.toTaggedUnion("kind"))
@@ -282,9 +300,10 @@ const spaceTaskFields = {
   ),
   created_at: WorkTimestampSchema,
   updated_at: WorkTimestampSchema,
-  created_by: Schema.Union([tag("unrecorded", {}), tag("recorded", { by: Schema.String })]).pipe(
-    Schema.toTaggedUnion("kind")
-  ),
+  created_by: Schema.Union([
+    tag("unrecorded", {}),
+    tag("recorded", { by: SpaceTaskCreatedBySchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
   seq: Schema.Union([tag("unnumbered", {}), tag("numbered", { seq: NonNegativeIntSchema })]).pipe(
     Schema.toTaggedUnion("kind")
   ),
@@ -306,10 +325,13 @@ const spaceTaskFields = {
 } as const
 
 export const SpaceTaskSchema: Schema.Codec<SpaceTask> = Schema.Union([
-  withExtras({ ...spaceTaskFields, status: Schema.Literals(["open", "deferred"] as const) }),
   withExtras({
     ...spaceTaskFields,
-    status: Schema.Literals(["done", "cancelled"] as const),
+    status: Schema.Literals([TASK_STATUS.open, TASK_STATUS.deferred])
+  }),
+  withExtras({
+    ...spaceTaskFields,
+    status: Schema.Literals([TASK_STATUS.done, TASK_STATUS.cancelled]),
     completed_at: WorkTimestampSchema
   })
 ])
@@ -350,16 +372,16 @@ export const SpaceTaskEventSchema = withExtras({
   run: Schema.Union([tag("none", {}), tag("run", { run_ref: Schema.String })]).pipe(
     Schema.toTaggedUnion("kind")
   ),
-  event_type: NonEmptyStringSchema,
+  event_type: SpaceTaskEventTypeSchema,
   content: Schema.Struct({
-    kind: Schema.Literals(["summary", "result"]),
+    kind: SpaceTaskEventContentKindSchema,
     text: NonEmptyStringSchema
   }),
   source_refs: Schema.Array(EvidenceSourceRefSchema),
   created_at: WorkTimestampSchema
 }).check(
   Schema.makeFilter((event) =>
-    event.content.kind === "result" && event.event_type !== "done"
+    event.content.kind === EVENT_CONTENT.result && event.event_type !== SPACE_TASK_EVENT_TYPE.done
       ? { path: ["content"], issue: "a completion result requires a Done event" }
       : undefined
   )
@@ -421,16 +443,15 @@ export const AcknowledgeTaskResultInputSchema = Schema.Struct({ result_key: NonE
 export const StopSpaceTaskInputSchema = Schema.Struct({ expected_updated_at: WorkTimestampSchema })
 const StopSpaceTaskRunResultSchema = Schema.Struct({
   run_id: NonEmptyStringSchema,
-  outcome: Schema.Literals(["acknowledged", "finished", "failed"] as const)
+  outcome: Schema.Literals(Object.values(STOP_SPACE_TASK_RUN_OUTCOME))
 })
 export const StopSpaceTaskResponseSchema: Schema.Codec<StopSpaceTaskResponse> = withExtras({
   task: SpaceTaskSchema,
   authority: Schema.Literal("revoked"),
-  state: Schema.Literals(["acknowledged", "finished", "partial"] as const),
+  state: Schema.Literals(Object.values(STOP_SPACE_TASK_STATE)),
   runs: Schema.Array(StopSpaceTaskRunResultSchema)
 })
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type StopSpaceTaskResponseAgrees = Assert<
   Agrees<(typeof StopSpaceTaskResponseSchema)["Type"], StopSpaceTaskResponse>
 >
@@ -466,12 +487,10 @@ export const CreateSpaceTaskAttachmentInputSchema = Schema.Struct({
 
 export type CreateSpaceTaskAttachmentRequest = typeof CreateSpaceTaskAttachmentInputSchema.Type
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type SpaceTaskStatusAgrees = Assert<
   Agrees<(typeof SpaceTaskStatusSchema)["Type"], SpaceTaskStatus>
 >
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type SpaceTaskActivityAgrees = Assert<
   Agrees<(typeof SpaceTaskActivitySchema)["Type"], SpaceTaskActivity>
 >

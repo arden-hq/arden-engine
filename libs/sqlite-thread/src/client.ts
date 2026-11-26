@@ -16,14 +16,8 @@ const MAX_BUSY_TIMEOUT = 2_147_483_647
 export interface SqliteThreadClientConfig {
   readonly filename: string
   readonly readonly?: boolean
-  /** How long SQLite waits on a lock; it blocks only the connection's thread. Defaults to 5 seconds. */
   readonly busyTimeout?: Duration.Input
-  /** Keep the file's rollback journal instead of switching it to WAL. */
   readonly disableWAL?: boolean
-  /** Read-only connections, each on its own thread, that serve statements in
-   *  parallel: one slow read no longer queues every other behind it. Only for
-   *  a `readonly` client; a writer keeps its one serialized connection.
-   *  Defaults to 1. */
   readonly connections?: number
 }
 
@@ -40,7 +34,6 @@ const failure = (cause: unknown, operation: string): SqlError.SqlError =>
     })
   })
 
-/** node:sqlite reports the SQLite result code as `errcode`; classification reads `errno`. */
 const causeOf = (error: Extract<SqliteThreadReply, { ok: false }>["error"]): unknown =>
   Object.assign(new Error(error.message), {
     code: error.code,
@@ -154,15 +147,6 @@ const openLane = Effect.fn("SqliteThread.openLane")(function* (
   return { connection, waiting: () => pending.size, permit: yield* Semaphore.make(1), held: false }
 })
 
-/**
- * A SQL client whose connections live on worker threads. It keeps the
- * contract of `@effect/sql-sqlite-node`'s client (a serialized connection,
- * `BEGIN IMMEDIATE` transactions, the same error classification), but every
- * statement is asynchronous for the server: a slow query or a lock wait stalls
- * the connection's thread, not the caller's event loop. A read-only client may
- * open several connections (`connections`); a statement goes to the least busy
- * one, and a transaction keeps its connection to itself until it ends.
- */
 export const makeSqliteThreadClient = Effect.fn("makeSqliteThreadClient")(function* (
   config: SqliteThreadClientConfig
 ): Effect.fn.Return<SqlClient.SqlClient, never, Scope.Scope | Reactivity.Reactivity> {

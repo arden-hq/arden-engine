@@ -1,8 +1,4 @@
-// The slice of the Cloudflare Workers runtime this adapter uses, declared by
-// hand: @cloudflare/workers-types redeclares the web globals (Response,
-// WebSocket, …) and clashes with bun-types in this one program. Shapes follow
-// https://developers.cloudflare.com/durable-objects/api/ (WebSocket
-// Hibernation, SQLite storage, alarms).
+// Shapes follow https://developers.cloudflare.com/durable-objects/api/
 
 export interface CfWebSocket {
   send(message: ArrayBuffer | Uint8Array | string): void
@@ -50,7 +46,6 @@ interface WebSocketRequestResponsePair {
 }
 
 declare global {
-  // Workers-only constructors; absent under Bun, used only inside the Durable Object.
   var WebSocketPair: new () => { 0: CfWebSocket; 1: CfWebSocket }
   var WebSocketRequestResponsePair: new (
     request: string,

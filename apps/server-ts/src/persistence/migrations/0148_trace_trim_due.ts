@@ -1,16 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** The chats whose log waits to be trimmed, kept as a list.
- *
- * The hourly trim shrinks a finished agent's log (after the "Keep logs for"
- * days) and an automation's forked chat (after 7 days) to its final answer.
- * To find them it read every chat and looked up each one's latest run.
- * `trace_trim_due` now holds one row per agent or forked chat whose latest
- * run has ended and is not trimmed yet. Triggers on `chat_runs` keep it: a new
- * run removes the chat's row, a run that ends writes it. The job reads the
- * rows older than the cutoff through the index and still checks each one in
- * full before it trims. The first fill reads every chat once. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TABLE trace_trim_due (
       session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,

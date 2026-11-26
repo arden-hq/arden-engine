@@ -22,7 +22,6 @@ export const resumeAutomation = Effect.fn("AutomationResume.resume")(function* (
   yield* restartAutomationPositions(sql, automationId)
 })
 
-/** The `monitor_state` row of a position an Automation keeps; resuming the Automation restarts it. */
 export const automationPositionNamespace = (automationId: string): string => automationId
 
 const restartAutomationPositions = (sql: SqlClient.SqlClient, automationId: string) =>

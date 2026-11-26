@@ -2,11 +2,6 @@ import { toolDisplayTitle } from "@arden-hq/std/text"
 import type { ToolDisplayTitle } from "../contracts/tools.js"
 import { isRecord } from "@arden-hq/std/json"
 
-/**
- * Add the host's presentation argument to the model schema, not the validator.
- * The schema lists it as required so the model titles every call; a call that
- * still omits it runs, because the argument is split off before validation.
- */
 export const withToolDisplayTitleParameter = (
   parameters: Readonly<Record<string, unknown>>,
   toolName: string,
@@ -49,10 +44,6 @@ export interface SplitToolArguments {
   readonly displayTitle?: string
 }
 
-/**
- * Remove the presentation argument before validation or tool dispatch. A
- * toolset without a display title leaves arguments and titles untouched.
- */
 export const splitToolArguments = (
   args: Readonly<Record<string, unknown>>,
   persistedTitle: unknown,

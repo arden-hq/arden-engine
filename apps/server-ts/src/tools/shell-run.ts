@@ -6,10 +6,10 @@ import {
   sandboxUnavailable,
   shellInvocation,
   shellRuntime,
-  type ShellInvocation
-} from "./shell-policy.js"
+  type ShellInvocation,
+  type ShellRuntimeOptions
+} from "./shell-invocation.js"
 import { BUBBLEWRAP_PATH, bubblewrapFailure } from "../runtime/command-sandbox.js"
-import type { ShellRuntimeOptions } from "./shell-policy.js"
 import type { LocalPathPolicy } from "../storage/local-paths.js"
 import { spawnLiveProcess, type LiveProcess, type ProcessInput } from "../terminals/live-process.js"
 import { toolFault, toolRefusal } from "./tool-failure.js"

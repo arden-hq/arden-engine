@@ -7,8 +7,7 @@ import {
   RUNNING_WORK,
   SEARCH_PREVIEW,
   SESSION_LIST_NEXT,
-  SESSION_ORIGIN,
-  type SessionListSort
+  SESSION_ORIGIN
 } from "@arden-hq/protocol/sessions"
 import {
   modelIdOf,
@@ -24,15 +23,11 @@ import {
   StructuredCompletion,
   StructuredCompletionError
 } from "../../models/structured-completion.js"
-import { SpaceStore, type SpaceStoreError } from "../../persistence/spaces/store.js"
+import { SpaceStore } from "../../persistence/spaces/store.js"
 import { ModelStore, ModelStoreError } from "../../persistence/models/store.js"
-import { SessionQueries, type SessionQueryFailure } from "../../persistence/sessions/queries.js"
-import { SessionReadState, SessionReadStateError } from "../../persistence/sessions/read-state.js"
-import {
-  SessionStore,
-  SessionStoreError,
-  type SessionListEntry
-} from "../../persistence/sessions/store.js"
+import { SessionQueries } from "../../persistence/sessions/queries.js"
+import { SessionReadState } from "../../persistence/sessions/read-state.js"
+import { SessionStore } from "../../persistence/sessions/store.js"
 import { TranscriptQueries, type ChatSearchHit } from "../../persistence/transcript/queries.js"
 import {
   makeSessionExportModel,
@@ -43,11 +38,7 @@ import { makeSessionCreation } from "../../sessions/create.js"
 import { ChatMessage } from "../../chat/message.js"
 import { onboardingKickoff } from "../../chat/message-input.js"
 import { makeOnboardingStart } from "../../chat/onboarding-start.js"
-import {
-  makeSessionTriage,
-  makeSessionTriageAction,
-  type SessionTriageConflict
-} from "../../assist/session-triage.js"
+import { makeSessionTriage, makeSessionTriageAction } from "../../assist/session-triage.js"
 import { ArdenApi } from "../api.js"
 import {
   completionErrorToHttp,
@@ -62,68 +53,26 @@ import {
   archivedSessionToWire,
   branchedSessionToWire,
   createdSessionToWire,
-  listedSessionToWire,
-  sessionListCursorToWire
+  listedSessionToWire
 } from "../wire/sessions.js"
 import { RunQueries } from "../../persistence/runs/queries.js"
-import { ConversationArtifactError, ConversationArtifacts } from "../../artifacts/conversation.js"
-import { sessionLineage } from "../../persistence/sessions/lineage.js"
+import { ConversationArtifacts } from "../../artifacts/conversation.js"
 import { HttpApiSchema } from "effect/unstable/httpapi"
 import { SessionFileCleanup } from "../../storage/session-file-cleanup.js"
 import { ChatStop, type ChatEnd } from "../../chat/chat-stop.js"
 import { makeForkPreparation } from "../../chat/session-fork.js"
 import { Memory } from "../../memory/service.js"
-import type { ChatMessageFailure } from "../../chat/message-errors.js"
-import type { RunQueryError } from "../../persistence/runs/queries.js"
-import type { ScriptStoreError } from "../../persistence/scripts/store.js"
-import type { WorkStoreError } from "../../persistence/work/store.js"
 import { Wiki } from "../../wiki/service.js"
 import { NO_TURNS, visualizationToWire } from "./visualization-wire.js"
-
-const triageActionError = (
-  error: SessionTriageConflict | SessionStoreError | SpaceStoreError | SessionQueryFailure
-) => {
-  if (error._tag === "SessionTriageConflict") return new StoreConflict({ detail: error.message })
-  if (error._tag === "SessionQueryError" || error._tag === "SessionDataCorruptionError")
-    return new HttpApiError.InternalServerError({})
-  return storeErrorToHttp(error)
-}
-
-const endRefusal = (
-  error: SessionStoreError | RunQueryError | ScriptStoreError | WorkStoreError | ChatMessageFailure
-) => {
-  switch (error._tag) {
-    case "SessionStoreError":
-      return error.reason === "conflict"
-        ? { detail: error.message, running: { kind: RUNNING_WORK.none } }
-        : storeErrorToHttp(error)
-    case "RunQueryError":
-    case "ScriptStoreError":
-    case "WorkStoreError":
-    case "ChatMessageError":
-    case "ChatMessageConflictError":
-      return new HttpApiError.InternalServerError({})
-  }
-}
-
-const readError = (_error: SessionReadStateError): HttpApiError.InternalServerError =>
-  new HttpApiError.InternalServerError({})
-
-const artifactHttpError = (error: ConversationArtifactError) => {
-  if (error.reason === "quota") return new HttpApiError.InternalServerError({})
-  return storeErrorToHttp({ reason: error.reason, message: error.message })
-}
-
-/** Chats whose messages match that a find across all chats returns. The panel shows
- * about eight; the rest scroll, and `has_more` says there are more. */
-const CHAT_SEARCH_LIMIT = 20
-
-const sessionCursor = (session: SessionListEntry, sort: SessionListSort) =>
-  sessionListCursorToWire({
-    at:
-      sort === "accessed" ? (session.lastAccessedAt ?? session.lastActivity) : session.lastActivity,
-    sessionId: session.sessionId
-  })
+import {
+  CHAT_SEARCH_LIMIT,
+  artifactHttpError,
+  endRefusal,
+  readError,
+  sessionCursor,
+  triageActionError
+} from "./handler-errors.js"
+import { makeArtifactReads } from "./artifact-lineage.js"
 
 export const SessionHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -141,35 +90,7 @@ export const SessionHandlers = HttpApiBuilder.group(
     const runs = yield* RunQueries
     const fileCleanup = yield* SessionFileCleanup
     const chat = yield* ChatMessage
-    const artifactLineage = Effect.fn("SessionHandlers.artifactLineage")(function* (
-      sessionId: string
-    ) {
-      const header = yield* sessions
-        .loadHistoryHeader(sessionId)
-        .pipe(Effect.catch(failInternal("Sessions")))
-      if (header === null) return null
-      return yield* sessionLineage(sessions, sessionId).pipe(
-        Effect.map((lineage) => lineage.map((entry) => entry.sessionId)),
-        Effect.tapError((error) =>
-          Effect.logWarning("Artifact lineage failed", { sessionId, error })
-        ),
-        Effect.orElseSucceed((): ReadonlyArray<string> => [sessionId])
-      )
-    })
-    const readInLineage = (lineage: ReadonlyArray<string>, ref: string) =>
-      lineage
-        .slice(1)
-        .reduce(
-          (found, owner) =>
-            found.pipe(
-              Effect.catchIf(
-                (error) => error.reason === "not_found",
-                () => artifacts.read(owner, ref)
-              )
-            ),
-          artifacts.read(lineage[0] ?? "", ref)
-        )
-        .pipe(Effect.mapError(artifactHttpError))
+    const { artifactLineage, readInLineage } = makeArtifactReads({ sessions, artifacts })
     const creation = makeSessionCreation({ store, models })
     const startOnboarding = yield* makeOnboardingStart({ store, send: chat.send })
     const kickoff = (sessionId: string) =>

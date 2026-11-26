@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Schema, type SchemaAST } from "effect"
 import type {
   McpOAuthClientReference,
   McpOAuthCredentials,
@@ -9,6 +9,7 @@ import type {
 import type { SecureDocumentTarget } from "./credentials/vault.js"
 import type { VaultKeyBroker } from "./credentials/vault-keys.js"
 import {
+  PARENT_PORT_FAILURE,
   createParentPortRpc,
   type ParentPortFailure,
   type ParentPortResponse,
@@ -17,7 +18,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 35_000
 const MAX_RESPONSE_BYTES = 640 * 1_024
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 
 export interface CredentialVaultBridge {
   readonly vault: McpOAuthVault
@@ -112,14 +113,14 @@ export const createCredentialVaultBridge = (
 
 const vaultFailure = (failure: ParentPortFailure<undefined>): Error => {
   switch (failure.kind) {
-    case "timeout":
+    case PARENT_PORT_FAILURE.timeout:
       return new Error("The credential vault broker timed out")
-    case "stopped":
+    case PARENT_PORT_FAILURE.stopped:
       return new Error("The credential vault broker is closed")
-    case "aborted":
-    case "dispatch_failed":
-    case "invalid_response":
-    case "rejected":
+    case PARENT_PORT_FAILURE.aborted:
+    case PARENT_PORT_FAILURE.dispatch_failed:
+    case PARENT_PORT_FAILURE.invalid_response:
+    case PARENT_PORT_FAILURE.rejected:
       return new Error("The credential vault broker failed")
   }
 }

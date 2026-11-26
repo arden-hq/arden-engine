@@ -7,12 +7,10 @@ const required = (description: string, max: number) =>
   Schema.String.annotate({ description }).check(Schema.isMinLength(1), Schema.isMaxLength(max))
 const optional = (description: string, max: number) =>
   Schema.optionalKey(required(description, max))
-/** An edit's text field: empty clears it. */
 const clearable = (description: string, max: number) =>
   Schema.optionalKey(Schema.String.annotate({ description }).check(Schema.isMaxLength(max)))
 const when = (description: string) => required(`${description} Given as ${WHEN}.`, 64)
 
-// A leading dash would read as one of the helper's options.
 const ref = (description: string) =>
   Schema.String.annotate({ description }).check(
     Schema.isMinLength(1),

@@ -2,25 +2,45 @@ import { DatabaseSync } from "node:sqlite"
 import { databaseSchema } from "./database.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
+export const SQLITE_OBJECT_TYPE = {
+  table: "table",
+  index: "index",
+  view: "view",
+  trigger: "trigger"
+} as const
+export type SqliteObjectType = (typeof SQLITE_OBJECT_TYPE)[keyof typeof SQLITE_OBJECT_TYPE]
+
+const sqliteObjectType = (value: unknown): SqliteObjectType => {
+  const type = Object.values(SQLITE_OBJECT_TYPE).find((known) => known === value)
+  if (type === undefined) throw new Error(`Unknown SQLite schema object type ${String(value)}`)
+  return type
+}
+
 export interface SchemaManifestRow {
-  readonly type: string
+  readonly type: SqliteObjectType
   readonly name: string
   readonly tbl_name: string
   readonly sql: string | null
 }
 
+export const SCHEMA_MANIFEST_VERDICT = {
+  current: "current",
+  conversionRequired: "conversion_required",
+  incompatible: "incompatible"
+} as const
+
 export type SchemaManifestVerdict =
   | {
-      readonly kind: "current"
+      readonly kind: typeof SCHEMA_MANIFEST_VERDICT.current
       readonly foreign: ReadonlyArray<SchemaManifestRow>
     }
   | {
-      readonly kind: "conversion_required"
+      readonly kind: typeof SCHEMA_MANIFEST_VERDICT.conversionRequired
       readonly missing: ReadonlyArray<SchemaManifestRow>
       readonly foreign: ReadonlyArray<SchemaManifestRow>
     }
   | {
-      readonly kind: "incompatible"
+      readonly kind: typeof SCHEMA_MANIFEST_VERDICT.incompatible
       readonly problems: ReadonlyArray<string>
       readonly foreign: ReadonlyArray<SchemaManifestRow>
     }
@@ -39,7 +59,7 @@ export const readSchemaManifest = (database: DatabaseSync): ReadonlyArray<Schema
     )
     .all()
     .map((row) => ({
-      type: String(row.type),
+      type: sqliteObjectType(row.type),
       name: String(row.name),
       tbl_name: String(row.tbl_name),
       sql: typeof row.sql === "string" ? row.sql : null
@@ -52,7 +72,7 @@ export const readForeignTableReferences = (
 ): ReadonlyMap<string, ReadonlyArray<string>> => {
   const reference = new Set(referenceRows.map(schemaIdentity))
   const tables = liveRows.filter(
-    (row) => row.type === "table" && !reference.has(schemaIdentity(row))
+    (row) => row.type === SQLITE_OBJECT_TYPE.table && !reference.has(schemaIdentity(row))
   )
   return new Map(
     tables.map((row) => [
@@ -129,7 +149,7 @@ export const classifySchemaManifest = (
     unexpected
       .filter(
         (row) =>
-          row.type === "table" &&
+          row.type === SQLITE_OBJECT_TYPE.table &&
           !ownedNames.has(row.name) &&
           foreignTableReferences.has(row.name) &&
           foreignTableReferences.get(row.name)?.length === 0
@@ -143,20 +163,20 @@ export const classifySchemaManifest = (
       problems.push(`${identity} collides with an owned schema object`)
       continue
     }
-    if (row.type === "table" && detachedForeignTableNames.has(row.name)) {
+    if (row.type === SQLITE_OBJECT_TYPE.table && detachedForeignTableNames.has(row.name)) {
       foreign.push(row)
       continue
     }
-    if (row.type === "index" && detachedForeignTableNames.has(row.tbl_name)) {
+    if (row.type === SQLITE_OBJECT_TYPE.index && detachedForeignTableNames.has(row.tbl_name)) {
       foreign.push(row)
       continue
     }
     problems.push(`${identity} can interfere with owned schema`)
   }
 
-  if (problems.length > 0) return { kind: "incompatible", problems, foreign }
+  if (problems.length > 0) return { kind: SCHEMA_MANIFEST_VERDICT.incompatible, problems, foreign }
   const missing = referenceRows.filter((row) => !live.has(schemaIdentity(row)))
   return missing.length === 0
-    ? { kind: "current", foreign }
-    : { kind: "conversion_required", missing, foreign }
+    ? { kind: SCHEMA_MANIFEST_VERDICT.current, foreign }
+    : { kind: SCHEMA_MANIFEST_VERDICT.conversionRequired, missing, foreign }
 }

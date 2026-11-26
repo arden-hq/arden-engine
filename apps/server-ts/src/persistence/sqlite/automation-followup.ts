@@ -1,6 +1,6 @@
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { AutomationQueue, FollowupOwner } from "../automations/queue.js"
+import type { AutomationFollowup, AutomationQueue, FollowupOwner } from "../automations/queue.js"
 import { AutomationStoreError } from "../automations/store.js"
 import type { AutomationStoreDeps } from "./automation-rows.js"
 import { storeError } from "./automation-rows.js"
@@ -76,7 +76,10 @@ export const readAutomationFollowup = Effect.fn("AutomationFollowup.read")(funct
   attemptId: number,
   runId: string | null
 ) {
-  const rows = yield* sql<{ readonly action: string; readonly at: string | null }>`
+  const rows = yield* sql<{
+    readonly action: AutomationFollowup["action"]
+    readonly at: string | null
+  }>`
     SELECT json_extract(attempt.followup_json, '$.action') AS action,
            json_extract(attempt.followup_json, '$.at') AS at
     FROM automation_runs AS attempt

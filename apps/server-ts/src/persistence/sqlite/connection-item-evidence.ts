@@ -1,4 +1,5 @@
-import { type TaskSourceRecord } from "../work/task-record.js"
+import { SOURCE_KIND } from "@arden-hq/protocol/spaces/work"
+import type { TaskSourceRecord } from "../work/task-record.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { workError } from "./work-records.js"
@@ -12,7 +13,7 @@ export const assertItemEvidence = Effect.fn("Work.assertItemEvidence")(function*
   }
 ) {
   const items = options.sources.flatMap((source) =>
-    source.kind === "connection_item" ? [source] : []
+    source.kind === SOURCE_KIND.connection_item ? [source] : []
   )
   if (items.length === 0) return
   for (const source of items) {

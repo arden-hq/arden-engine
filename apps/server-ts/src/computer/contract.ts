@@ -1,6 +1,8 @@
 import type { NativeVisual } from "./feedback.js"
 import { Schema } from "effect"
 
+export const NATIVE_BUTTON = { left: "left", right: "right", middle: "middle" } as const
+
 const Id = Schema.Int.check(Schema.isGreaterThan(0))
 const Token = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128))
 export const NativeTargetSchema = Schema.Struct({ pid: Id, window_id: Id })
@@ -24,7 +26,7 @@ const Modifiers = Schema.Array(Schema.Literals(["cmd", "shift", "alt", "ctrl"]))
 )
 const PointerFields = {
   button: Schema.optionalKey(
-    Schema.Literals(["left", "right", "middle"]).annotate({
+    Schema.Literals(Object.values(NATIVE_BUTTON)).annotate({
       description: "Mouse button for click, pixel_click and drag. Defaults to left."
     })
   ),
@@ -46,10 +48,24 @@ export const NativeAxActions = {
   AXOpen: "open"
 } as const
 
+export type NativeAxAction = (typeof NativeAxActions)[keyof typeof NativeAxActions]
+
+export const NATIVE_ACTION = {
+  set_value: "set_value",
+  activate: "activate",
+  click: "click",
+  menu: "menu",
+  type: "type",
+  key: "key",
+  scroll: "scroll",
+  pixel_click: "pixel_click",
+  drag: "drag"
+} as const
+
 export const NativeActionSchema = Schema.Union([
   Schema.Struct({
     ...ActionFields,
-    action: Schema.Literal("set_value"),
+    action: Schema.Literal(NATIVE_ACTION.set_value),
     delivery: Schema.Literal("background"),
     element: Token.annotate({
       description: "element_token from the observation's elements."
@@ -61,13 +77,13 @@ export const NativeActionSchema = Schema.Union([
   }),
   Schema.Struct({
     ...ActionFields,
-    action: Schema.Literal("activate"),
+    action: Schema.Literal(NATIVE_ACTION.activate),
     delivery: Schema.Literal("foreground")
   }),
   Schema.Struct({
     ...ActionFields,
     ...PointerFields,
-    action: Schema.Literal("click"),
+    action: Schema.Literal(NATIVE_ACTION.click),
     element: Token.annotate({
       description: "element_token from the observation's elements."
     }),
@@ -80,7 +96,7 @@ export const NativeActionSchema = Schema.Union([
   }),
   Schema.Struct({
     ...ActionFields,
-    action: Schema.Literal("menu"),
+    action: Schema.Literal(NATIVE_ACTION.menu),
     delivery: Schema.Literal("foreground"),
     path: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)))
       .check(Schema.isMinLength(1), Schema.isMaxLength(16))
@@ -91,7 +107,7 @@ export const NativeActionSchema = Schema.Union([
   }),
   Schema.Struct({
     ...ActionFields,
-    action: Schema.Literal("type"),
+    action: Schema.Literal(NATIVE_ACTION.type),
     element: Schema.optionalKey(
       Token.annotate({
         description:
@@ -104,7 +120,7 @@ export const NativeActionSchema = Schema.Union([
   }),
   Schema.Struct({
     ...ActionFields,
-    action: Schema.Literal("key"),
+    action: Schema.Literal(NATIVE_ACTION.key),
     element: Schema.optionalKey(
       Token.annotate({
         description:
@@ -123,7 +139,7 @@ export const NativeActionSchema = Schema.Union([
   }),
   Schema.Struct({
     ...ActionFields,
-    action: Schema.Literal("scroll"),
+    action: Schema.Literal(NATIVE_ACTION.scroll),
     element: Token.annotate({
       description: "element_token of the element to scroll, from the observation's elements."
     }),
@@ -140,7 +156,7 @@ export const NativeActionSchema = Schema.Union([
   Schema.Struct({
     ...ActionFields,
     ...PointerFields,
-    action: Schema.Literal("pixel_click"),
+    action: Schema.Literal(NATIVE_ACTION.pixel_click),
     capture: Token.annotate({
       description:
         "capture_id from the same observation. Read it with screenshot=true so you see the image the coordinates refer to. Used by pixel_click and drag."
@@ -163,7 +179,7 @@ export const NativeActionSchema = Schema.Union([
   Schema.Struct({
     ...ActionFields,
     ...PointerFields,
-    action: Schema.Literal("drag"),
+    action: Schema.Literal(NATIVE_ACTION.drag),
     delivery: Schema.Literal("foreground"),
     capture: Token.annotate({
       description:
@@ -385,8 +401,6 @@ export const requireForegroundWindow = (target: NativeTarget, listing: unknown):
   }
 }
 
-/** Cua 0.34's background left-pixel route activates AppKit without raising
- * the window. It still competes for user input, so requires foreground access. */
 export function nativeDelivery(action: NativeAction): "background" | "foreground" {
   if (action.action === "pixel_click" && (action.button ?? "left") === "left") return "foreground"
   return action.delivery

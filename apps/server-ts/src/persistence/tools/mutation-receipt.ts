@@ -341,8 +341,14 @@ export const attachMutationReceipt = (
   }
 })
 
-export const NOT_RUN_HOST = { not_run: "approval" } as const
-export const DIRECTION_REVIEW_HOST = { not_run: "task_direction" } as const
+const NOT_RUN_REASON = { approval: "approval", directionReview: "task_direction" } as const
+
+type NotRunReason = (typeof NOT_RUN_REASON)[keyof typeof NOT_RUN_REASON]
+
+export const NOT_RUN_HOST: { readonly not_run: NotRunReason } = { not_run: NOT_RUN_REASON.approval }
+export const DIRECTION_REVIEW_HOST: { readonly not_run: NotRunReason } = {
+  not_run: NOT_RUN_REASON.directionReview
+}
 
 const notRun = (result: Pick<ToolResult, "host">): boolean =>
   result.host?.["not_run"] === NOT_RUN_HOST.not_run ||

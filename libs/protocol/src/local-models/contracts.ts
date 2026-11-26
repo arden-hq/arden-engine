@@ -1,67 +1,85 @@
 import type { JsonRecord } from "../common/json.js"
+import type { ModelEndpointInput } from "../model-endpoints/contracts.js"
 
-/**
- * Where one downloadable model stands on this Mac.
- *
- * - `absent`: nothing on disk.
- * - `downloading`: bytes are arriving; a download in this state when Arden
- *   quits resumes after the next start.
- * - `stopped`: the user stopped it; the bytes so far are kept and Install resumes.
- * - `failed`: `network` (the connection broke or the server refused; Install
- *   resumes from the kept bytes), `hash` (the file did not match; its bytes
- *   were deleted, Install starts over) or `disk` (the disk refused a write).
- * - `no_space`: the disk lacks room for the rest of the download; nothing more
- *   was downloaded. `neededBytes` is what is still to come plus 1 GB Arden
- *   keeps free, so the disk never fills to the last byte.
- * - `installed`: every file is on disk and verified.
- */
+export const LOCAL_MODEL_INSTALL_STATE = {
+  absent: "absent",
+  downloading: "downloading",
+  stopped: "stopped",
+  failed: "failed",
+  noSpace: "no_space",
+  installed: "installed"
+} as const
+
+export const LOCAL_MODEL_INSTALL_REASON = {
+  network: "network",
+  hash: "hash",
+  disk: "disk"
+} as const
+
+export type LocalModelInstallReason =
+  (typeof LOCAL_MODEL_INSTALL_REASON)[keyof typeof LOCAL_MODEL_INSTALL_REASON]
+
 export type LocalModelInstall =
-  | { readonly state: "absent" }
   | {
-      readonly state: "downloading" | "stopped"
+      readonly state:
+        | typeof LOCAL_MODEL_INSTALL_STATE.absent
+        | typeof LOCAL_MODEL_INSTALL_STATE.installed
+    }
+  | {
+      readonly state:
+        | typeof LOCAL_MODEL_INSTALL_STATE.downloading
+        | typeof LOCAL_MODEL_INSTALL_STATE.stopped
       readonly receivedBytes: number
       readonly totalBytes: number
     }
   | {
-      readonly state: "failed"
-      readonly reason: "network" | "hash" | "disk"
+      readonly state: typeof LOCAL_MODEL_INSTALL_STATE.failed
+      readonly reason: LocalModelInstallReason
       readonly receivedBytes: number
       readonly totalBytes: number
     }
   | {
-      readonly state: "no_space"
+      readonly state: typeof LOCAL_MODEL_INSTALL_STATE.noSpace
       readonly neededBytes: number
       readonly freeBytes: number
     }
-  | { readonly state: "installed" }
 
-/** One model of the curated catalog. */
+export const LOCAL_MODEL_KIND = { embedding: "embedding", decision: "decision" } as const
+
+export type LocalModelKind = (typeof LOCAL_MODEL_KIND)[keyof typeof LOCAL_MODEL_KIND]
+
 export interface LocalModelInfo extends JsonRecord {
   readonly id: string
-  /** embedding — Wiki search vectors; decision — option probabilities for typed questions. */
-  readonly kind: "embedding" | "decision"
+  readonly kind: LocalModelKind
   readonly name: string
-  /** The licence's name, and the page that holds its text. */
   readonly license: string
   readonly licenseUrl: string
-  /** text+image models also read images (they carry a projector file). */
-  readonly input: "text" | "text+image"
-  /** Download size of every file together. */
+  readonly input: ModelEndpointInput
   readonly totalBytes: number
   readonly install: LocalModelInstall
 }
 
-/**
- * The helper process that runs installed models. It starts on first use and
- * stops with Arden; `failed` means it crashed three times in a row.
- */
+export const LOCAL_MODEL_RUNTIME = {
+  stopped: "stopped",
+  starting: "starting",
+  running: "running",
+  failed: "failed"
+} as const
+
 export type LocalModelRuntime =
-  | { readonly state: "stopped" | "starting" | "running" }
-  | { readonly state: "failed"; readonly error: string }
+  | {
+      readonly state:
+        | typeof LOCAL_MODEL_RUNTIME.stopped
+        | typeof LOCAL_MODEL_RUNTIME.starting
+        | typeof LOCAL_MODEL_RUNTIME.running
+    }
+  | { readonly state: typeof LOCAL_MODEL_RUNTIME.failed; readonly error: string }
+
+export const LOCAL_MODELS_FREE_SPACE = { measured: "measured", unmeasured: "unmeasured" } as const
 
 export type LocalModelsFreeSpace =
-  | { readonly kind: "measured"; readonly bytes: number }
-  | { readonly kind: "unmeasured" }
+  | { readonly kind: typeof LOCAL_MODELS_FREE_SPACE.measured; readonly bytes: number }
+  | { readonly kind: typeof LOCAL_MODELS_FREE_SPACE.unmeasured }
 
 export interface LocalModelsStatus extends JsonRecord {
   readonly models: ReadonlyArray<LocalModelInfo>

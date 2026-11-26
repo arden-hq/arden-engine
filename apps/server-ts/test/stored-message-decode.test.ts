@@ -1,7 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { toChatRunnerMessages } from "../src/chat/run-driver.js"
+import { toChatRunnerMessages } from "../src/chat/run-driver-support.js"
 import type { StoredMessageEnvelope } from "../src/persistence/transcript/model.js"
 
 const createdAt = "2026-09-26T10:00:00.000Z"

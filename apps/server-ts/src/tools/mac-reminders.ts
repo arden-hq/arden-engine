@@ -45,7 +45,6 @@ const READ = {
 
 const WRITE = {
   effect: "external",
-  // The app's document card: it shows the card's own button and heads it with the title.
   display: [{ fact: "card", value: "calendar" }],
   kind: "tool",
   action: "write",
@@ -276,7 +275,6 @@ export const makeMacRemindersTools = (apps: MacApps): ReadonlyArray<ServerTool> 
         display_name: "Complete Reminder",
         approval_preview: "Mark this reminder done in the Reminders app.",
         destructive: false,
-        // Again on a repeating reminder finishes its next occurrence.
         idempotent: false
       },
       approvalPrompt: (input, ctx) => completeCard(input, ctx.signal),

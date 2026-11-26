@@ -1,25 +1,11 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
-import {
-  makeAgent,
-  pendingBackgroundCalls,
-  resolveModelCapabilities,
-  ToolChoice,
-  usageInputTokens
-} from "@arden-hq/loop"
+import { makeAgent, resolveModelCapabilities, usageInputTokens } from "@arden-hq/loop"
 import type {
   AgentStreamEvent,
-  AgentConfigInput,
-  AgentHooks,
-  AgentOptions,
-  AgentOutputOptions,
   ChatMessage,
-  ImageInput,
-  MessageIdMinter,
   ModelRequest,
-  ModelRequestMiddleware,
   ModelRequestNext,
-  ModelProvider,
   Toolset,
   ToolCallRequest,
   ToolResult
@@ -28,480 +14,37 @@ import type {
   ChatRunner,
   ChatRunnerContextReport,
   ChatRunnerInput,
-  ChatRunnerMessage,
-  ChatRunnerToolRequest,
-  ServerToolRun
+  ChatRunnerToolRequest
 } from "./runner-contract.js"
-import { projectCurrentIdleGap } from "../context/idle-gap.js"
-import { projectAnswerBlocks } from "../context/answer-blocks.js"
 import { ToolEffectSchema } from "../execution/tool-effect.js"
 import { Option, Schema } from "effect"
 import { persistToolCallHost } from "../execution/tool-call-presentation.js"
-import { observeModelRequests, type CompletedModelRequest } from "./request-observation.js"
+import { observeModelRequests } from "./request-observation.js"
 import { makeModelRequestMeter, responseUsage } from "./model-request-meter.js"
-import { randomUUID } from "node:crypto"
-import { appendDeveloperContext } from "./developer-context.js"
-import {
-  makeLocalInstructionRuntime,
-  type LocalInstructionLoader,
-  type LocalInstructionRecorder
-} from "./local-instruction-runtime.js"
-import type { AutomationId } from "../persistence/automations/model.js"
-import { mintedMessageId, mintedTurnRoot } from "../persistence/transcript/minted-ids.js"
-import { repairOrphanToolOutputs, type OrphanToolOutput } from "./tool-history-repair.js"
+import { appendDeveloperContext, DEVELOPER_CONTEXT_SOURCE } from "./developer-context.js"
+import { makeLocalInstructionRuntime } from "./local-instruction-runtime.js"
 import { answerBlockCorrection } from "./ui-blocks.js"
 import { answerFixInHistory } from "./loop-events.js"
-import { labelToolResults, seenToolResult } from "../context/tool-result-ids.js"
-import {
-  presentedRuntimeState,
-  producingTaskDirection,
-  runtimeUpdate,
-  type RuntimeContext
-} from "../context/runtime-update.js"
+import { seenToolResult } from "../context/tool-result-ids.js"
+import { producingTaskDirection } from "../context/runtime-update.js"
 import { DIRECTION_REVIEW_HOST } from "../persistence/tools/mutation-receipt.js"
-import { currentIso } from "../runtime/clock.js"
-import type { ModelDefinition } from "../models/host.js"
 import { chatStepOutputLimit, outputLimitDelivery } from "../models/side-call.js"
-import { TODO_REMINDER_SOURCE, todoReminderDue } from "../context/todo-reminder.js"
+import { type LoopChatRunnerOptions } from "./loop-runner-options.js"
 import {
-  OWNER_INSTRUCTIONS_SOURCE,
-  ownerInstructionsDue,
-  renderOwnerInstructions
-} from "../context/owner-instructions.js"
+  initialMessages,
+  labelToolResultsMiddleware,
+  makeCompactionMiddleware,
+  makeMessageIdMinter,
+  makeStepLimitMiddleware,
+  makeSystemContextMiddleware,
+  makeTodoReminderMiddleware,
+  makeToolHistoryRepairMiddleware,
+  ownerInstructionsMiddleware,
+  projectAnswerBlocksMiddleware,
+  projectIdleGapMiddleware,
+  toLoopMessages
+} from "./loop-runner-middleware.js"
 
-type LoopChatRunnerAgentOptions = Omit<AgentOptions, "provider" | "toolset" | "hooks"> & {
-  readonly hooks?: Omit<
-    AgentHooks,
-    "getPendingMessages" | "hasPendingInput" | "waitForPendingMessages" | "recoverToolCalls"
-  >
-}
-
-export type LoopChatCompactionResult =
-  | { readonly kind: "unchanged" }
-  | { readonly kind: "replacement"; readonly messages: ReadonlyArray<ChatRunnerMessage> }
-  | { readonly kind: "disabled_for_run" }
-
-export interface LoopChatRunnerOptions {
-  readonly provider: ModelProvider
-  /** Successful final request shape, including resolved tool declarations and search. */
-  readonly onRequestComplete?: (input: CompletedModelRequest) => void
-  readonly toolset:
-    | Toolset
-    | ((input: {
-        readonly sessionId: string
-        readonly runId: string
-        readonly approvalMode: ChatRunnerInput["approvalMode"]
-        readonly automationId: AutomationId | null
-        readonly executeTool: ChatRunnerInput["tools"]["execute"]
-        readonly executeDetachedTool: ChatRunnerInput["tools"]["executeDetached"]
-        readonly spawnAgent: ChatRunnerInput["tools"]["spawnAgent"]
-        readonly cancelAgent: ChatRunnerInput["tools"]["cancelAgent"]
-        readonly sendMessage: ChatRunnerInput["tools"]["sendMessage"]
-        readonly detachedRun: ChatRunnerInput["tools"]["detachedRun"]
-        readonly emitToolProgress: ChatRunnerInput["tools"]["emitToolProgress"]
-        readonly emitToolOutput: ChatRunnerInput["tools"]["emitToolOutput"]
-        readonly declareEffectTarget: ChatRunnerInput["tools"]["declareEffectTarget"]
-        readonly modelUsage: NonNullable<ServerToolRun["modelUsage"]>
-        readonly imageInput?: ImageInput
-      }) => Toolset | PromiseLike<Toolset>)
-  readonly config?: Omit<
-    AgentConfigInput,
-    "model" | "reasoningEffort" | "toolCallMiddlewares" | "mintMessageId"
-  >
-  /** A thunk so a setting that changes it takes effect on the NEXT RUN rather
-   *  than the next process. Resolved once per run, before the first request. */
-  readonly systemPrompt?: string | (() => string | PromiseLike<string>)
-  /** Small clock updates, separate from the larger runtime context. */
-  readonly localTime?: () => string
-  /** The chat's own todo list as a reminder, or undefined when there is none
-   *  to keep in view (`context/todo-reminder.ts`); read only when one is due. */
-  readonly todoReminder?: (input: {
-    readonly sessionId: string
-    readonly signal: AbortSignal
-  }) => PromiseLike<string | undefined>
-  /** Which of `messageIds` are the owner's own words (`TranscriptQueries.ownerWordsIn`); the
-   *  owner's instructions are recited only from those. */
-  readonly ownerWords?: (input: {
-    readonly sessionId: string
-    readonly messageIds: ReadonlyArray<string>
-    readonly signal: AbortSignal
-  }) => PromiseLike<ReadonlySet<string>>
-  /** Per-user-turn context. The first record restates it whole; later ones
-   *  append only what changed (`context/runtime-update.ts`). */
-  readonly systemContext?: (input: {
-    readonly sessionId: string
-    readonly runId: string
-    readonly automationId: AutomationId | null
-    readonly messages: ReadonlyArray<ChatRunnerMessage>
-    readonly signal: AbortSignal
-  }) => PromiseLike<RuntimeContext | undefined>
-  readonly localInstructions?: LocalInstructionLoader
-  readonly recordLocalInstructions?: LocalInstructionRecorder
-  /** Folders whose Local folder instructions every run sees from its first step. */
-  readonly localInstructionDirectories?: ReadonlyArray<string>
-  readonly output?: (input: ChatRunnerInput) => Promise<AgentOutputOptions | undefined>
-  /** Deferred tools a conversation starts with loaded, decided per run. */
-  readonly preloadTools?: (input: {
-    readonly sessionId: string
-    readonly runId: string
-    readonly automationId: AutomationId | null
-  }) => PromiseLike<ReadonlyArray<string>>
-  readonly agentOptions?: LoopChatRunnerAgentOptions
-  /** The window and output cap a model declares; each step's output limit
-   *  follows from them (`chatStepOutputLimit`). Absent, a step sends none. */
-  readonly modelContext?: (model: string) => ModelDefinition["context"] | undefined
-  /** Replace the complete model history at a durable compaction boundary.
-   *  System messages in a replacement are ignored: the current system prefix
-   *  is kept and the replacement's non-system messages follow it. */
-  /** Told once per run and call when a request carried a tool output whose
-   *  call is gone from the history; the request sends it as a context note. */
-  readonly onOrphanToolOutputs?: (input: {
-    readonly sessionId: string
-    readonly runId: string
-    readonly orphans: ReadonlyArray<OrphanToolOutput>
-  }) => void
-  readonly compact?: (input: {
-    readonly sessionId: string
-    readonly runId: string
-    readonly model: string
-    readonly reasoningEffort: string | null
-    readonly messages: ReadonlyArray<ChatRunnerMessage>
-    readonly inputTokens: number | null
-    /** The provider refused this request as too long: compact whatever the token count says. */
-    readonly overflow: boolean
-    readonly pendingCallIds: ReadonlySet<string>
-    readonly signal: AbortSignal
-  }) => PromiseLike<LoopChatCompactionResult>
-}
-
-const toLoopMessages = (messages: ReadonlyArray<ChatRunnerMessage>): ReadonlyArray<ChatMessage> =>
-  messages.map((message) => ({ ...message }))
-
-const initialMessages = async (
-  input: ChatRunnerInput,
-  systemPrompt: LoopChatRunnerOptions["systemPrompt"]
-): Promise<ReadonlyArray<ChatMessage>> => {
-  const resolved = typeof systemPrompt === "function" ? await systemPrompt() : systemPrompt
-  return [
-    ...(resolved === undefined ? [] : [{ role: ROLE.system, content: resolved }]),
-    ...toLoopMessages(input.messages)
-  ]
-}
-
-const tokenCount = (value: number | undefined): number =>
-  value !== undefined && Number.isFinite(value) && value >= 0 ? value : 0
-
-const previousInputTokens = (request: ModelRequest): number | null => {
-  const usage = request.previousResponse?.usage
-  return usage === undefined
-    ? null
-    : tokenCount(usage.prompt_tokens) +
-        tokenCount(usage.cache_read_tokens) +
-        tokenCount(usage.cache_write_tokens)
-}
-
-const withStableSystemPrefix = (
-  current: ReadonlyArray<ChatMessage>,
-  replacement: ReadonlyArray<ChatMessage>
-): ReadonlyArray<ChatMessage> => {
-  const firstNonSystem = current.findIndex((message) => message.role !== ROLE.system)
-  const prefix = firstNonSystem < 0 ? current : current.slice(0, firstNonSystem)
-  return [...prefix, ...replacement.filter((message) => message.role !== ROLE.system)]
-}
-
-type CompactionState = "active" | "disabled_for_run"
-
-const makeCompactionMiddleware = (
-  compact: NonNullable<LoopChatRunnerOptions["compact"]>,
-  input: ChatRunnerInput
-): ModelRequestMiddleware => {
-  let state: CompactionState = "active"
-  return async (request: ModelRequest, next: ModelRequestNext) => {
-    const prepared = await next(request)
-    if (state === "disabled_for_run") return prepared
-    const pending = pendingBackgroundCalls(prepared.messages)
-    const result = await compact({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      model: prepared.model,
-      reasoningEffort: prepared.reasoningEffort ?? input.reasoningEffort,
-      messages: toLoopMessages(prepared.messages),
-      inputTokens: previousInputTokens(prepared),
-      overflow: prepared.contextOverflow === true,
-      pendingCallIds: new Set(pending.map((call) => call.toolCall.id)),
-      signal: input.signal
-    })
-    if (result.kind === "disabled_for_run") {
-      state = "disabled_for_run"
-      return prepared
-    }
-    if (result.kind === "unchanged") return prepared
-    const compacted = withStableSystemPrefix(prepared.messages, toLoopMessages(result.messages))
-    const { contextOverflow: _, ...answered } = prepared
-    return {
-      ...answered,
-      messages: compacted,
-      compactionReplacement: compacted
-    }
-  }
-}
-
-const makeMessageIdMinter = (
-  assistantMessageId: string,
-  messages: ReadonlyArray<ChatRunnerMessage>,
-  mintedMessageIds: ReadonlyArray<string>
-): MessageIdMinter => {
-  const claimed = new Set([
-    ...mintedMessageIds,
-    ...messages.flatMap((message) =>
-      message.role === ROLE.assistant && typeof message.message_id === "string"
-        ? [message.message_id]
-        : []
-    )
-  ])
-  let offset = 0
-  while (claimed.has(mintedTurnRoot(assistantMessageId, offset))) offset += 1
-  return (kind, position) =>
-    mintedMessageId(mintedTurnRoot(assistantMessageId, position.turn + offset), kind, position)
-}
-
-const projectIdleGapMiddleware: ModelRequestMiddleware = async (request, next) => {
-  const prepared = await next(request)
-  return {
-    ...prepared,
-    messages: projectCurrentIdleGap(prepared.messages)
-  }
-}
-
-const projectAnswerBlocksMiddleware: ModelRequestMiddleware = async (request, next) => {
-  const prepared = await next(request)
-  return { ...prepared, messages: projectAnswerBlocks(prepared.messages) }
-}
-
-const labelToolResultsMiddleware: ModelRequestMiddleware = async (request, next) => {
-  const prepared = await next(request)
-  return { ...prepared, messages: labelToolResults(prepared.messages) }
-}
-
-const makeToolHistoryRepairMiddleware = (
-  report: LoopChatRunnerOptions["onOrphanToolOutputs"],
-  input: ChatRunnerInput
-): ModelRequestMiddleware => {
-  const reported = new Set<string>()
-  return async (request, next) => {
-    const prepared = await next(request)
-    const repair = repairOrphanToolOutputs(prepared.messages)
-    if (repair.orphans.length === 0) return prepared
-    const fresh = repair.orphans.filter((orphan) => !reported.has(orphan.callId))
-    for (const orphan of fresh) reported.add(orphan.callId)
-    if (fresh.length > 0)
-      report?.({ sessionId: input.sessionId, runId: input.runId, orphans: fresh })
-    return { ...prepared, messages: repair.messages }
-  }
-}
-
-type StepLimitStage = "far" | "plan" | "save" | "final"
-
-const stepLimitWarnings = (maxSteps: number) => ({
-  plan: Math.ceil(maxSteps * 0.25),
-  save: Math.ceil(maxSteps * 0.05)
-})
-
-const STEP_LIMIT_STAGES: ReadonlyArray<{
-  readonly stage: Exclude<StepLimitStage, "far">
-  readonly reached: (remaining: number, maxSteps: number) => boolean
-  readonly note: (maxSteps: number) => string
-}> = [
-  {
-    stage: "final",
-    reached: (remaining) => remaining <= 1,
-    note: (maxSteps) =>
-      `This is the last step of this run's ${maxSteps}-step limit. Tools are off for this step. Write your final reply now: what is done, what is left, where your work is saved.`
-  },
-  {
-    stage: "save",
-    reached: (remaining, maxSteps) => remaining <= stepLimitWarnings(maxSteps).save,
-    note: (maxSteps) =>
-      `${stepLimitWarnings(maxSteps).save} or fewer steps remain of this run's ${maxSteps}-step limit. Save your progress now (files, Task notes), then write your report.`
-  },
-  {
-    stage: "plan",
-    reached: (remaining, maxSteps) => remaining <= stepLimitWarnings(maxSteps).plan,
-    note: (maxSteps) =>
-      `About ${stepLimitWarnings(maxSteps).plan} steps remain of this run's ${maxSteps}-step limit. Continue the task: keep to the main goal, save progress as you go, and plan how to finish. Do not stop because of this note.`
-  }
-]
-
-const stepLimitStage = (step: number, maxSteps: number): StepLimitStage =>
-  STEP_LIMIT_STAGES.find((entry) => entry.reached(maxSteps - step, maxSteps))?.stage ?? "far"
-
-const stepLimitNote = (stage: StepLimitStage, maxSteps: number): string =>
-  STEP_LIMIT_STAGES.find((entry) => entry.stage === stage)?.note(maxSteps) ?? ""
-
-const makeStepLimitMiddleware =
-  (input: ChatRunnerInput, maxSteps: number): ModelRequestMiddleware =>
-  async (request, next) => {
-    const stage = stepLimitStage(request.step, maxSteps)
-    const prepared = appendDeveloperContext({
-      request: await next(request),
-      input,
-      source: "step_limit",
-      content: stepLimitNote(stage, maxSteps)
-    })
-    return stage === "final" ? { ...prepared, toolChoice: ToolChoice.NONE } : prepared
-  }
-
-const makeTodoReminderMiddleware =
-  (
-    load: NonNullable<LoopChatRunnerOptions["todoReminder"]>,
-    input: ChatRunnerInput
-  ): ModelRequestMiddleware =>
-  async (request, next) => {
-    const prepared = await next(request)
-    if (!todoReminderDue(prepared.messages)) return prepared
-    const reminder = await load({ sessionId: input.sessionId, signal: input.signal })
-    if (reminder === undefined) return prepared
-    const messages: ReadonlyArray<ChatMessage> = [
-      ...prepared.messages,
-      {
-        role: ROLE.developer,
-        message_id: `${input.runId}:context:${TODO_REMINDER_SOURCE}:${randomUUID()}`,
-        created_at: currentIso(),
-        turn_id: input.turnId,
-        arden_context_source: TODO_REMINDER_SOURCE,
-        content: reminder
-      }
-    ]
-    return { ...prepared, messages, compactionReplacement: messages }
-  }
-
-const ownerInstructionsMiddleware =
-  (
-    load: NonNullable<LoopChatRunnerOptions["ownerWords"]>,
-    input: ChatRunnerInput
-  ): ModelRequestMiddleware =>
-  async (request, next) => {
-    const prepared = await next(request)
-    if (!ownerInstructionsDue(prepared.messages)) return prepared
-    const owned = await load({
-      sessionId: input.sessionId,
-      messageIds: prepared.messages.flatMap((message) =>
-        message.role === ROLE.user && typeof message.message_id === "string"
-          ? [message.message_id]
-          : []
-      ),
-      signal: input.signal
-    })
-    const recital = renderOwnerInstructions(prepared.messages, owned)
-    if (recital === undefined) return prepared
-    const messages: ReadonlyArray<ChatMessage> = [
-      ...prepared.messages,
-      {
-        role: ROLE.developer,
-        message_id: `${input.runId}:context:${OWNER_INSTRUCTIONS_SOURCE}:${randomUUID()}`,
-        created_at: currentIso(),
-        turn_id: input.turnId,
-        arden_context_source: OWNER_INSTRUCTIONS_SOURCE,
-        content: recital
-      }
-    ]
-    return { ...prepared, messages, compactionReplacement: messages }
-  }
-
-const NO_RUNTIME_CONTEXT: RuntimeContext = { sections: [], endNote: undefined }
-
-const isRuntimeRecord = (message: ChatMessage): boolean =>
-  message.role === ROLE.developer && message.arden_context_source === "runtime"
-
-const appendRuntimeContext = (
-  request: ModelRequest,
-  input: ChatRunnerInput,
-  context: RuntimeContext
-): ModelRequest => {
-  const records = request.messages.filter(isRuntimeRecord)
-  const update = runtimeUpdate({
-    presented: presentedRuntimeState(
-      records.map((record) => ({
-        update: record.arden_context_update,
-        state: record.arden_context_state
-      }))
-    ),
-    current: context,
-    endNoteDue: !records.some((record) => record.arden_context_run_id === input.runId)
-  })
-  if (update === undefined) return request
-  const messages: ReadonlyArray<ChatMessage> = [
-    ...request.messages,
-    {
-      role: ROLE.developer,
-      message_id: `${input.runId}:context:runtime:${randomUUID()}`,
-      created_at: currentIso(),
-      turn_id: input.turnId,
-      arden_context_source: "runtime",
-      arden_context_run_id: input.runId,
-      arden_context_update: update.kind,
-      arden_context_state: update.state,
-      content: update.text
-    }
-  ]
-  return { ...request, messages, compactionReplacement: messages }
-}
-
-const makeSystemContextMiddleware = (
-  systemContext: NonNullable<LoopChatRunnerOptions["systemContext"]>,
-  input: ChatRunnerInput,
-  directionReviews: () => number
-): ModelRequestMiddleware => {
-  let cacheKey: string | null = null
-  let cached: RuntimeContext | undefined
-  return async (request: ModelRequest, next: ModelRequestNext) => {
-    const prepared = await next(request)
-    const messages = toLoopMessages(prepared.messages)
-    const userIndex = messages.reduce(
-      (last, message, index) =>
-        message.role === ROLE.user || message.role === ROLE.interaction ? index : last,
-      -1
-    )
-    const user = userIndex < 0 ? undefined : messages[userIndex]
-    const catalogCalls = new Set(
-      prepared.messages.flatMap((message) =>
-        message.role === ROLE.assistant
-          ? (message.tool_calls ?? [])
-              .filter(
-                (call) =>
-                  call.function.name === "skill_create" || call.function.name === "skill_update"
-              )
-              .map((call) => call.id)
-          : []
-      )
-    )
-    const completedCatalogCalls = prepared.messages.flatMap((message) =>
-      message.role === ROLE.tool && catalogCalls.has(message.tool_call_id)
-        ? [message.tool_call_id]
-        : []
-    )
-    const key = JSON.stringify([
-      userIndex,
-      user?.message_id,
-      user?.content,
-      completedCatalogCalls,
-      directionReviews()
-    ])
-    if (cacheKey !== key) {
-      cached = await systemContext({
-        sessionId: input.sessionId,
-        runId: input.runId,
-        automationId: input.automationId,
-        messages,
-        signal: input.signal
-      })
-      cacheKey = key
-    }
-    return appendRuntimeContext(prepared, input, cached ?? NO_RUNTIME_CONTEXT)
-  }
-}
-
-/** Adapt the public Loop agent to the server's plain AsyncIterable seam. */
 export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
   async function* loopChatRunner(originalInput: ChatRunnerInput): AsyncIterable<AgentStreamEvent> {
     await originalInput.executionBudget()
@@ -652,7 +195,7 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
                   appendDeveloperContext({
                     request: await next(request),
                     input,
-                    source: "local_time",
+                    source: DEVELOPER_CONTEXT_SOURCE.localTime,
                     content: localTime()
                   })
               ]),

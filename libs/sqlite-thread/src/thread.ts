@@ -2,10 +2,6 @@ import { appendFileSync } from "node:fs"
 import { DatabaseSync, type StatementSync } from "node:sqlite"
 import { parentPort, threadId, workerData } from "node:worker_threads"
 
-// This file imports only node: modules so Node can load it straight from
-// source under tests (type stripping) as well as from the build.
-
-/** What the client passes when it starts the thread. */
 export interface SqliteThreadOptions {
   readonly filename: string
   readonly readonly: boolean
@@ -14,17 +10,17 @@ export interface SqliteThreadOptions {
   readonly prepareCacheSize: number
 }
 
-/** How a statement's rows come back: objects, or arrays of column values. */
-export type SqliteThreadShape = "objects" | "values"
+const SQLITE_THREAD_SHAPE = { objects: "objects", values: "values" } as const
+export type SqliteThreadShape = (typeof SQLITE_THREAD_SHAPE)[keyof typeof SQLITE_THREAD_SHAPE]
+
+const CLOSE_MESSAGE = "close"
 
 export interface SqliteThreadRequest {
   readonly id: number
   readonly sql: string
   readonly params: ReadonlyArray<unknown>
   readonly shape: SqliteThreadShape
-  /** Prepared statements are cached by their text; unprepared ones are not. */
   readonly prepared: boolean
-  /** A statement with no result columns reports its changes instead of rows. */
   readonly raw: boolean
   readonly safeIntegers: boolean
 }
@@ -44,12 +40,8 @@ const port = parentPort
 if (port === null) throw new Error("The SQLite thread must run in a worker thread")
 const options = workerData as SqliteThreadOptions
 
-// Switching a new file to WAL needs a lock that SQLite does not always wait
-// for, so two connections opening the same new file at once can fail the
-// switch with "database is locked" whatever busy_timeout says. WAL is stored
-// in the file: skip the switch when it is already set, and retry it briefly
-// while another connection is making it. A read-only connection never switches.
 const WAL_RETRY_MS = 5_000
+const WAL_JOURNAL_MODE = "wal"
 const sleep = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
@@ -62,7 +54,7 @@ const enableWal = (connection: DatabaseSync): void => {
   for (;;) {
     try {
       const mode = connection.prepare("PRAGMA journal_mode").get()?.journal_mode
-      if (mode === "wal") return
+      if (mode === WAL_JOURNAL_MODE) return
       connection.exec("PRAGMA journal_mode = WAL")
       return
     } catch (cause) {
@@ -96,13 +88,6 @@ const prepare = (sql: string): StatementSync => {
   return statement
 }
 
-// Scan log, for tests. With ARDEN_SQL_SCAN_LOG set to a directory, the thread
-// asks SQLite for the plan of each new statement and writes down every step
-// that reads a table or an index from start to end. A check after the test
-// run fails on a scan of a table that grows with use: such a query gets
-// slower with every chat, and SQLite picks it silently (a join started from
-// the wrong side, a partial index the WHERE does not repeat). Unset, as in
-// the app, this costs one comparison per statement.
 const scanLog = process.env.ARDEN_SQL_SCAN_LOG
 const planned = new Set<string>()
 const SCAN_STEP = /^SCAN (\S+)(?: USING (?:COVERING )?INDEX (\S+))?/
@@ -132,24 +117,17 @@ const noteScans = (sql: string): void => {
         })}\n`
       )
     }
-  } catch {
-    // Not a statement SQLite can plan (a PRAGMA, several statements, DDL).
-  }
+  } catch {}
 }
 
-// Slow-statement log, for finding what a slow write or read spends its time
-// on. With ARDEN_SQL_SLOW_LOG set to a directory, the thread writes down each
-// statement that takes 50 ms or more: its time, its text and when it ran.
-// ARDEN_SQL_SLOW_MS sets another floor; 0 writes down every statement, so a
-// test can judge each statement by its fastest run
-// (test/sql-speed/full-size.test.ts). Unset, as in the app by default, this
-// costs one comparison per statement.
 const slowLog = process.env.ARDEN_SQL_SLOW_LOG
 const slowFloor = process.env.ARDEN_SQL_SLOW_MS
+const DEFAULT_SLOW_STATEMENT_MS = 50
 const SLOW_STATEMENT_MS =
-  slowFloor === undefined || slowFloor === "" || !(Number(slowFloor) >= 0) ? 50 : Number(slowFloor)
+  slowFloor === undefined || slowFloor === "" || !(Number(slowFloor) >= 0)
+    ? DEFAULT_SLOW_STATEMENT_MS
+    : Number(slowFloor)
 const run = (request: SqliteThreadRequest): unknown => {
-  // Planning for the scan log stays outside the timed part.
   noteScans(request.sql)
   if (slowLog === undefined || slowLog.length === 0) return runStatement(request)
   const started = performance.now()
@@ -169,11 +147,8 @@ const runStatement = (request: SqliteThreadRequest): unknown => {
   const statement = request.prepared ? prepare(request.sql) : database.prepare(request.sql)
   const params = request.params as Array<never>
   statement.setReadBigInts(request.safeIntegers)
-  statement.setReturnArrays(request.shape === "values")
+  statement.setReturnArrays(request.shape === SQLITE_THREAD_SHAPE.values)
   try {
-    // `run` takes one step, and a statement without result columns can need
-    // more: `PRAGMA incremental_vacuum(n)` releases one page per step. `all`
-    // steps to the end. Only a raw request needs `run`, for its change count.
     if (statement.columns().length > 0) return statement.all(...params)
     if (!request.raw) {
       statement.all(...params)
@@ -198,8 +173,8 @@ const errorOf = (cause: unknown): SqliteThreadError => {
   }
 }
 
-port.on("message", (message: SqliteThreadRequest | "close") => {
-  if (message === "close") {
+port.on("message", (message: SqliteThreadRequest | typeof CLOSE_MESSAGE) => {
+  if (message === CLOSE_MESSAGE) {
     database.close()
     port.close()
     return

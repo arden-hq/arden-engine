@@ -2,6 +2,7 @@ import { slugify, uniqueName } from "@arden-hq/std/slug"
 import { escapeRegExp } from "@arden-hq/std/text"
 import { Schema } from "effect"
 
+import { BROWSER_ACT_ACTION, BROWSER_TARGET_KIND, BROWSER_TOOL } from "../../browser/service.js"
 import { isJsonObject, jsonText, type JsonObject } from "../json.js"
 import type { ProcedureEvidenceCall } from "./model.js"
 import { parseSnapshotNode } from "./snapshot-line.js"
@@ -124,7 +125,8 @@ export const redactEvidenceCalls = (calls: ReadonlyArray<EvidenceCall>): Redacte
     const named = jsonText(target["name"])
     if (named !== "") return named
     const kind = jsonText(target["kind"])
-    if (kind === "label" || kind === "placeholder") return jsonText(target["value"]) || undefined
+    if (kind === BROWSER_TARGET_KIND.label || kind === BROWSER_TARGET_KIND.placeholder)
+      return jsonText(target["value"]) || undefined
     return refOf(target)?.name
   }
   const redactAct = (given: JsonObject): JsonObject => {
@@ -132,9 +134,9 @@ export const redactEvidenceCalls = (calls: ReadonlyArray<EvidenceCall>): Redacte
     const action = jsonText(given["action"])
     const choice =
       target !== undefined &&
-      (action === "check" ||
-        action === "uncheck" ||
-        (action === "click" && CHOICE_ROLES.has(refOf(target)?.role ?? "")))
+      (action === BROWSER_ACT_ACTION.check ||
+        action === BROWSER_ACT_ACTION.uncheck ||
+        (action === BROWSER_ACT_ACTION.click && CHOICE_ROLES.has(refOf(target)?.role ?? "")))
     if (choice) {
       const role = refOf(target)?.role
       const picked = fresh("choice")
@@ -156,10 +158,13 @@ export const redactEvidenceCalls = (calls: ReadonlyArray<EvidenceCall>): Redacte
       control === undefined
         ? given
         : { ...given, target_label: `${control.role} "${control.name.slice(0, LABEL_MAX)}"` }
-    if ((action === "fill" || action === "type") && typeof args["value"] === "string")
+    if (
+      (action === BROWSER_ACT_ACTION.fill || action === BROWSER_ACT_ACTION.type) &&
+      typeof args["value"] === "string"
+    )
       return { ...args, value: typedPlaceholder(args["value"], name) }
     const values = args["values"]
-    if (action === "select" && Array.isArray(values))
+    if (action === BROWSER_ACT_ACTION.select && Array.isArray(values))
       return {
         ...args,
         values: values.map((v) => (typeof v === "string" ? typedPlaceholder(v, name) : v))
@@ -168,7 +173,7 @@ export const redactEvidenceCalls = (calls: ReadonlyArray<EvidenceCall>): Redacte
   }
 
   const located = calls.map((call) => {
-    const args = call.name === "browser_act" ? redactAct(call.args) : call.args
+    const args = call.name === BROWSER_TOOL.act ? redactAct(call.args) : call.args
     const content = jsonText(call.result["content"])
     for (const line of content.split("\n")) {
       const node = parseSnapshotNode(line)
@@ -283,7 +288,7 @@ export const redactEvidenceCalls = (calls: ReadonlyArray<EvidenceCall>): Redacte
       ...call,
       args: scrubObject(
         call.args,
-        call.name === "browser_wait" && !WAIT_DATA.has(jsonText(call.args["condition"]))
+        call.name === BROWSER_TOOL.wait && !WAIT_DATA.has(jsonText(call.args["condition"]))
           ? "value"
           : undefined
       ),

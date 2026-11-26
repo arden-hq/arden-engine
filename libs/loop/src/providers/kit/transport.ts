@@ -2,7 +2,7 @@ import { errorMessage, redactedFailureText } from "@arden-hq/std/errors"
 import { retryAfterHints } from "@arden-hq/std/retry"
 import { abortAfter } from "@arden-hq/std/timer"
 
-import type { ModelStreamItem } from "../../contracts/provider.js"
+import { isCompletionResponse, type ModelStreamItem } from "../../contracts/provider.js"
 import type { ProviderErrorCode } from "../../errors.js"
 import { raceAbort } from "../../abort.js"
 import { HttpStatusError, ProviderError, RetryableProviderError } from "./errors.js"
@@ -15,19 +15,10 @@ export interface ProviderAuthHeadersOptions {
   readonly forceRefresh?: boolean
 }
 
-/**
- * Host-owned credential broker: returns the full auth header set per
- * connection attempt, with `forceRefresh` on the single pre-emission 401
- * retry. Tokens never enter the lib.
- */
 export interface ProviderAuth {
   readonly headers: (options: ProviderAuthHeadersOptions) => Promise<Record<string, string>>
 }
 
-/**
- * An adapter's public failure class. The transport throws only instances of
- * it, so a host catches one type per provider.
- */
 export type ProviderErrorClass = new (message: string, code?: ProviderErrorCode) => ProviderError
 
 const MAX_ERROR_DETAIL_BYTES = 16_384
@@ -36,7 +27,6 @@ const MAX_ERROR_DETAIL_WAIT_MS = 5_000
 export const abortReason = (signal: AbortSignal): unknown =>
   signal.reason ?? new DOMException("The model request was cancelled", "AbortError")
 
-/** One attempt's auth headers; a broker failure is a `provider_auth` failure of the adapter. */
 export const providerAuthHeaders = async (options: {
   readonly auth: ProviderAuth
   readonly signal: AbortSignal | undefined
@@ -59,11 +49,6 @@ export const providerAuthHeaders = async (options: {
   }
 }
 
-/**
- * Turns SSE events into stream items for one attempt. `end` runs when the
- * body closes: it returns the terminal items when the stream may end there
- * (a Chat Completions body that closed after its `finish_reason`), else none.
- */
 export interface SseEventMapper {
   readonly event: (event: SseEvent) => ReadonlyArray<ModelStreamItem>
   readonly end: () => ReadonlyArray<ModelStreamItem>
@@ -73,30 +58,17 @@ export interface SseRequest {
   readonly url: string
   readonly body: string
   readonly fetch: typeof globalThis.fetch
-  /** Absent for a server without credentials (a local llama.cpp). */
   readonly auth: ProviderAuth | undefined
-  /** Sent with every attempt after the auth headers, so they win over them. */
   readonly headers: Readonly<Record<string, string>>
-  /** Maximum silence between SSE reads before the idle transport retry. */
   readonly idleTimeoutMs: number
-  /** Total connection attempts, including the first. */
   readonly maxAttempts: number
   readonly signal: AbortSignal | undefined
-  /** Names the provider in failure messages: "<label> response stream became idle". */
   readonly label: string
   readonly errorClass: ProviderErrorClass
   readonly classifyStatus: (status: number, detail: string | undefined) => ProviderErrorCode
-  /** A fresh mapper per attempt: a retry streams the response again from nothing. */
   readonly mapper: () => SseEventMapper
 }
 
-/**
- * One streamed model request over fetch and SSE: auth headers per attempt
- * with one forced refresh on a 401 before anything was emitted, the error
- * body read into the status failure, the idle timeout, and the bounded
- * transport retry announced by `ProviderStreamRetry`. The stream ends at the
- * first `Completed`; a body that ends without one is a retryable drop.
- */
 export const streamSse = async function* (request: SseRequest): AsyncGenerator<ModelStreamItem> {
   let forceRefresh = false
   let authRetried = false
@@ -137,13 +109,13 @@ export const streamSse = async function* (request: SseRequest): AsyncGenerator<M
         for (const item of mapper.event(event)) {
           emitted = true
           yield item
-          if (item._tag === "Completed") return
+          if (isCompletionResponse(item)) return
         }
       }
       for (const item of mapper.end()) {
         emitted = true
         yield item
-        if (item._tag === "Completed") return
+        if (isCompletionResponse(item)) return
       }
       throw new RetryableProviderError(
         `${request.label} response stream ended before a terminal event`
@@ -195,7 +167,6 @@ const waitBeforeRetry = async (request: SseRequest, delayMs: number): Promise<vo
   }
 }
 
-/** Every failure leaves as the adapter's own class, keeping a classified code. */
 const sanitizedFailure = (request: SseRequest, error: unknown): ProviderError => {
   if (error instanceof request.errorClass) return error
   if (error instanceof ProviderError) return new request.errorClass(error.message, error.code)
@@ -240,14 +211,6 @@ const connect = async (
   return response.body
 }
 
-/**
- * Why `url` could not be reached, for a person: `cannot reach <address>:
- * <cause>`. The address keeps scheme, host, port and path only: a user name,
- * password, query or fragment may carry a key, so none is shown (nor the raw
- * URL inside a cause's text). The cause is the whole chain, since Node's fetch
- * says only `fetch failed` and puts the reason (`connect ECONNREFUSED
- * 127.0.0.1:8080`, `getaddrinfo ENOTFOUND …`) in its `cause`.
- */
 export const unreachableMessage = (url: string, cause: unknown): string => {
   const address = URL.canParse(url) ? safeAddress(new URL(url)) : "the server"
   const reasons = causeChain(cause).map((reason) => reason.replaceAll(url, address))
@@ -259,7 +222,6 @@ export const unreachableMessage = (url: string, cause: unknown): string => {
 
 const safeAddress = (url: URL): string => `${url.origin}${url.pathname}`
 
-/** The distinct messages along a cause chain, outermost first; at most four, a chain can loop. */
 const causeChain = (cause: unknown): ReadonlyArray<string> => {
   const messages: Array<string> = []
   let current: unknown = cause
@@ -302,7 +264,6 @@ const readErrorDetail = async (
   }
 }
 
-/** Validates the numeric transport options every adapter accepts. */
 export const checkTransportOptions = (options: {
   readonly label: string
   readonly idleTimeoutMs: number | undefined

@@ -1,20 +1,27 @@
-import type { GoogleAccount, GoogleServiceId } from "@arden-hq/protocol/google"
+import {
+  GOOGLE_AUTHORIZATION_STATUS,
+  type GoogleAccount,
+  type GoogleServiceId
+} from "@arden-hq/protocol/google"
 import { GoogleServiceIdSchema } from "@arden-hq/protocol/effect/google"
-import { Schema } from "effect"
+import { Schema, type SchemaAST } from "effect"
 
 import {
   readSecureDocument,
   type CredentialVault,
+  type SecureDocumentTarget,
   writeSecureDocument
 } from "../credentials/vault.js"
 import { GoogleConnectionError } from "./errors.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 
-const GOOGLE_ACCOUNTS_TARGET = {
+const GOOGLE_ACCOUNTS_TARGET: SecureDocumentTarget = {
   documentKey: "google:accounts",
   binding: "google:v1"
-} as const
-const strict = { onExcessProperty: "error" } as const
+}
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
+
+export const GOOGLE_TOKEN_TYPE = { bearer: "Bearer" } as const
 
 const ScopeSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const TokenSchema = Schema.Struct({
@@ -23,12 +30,12 @@ const TokenSchema = Schema.Struct({
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(65_536))
   ),
   expiresAt: Schema.Number.check(Schema.isFinite()),
-  tokenType: Schema.Literal("Bearer")
+  tokenType: Schema.Literal(GOOGLE_TOKEN_TYPE.bearer)
 })
 const StoredAuthorizationSchema = Schema.Struct({
   service: GoogleServiceIdSchema,
   scopes: Schema.Array(ScopeSchema),
-  status: Schema.Literals(["ready", "needs_auth"] as const),
+  status: Schema.Literals(Object.values(GOOGLE_AUTHORIZATION_STATUS)),
   token: TokenSchema
 })
 const StoredAccountSchema = Schema.Struct({

@@ -1,4 +1,4 @@
-import type { CommandKind } from "@arden-hq/relay-protocol"
+import { COMMAND_ACK_STATE, type CommandAckState, type CommandKind } from "@arden-hq/relay-protocol"
 import { Context, type Effect, Schema } from "effect"
 import { storeErrorFields } from "../errors.js"
 import type { Notice } from "../sqlite/notices.js"
@@ -34,7 +34,9 @@ export interface PushTarget {
   readonly topic: string
 }
 
-export type RelayCommandState = "running" | "done" | "stopping" | "rejected"
+export const RELAY_COMMAND_STATE = { running: "running", ...COMMAND_ACK_STATE } as const
+
+export type RelayCommandState = (typeof RELAY_COMMAND_STATE)[keyof typeof RELAY_COMMAND_STATE]
 
 export interface RelayCommandRecord {
   readonly cid: string
@@ -62,6 +64,10 @@ const RELAY_URLS = {
   hosted: "wss://relay.fromarden.com",
   local: "ws://127.0.0.1:8787"
 } as const
+
+type RelayUrl = (typeof RELAY_URLS)[keyof typeof RELAY_URLS]
+
+const isRelayUrl = (url: string, expected: RelayUrl): boolean => url === expected
 
 export const DEFAULT_RELAY_SETTINGS: RelaySettings = {
   enabled: true,
@@ -93,7 +99,7 @@ export class RelayStore extends Context.Service<
     }) => Effect.Effect<RelayCommandRecord | undefined, RelayStoreError>
     readonly finishCommand: (input: {
       readonly cid: string
-      readonly state: Exclude<RelayCommandState, "running">
+      readonly state: CommandAckState
       readonly result: Schema.Json | undefined
     }) => Effect.Effect<void, RelayStoreError>
     readonly pruneCommands: (before: string) => Effect.Effect<void, RelayStoreError>
@@ -118,4 +124,5 @@ export class RelayStore extends Context.Service<
 >()("@arden-hq/server/persistence/relay/RelayStore") {}
 
 export const effectiveRelayUrl = (saved: string): string =>
-  process.env["ARDEN_RELAY_URL"] ?? (saved === RELAY_URLS.local ? RELAY_URLS.hosted : saved)
+  process.env["ARDEN_RELAY_URL"] ??
+  (isRelayUrl(saved, RELAY_URLS.local) ? RELAY_URLS.hosted : saved)

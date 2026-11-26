@@ -1,7 +1,8 @@
 import { Effect, Schema } from "effect"
+import { strict } from "../../common/boundary.js"
 import { NonNegativeIntSchema, PositiveIntSchema } from "../../common/schema.js"
+import { QueryBooleanTextSchema } from "../../common/routes.js"
 import {
-  strict,
   trimmedText,
   WikiDiffBaseSchema,
   WikiPageIdSchema,
@@ -44,10 +45,8 @@ const queryInt = (minimum: number, maximum: number) =>
     Schema.isLessThanOrEqualTo(maximum)
   )
 
-const BooleanQuerySchema = Schema.Literals(["true", "false"] as const)
-
 const listQueryFields = {
-  include_redirects: BooleanQuerySchema,
+  include_redirects: QueryBooleanTextSchema,
   limit: queryInt(1, WIKI_PAGE_MAX_LIMIT)
 } as const
 

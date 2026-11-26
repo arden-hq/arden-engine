@@ -10,7 +10,7 @@ import {
   type McpServer
 } from "@arden-hq/protocol/mcp"
 import type { ConnectedServer } from "../persistence/capability-offers/match.js"
-import type { RuntimeEntry } from "./runtime.js"
+import type { RuntimeEntry } from "./runtime-state.js"
 
 const publicFolder = (cwd: string | null): McpFolder =>
   cwd === null ? { kind: MCP_FOLDER.home } : { kind: MCP_FOLDER.folder, path: cwd }

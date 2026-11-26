@@ -1,6 +1,6 @@
 import {
   AUTOMATION_ACTIVITY_TRIGGERS,
-  AUTOMATION_EVENT_TYPES,
+  AUTOMATION_EVENT_TYPE,
   AUTOMATION_EVENTS,
   EVENT_TRIGGER_FIELDS
 } from "@arden-hq/protocol/automations"
@@ -21,6 +21,8 @@ import {
   ToolTimeTriggerSchema
 } from "./automation-tool-trigger-schema.js"
 
+export const CREATE_CHAT = { current: "current", own: "own" } as const
+
 export const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 const AutomationRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200)).annotate({
   description: "Exact automation_ref returned by automation_list."
@@ -28,7 +30,7 @@ const AutomationRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200))
 const SessionRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200)).annotate({
   description: "Exact session_ref returned by session_list."
 })
-const ChatSchema = Schema.Literals(["current", "own"] as const).annotate({
+const ChatSchema = Schema.Literals(Object.values(CREATE_CHAT)).annotate({
   description:
     "Where it lives and reports. current: this chat, for follow-ups and checking back here, including in a Space room. own: a new chat of its own, for independent recurring work."
 })
@@ -88,9 +90,9 @@ const EventTriggerSchema = ToolEventTriggerSchema.mapFields((fields) => ({
   }),
   event_type: fields.event_type.pipe(
     Schema.annotateEncoded({
-      description: AUTOMATION_EVENT_TYPES.map(
-        (type) => `${type}: ${AUTOMATION_EVENTS[type].sentence}`
-      ).join(" ")
+      description: Object.values(AUTOMATION_EVENT_TYPE)
+        .map((type) => `${type}: ${AUTOMATION_EVENTS[type].sentence}`)
+        .join(" ")
     })
   ),
   lead_minutes: fields.lead_minutes.annotate({ description: EVENT_TRIGGER_FIELDS.lead_minutes }),

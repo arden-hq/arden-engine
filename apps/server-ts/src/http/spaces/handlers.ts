@@ -13,7 +13,9 @@ import { Wiki } from "../../wiki/service.js"
 import { WikiError } from "../../wiki/errors.js"
 import { createSpaceWithPage } from "../../wiki/space-page.js"
 import { ArdenApi } from "../api.js"
-import { ChatStop } from "../../chat/chat-stop.js"
+import { ChatStop, END_RESULT } from "../../chat/chat-stop.js"
+import { STORE_REASON } from "../../persistence/errors.js"
+import { queryFlag, type QueryBoolean } from "@arden-hq/protocol/common"
 import {
   completionErrorToHttp,
   failInternal,
@@ -24,7 +26,7 @@ import {
 } from "../errors.js"
 
 const lifecycleError = (error: SpaceStoreError | WikiError) =>
-  error._tag === "SpaceStoreError" ? storeErrorToHttp(error) : wikiErrorToHttp(error)
+  error instanceof SpaceStoreError ? storeErrorToHttp(error) : wikiErrorToHttp(error)
 
 export const SpaceHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -49,23 +51,21 @@ export const SpaceHandlers = HttpApiBuilder.group(
 
     const archiveSpace = Effect.fn("SpaceHandlers.archiveSpace")(function* (
       spaceId: string,
-      stop: boolean | "true" | "false" = false
+      stop: boolean | QueryBoolean = false
     ) {
-      const ended = yield* chatStop
-        .endSpace({ spaceId, stop: stop === true || stop === "true" })
-        .pipe(
-          Effect.mapError((error) => {
-            if (error._tag !== "SpaceStoreError") return new HttpApiError.InternalServerError({})
-            if (error.reason === "conflict") return { detail: error.message, chats: [] }
-            return storeErrorToHttp(error)
-          })
-        )
+      const ended = yield* chatStop.endSpace({ spaceId, stop: queryFlag(stop) }).pipe(
+        Effect.mapError((error) => {
+          if (!(error instanceof SpaceStoreError)) return new HttpApiError.InternalServerError({})
+          if (error.reason === STORE_REASON.conflict) return { detail: error.message, chats: [] }
+          return storeErrorToHttp(error)
+        })
+      )
       switch (ended.kind) {
-        case "ended":
+        case END_RESULT.ended:
           return { status: "archived" as const, space_id: spaceId }
-        case "not_found":
+        case END_RESULT.not_found:
           return yield* new HttpApiError.NotFound({})
-        case "running":
+        case END_RESULT.running:
           return yield* Effect.fail({
             detail: "The Space's chats still have work running",
             chats: ended.chats

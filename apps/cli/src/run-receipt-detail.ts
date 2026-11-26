@@ -1,5 +1,5 @@
 import type { RunDetail, RunTerminalResult } from "@arden-hq/headless"
-import type { CommandReceiptV1, DeclinedRequest } from "./run.js"
+import type { CommandReceiptV1, DeclinedRequest } from "./run-receipt.js"
 import {
   PROVIDER_COST,
   RUN_CLIENT,

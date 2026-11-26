@@ -21,6 +21,7 @@ import { permissionSessionState, permissionGrantState } from "./permissions.js"
 import { appBundles, nativeCallRefusal, windowCall, withoutOwnApps } from "./own-windows.js"
 
 const executeFile = promisify(execFile)
+const CUA_OVERLAY_IDLE_HIDE_MS = 1000
 
 interface DriverConnection {
   readonly app: string
@@ -241,12 +242,10 @@ export class NativeDriver {
     const connection = { client, transport, directory, socket, binary, app }
     this.#connection = connection
     try {
-      // LaunchServices keeps TCC attached to the verified Cua app identity.
       await executeFile(
         "/usr/bin/open",
         [
           "-n",
-          // Cua's native permission panel is opt-in; only this user action may foreground it.
           ...(permissions ? ["--env", "CUA_DRIVER_RS_PERMISSIONS_PANEL=1"] : ["-g"]),
           "-a",
           app,
@@ -284,12 +283,13 @@ export class NativeDriver {
             : "The Cua helper did not start. Retry computer use."
         )
       await connectMcpClient(client, transport, 10_000)
-      // Cua's animated overlay can use a full core until it hides. Keep feedback brief;
-      // the PiP retains the last action without keeping the native overlay rendering.
       while (true) {
         signal.throwIfAborted()
         const session = await client.callTool(
-          { name: "start_session", arguments: { cursor_motion: { idle_hide_ms: 1000 } } },
+          {
+            name: "start_session",
+            arguments: { cursor_motion: { idle_hide_ms: CUA_OVERLAY_IDLE_HIDE_MS } }
+          },
           CallToolResultSchema,
           { signal, timeout: 10_000 }
         )

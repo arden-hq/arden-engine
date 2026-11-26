@@ -17,7 +17,6 @@ const MAX_DOMAINS = 40
 const MAX_PATHS = 3
 const MIN_PATH_VISITS = 3
 const DAY_MS = 86_400_000
-/** Chromium stores times as microseconds since 1601-01-01 UTC. */
 const CHROMIUM_EPOCH_OFFSET_MS = 11_644_473_600_000
 
 const BROWSERS: ReadonlyArray<{ readonly name: string; readonly root: string }> = [
@@ -148,7 +147,6 @@ const findProfiles = async (home: string): Promise<ReadonlyArray<ProfileHistory>
   return found.flat()
 }
 
-/** A running browser locks its History file, so each is read from a private copy. */
 const readProfileVisits = async (
   profile: ProfileHistory,
   since: number
@@ -162,7 +160,6 @@ const readProfileVisits = async (
         Effect.flatMap(
           makeSqliteThreadClient({ filename: copy, readonly: true, disableWAL: true }),
           (sql) =>
-            // Chromium times pass 2^53, so they are bound as BigInt and read back in milliseconds.
             sql.unsafe<Record<string, unknown>>(
               `SELECT u.url AS url, v.visit_time / 1000 AS visit_ms
                FROM visits v JOIN urls u ON u.id = v.url

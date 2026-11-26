@@ -11,13 +11,8 @@ import {
 import type { PersistenceDeps } from "./deps.js"
 import { encodeJson } from "./json.js"
 import { journalAskChange } from "./ask-changes.js"
-import {
-  appendEscalatedApprovalDraft,
-  approvalInput,
-  approvalPayload,
-  cardStanding,
-  pendingDecisionDraft
-} from "./tool-approvals.js"
+import { appendEscalatedApprovalDraft, approvalInput } from "./tool-approvals.js"
+import { approvalPayload, cardStanding, pendingDecisionDraft } from "./tool-approval-drafts.js"
 import { decodeResult, toolError } from "./tool-rows.js"
 import { PersistedToolResultSchema } from "./tool-result-storage.js"
 import { assertRunTaskBinding } from "./run-context.js"
@@ -25,7 +20,8 @@ import { noApprovalForRun } from "./approval-policy.js"
 import { loadPendingDecisionRoutes } from "./decision-route-journal.js"
 import { COMMAND_TOOL } from "../permissions/command-policy.js"
 import { approvalPermissionContext } from "./permissions.js"
-import { keepCommandResult, saveCardRule } from "./tool-approval-resolve.js"
+import { keepCommandResult } from "./tool-approval-resolve.js"
+import { saveCardRule } from "./tool-approval-rules.js"
 import { followUpRecordableStatusList } from "./status-sets.js"
 import { readCallPlan } from "./task-direction.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"

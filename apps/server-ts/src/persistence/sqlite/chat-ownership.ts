@@ -63,7 +63,6 @@ export interface ChatSettledState {
   readonly run_id: string | null
   readonly turn_id: string | null
   readonly status: string | null
-  /** The latest turn the owner typed, finished or not. A Task or helper result is not one. */
   readonly owner_turn_id: string | null
   readonly pending: number
   readonly settled: boolean
@@ -118,9 +117,6 @@ const chatSettled = Effect.fn("Chat.settled")(function* (
   return rows.map(({ active, ...row }) => ({ ...row, settled: active === 0 && row.pending === 0 }))
 })
 
-/** What the Space review's snapshot holds of each chat: what the owner said, and what waits to be
- * said. A Task or helper result landing in the chat leaves it unchanged; a new owner turn does
- * not, so an offer is refused until the worker has read it. */
 export const ownerTurnFingerprint = (
   chats: ReadonlyArray<ChatSettledState>
 ): { session_id: string; owner_turn_id: string | null; pending: number }[] =>
@@ -130,7 +126,6 @@ export const ownerTurnFingerprint = (
     pending: chat.pending
   }))
 
-/** What the Space review's wake fingerprint holds of each chat: its latest run and state. */
 export const settledFingerprint = (
   chats: ReadonlyArray<ChatSettledState>
 ): { session_id: string; run_id: string | null; state: string | null; pending: number }[] =>

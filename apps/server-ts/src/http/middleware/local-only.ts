@@ -22,21 +22,33 @@ const isLoopbackHostHeader = (value: string | undefined): boolean => {
   )
 }
 
-/** Chromium caps a cached preflight at two hours. */
-const PREFLIGHT_MAX_AGE_SECONDS = 7_200
+// https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age
+const CHROMIUM_PREFLIGHT_MAX_AGE_CAP_SECONDS = 7_200
+
+export const LOCAL_ACCESS_HOST = { app: "app", configured: "configured" } as const
+
+type LocalAccessHost = (typeof LOCAL_ACCESS_HOST)[keyof typeof LOCAL_ACCESS_HOST]
 
 export interface LocalAccess {
-  readonly host: "app" | "configured"
+  readonly host: LocalAccessHost
   readonly capability: string
   readonly rendererOrigin: string
   readonly cliCapability: string
   readonly phoneCapability: string
 }
 
-export const LocalCaller = Context.Reference<"desktop" | "cli" | "phone" | "other">(
-  "@arden-hq/server/http/LocalCaller",
-  { defaultValue: () => "other" }
-)
+export const LOCAL_CALLER = {
+  desktop: "desktop",
+  cli: "cli",
+  phone: "phone",
+  other: "other"
+} as const
+
+export type LocalCallerKind = (typeof LOCAL_CALLER)[keyof typeof LOCAL_CALLER]
+
+export const LocalCaller = Context.Reference<LocalCallerKind>("@arden-hq/server/http/LocalCaller", {
+  defaultValue: () => LOCAL_CALLER.other
+})
 
 export const CallerIsTheApp = Context.Reference<boolean>("@arden-hq/server/http/CallerIsTheApp", {
   defaultValue: () => false
@@ -69,9 +81,7 @@ export const makeLocalOnlyMiddleware = (
               CHAT_OPEN_TIMING_REQUEST_HEADER
             ],
             exposedHeaders: [SERVER_BOOT_HEADER, "x-request-id", CHAT_OPEN_TIMING_RESPONSE_HEADER],
-            maxAge: PREFLIGHT_MAX_AGE_SECONDS,
-            // The renderer's event streams send credentials: that keeps them in a
-            // socket pool apart from its API reads. The daemon sets no cookies.
+            maxAge: CHROMIUM_PREFLIGHT_MAX_AGE_CAP_SECONDS,
             credentials: true
           })
         }
@@ -86,13 +96,13 @@ export const makeLocalOnlyMiddleware = (
     const cli = access !== undefined && matchesLocalCapability(access.cliCapability, provided)
     const phone = access !== undefined && matchesLocalCapability(access.phoneCapability, provided)
     const authorized = access === undefined || desktop || cli || phone
-    let caller: typeof LocalCaller.Service = "other"
-    if (desktop) caller = "desktop"
-    else if (cli) caller = "cli"
-    else if (phone) caller = "phone"
+    let caller: LocalCallerKind = LOCAL_CALLER.other
+    if (desktop) caller = LOCAL_CALLER.desktop
+    else if (cli) caller = LOCAL_CALLER.cli
+    else if (phone) caller = LOCAL_CALLER.phone
     const app = httpApp.pipe(
       Effect.provideService(LocalCaller, caller),
-      Effect.provideService(CallerIsTheApp, desktop && access.host === "app")
+      Effect.provideService(CallerIsTheApp, desktop && access.host === LOCAL_ACCESS_HOST.app)
     )
     const origin = request.headers["origin"]
     if (origin === undefined) return authorized ? yield* app : yield* forbidden

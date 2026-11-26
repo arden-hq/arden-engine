@@ -39,8 +39,6 @@ export const attemptWakeDepth = (
 ): ReturnType<SqlClient.SqlClient["literal"]> =>
   sql.literal(`COALESCE(json_extract(${attempt}.origin, '$.chain_depth'), 0)`)
 
-/** The depth a Task's work goes on at, in the background or in its chat: that of the wake its
- *  latest attempt answered; 0 before any. */
 export const taskWakeDepth = (
   sql: SqlClient.SqlClient,
   itemId: Statement.Fragment
@@ -48,8 +46,6 @@ export const taskWakeDepth = (
   sql`COALESCE((SELECT ${attemptWakeDepth(sql, "attempt")} FROM automation_runs AS attempt
     WHERE attempt.item_id = ${itemId} ORDER BY attempt.id DESC LIMIT 1), 0)`
 
-/** The depth an in-chat Task step goes on at: that of the run whose end handed it the step, or
- *  else that of the wake the Task's latest attempt answered. */
 export const taskStepDepth = (
   sql: SqlClient.SqlClient,
   step: { readonly itemId: string; readonly afterRunId?: string | undefined }

@@ -1,5 +1,16 @@
-export type { RunApproval, RunApprovalConnection, RunApprovalText } from "./approvals.js"
-export { APPROVAL_CONNECTION, APPROVAL_TEXT } from "./approvals.js"
+export type {
+  DecisionDelivery,
+  RunApproval,
+  RunApprovalConnection,
+  RunApprovalText
+} from "./approvals.js"
+export {
+  APPROVAL_CONNECTION,
+  APPROVAL_TEXT,
+  DECISION_DELIVERY,
+  INTEGRATION_CONNECTION_APPROVAL,
+  isConnectionApproval
+} from "./approvals.js"
 export type { HomePresenceInput } from "./home.js"
 import type { ChatProjectionEvent } from "../chat/events/stream.js"
 import type { EventUsage } from "../common/event-fields.js"
@@ -42,6 +53,7 @@ export {
   MEMORY_OUTCOME,
   MEMORY_RECALL,
   MEMORY_REVISION,
+  MEMORY_SOURCE,
   MEMORY_SPACE_PAGE
 } from "./memory.js"
 export type {
@@ -101,7 +113,7 @@ export type {
 } from "./usage-report.js"
 
 export type { RunApprovalWork, RunOrigin, RunTaskBinding, RunContext } from "./context.js"
-export { RUN_BELONGS_TO, RUN_ORIGIN, RUN_TASK_BINDING } from "./context.js"
+export { RUN_APPROVAL_WORK, RUN_BELONGS_TO, RUN_ORIGIN, RUN_TASK_BINDING } from "./context.js"
 export type { WorkerAttempt, WorkerAttemptPage } from "./attempts.js"
 export { ATTEMPT_END, ATTEMPT_RUN, ATTEMPT_TEXT } from "./attempts.js"
 export type {

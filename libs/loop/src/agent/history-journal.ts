@@ -1,7 +1,6 @@
 import type { ChatMessage } from "../contracts/messages.js"
 import { decodeMessage } from "../internal/validate.js"
 
-/** Changes to the canonical history since the last successful checkpoint hook. */
 export type HistoryChange =
   | {
       readonly kind: "append"
@@ -34,6 +33,8 @@ const freezeMessage = (message: ChatMessage): ChatMessage => {
   return message
 }
 
+const ARRAY_LENGTH: keyof ChatMessage[] = "length"
+
 export const makeHistoryJournal = (initial: ReadonlyArray<ChatMessage>): HistoryJournal => {
   const target = initial.map((message) => freezeMessage(structuredClone(message)))
   let revision = 0
@@ -60,7 +61,7 @@ export const makeHistoryJournal = (initial: ReadonlyArray<ChatMessage>): History
       if (index !== undefined) {
         revision += 1
         if (index < oldLength) replacement += 1
-      } else if (property === "length" && value < oldLength) {
+      } else if (property === ARRAY_LENGTH && value < oldLength) {
         revision += 1
         replacement += 1
       }

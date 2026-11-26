@@ -6,7 +6,7 @@ import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { SessionFileCleanup } from "../storage/session-file-cleanup.js"
 import { ChatStop } from "./chat-stop.js"
 import type { SessionStoreError } from "../persistence/sessions/store.js"
-import type { ConversationArtifactError } from "../artifacts/conversation.js"
+import type { ConversationArtifactError } from "../artifacts/conversation-model.js"
 
 interface ForkServices {
   readonly store: SessionStore["Service"]

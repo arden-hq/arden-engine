@@ -6,19 +6,27 @@ import { blockText } from "./text.js"
 
 export {
   ANSWER_PARTS,
+  BAR_CHART_HIGHLIGHT,
+  COMPONENT_NAME,
   COMPONENT_NAMES,
+  type BarChartHighlight,
   type ComponentName,
   type IconName,
   type PartProps
 } from "./parts.js"
-export { formatAxis, formatFigure, type Format } from "./format.js"
-export { formulaValue, plotData, PlotSpec, type PlotData } from "./plot.js"
-export { ChartSpec, DiagramSpec } from "./specs.js"
+export { FORMAT, formatAxis, formatFigure, type Format } from "./format.js"
+export { FORMULA_VALUE_KIND, type FormulaValue } from "./formula.js"
+export { formulaValue, PLOT_DATA_KIND, plotData, PlotSpec, type PlotData } from "./plot.js"
+export { CHART_KIND, ChartSpec, DiagramSpec, type ChartKind } from "./specs.js"
 export { ANSWER_UI_ROOT } from "./library.js"
-export { completeStatements, guardBlock, readAnswerBlock } from "./read.js"
+export {
+  BLOCK_GUARD_KIND,
+  completeStatements,
+  guardBlock,
+  readAnswerBlock,
+  type BlockGuard
+} from "./read.js"
 
-/** One line per part, "Name(arg, arg?…) — description", in the parts' order:
- *  the catalog the prompt shows the model. */
 export function catalogSignatures(): string {
   const { components } = library.toSpec()
   return COMPONENT_NAMES.flatMap((name) => {
@@ -27,13 +35,6 @@ export function catalogSignatures(): string {
   }).join("\n")
 }
 
-/** A block as compact plain Markdown: its title, figures, table, verdict, the
- *  value of each control and its buttons, computed for `state` over the
- *  block's declared defaults (keys are the `$variable` names; a value may come
- *  as the runtime's store holds it, `{ value, componentType }`). The text the
- *  block stands as wherever it cannot be drawn: older turns of the model's
- *  history, the clipboard. Empty when `readAnswerBlock` refuses the block or
- *  it has no root. */
 export function answerBlockText(
   source: string,
   state: Readonly<Record<string, unknown>> = {}

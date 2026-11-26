@@ -82,6 +82,8 @@ export type NeedsGrant =
 
 export const PRESENTATION_BODY = { none: "none", body: "body" } as const
 
+export const COMMAND_BODY_LABEL = "Command"
+
 export type PresentationBody =
   | { readonly kind: typeof PRESENTATION_BODY.none }
   | ({ readonly kind: typeof PRESENTATION_BODY.body } & ApprovalPresentationBody)
@@ -92,16 +94,18 @@ export type PresentationText =
   | { readonly kind: typeof PRESENTATION_TEXT.none }
   | { readonly kind: typeof PRESENTATION_TEXT.text; readonly text: string }
 
+export const APPROVAL_ATTACHMENT = { file: "file", link: "link" } as const
+
 export type ApprovalAttachment =
   | {
-      readonly kind: "file"
+      readonly kind: typeof APPROVAL_ATTACHMENT.file
       readonly index: number
       readonly name: string
       readonly media_type: string
       readonly size: number
     }
   | {
-      readonly kind: "link"
+      readonly kind: typeof APPROVAL_ATTACHMENT.link
       readonly name: string
       readonly media_type: string
       readonly url: string
@@ -127,23 +131,14 @@ export interface ApprovalPresentation {
 export const APPROVAL_FIELD_LABEL = Object.freeze({
   site: "Site",
   secret: "Secret",
-  /** A saved key's Vault name ("Todoist"), on the cards that use or ask for one. */
   key: "Key",
-  /** The addresses a key goes to, joined with ", ". */
   sendTo: "Send only to",
-  /** Why the agent asks, in its own words. */
   reason: "For",
-  /** A saved card's safe title ("Visa ending 4242"), on the cards that pay with it. */
   card: "Card",
-  /** The saved card's id in the Vault: what the desktop approves, never shown. */
   cardId: "Card id",
-  /** The amount and its currency code as the agent gave them ("84.20 USD"). */
   amount: "Amount",
-  /** The shop's origin, which the tab must be on. */
   shop: "Shop",
-  /** The browser tab the payment happens in. */
   tab: "Tab",
-  /** A payment frame's origin the card would be typed into. */
   frame: "Frame"
 })
 
@@ -203,14 +198,14 @@ const previousValue = (maximum: number) =>
 
 export const ApprovalAttachmentSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("file"),
+    kind: Schema.Literal(APPROVAL_ATTACHMENT.file),
     index: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 499 })),
     name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
     media_type: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
     size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
   }),
   Schema.Struct({
-    kind: Schema.Literal("link"),
+    kind: Schema.Literal(APPROVAL_ATTACHMENT.link),
     name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
     media_type: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
     url: Schema.String.check(Schema.isMaxLength(8192))
@@ -288,6 +283,8 @@ export type ApprovalPresentationAgrees = Assert<
   Agrees<typeof ApprovalPresentationSchema.Type, ApprovalPresentation>
 >
 
+export const VERIFY_OUTCOME_ACTION = "verify_outcome"
+
 export function canDenyApprovalByReply(approval: { readonly action: string }): boolean {
-  return approval.action !== "verify_outcome"
+  return approval.action !== VERIFY_OUTCOME_ACTION
 }

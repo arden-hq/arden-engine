@@ -4,10 +4,6 @@ import type { ManagedObjectDescriptor } from "./descriptor.js"
 import type { ManagedOutputLifecycleStore } from "./lifecycle-store.js"
 import { makeManagedObjectStore } from "./object-store.js"
 
-/**
- * Where a large tool result is kept whole: a managed object owned by the
- * result's chat, so deleting the chat removes it with the chat's other files.
- */
 export interface ToolResultObjectStore {
   readonly publish: (input: {
     readonly sessionId: string
@@ -18,7 +14,6 @@ export interface ToolResultObjectStore {
   readonly read: (ref: string) => Promise<string>
 }
 
-/** `undefined` when storage has no managed-output folder (an in-memory test database). */
 export const ToolResultObjects = Context.Reference<ToolResultObjectStore | undefined>(
   "@arden-hq/server/persistence/managed-output/ToolResultObjects",
   { defaultValue: () => undefined }

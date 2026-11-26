@@ -1,11 +1,11 @@
 import { Database } from "bun:sqlite"
 import type { SQLQueryBindings } from "bun:sqlite"
 import type { ServerWebSocket } from "bun"
-import { isDeviceId, MAX_FRAME_BYTES } from "@arden-hq/relay-protocol"
+import { isDeviceId, KEEPALIVE, MAX_FRAME_BYTES, RELAY_PATH } from "@arden-hq/relay-protocol"
 import { every } from "@arden-hq/std/timer"
 import type { Pusher } from "../core/pusher.js"
 import { RelayCore } from "../core/relay-core.js"
-import type { Attachment, Conns } from "../core/relay-core.js"
+import type { Attachment, Conns } from "../core/connections.js"
 import { migrate, SqlStore } from "../core/sql-store.js"
 import type { Sql } from "../core/sql-store.js"
 
@@ -97,8 +97,8 @@ export const startRelay = ({
     hostname,
     fetch: (request, bunServer) => {
       const url = new URL(request.url)
-      if (url.pathname === "/v1/health") return new Response("ok")
-      if (url.pathname !== "/v1/connect") return new Response("not found", { status: 404 })
+      if (url.pathname === RELAY_PATH.health) return new Response("ok")
+      if (url.pathname !== RELAY_PATH.connect) return new Response("not found", { status: 404 })
       const mac = url.searchParams.get("mac")
       if (!isDeviceId(mac)) return new Response("bad mac id", { status: 400 })
       const data: SocketData = { mac, attachment: undefined, lastPing: undefined }
@@ -107,7 +107,6 @@ export const startRelay = ({
         : new Response("expected a WebSocket", { status: 426 })
     },
     websocket: {
-      // Type witness for ws.data (Bun's pattern); the real value comes from upgrade().
       data: socketDataType,
       maxPayloadLength: MAX_FRAME_BYTES,
       idleTimeout: 120,
@@ -119,9 +118,9 @@ export const startRelay = ({
       },
       message: (socket, message) => {
         if (typeof message === "string") {
-          if (message !== "ping") return
+          if (message !== KEEPALIVE.ping) return
           socket.data.lastPing = Date.now()
-          socket.send("pong")
+          socket.send(KEEPALIVE.pong)
           return
         }
         coreFor(socket.data.mac).onFrame(
@@ -145,9 +144,6 @@ export const startRelay = ({
     stop: () => {
       stopped = true
       interval.cancel()
-      // Bun 1.3.10: stop(true) closes every socket and the listener at once,
-      // but its promise never settles once the server has closed a socket
-      // itself (auth failure, revoke), so it is not awaited.
       void server.stop(true)
       db.close()
       return Promise.resolve()

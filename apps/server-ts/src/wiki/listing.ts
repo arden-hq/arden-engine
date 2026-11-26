@@ -5,7 +5,8 @@ import {
   WIKI_LIST_START,
   WIKI_NEXT_PAGE,
   WIKI_PAGE_LIST,
-  WIKI_PAGE_MAX_LIMIT
+  WIKI_PAGE_MAX_LIMIT,
+  WIKI_PAGE_LIFECYCLE
 } from "@arden-hq/protocol/wiki"
 import { DateTime, Effect, Option, Schema } from "effect"
 
@@ -53,7 +54,6 @@ export interface WikiListingMethods {
   readonly list: (options: WikiPageListOptions) => Effect.Effect<WikiPagePage, WikiError>
   readonly listChanges: (input: WikiListChangesInput) => Effect.Effect<WikiChangesPage, WikiError>
   readonly read: (pageId: string) => Effect.Effect<WikiPage, WikiError>
-  /** When each page at this head was created and last changed. */
   readonly pageTimes: (
     head: string | null
   ) => Effect.Effect<ReadonlyMap<string, PageTimes>, WikiError>
@@ -150,7 +150,7 @@ export const makeWikiListingMethods = (
     const shown = [
       ...(includeRedirects
         ? current.wholeSet
-        : current.wholeSet.filter((record) => record.page.lifecycle === "active"))
+        : current.wholeSet.filter((record) => record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active))
     ]
       .sort(compareWikiPage)
       .filter((record) => cursor === null || afterWikiCursor(record, cursor))

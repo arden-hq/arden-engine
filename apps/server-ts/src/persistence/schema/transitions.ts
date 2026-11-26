@@ -6,9 +6,12 @@ import {
   classifySchemaManifest,
   readForeignTableReferences,
   readSchemaManifest,
+  SCHEMA_MANIFEST_VERDICT,
   schemaIdentity,
   schemaManifestFingerprint,
-  type SchemaManifestRow
+  SQLITE_OBJECT_TYPE,
+  type SchemaManifestRow,
+  type SqliteObjectType
 } from "./manifest.js"
 import { communicationSequenceColumnSql } from "./sections/communication.js"
 import { schemaCleanupPriorRows } from "./priors/schema-cleanup.js"
@@ -20,6 +23,11 @@ interface SchemaTransition {
   readonly convert: (database: DatabaseSync, next: ReadonlyArray<SchemaManifestRow>) => void
   readonly discards: ReadonlyArray<string>
 }
+
+const isSchemaObject = (row: SchemaManifestRow, type: SqliteObjectType, name: string): boolean =>
+  row.type === type && row.name === name
+
+const FORK_CONTEXT_TABLES: ReadonlySet<string> = new Set(["scheduled_tasks", "automation_runs"])
 
 const sessionLayoutPriorSessionsSql = `CREATE TABLE sessions (
       session_id TEXT PRIMARY KEY,
@@ -55,7 +63,6 @@ const sessionLayoutPriorSessionsSql = `CREATE TABLE sessions (
       )
     )`
 
-/** SQLite splices an added column's definition into the stored CREATE TABLE text. */
 const visibleMessageCountColumn = "visible_message_count INTEGER NOT NULL DEFAULT 0"
 
 const communicationPriorAutomationDeliveriesSql = `CREATE TABLE automation_deliveries (
@@ -102,7 +109,7 @@ const schemaTransitions = [
     discards: ["scheduled_tasks.kind"],
     prior: (next) =>
       next.map((row) =>
-        schemaIdentity(row) === "table:scheduled_tasks" && row.sql !== null
+        isSchemaObject(row, SQLITE_OBJECT_TYPE.table, "scheduled_tasks") && row.sql !== null
           ? {
               ...row,
               sql: row.sql
@@ -129,7 +136,7 @@ const schemaTransitions = [
     ],
     prior: (next) =>
       next.map((row) =>
-        schemaIdentity(row) === "table:scheduled_tasks" && row.sql !== null
+        isSchemaObject(row, SQLITE_OBJECT_TYPE.table, "scheduled_tasks") && row.sql !== null
           ? {
               ...row,
               sql: row.sql
@@ -169,8 +176,8 @@ const schemaTransitions = [
     discards: [],
     prior: (next) =>
       next.map((row) => {
-        if (row.type !== "table" || row.sql === null) return row
-        if (row.name !== "scheduled_tasks" && row.name !== "automation_runs") return row
+        if (row.type !== SQLITE_OBJECT_TYPE.table || row.sql === null) return row
+        if (!FORK_CONTEXT_TABLES.has(row.name)) return row
         const sql = row.sql
           .replace("('fresh', 'continue', 'fork')", "('fresh', 'continue')")
           .replace(", 'memory_capture', 'chat_summary')", ", 'memory_capture')")
@@ -198,7 +205,10 @@ const schemaTransitions = [
     source: "task_item_index",
     fingerprint: "2c08f83d22bd19e45fee8a95f40dd0a6564c2736b8c7d3b42d8890956c251afe",
     discards: [],
-    prior: (next) => next.filter((row) => schemaIdentity(row) !== "index:idx_chat_runs_task_item"),
+    prior: (next) =>
+      next.filter(
+        (row) => !isSchemaObject(row, SQLITE_OBJECT_TYPE.index, "idx_chat_runs_task_item")
+      ),
     convert: (database, next) => {
       createFrom(database, next, "index:idx_chat_runs_task_item")
     }
@@ -236,7 +246,7 @@ const schemaTransitions = [
     discards: [],
     prior: (next) =>
       next.map((row) =>
-        schemaIdentity(row) === "table:sessions"
+        isSchemaObject(row, SQLITE_OBJECT_TYPE.table, "sessions")
           ? { ...row, sql: sessionLayoutPriorSessionsSql }
           : row
       ),
@@ -248,9 +258,9 @@ const schemaTransitions = [
     discards: [],
     prior: (next) =>
       next
-        .filter((row) => schemaIdentity(row) !== "index:idx_sessions_list")
+        .filter((row) => !isSchemaObject(row, SQLITE_OBJECT_TYPE.index, "idx_sessions_list"))
         .map((row) =>
-          schemaIdentity(row) === "table:sessions" && row.sql !== null
+          isSchemaObject(row, SQLITE_OBJECT_TYPE.table, "sessions") && row.sql !== null
             ? { ...row, sql: row.sql.replace(`, ${visibleMessageCountColumn}`, "") }
             : row
         ),
@@ -279,7 +289,7 @@ const schemaTransitions = [
       next
         .filter((row) => !communicationObjects.includes(schemaIdentity(row)))
         .map((row) =>
-          schemaIdentity(row) === "table:automation_deliveries"
+          isSchemaObject(row, SQLITE_OBJECT_TYPE.table, "automation_deliveries")
             ? { ...row, sql: communicationPriorAutomationDeliveriesSql }
             : row
         ),
@@ -311,10 +321,10 @@ const schemaTransitions = [
       next
         .filter((row) => !deliveryReliabilityObjects.includes(schemaIdentity(row)))
         .map((row) => {
-          if (schemaIdentity(row) === "table:automation_deliveries") {
+          if (isSchemaObject(row, SQLITE_OBJECT_TYPE.table, "automation_deliveries")) {
             return { ...row, sql: deliveryReliabilityPriorAutomationDeliveriesSql }
           }
-          if (schemaIdentity(row) === "index:idx_automation_deliveries_pending") {
+          if (isSchemaObject(row, SQLITE_OBJECT_TYPE.index, "idx_automation_deliveries_pending")) {
             return { ...row, sql: deliveryReliabilityPriorPendingIndexSql }
           }
           return row
@@ -360,7 +370,10 @@ export const findSchemaTransition = (
       )
     }
     steps.unshift({ transition, next })
-    if (classifySchemaManifest(prior, live, foreignTableReferences).kind === "current") {
+    if (
+      classifySchemaManifest(prior, live, foreignTableReferences).kind ===
+      SCHEMA_MANIFEST_VERDICT.current
+    ) {
       return { source: transition.source, fingerprint, steps }
     }
     next = prior
@@ -380,7 +393,7 @@ export const applySchemaTransitions = (
       live,
       readForeignTableReferences(database, step.next, live)
     )
-    if (verdict.kind !== "current") {
+    if (verdict.kind !== SCHEMA_MANIFEST_VERDICT.current) {
       throw new Error(
         `Schema transition ${step.transition.source} did not reach its next manifest: ${JSON.stringify(verdict)}`
       )
@@ -419,7 +432,6 @@ const withRows = (
   )
 }
 
-/** SQLite's default BINARY collation, which orders the manifest. */
 const compareText = (left: string, right: string): number => {
   if (left === right) return 0
   return left < right ? -1 : 1
@@ -447,7 +459,7 @@ const rebuildTable = (
     SELECT rowid, ${values.join(", ")} FROM "${prior}"`)
   database.exec(`DROP TABLE "${prior}"`)
   for (const row of next) {
-    if (row.tbl_name === table && row.type !== "table")
+    if (row.tbl_name === table && row.type !== SQLITE_OBJECT_TYPE.table)
       createFrom(database, next, schemaIdentity(row))
   }
 }

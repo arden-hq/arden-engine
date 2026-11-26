@@ -1,8 +1,9 @@
 import type { JsonRecord } from "../common/json.js"
 
-export type HealthStatusValue = "ok" | "unavailable"
+export const HEALTH_STATUS_VALUE = { ok: "ok", unavailable: "unavailable" } as const
 
-/** Sanitized startup projection. Auth, storage, outbox, and raw errors are private. */
+export type HealthStatusValue = (typeof HEALTH_STATUS_VALUE)[keyof typeof HEALTH_STATUS_VALUE]
+
 export interface HealthStatus extends JsonRecord {
   readonly status: HealthStatusValue
   readonly version: string

@@ -1,6 +1,7 @@
 import { type StoredRunQuestion } from "../persistence/runs/stored-question.js"
 import {
   APPROVAL_CARD,
+  COMMAND_BODY_LABEL,
   PRESENTATION_BODY,
   APPROVAL_DIFF,
   APPROVAL_PREVIEW,
@@ -14,7 +15,13 @@ import {
   type MobileDetail,
   type MobileFiling
 } from "@arden-hq/protocol/mobile"
-import { APPROVAL_TEXT, type RunApproval, type RunApprovalText } from "@arden-hq/protocol/runs"
+import {
+  APPROVAL_TEXT,
+  isConnectionApproval,
+  RUN_QUESTION_STATUS,
+  type RunApproval,
+  type RunApprovalText
+} from "@arden-hq/protocol/runs"
 import { grantedOnlyInTheApp, type ToolDisplay } from "@arden-hq/protocol/tools"
 import { namedTool } from "@arden-hq/protocol/views"
 
@@ -47,8 +54,7 @@ export function mobileAsks({
   readonly displayOf: (toolName: string) => ToolDisplay | undefined
 }): MobileAsk[] {
   const answeredOnThePhone = (approval: RunApproval): boolean =>
-    approval.kind !== "integration_connection" &&
-    !grantedOnlyInTheApp(displayOf(approval.tool_name))
+    !isConnectionApproval(approval) && !grantedOnlyInTheApp(displayOf(approval.tool_name))
   const where = (sessionId: string) => {
     const place = places.get(sessionId)
     const spaceId = place?.spaceId
@@ -61,7 +67,8 @@ export function mobileAsks({
   }
   const open = questions.filter(
     (question) =>
-      question.status === "open" && places.get(question.destination_session_id)?.onboarding !== true
+      question.status === RUN_QUESTION_STATUS.open &&
+      places.get(question.destination_session_id)?.onboarding !== true
   )
   const question = (asked: StoredRunQuestion): MobileAsk => ({
     kind: "question",
@@ -119,7 +126,7 @@ function approvalChange(approval: RunApproval): MobileChange {
     approval.diff.kind === APPROVAL_DIFF.diff ? parseUnifiedDiff(approval.diff.patch) : []
   if (files.length > 0) return { kind: "diff", files }
   const body = presentationOf(approval)?.body
-  if (body?.kind === PRESENTATION_BODY.body && body.label === "Command")
+  if (body?.kind === PRESENTATION_BODY.body && body.label === COMMAND_BODY_LABEL)
     return { kind: "command", command: body.text }
   const fields = (presentationOf(approval)?.fields ?? [])
     .filter((field) => field.value.trim().length > 0)
@@ -155,7 +162,7 @@ function parseUnifiedDiff(patch: string): DiffFile[] {
     if (!inHunk && line.startsWith("--- ")) continue
     if (!inHunk && line.startsWith("+++ ")) {
       const named = stripDiffPrefix(line.slice(4).split("\t")[0]?.trim() ?? "")
-      label = named === "" || named === "/dev/null" ? label : named
+      label = named === "" || named === DEV_NULL ? label : named
       continue
     }
     if (line.startsWith("@@")) {
@@ -177,5 +184,7 @@ function parseUnifiedDiff(patch: string): DiffFile[] {
   }
   return files.filter((file) => file.lines.length > 0)
 }
+
+const DEV_NULL = "/dev/null"
 
 const stripDiffPrefix = (path: string): string => path.replace(/^[ab]\//, "")

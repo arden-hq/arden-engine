@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { configDefaults, defineConfig, mergeConfig } from "vitest/config"
 
+import { FLAG, MEMORY_TEST_HALF } from "../../tooling/value-tables.mjs"
 import root from "../../vitest.config.mjs"
 
 const testDirectory = new URL("./test/", import.meta.url)
@@ -12,19 +13,15 @@ const boot = readdirSync(testDirectory)
   )
   .map((name) => `test/${name}`)
 
-// The growth check seeds two large databases and takes minutes: it runs only
-// in its own project, from `just speed` (the last step of `just check`).
 const speed = ["test/sql-speed/**/*.test.ts"]
 const speedProject =
-  process.env.ARDEN_SQL_SPEED === "1"
+  process.env.ARDEN_SQL_SPEED === FLAG.on
     ? [{ extends: true, test: { name: "speed", include: speed, testTimeout: 1_200_000 } }]
     : []
 
-// The memory test's two halves are scripts on the replay copy, not tests: each runs only in its
-// own project, from `just memory-test-sent` or `just memory-test-answered`.
 const memoryTestHalf = process.env.ARDEN_MEMORY_TEST
 const memoryTestProject =
-  memoryTestHalf === "sent" || memoryTestHalf === "answered"
+  memoryTestHalf === MEMORY_TEST_HALF.sent || memoryTestHalf === MEMORY_TEST_HALF.answered
     ? [
         {
           extends: true,
@@ -34,7 +31,7 @@ const memoryTestProject =
     : []
 
 const outsideEditsProject =
-  process.env.ARDEN_OUTSIDE_EDITS === "1"
+  process.env.ARDEN_OUTSIDE_EDITS === FLAG.on
     ? [
         {
           extends: true,
@@ -44,16 +41,13 @@ const outsideEditsProject =
     : []
 
 const memoryShapeProject =
-  process.env.ARDEN_MEMORY_SHAPE === "1"
+  process.env.ARDEN_MEMORY_SHAPE === FLAG.on
     ? [{ extends: true, test: { name: "memory-shape", include: ["scripts/memory-shape.ts"] } }]
     : []
 
-// The SQLite threads write here every table scan the tests cause; the check
-// in test/sql-scans/global.ts reads it after the run.
 const scanLog = fileURLToPath(new URL("../../node_modules/.cache/sql-scans/", import.meta.url))
 rmSync(scanLog, { recursive: true, force: true })
 mkdirSync(scanLog, { recursive: true })
-// Set here as well as in `test.env`: the check runs in this process, the tests in workers.
 process.env.ARDEN_SQL_SCAN_LOG = scanLog
 
 export default mergeConfig(
@@ -71,7 +65,6 @@ export default mergeConfig(
             isolate: false
           }
         },
-        // The boot project carries the scan check: its teardown runs once, after both projects.
         {
           extends: true,
           test: { name: "boot", include: boot, globalSetup: ["./test/sql-scans/global.ts"] }

@@ -7,11 +7,9 @@ import type { OfferHolders } from "../src/persistence/permissions/offer.js"
 import type { PermissionRule } from "../src/persistence/permissions/rules.js"
 import type { PermissionStore } from "../src/persistence/permissions/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
-import {
-  makePermissionOffers,
-  planPermissionOffer,
-  type OfferFacts
-} from "../src/tools/permission-offer.js"
+import { makePermissionOffers } from "../src/tools/permission-offer.js"
+import { planPermissionOffer } from "../src/tools/permission-offer-plan.js"
+import type { OfferFacts } from "../src/tools/permission-offer-facts.js"
 import { partialService, runAuthority, serverRunContext } from "./kit.js"
 
 const browser: ToolFacts = {

@@ -5,6 +5,11 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 import { makeManagedObjectStore } from "../src/persistence/managed-output/object-store.js"
+import {
+  MANAGED_REF_KIND,
+  managedObjectRef,
+  readManagedObjectRef
+} from "../src/persistence/managed-output/ref.js"
 
 const hash = (value: string): string => createHash("sha256").update(value).digest("hex")
 
@@ -48,7 +53,9 @@ describe("managed object store", () => {
         format: "text",
         source: { kind: "tool", name: "x", call_id: "y" }
       })
-      const guessed = descriptor.ref.replace(descriptor.owner_session_hash, hash("second"))
+      const address = readManagedObjectRef(descriptor.ref)
+      if (address.kind !== MANAGED_REF_KIND.managed) throw new Error("The ref is not a managed ref")
+      const guessed = managedObjectRef({ ...address, owner: hash("second") })
       expect(guessed).not.toBe(descriptor.ref)
       await expect(store.read({ sessionId: "second", ref: guessed })).rejects.toThrow()
       const entries = await readdir(path.join(root, "managed-outputs"), {

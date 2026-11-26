@@ -151,7 +151,7 @@ CHAT_COMPLETIONS_COMPAT='{"structuredOutput":"json_schema","imageInput":true,"pa
 bun --conditions=arden-source libs/loop/test/live/chat-completions.live.ts
 ```
 
-The script's header lists the other variables (an API key variable name, a reasoning effort, the overflow prompt size, cases to skip).
+Optional: `CHAT_COMPLETIONS_PROVIDER` (origin provider id, default `llama.cpp`), `CHAT_COMPLETIONS_API_KEY_ENV` (the name of the variable that holds the key, sent as a bearer token), `CHAT_COMPLETIONS_EFFORT` (a reasoning effort to request), `CHAT_COMPLETIONS_OVERFLOW_WORDS` (default 6000, sized for a 4096-token context; one word is about one token), `CHAT_COMPLETIONS_SKIP` (comma list of case names). It exits non-zero when a case fails.
 
 ## Layout
 

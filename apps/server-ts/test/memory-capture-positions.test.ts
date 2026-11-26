@@ -44,7 +44,6 @@ const turn = Effect.fn("turn")(function* (
   })
 })
 
-/** Runs Capture until idle and returns the owner messages it was handed. */
 const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" | "leave" = "complete") {
   const receipts = new Set<string>()
   const batches = makeMemoryCaptureBatches({

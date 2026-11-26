@@ -1,21 +1,30 @@
 import { Schema } from "effect"
 
-const SkillOperationSchema = Schema.Literals([
-  "list",
-  "content",
-  "create",
-  "update",
-  "marketplace",
-  "install",
-  "set_enabled",
-  "remove"
-] as const)
+const SKILL_OPERATION = {
+  list: "list",
+  content: "content",
+  create: "create",
+  update: "update",
+  marketplace: "marketplace",
+  install: "install",
+  set_enabled: "set_enabled",
+  remove: "remove"
+} as const
+
+const SkillOperationSchema = Schema.Literals(Object.values(SKILL_OPERATION))
 
 export type SkillOperation = typeof SkillOperationSchema.Type
 
+export const SKILL_ERROR_REASON = {
+  invalid: "invalid",
+  not_found: "not_found",
+  storage: "storage",
+  unavailable: "unavailable"
+} as const
+
 export class SkillError extends Schema.TaggedError<SkillError>()("SkillError", {
   operation: SkillOperationSchema,
-  reason: Schema.Literals(["invalid", "not_found", "storage", "unavailable"] as const),
+  reason: Schema.Literals(Object.values(SKILL_ERROR_REASON)),
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}

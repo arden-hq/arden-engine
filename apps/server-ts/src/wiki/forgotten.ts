@@ -1,8 +1,10 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { countOf } from "@arden-hq/std/count"
 import { DateTime, Effect, type Schema } from "effect"
 import { randomUUID } from "node:crypto"
 
-import { createPage, updatePage, type WikiWrite } from "./commit.js"
+import { createPage, updatePage } from "./commit.js"
+import { type WikiWrite } from "./commit-write-types.js"
 import type { WikiLocationAuthority } from "./authority.js"
 import { wikiError, type WikiError } from "./errors.js"
 import type { WikiChangeWriter, WikiChanges, WikiPlan } from "./page-change.js"
@@ -49,14 +51,11 @@ export interface RetractionChange {
 }
 
 export interface WikiForgetMethods {
-  /** What a forget would change, for the owner to approve. Refused by every rule the forget is. */
   readonly planForget: (input: WikiForgetInput) => Effect.Effect<RetractionChange, WikiError>
-  /** Removes every copy of the lines on every page and opens a retraction, in one commit. */
   readonly forget: (input: WikiForgetInput) => Effect.Effect<RetractionChange, WikiError>
   readonly planUndoForget: (
     input: WikiUndoForgetInput
   ) => Effect.Effect<RetractionChange, WikiError>
-  /** Closes an open retraction, so its lines may be written again. */
   readonly undoForget: (input: WikiUndoForgetInput) => Effect.Effect<RetractionChange, WikiError>
 }
 
@@ -97,7 +96,9 @@ const renderForgotten = (stored: ReadonlyArray<Schema.Json>): string => {
 
 const forgottenPage = (snapshot: Snapshot): PageRecord | undefined =>
   snapshot.wholeSet.find(
-    (record) => record.resource.path === FORGOTTEN_PAGE_PATH && record.page.lifecycle === "active"
+    (record) =>
+      record.resource.path === FORGOTTEN_PAGE_PATH &&
+      record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
   )
 
 const withEntriesKeepingUnreadable = (

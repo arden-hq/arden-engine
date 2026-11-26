@@ -1,5 +1,9 @@
 import { RunContextSchema, type RunContext, type RunOrigin } from "../runs/stored-context.js"
-import { Effect, Schema } from "effect"
+import { Effect, Result, Schema } from "effect"
+import { AGENT_MODE, type AgentMode } from "@arden-hq/protocol/chat"
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
+import { PLACE_KIND } from "../runs/ending.js"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { readAgentSessionMetadata } from "../../sessions/agent-mode.js"
@@ -81,7 +85,7 @@ const readDestinationSessionId = Effect.fn("RunDestination.readSession")(functio
 
 export type ChatPlace = {
   readonly sessionId: string
-  readonly kind: "chat"
+  readonly kind: typeof PLACE_KIND.chat
   readonly row: DestinationRow
 }
 
@@ -89,10 +93,14 @@ export type Place =
   | ChatPlace
   | {
       readonly sessionId: string
-      readonly kind: "own" | "parent" | "sender"
+      readonly kind: typeof PLACE_KIND.own | typeof PLACE_KIND.parent | typeof PLACE_KIND.sender
       readonly row: undefined
     }
-  | { readonly sessionId: string | undefined; readonly kind: "gone"; readonly row: undefined }
+  | {
+      readonly sessionId: string | undefined
+      readonly kind: typeof PLACE_KIND.gone
+      readonly row: undefined
+    }
 
 const gone: Place = { sessionId: undefined, kind: "gone", row: undefined }
 
@@ -121,7 +129,7 @@ const chatPlace = Effect.fn("RunDestination.chatPlace")(function* (
 })
 
 export interface ChildAgent {
-  readonly mode: "code" | "research" | "work"
+  readonly mode: AgentMode
   readonly parent: string
 }
 
@@ -136,20 +144,30 @@ const readAgentChild = Effect.fn("RunDestination.agentChild")(function* (
   }>`SELECT session_type, parent_session_id, metadata FROM sessions
     WHERE session_id = ${run.sessionId}`
   const child = rows[0]
-  if (child?.session_type !== "agent" || child.parent_session_id === null) return undefined
+  if (child?.session_type !== SESSION_TYPE.agent || child.parent_session_id === null)
+    return undefined
   if (yield* scriptOwnsRun(sql, run.runId)) return undefined
   const agent = readAgentSessionMetadata(
     yield* decodeJson(Schema.Record(Schema.String, Schema.Json), child.metadata ?? "{}").pipe(
       Effect.orElseSucceed(() => ({}))
     )
   )
-  return { mode: agent?.mode ?? "work", parent: child.parent_session_id } satisfies ChildAgent
+  return {
+    mode: agent?.mode ?? AGENT_MODE.work,
+    parent: child.parent_session_id
+  } satisfies ChildAgent
 })
 
+export const RUN_RECORD = {
+  recorded: "recorded",
+  unrecorded: "unrecorded",
+  corrupt: "corrupt"
+} as const
+
 type RunRecord =
-  | { readonly kind: "recorded"; readonly context: RunContext }
-  | { readonly kind: "unrecorded" }
-  | { readonly kind: "corrupt"; readonly error: string }
+  | { readonly kind: typeof RUN_RECORD.recorded; readonly context: RunContext }
+  | { readonly kind: typeof RUN_RECORD.unrecorded }
+  | { readonly kind: typeof RUN_RECORD.corrupt; readonly error: string }
 
 export interface RunAddress {
   readonly source: SourceRunRow
@@ -178,9 +196,11 @@ export const addressOfRun = Effect.fn("RunDestination.addressOfRun")(function* (
   const source = rows[0]
   if (source === undefined) return undefined
   const record = yield* recordOf(source.context)
-  const context = record.kind === "recorded" ? record.context : undefined
+  const context = record.kind === RUN_RECORD.recorded ? record.context : undefined
   const origin =
-    record.kind === "corrupt" ? undefined : (context?.origin ?? { kind: "unrecorded" as const })
+    record.kind === RUN_RECORD.corrupt
+      ? undefined
+      : (context?.origin ?? { kind: RUN_ORIGIN.unrecorded })
   const belongsTo = context?.belongs_to
   const owner = belongsTo ?? origin
   const { place, agent } = yield* placeOf(sql, {
@@ -189,7 +209,7 @@ export const addressOfRun = Effect.fn("RunDestination.addressOfRun")(function* (
     origin,
     belongsTo
   })
-  const damaged = record.kind === "corrupt" && agent !== undefined
+  const damaged = record.kind === RUN_RECORD.corrupt && agent !== undefined
   const fallback: RunContext | undefined = damaged
     ? { origin: { kind: "chat", session_id: agent.parent, turn_id: "unrecorded" }, task: null }
     : undefined
@@ -209,7 +229,7 @@ export const addressOfRun = Effect.fn("RunDestination.addressOfRun")(function* (
 const recordOf = Effect.fn("RunDestination.recordOf")(function* (stored: string | null) {
   if (stored === null) return { kind: "unrecorded" } satisfies RunRecord
   const decoded = yield* decodeJson(RunContextSchema, stored).pipe(Effect.result)
-  return decoded._tag === "Success"
+  return Result.isSuccess(decoded)
     ? ({ kind: "recorded", context: decoded.success } satisfies RunRecord)
     : ({ kind: "corrupt", error: "The run's context is corrupt" } satisfies RunRecord)
 })
@@ -225,7 +245,9 @@ const placeOf = Effect.fn("RunDestination.placeOf")(function* (
 ): Effect.fn.Return<{ readonly place: Place; readonly agent: ChildAgent | undefined }, SqlError> {
   const { origin } = run
   const agent =
-    origin === undefined || origin.kind === "chat" ? yield* readAgentChild(sql, run) : undefined
+    origin === undefined || origin.kind === RUN_ORIGIN.chat
+      ? yield* readAgentChild(sql, run)
+      : undefined
   if (agent !== undefined) {
     const parent =
       origin === undefined
@@ -243,17 +265,19 @@ const placeOf = Effect.fn("RunDestination.placeOf")(function* (
     return { place: { sessionId: run.sessionId, kind: "own", row: undefined }, agent }
   const sessionId = yield* readDestinationSessionId(sql, { ...run, origin })
   if (sessionId === undefined) return { place: gone, agent }
-  if (origin.kind === "chat" && origin.session_id !== run.sessionId)
+  if (origin.kind === RUN_ORIGIN.chat && origin.session_id !== run.sessionId)
     return { place: { sessionId, kind: "sender", row: undefined }, agent }
   if (sessionId === run.sessionId)
     return { place: { sessionId, kind: "own", row: undefined }, agent }
   return { place: yield* chatPlace(sql, sessionId), agent }
 })
 
+const ENTITY = { task: "task", automation: "automation" } as const
+
 export type Entity =
-  | { readonly kind: "task"; readonly itemId: string }
+  | { readonly kind: typeof ENTITY.task; readonly itemId: string }
   | {
-      readonly kind: "automation"
+      readonly kind: typeof ENTITY.automation
       readonly automationId: string
       readonly ownChats: boolean
     }
@@ -266,12 +290,12 @@ export const entityPlaces = Effect.fn("RunDestination.entityPlaces")(function* (
     runId: "",
     sessionId: null,
     origin:
-      entity.kind === "task"
+      entity.kind === ENTITY.task
         ? { kind: "task", item_id: entity.itemId, occurrence_id: "" }
         : { kind: "automation", automation_id: entity.automationId, occurrence_id: "" }
   })
   const sessionIds = [...(primary === undefined ? [] : [primary])]
-  if (entity.kind === "automation" && entity.ownChats) {
+  if (entity.kind === ENTITY.automation && entity.ownChats) {
     const own = yield* sql<{ readonly session_id: string }>`SELECT session_id FROM sessions
       WHERE session_type = 'channel' AND origin_automation_id = ${entity.automationId}
       ORDER BY session_id`

@@ -80,6 +80,5 @@ export const googleRoutes = {
   replacement: "/google/client/replacement",
   oauth: oauthPath,
   disconnect: accountPath,
-  /** POST: start Google consent for one optional grant on one connected account. */
   grant: grantPath
 } as const

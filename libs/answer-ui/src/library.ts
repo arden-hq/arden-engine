@@ -1,8 +1,7 @@
 import { createLibrary, createParser, type ParseResult } from "@openuidev/lang-core"
-import { ANSWER_PARTS } from "./parts.js"
+import { ANSWER_PARTS, COMPONENT_NAME } from "./parts.js"
 
-/** The part every block's `root` statement must be. */
-export const ANSWER_UI_ROOT = "Stack"
+export const ANSWER_UI_ROOT = COMPONENT_NAME.Stack
 
 export const library = createLibrary({
   root: ANSWER_UI_ROOT,

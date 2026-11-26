@@ -1,5 +1,12 @@
 import { cutText } from "@arden-hq/std/text"
-import { CLI_TOOL_VERSION, type CliTool, type CliToolsReport } from "@arden-hq/protocol/cli-tools"
+import {
+  CLI_TOOL_SIGN_IN,
+  CLI_TOOL_SKILL,
+  CLI_TOOL_VERSION,
+  type CliTool,
+  type CliToolsReport
+} from "@arden-hq/protocol/cli-tools"
+import { TASK_STATUS } from "@arden-hq/protocol/spaces/work"
 import { TODO_EXPLANATION, type TodoSnapshot } from "@arden-hq/protocol/sessions/todos"
 
 import type { AutomationOriginPolicy } from "../persistence/automations/catalog.js"
@@ -99,23 +106,30 @@ export const renderLocalTimeContext = ({
   return renderPromptSection("Current local time", `${local} (${zone})`)
 }
 
+const AUTOMATION_PLACEMENT = {
+  inPlace: "in_place",
+  fork: "fork",
+  ownChat: "own_chat"
+} as const
+export type AutomationPlacement = (typeof AUTOMATION_PLACEMENT)[keyof typeof AUTOMATION_PLACEMENT]
+
 export const renderExecutionContext = (
   input:
     | {
         readonly automationId: AutomationId
         readonly policy: AutomationOriginPolicy
-        readonly placement: "in_place" | "fork" | "own_chat"
+        readonly placement: AutomationPlacement
       }
     | undefined
 ): string | undefined => {
   if (input === undefined) return undefined
   if (!isSpaceWorkJob(input.policy) && input.policy.handler === null) {
     switch (input.placement) {
-      case "in_place":
+      case AUTOMATION_PLACEMENT.inPlace:
         return AUTOMATION_SUFFIX
-      case "fork":
+      case AUTOMATION_PLACEMENT.fork:
         return joinPromptSections([AUTOMATION_SUFFIX, FORK_SUFFIX, REPORT_ELSEWHERE_SUFFIX])
-      case "own_chat":
+      case AUTOMATION_PLACEMENT.ownChat:
         return joinPromptSections([AUTOMATION_SUFFIX, REPORT_ELSEWHERE_SUFFIX])
     }
   }
@@ -130,7 +144,7 @@ export const renderResearchAgentContext = (enabled: boolean): string | undefined
 export const renderChatTaskContext = (current: ChatTaskContext | undefined): string | undefined => {
   if (current === undefined) return undefined
   const { task } = current
-  const working = task.status === "open" && !task.blocked
+  const working = task.status === TASK_STATUS.open && !task.blocked
   const blocked = task.blocked ? `blocked, waiting on ${task.waitingOn ?? "you"}` : task.status
   const state = [
     `Task: ${jsonText(task.text, CHAT_TASK_LINE_LIMIT)}`,
@@ -203,22 +217,22 @@ const versionWords = (version: CliTool["version"]): string | undefined => {
 
 const signInWords = (signIn: CliTool["sign_in"]): string | undefined => {
   switch (signIn) {
-    case "signed_in":
+    case CLI_TOOL_SIGN_IN.signedIn:
       return "signed in"
-    case "signed_out":
+    case CLI_TOOL_SIGN_IN.signedOut:
       return "not signed in"
-    case "unknown":
+    case CLI_TOOL_SIGN_IN.unknown:
       return undefined
   }
 }
 
 const usableSkill = (skill: CliTool["skill"]): string | undefined => {
   switch (skill.kind) {
-    case "built_in":
+    case CLI_TOOL_SKILL.builtIn:
       return skill.name
-    case "installed":
+    case CLI_TOOL_SKILL.installed:
       return skill.enabled ? skill.name : undefined
-    case "none":
+    case CLI_TOOL_SKILL.none:
       return undefined
   }
 }

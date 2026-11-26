@@ -9,10 +9,6 @@ import type {
 
 const SCREEN_CONCURRENCY = 4
 
-/**
- * `ownerOf` answers what is known about the owner for a job whose condition is about them
- * ("it needs me today"); undefined for every other job, which is judged on the event alone.
- */
 export const screenEventWake = (
   decisions: Pick<Decisions["Service"], "decide">,
   ownerOf: (job: AutomationJobLeaseRef) => Effect.Effect<string | undefined> = () =>

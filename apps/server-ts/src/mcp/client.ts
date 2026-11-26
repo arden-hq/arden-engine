@@ -39,7 +39,6 @@ export interface ClosableClient {
   readonly transport?: McpOwnedTransport
 }
 
-/** SDK 1.29's transport declaration is not exact-optional compatible. */
 const clientTransport = (transport: McpOwnedTransport | McpChannel): Transport =>
   transport as unknown as Transport
 
@@ -111,8 +110,6 @@ export const callMcpTool = async ({
   readonly binding: McpToolBinding
   readonly input: McpToolCall
 }): Promise<CallToolResult> => {
-  // A progress handler is always set: without one the SDK sends no progress
-  // token, so the server can't report progress and reset the timeout.
   const options: RequestOptions = {
     signal: input.signal,
     timeout: CALL_TIMEOUT_MS,

@@ -60,11 +60,9 @@ const optionalFields = (
 
 export const parseSkillMetadata = Effect.fn("Skills.parseMetadata")(function* (
   source: string,
-  /** The folder the Skill must be named after; null when the folder name is free. */
   directoryName: string | null,
   operation: SkillOperation
 ) {
-  // A SKILL.md saved with Windows line endings is the same Skill.
   const lines = source.split("\n").map((line) => line.replace(/\r$/, ""))
   if (lines[0] !== "---") {
     return yield* skillError(operation, "invalid", "Skill metadata is missing")

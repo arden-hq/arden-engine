@@ -2,7 +2,6 @@ import type { RunBudget, RunBudgetOptions, RunBudgetSnapshot } from "../contract
 
 const validCount = (value: number): boolean => Number.isSafeInteger(value) && value >= 0
 
-/** Create a small synchronous budget that can be shared between agent runs. */
 export const makeRunBudget = (options: RunBudgetOptions = {}): RunBudget => {
   let current: RunBudgetSnapshot = {
     toolCalls: options.toolCalls ?? 0,

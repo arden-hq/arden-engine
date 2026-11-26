@@ -1,3 +1,4 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import type {
@@ -32,7 +33,6 @@ import type { WikiMutationMethods } from "./mutations.js"
 
 export interface WikiSpacePageInput {
   readonly spaceId: string
-  /** Where a page made now goes; the default is areas. */
   readonly home?: "projects" | "areas"
 }
 
@@ -96,7 +96,6 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
       }
 })
 
-/** Logs a Space left without a page; the start check gives it one. */
 export const logNoSpacePage = (
   spaceId: string,
   error: WikiError
@@ -167,7 +166,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePage")(function* (
     spaceOwned ||
     pageKind(recordFolders(current.wholeSet), directoryPath).kind !== "knowledge" ||
     (directory !== undefined &&
-      (directory.page.lifecycle !== "active" ||
+      (directory.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active ||
         DIRECTORY_CONTRACT_HEADINGS.some((heading) => !sections?.get(heading))))
   ) {
     return yield* wikiError(
@@ -253,7 +252,6 @@ const withSpacePageOrDeferred = (
     Effect.catch((error) => logNoSpacePage(space.space_id, error).pipe(Effect.as(space)))
   )
 
-/** The one way a Space is created: the Space, then its page in `home`. */
 export const createSpaceWithPage = Effect.fn("Spaces.createWithPage")(function* (
   services: {
     readonly spaces: Pick<SpaceStore["Service"], "create">

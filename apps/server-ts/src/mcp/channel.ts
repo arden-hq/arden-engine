@@ -35,12 +35,6 @@ const INTERNAL_ERROR = -32_603
 const METHOD_NOT_FOUND = -32_601
 const INVALID_REQUEST = -32_600
 
-/**
- * What an older server answers `server/discover` with: it does not know the
- * method or its `_meta`, or it wants a session first (the SDK's own servers
- * answer -32000 "No valid session ID"). Only these move a connection to
- * `initialize`, as in Codex's fallback; anything else fails the connection.
- */
 const OLDER_SERVER_CODES: ReadonlySet<number> = new Set([
   METHOD_NOT_FOUND,
   INVALID_REQUEST,
@@ -48,7 +42,7 @@ const OLDER_SERVER_CODES: ReadonlySet<number> = new Set([
   -32_000
 ])
 
-/** Requests that carry `params.name` in `Mcp-Name` over HTTP (SEP-2243, SEP-3415). */
+// modelcontextprotocol/modelcontextprotocol#2243 modelcontextprotocol/modelcontextprotocol#3415
 const NAMED_METHODS = new Set([
   "tools/call",
   "prompts/get",
@@ -107,27 +101,6 @@ export interface McpEventStream {
   readonly cancel: () => void
 }
 
-/**
- * One MCP connection's lifecycle, between the SDK client and its transport.
- * When the SDK client connects over HTTP, the channel first asks
- * `server/discover`: a server that offers protocol 2026-07-28 is spoken to
- * statelessly from then on, and the SDK client is answered its `initialize`
- * from the discovery. Any other server (and every stdio one) keeps the
- * `initialize` session, as the SDK runs it. One lifecycle serves the whole
- * connection: tools, and, where the server offers them, events.
- *
- * On the stateless lifecycle every request carries the version and Arden's
- * capabilities in `_meta`, and over HTTP the matching `MCP-Protocol-Version`,
- * `Mcp-Method` and `Mcp-Name` headers and no session id; the transport's
- * authorization still applies. A refusal comes back as a JSON-RPC error the
- * SDK can route, and a cancelled request's fetch is aborted.
- *
- * The channel also owns its own requests (`server/discover`, `events/*`) under
- * its own ids, and routes each `notifications/events/*` message to the push
- * stream it names. A stream is the SSE response to its own POST; cancelling it
- * aborts that fetch, and its body then ends with a result for its id, so the
- * SDK never tries to resume it.
- */
 export class McpChannel {
   onclose?: NonNullable<Transport["onclose"]>
   onerror?: NonNullable<Transport["onerror"]>
@@ -316,13 +289,6 @@ export class McpChannel {
     return { cancel }
   }
 
-  /**
-   * Wraps an HTTP transport's fetch. A stateless request goes out with its
-   * headers and no session id, can be aborted on its own, and its refusal comes
-   * back as a JSON-RPC error the SDK can route. A push stream's body always
-   * ends with a result for its id; any other answer's body ends quietly when
-   * its request is cancelled.
-   */
   wrapFetch(fetch: FetchLike): FetchLike {
     return async (url, init) => {
       const request = statelessRequest(init?.body)
@@ -470,20 +436,12 @@ const authorizationChallenge = (response: Response): boolean =>
   (response.status === 403 &&
     response.headers.get("www-authenticate")?.includes("insufficient_scope") === true)
 
-/** A refusal's JSON-RPC code when its body has none, by its HTTP status. */
 const refusalCode = (status: number): number => {
   if (status === 404 || status === 405) return METHOD_NOT_FOUND
   if (status === 400) return INVALID_REQUEST
   return INTERNAL_ERROR
 }
 
-/**
- * A stateless answer as the SDK should see it. A refusal (HTTP 4xx/5xx other
- * than an authorization challenge) becomes a JSON-RPC error for the request's
- * id, carrying the server's code when its body has one, else method-not-found
- * for a 4xx and an internal error for a 5xx; a session id the answer names is
- * not this lifecycle's.
- */
 const statelessResponse = async (response: Response, id: string | number): Promise<Response> => {
   if (response.ok || authorizationChallenge(response)) {
     if (!response.headers.has("mcp-session-id")) return response

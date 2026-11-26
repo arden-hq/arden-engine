@@ -1,6 +1,7 @@
+import { JOB_SUBJECT_KIND } from "../space-job-id.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
 import { Effect, Schema } from "effect"
-import { SYSTEM_HANDLER_IDS } from "../automations/model.js"
+import { SystemHandlerIdSchema } from "../automations/model.js"
 import type {
   AutomationJobHandler,
   AutomationJobPayload,
@@ -17,7 +18,7 @@ import {
   storeError
 } from "./automation-rows.js"
 import type { RunAuthorityState } from "./run-context.js"
-import { internalRef } from "./space-jobs.js"
+import { internalRef } from "./space-job-types.js"
 
 const JobChatRunSchema = Schema.NullOr(
   Schema.Struct({
@@ -62,7 +63,7 @@ export const readJobChatRun = Effect.fn("AutomationJob.readChatRun")(function* (
   )
 })
 
-const JobHandlerIdSchema = Schema.NullOr(Schema.Literals(SYSTEM_HANDLER_IDS))
+const JobHandlerIdSchema = Schema.NullOr(SystemHandlerIdSchema)
 
 export const isJobHandlerId = Schema.is(JobHandlerIdSchema)
 
@@ -124,7 +125,7 @@ export interface ClaimedWork {
 
 const workOf = (owner: WorkOwner): Omit<ClaimedWork, "jobOwner"> => {
   switch (owner.kind) {
-    case "task":
+    case JOB_SUBJECT_KIND.task:
       return {
         job: classificationOf(owner),
         name: owner.text,
@@ -138,7 +139,7 @@ const workOf = (owner: WorkOwner): Omit<ClaimedWork, "jobOwner"> => {
         instructionRevisionId: null,
         heldSince: null
       }
-    case "space_review": {
+    case JOB_SUBJECT_KIND.spaceReview: {
       const { settings } = owner
       return {
         job: classificationOf(owner),
@@ -154,7 +155,7 @@ const workOf = (owner: WorkOwner): Omit<ClaimedWork, "jobOwner"> => {
         heldSince: null
       }
     }
-    case "automation": {
+    case JOB_SUBJECT_KIND.automation: {
       const { authored } = owner
       const chatKind =
         isUserAutomationPurpose(owner.purpose) && authored.chatOrigin !== owner.key

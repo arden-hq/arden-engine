@@ -26,7 +26,6 @@ interface SpaceConversationContextSnapshot {
   readonly authority: string
   readonly view: SpaceView
   readonly threads: string
-  /** The Space's Memory page, at the version this run read. */
   readonly page?: SpacePageInput
 }
 

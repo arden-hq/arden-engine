@@ -7,11 +7,18 @@ import {
   ComputerSetupSchema
 } from "./schema.js"
 export {
+  COMPUTER_ACTIVITY,
   COMPUTER_APP,
+  COMPUTER_DELIVERY,
   COMPUTER_FEEDBACK,
+  COMPUTER_INSTALLATION,
+  COMPUTER_MODE,
   COMPUTER_OPERATION,
+  COMPUTER_PERMISSIONS,
   COMPUTER_PREVIEW,
-  COMPUTER_SESSION
+  COMPUTER_SESSION,
+  COMPUTER_STEP,
+  COMPUTER_WINDOW
 } from "./contracts.js"
 export type {
   ComputerApp,
@@ -26,7 +33,15 @@ export type {
   ComputerWindow,
   ComputerFrame
 } from "./contracts.js"
-export type { ComputerSetup } from "./contracts.js"
+export type {
+  ComputerActivity,
+  ComputerDelivery,
+  ComputerInstallation,
+  ComputerMode,
+  ComputerPermissions,
+  ComputerSetup,
+  ComputerStepKind
+} from "./contracts.js"
 export const isComputerStep = Schema.is(ComputerStepSchema)
 export const computerDecoders = {
   setup: decoderFor(ComputerSetupSchema, "Invalid computer setup response"),
@@ -42,4 +57,4 @@ export const computerRoutes = {
   preview: "/computer/preview",
   pause: "/computer/pause",
   resume: "/computer/resume"
-} as const
+}

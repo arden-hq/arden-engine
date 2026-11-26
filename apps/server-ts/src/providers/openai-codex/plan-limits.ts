@@ -56,10 +56,6 @@ const resetTime = (
   return undefined
 }
 
-/**
- * Reads the `x-codex-<window>-*` family every Codex response carries. Returns
- * undefined when the response has none (an error page, another route).
- */
 const readCodexHeaders = (
   headers: Headers,
   now: number,
@@ -73,8 +69,6 @@ const readCodexHeaders = (
       finite(headers.get(`x-codex-${name}-reset-after-seconds`)),
       now
     )
-    // A window of no length is the placeholder Codex sends for a limit the
-    // plan does not have (Codex's own reader drops it too).
     if (used === undefined || minutes === undefined || minutes <= 0) return []
     if (resetsAt === undefined) return []
     return [{ usedPercent: used, windowSeconds: minutes * 60, resetsAt }]

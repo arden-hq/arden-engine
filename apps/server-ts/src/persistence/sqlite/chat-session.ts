@@ -13,7 +13,7 @@ export interface SessionRow {
   readonly session_type: string
 }
 
-interface LiveSessionRow extends SessionRow {
+export interface LiveSessionRow extends SessionRow {
   readonly origin_automation_id: string | null
 }
 

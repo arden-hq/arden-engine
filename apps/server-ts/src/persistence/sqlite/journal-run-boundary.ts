@@ -3,16 +3,11 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { Statement } from "effect/unstable/sql/Statement"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
-/** The journal rows that open or close a run. Event admission reads the newest
- * of them, so retention keeps every run's boundary rows. */
 export const RUN_BOUNDARY_TYPES = ["RUN_STARTED", "RUN_FINISHED", "RUN_ERROR", "run_cancelled"]
 
-/** The run a journal row belongs to: the `runId` attribute, else the payload's
- * `run_id`. The one expression for it; a row is never matched to a run another way. */
 export const journalRunIdSql = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`COALESCE(json_extract(attributes_json, '$.runId'), json_extract(data_json, '$.run_id'))`
 
-/** The newest run-boundary row of a session at or below its checkpoint. */
 export const readLatestRunBoundary = (
   sql: SqlClient.SqlClient,
   sessionId: string

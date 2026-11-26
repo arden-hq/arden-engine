@@ -18,19 +18,10 @@ export interface BrokerCredential {
 }
 
 interface BrokeredCredentials {
-  /**
-   * The credential the host is still fetching; null when nobody is signed in.
-   * The provider waits for it on first use, so the server can open without it.
-   */
   readonly initial: Promise<BrokerCredential | null>
   readonly request: (forceRefresh: boolean, signal: AbortSignal) => Promise<BrokerCredential | null>
 }
 
-/**
- * The host's part of the model route (`ModelProviderSwitch` adds a saved
- * model server's). Every field is optional, as the server reads them: the
- * Codex route happens to supply them all.
- */
 export interface ProviderRoute {
   readonly id: "codex"
   readonly start: (credentials: BrokeredCredentials, appVersion: string) => ModelProviderOptions
@@ -151,7 +142,6 @@ const openAiCodexRoute: ProviderRoute = {
       if (!runtime) throw new Error("OpenAI Codex is not connected")
       return runtime
     })
-    // Codex serves the Responses API, so its native structured output is OpenAI strict.
     return { ...starting, structuredOutputDialect: "openai" }
   }
 }

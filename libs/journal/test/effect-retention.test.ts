@@ -6,7 +6,8 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 
-import { initializeJournalSchema, truncateBeforeInTransaction } from "../src/effect/runtime.js"
+import { truncateBeforeInTransaction } from "../src/effect/store.js"
+import { initializeJournalSchema } from "../src/effect/schema.js"
 
 const withSql = async <A, E>(
   label: string,

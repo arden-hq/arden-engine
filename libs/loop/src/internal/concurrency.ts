@@ -1,4 +1,3 @@
-/** Counting semaphore. `acquire()` resolves to a release function. */
 export interface Semaphore {
   readonly acquire: () => Promise<() => void>
 }
@@ -41,7 +40,6 @@ interface Waiter {
   released: boolean
 }
 
-/** FIFO read/write lock. Consecutive readers share; a queued writer blocks later readers. */
 export interface FairReadWriteLock {
   readonly acquire: (write: boolean) => Promise<() => void>
 }

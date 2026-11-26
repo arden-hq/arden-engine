@@ -2,7 +2,7 @@ import { DateTime } from "effect"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { expect, it } from "vitest"
 import type { ChatRunnerMessage } from "../src/chat/runner-contract.js"
-import { isLiveChat, type SessionOrigin } from "../src/context/turn-context.js"
+import { isLiveChat, type SessionOrigin } from "../src/context/session-origin.js"
 import type { SessionHistoryHeader } from "../src/persistence/sessions/model.js"
 
 const personal: SessionOrigin = {

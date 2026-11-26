@@ -353,7 +353,6 @@ export const automationSchemaSection = {
         THEN skip_json IS NULL AND disposition IS NOT 'superseded'
         ELSE outcome <> 'superseded' AND outcome NOT GLOB 'skipped:*' END)`,
     `CREATE INDEX idx_automation_runs_task_day ON automation_runs(task_id, date(started_at))`,
-    // A job run is open exactly while a queue row names it (migration 0154).
     `CREATE TRIGGER automation_job_closes_run_ad
       AFTER DELETE ON automation_event_queue
       WHEN json_extract(OLD.context, '$.automation_run_id') IS NOT NULL

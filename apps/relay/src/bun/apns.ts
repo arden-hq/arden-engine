@@ -6,10 +6,6 @@ import type { ApnsHttpResponse, ApnsTransport } from "../apns/apns.js"
 import { noopPusher } from "../core/pusher.js"
 import type { Pusher } from "../core/pusher.js"
 
-// APNs for the Bun host. Bun's fetch speaks only HTTP/1.1, which Apple
-// refuses, so requests go over node:http2 — with ALPN set by hand: Bun's
-// http2 client does not offer "h2" by default and the handshake fails.
-
 const requestTimeoutMs = 15_000
 
 export interface Http2Transport {
