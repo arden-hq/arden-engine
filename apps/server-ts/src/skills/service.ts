@@ -6,6 +6,7 @@ import type {
   SkillRemoveReceipt,
   SkillToggleReceipt
 } from "@arden-hq/protocol/skills"
+import { SKILL_PLACE, type SkillVersion } from "@arden-hq/protocol/skills"
 import {
   SkillDescriptionSchema,
   SkillNameSchema,
@@ -32,12 +33,13 @@ import { readSkillReference } from "./resources.js"
 import { stringify } from "yaml"
 
 import {
+  BUILT_IN_LIST,
   BUILT_IN_SKILLS,
+  builtInLoaded,
   builtInSkillByName,
   builtInUnchangeable,
   isBuiltInSkillName,
-  reservedName,
-  type BuiltInSkill
+  reservedName
 } from "./builtin.js"
 import { SkillError, skillError, type SkillOperation } from "./errors.js"
 import {
@@ -45,7 +47,7 @@ import {
   type SkillMarketplaceOptions,
   type SkillMarketplaceSource
 } from "./marketplace.js"
-import { parseSkillMetadata } from "./metadata.js"
+import { declaredVersion, parseSkillMetadata } from "./metadata.js"
 import { countOf } from "@arden-hq/std/count"
 import { renderPromptSection } from "../prompts/format.js"
 
@@ -111,7 +113,12 @@ const SkillResourceFilesSchema = Schema.Array(SkillResourceFileSchema).check(
 )
 
 interface SkillRecord {
-  readonly skill: Skill
+  readonly skill: {
+    readonly name: string
+    readonly description: string
+    readonly version: SkillVersion
+    readonly enabled: boolean
+  }
   readonly content: string
   readonly directory: string
   readonly identity: string
@@ -128,27 +135,6 @@ export interface SkillLoadedContent extends SkillContent {
   readonly builtin: boolean
   readonly enabled: boolean
 }
-
-const builtInSkill = (skill: BuiltInSkill): Skill => ({
-  name: skill.name,
-  description: skill.description,
-  version: skill.version,
-  enabled: true,
-  builtin: true,
-  ...(skill.userInvocable ? { invocable: true as const } : {})
-})
-
-const builtInLoaded = (skill: BuiltInSkill): SkillLoadedContent => ({
-  name: skill.name,
-  description: skill.description,
-  version: skill.version,
-  content: skill.content,
-  directory: null,
-  builtin: true,
-  enabled: true
-})
-
-const BUILT_IN_LIST: ReadonlyArray<Skill> = BUILT_IN_SKILLS.map(builtInSkill)
 
 export interface SkillCatalogPromptOptions {
   readonly omit?: ReadonlySet<string>
@@ -246,9 +232,8 @@ const loadRecord = Effect.fn("Skills.loadRecord")(function* (
     skill: {
       name: metadata.name,
       description: metadata.description,
-      version: metadata.version ?? null,
-      enabled: !(yield* disabled(directory, operation)),
-      builtin: false
+      version: declaredVersion(metadata.version),
+      enabled: !(yield* disabled(directory, operation))
     },
     content,
     directory,
@@ -279,7 +264,9 @@ const compactCatalog = (
 ): string | undefined => {
   const omit = options.omit ?? new Set<string>()
   const builtins = BUILT_IN_SKILLS.filter((skill) => !omit.has(skill.name))
-  const local = skills.filter((skill) => !skill.builtin && skill.enabled && !omit.has(skill.name))
+  const local = skills.filter(
+    (skill) => skill.place.kind === SKILL_PLACE.local && skill.enabled && !omit.has(skill.name)
+  )
   if (builtins.length === 0 && local.length === 0) return undefined
   const sections: Array<string> = []
   if (builtins.length > 0) {
@@ -393,8 +380,11 @@ const make = Effect.fn("Skills.make")(function* (
 
   const located = (record: SkillRecord): Skill => ({
     ...record.skill,
-    origin: record.root === primary ? "arden" : "shared",
-    path: record.directory
+    place: {
+      kind: SKILL_PLACE.local,
+      origin: record.root === primary ? "arden" : "shared",
+      path: record.directory
+    }
   })
 
   const list = Effect.fn("Skills.list")(function* () {
@@ -512,7 +502,7 @@ const make = Effect.fn("Skills.make")(function* (
         )
       }
     })
-    return (yield* loadRecord(primary, name, "create")).skill
+    return located(yield* loadRecord(primary, name, "create"))
   })
 
   const setEnabled = Effect.fn("Skills.setEnabled")(function* (name: string, enabled: boolean) {

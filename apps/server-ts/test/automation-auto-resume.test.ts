@@ -6,11 +6,14 @@ import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationId, AutomationRules } from "../src/persistence/automations/model.js"
 import { resumeDueAutomations } from "../src/persistence/sqlite/automation-resume.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { changes } from "./fixtures/automation-input.js"
 
 const NOW = "2026-11-07T10:00:00.000Z"
 const EARLIER = "2026-11-07T09:00:00.000Z"
 const LATER = "2026-11-07T16:00:00.000Z"
-const DAILY = JSON.stringify([{ type: "time", at: "09:30", days: "daily", id: "t1" }])
+const DAILY = JSON.stringify([
+  { id: "t1", type: "time", schedule: { kind: "daily", at: "09:30", days: "daily" } }
+])
 
 const automation = (
   id: string,
@@ -60,7 +63,11 @@ it("an Automation paused by its provider is resumed when its wait is over", asyn
       expect(of("already-on")).toMatchObject({ enabled: 1, auto_resumes: 1 })
       expect(of("waiting")).toMatchObject({ enabled: 0, auto_resume_at: LATER })
       const catalog = yield* AutomationCatalog
-      yield* catalog.update(AutomationId.make("waiting"), { enabled: false }, "owner")
+      yield* catalog.update(
+        AutomationId.make("waiting"),
+        changes({ kind: "enabled", enabled: false }),
+        "owner"
+      )
       yield* resumeDueAutomations({ sql, rules, now: "2026-11-08T00:00:00.000Z" })
       const [kept] = yield* sql<{
         readonly enabled: number

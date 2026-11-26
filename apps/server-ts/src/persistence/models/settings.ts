@@ -4,8 +4,10 @@ import type {
   ModelCatalog,
   ModelResetScope,
   ModelRole,
-  ModelSettingsPatch
+  ModelSettingsPatch,
+  ReasoningTarget
 } from "@arden-hq/protocol/models"
+import { MODEL_SETTINGS_CHANGE, MODEL_TARGET, REASONING_TARGET } from "@arden-hq/protocol/models"
 import { Result, Schema } from "effect"
 import type { ModelDefinition, ModelHost } from "../../models/host.js"
 import type { ModelSettingsSnapshot } from "./store.js"
@@ -57,6 +59,9 @@ export const emptySnapshot = (): ModelSettingsSnapshot => ({
   atDefaults: { chat: true, roles: true },
   ...emptySettings()
 })
+
+const effortOf = (reasoning: ReasoningTarget): string | null =>
+  reasoning.kind === REASONING_TARGET.effort ? reasoning.effort : null
 
 const sameAssignment = (left: ModelAssignment, right: ModelAssignment): boolean =>
   left.modelId === right.modelId && left.reasoningEffort === right.reasoningEffort
@@ -189,27 +194,39 @@ export const applyPatch = (
     let chatModelId = stored.chatModelId
     const efforts = { ...stored.modelReasoningEfforts }
     const overrides = roles((role) => ({ ...stored.roleOverrides[role] }))
-    if (patch.chatModelId !== undefined) {
-      yield* validTarget(runtime, patch.chatModelId)
-      chatModelId = patch.chatModelId
-    }
-    if (patch.modelReasoning !== undefined) {
-      const { modelId, effort } = patch.modelReasoning
-      yield* validTarget(runtime, modelId, effort)
-      effort === null ? delete efforts[modelId] : (efforts[modelId] = effort)
-    }
-    for (const role of modelRoles) {
-      const change = patch.roles?.[role]
-      if (change === undefined) continue
-      const previous = overrides[role]
-      const modelId = change.modelId === undefined ? previous.modelId : change.modelId
-      const modelChanged = change.modelId !== undefined && change.modelId !== previous.modelId
-      const carriedEffort = modelChanged ? null : previous.reasoningEffort
-      const reasoningEffort =
-        change.reasoningEffort !== undefined ? change.reasoningEffort : carriedEffort
-      if (modelId !== null || reasoningEffort !== null)
-        yield* validTarget(runtime, modelId ?? chatModelId, reasoningEffort)
-      overrides[role] = assignment(modelId, reasoningEffort)
+    for (const change of patch) {
+      switch (change.kind) {
+        case MODEL_SETTINGS_CHANGE.chatModel: {
+          const modelId = change.model.kind === MODEL_TARGET.model ? change.model.modelId : null
+          yield* validTarget(runtime, modelId)
+          chatModelId = modelId
+          break
+        }
+        case MODEL_SETTINGS_CHANGE.modelReasoning: {
+          const effort = effortOf(change.reasoning)
+          yield* validTarget(runtime, change.modelId, effort)
+          effort === null ? delete efforts[change.modelId] : (efforts[change.modelId] = effort)
+          break
+        }
+        case MODEL_SETTINGS_CHANGE.roleModel: {
+          const previous = overrides[change.role]
+          const modelId = change.model.kind === MODEL_TARGET.model ? change.model.modelId : null
+          const reasoningEffort =
+            modelId !== null && modelId === previous.modelId ? previous.reasoningEffort : null
+          if (modelId !== null || reasoningEffort !== null)
+            yield* validTarget(runtime, modelId ?? chatModelId, reasoningEffort)
+          overrides[change.role] = assignment(modelId, reasoningEffort)
+          break
+        }
+        case MODEL_SETTINGS_CHANGE.roleReasoning: {
+          const { modelId } = overrides[change.role]
+          const reasoningEffort = effortOf(change.reasoning)
+          if (modelId !== null || reasoningEffort !== null)
+            yield* validTarget(runtime, modelId ?? chatModelId, reasoningEffort)
+          overrides[change.role] = assignment(modelId, reasoningEffort)
+          break
+        }
+      }
     }
     return { chatModelId, modelReasoningEfforts: efforts, roleOverrides: overrides }
   })

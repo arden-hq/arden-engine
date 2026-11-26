@@ -1,9 +1,23 @@
 import { parseJsonBody } from "@arden-hq/protocol/common"
-import { mcpDecoders, mcpRequests, mcpRoutes } from "@arden-hq/protocol/mcp"
-import { permissionDecoders, permissionRoutes } from "@arden-hq/protocol/permissions"
+import {
+  MCP_DIAGNOSTICS,
+  MCP_FOLDER,
+  MCP_SERVER_DETAIL,
+  mcpDecoders,
+  mcpRequests,
+  mcpRoutes,
+  type McpServer
+} from "@arden-hq/protocol/mcp"
+import {
+  PERMISSION_TOOL_OWNER,
+  permissionDecoders,
+  permissionRoutes
+} from "@arden-hq/protocol/permissions"
 import {
   DEFAULT_INTELLIGENCE_SETTINGS,
-  intelligenceSettingsRequests
+  INTELLIGENCE_SETTINGS_CHANGE,
+  intelligenceSettingsRequests,
+  type IntelligenceSettingsPatch
 } from "@arden-hq/protocol/settings"
 import { toolDecoders, toolRoutes } from "@arden-hq/protocol/tools"
 import { sleep } from "@arden-hq/std/sleep"
@@ -90,6 +104,11 @@ const MCP_CONNECT_TIMEOUT_MS = 60_000
  * Model, step limit, Memory, Skills and the sandbox are start options instead
  * (`serverOptionsFor`).
  */
+const failureText = (server: McpServer): string => {
+  if (server.diagnostics.kind === MCP_DIAGNOSTICS.captured) return server.diagnostics.text
+  return server.detail.kind === MCP_SERVER_DETAIL.shown ? server.detail.text : "null"
+}
+
 export const applySettings = async ({
   request,
   settings,
@@ -118,7 +137,7 @@ export const applySettings = async ({
       subject.kind === "tool"
         ? entry.subject.kind === "tool" &&
           entry.subject.tool === subject.tool &&
-          entry.subject.server === null
+          entry.subject.owner.kind === PERMISSION_TOOL_OWNER.arden
         : entry.subject.kind === "path" &&
           entry.subject.path === subject.path &&
           entry.subject.access === subject.access
@@ -187,7 +206,10 @@ export const applySettings = async ({
           command: server.command,
           args: server.args,
           environment: { set, retain: [] },
-          ...(server.cwd === undefined ? {} : { cwd: server.cwd })
+          cwd:
+            server.cwd === undefined
+              ? { kind: MCP_FOLDER.keep }
+              : { kind: MCP_FOLDER.folder, path: server.cwd }
         }
       })
     )
@@ -202,9 +224,7 @@ export const applySettings = async ({
         .servers.filter((server) => wanted.has(server.name))
       const failed = servers.find((server) => server.status === "failed")
       if (failed !== undefined)
-        throw new SettingsError(
-          `MCP server ${failed.name} failed: ${failed.diagnostics ?? failed.detail}`
-        )
+        throw new SettingsError(`MCP server ${failed.name} failed: ${failureText(failed)}`)
       if (
         servers.length === wanted.size &&
         servers.every((server) => server.status === "connected")
@@ -238,29 +258,44 @@ export const applySettings = async ({
   // Sub-agents follow the tool: offered, they get the file's limits or the
   // defaults; not offered, they are off, so the two never disagree. Both are
   // written on every start, so an earlier start's limits do not linger.
-  const subAgentLimits = (): { maxAgentDepth?: number; maxConcurrentAgents?: number } => {
+  const subAgentLimits = (): IntelligenceSettingsPatch => {
     if (offered !== undefined && !offered.has("spawn_agent"))
-      return { maxAgentDepth: 1, maxConcurrentAgents: 1 }
-    if (offered === undefined && settings.subAgents === undefined) return {}
-    return {
-      maxAgentDepth: settings.subAgents?.maxDepth ?? DEFAULT_INTELLIGENCE_SETTINGS.maxAgentDepth,
-      maxConcurrentAgents:
-        settings.subAgents?.maxConcurrent ?? DEFAULT_INTELLIGENCE_SETTINGS.maxConcurrentAgents
-    }
+      return [
+        { kind: INTELLIGENCE_SETTINGS_CHANGE.maxAgentDepth, value: 1 },
+        { kind: INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentAgents, value: 1 }
+      ]
+    if (offered === undefined && settings.subAgents === undefined) return []
+    return [
+      {
+        kind: INTELLIGENCE_SETTINGS_CHANGE.maxAgentDepth,
+        value: settings.subAgents?.maxDepth ?? DEFAULT_INTELLIGENCE_SETTINGS.maxAgentDepth
+      },
+      {
+        kind: INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentAgents,
+        value:
+          settings.subAgents?.maxConcurrent ?? DEFAULT_INTELLIGENCE_SETTINGS.maxConcurrentAgents
+      }
+    ]
   }
-  const limits = {
+  const compaction = settings.compaction
+  const limits: IntelligenceSettingsPatch = [
     ...subAgentLimits(),
-    ...(settings.compaction?.threshold === undefined
-      ? {}
-      : { compactionThreshold: settings.compaction.threshold }),
-    ...(settings.compaction?.keepRatio === undefined
-      ? {}
-      : { compactionKeepRatio: settings.compaction.keepRatio }),
-    ...(settings.compaction?.summaryMaxTokens === undefined
-      ? {}
-      : { summaryMaxTokens: settings.compaction.summaryMaxTokens })
-  }
-  if (Object.keys(limits).length > 0)
+    ...(compaction?.threshold === undefined
+      ? []
+      : [{ kind: INTELLIGENCE_SETTINGS_CHANGE.compactionThreshold, value: compaction.threshold }]),
+    ...(compaction?.keepRatio === undefined
+      ? []
+      : [{ kind: INTELLIGENCE_SETTINGS_CHANGE.compactionKeepRatio, value: compaction.keepRatio }]),
+    ...(compaction?.summaryMaxTokens === undefined
+      ? []
+      : [
+          {
+            kind: INTELLIGENCE_SETTINGS_CHANGE.summaryMaxTokens,
+            value: compaction.summaryMaxTokens
+          }
+        ])
+  ]
+  if (limits.length > 0)
     await call("/settings/intelligence", "PATCH", intelligenceSettingsRequests.update(limits))
 
   if (settings.workspace !== undefined) {

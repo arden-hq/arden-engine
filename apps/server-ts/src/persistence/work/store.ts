@@ -1,31 +1,36 @@
+import {
+  type StoredResolveInput,
+  type StoredRunQuestion,
+  type StoredRunQuestionContent,
+  type StoredRunQuestionList
+} from "../runs/stored-question.js"
+import {
+  type TaskAttachmentRecord,
+  type TaskCommentRecord,
+  type TaskRecord,
+  type WorkPageRecord
+} from "./task-record.js"
+import { type TaskPatch } from "./task-patch.js"
+import { type ChatTaskDraft, type KeyedTaskDraft, type TaskDraft } from "./task-input.js"
+import {
+  WORK_PAGE_DEFAULT_LIMIT,
+  WORK_PAGE_SCOPE,
+  WORK_PAGE_START
+} from "@arden-hq/protocol/spaces/work"
 import type { RecordedHistoryInput, RecordedHistoryPage } from "../history.js"
 import type { TaskWorkerSnapshot } from "../automations/job-prompt.js"
 import type { PermissionOfferRecord } from "../permissions/offer.js"
 import type { ContractProposalRecord, CriterionMet, EvidenceInput } from "./contract.js"
 import { storeReasons } from "../errors.js"
 import type {
-  CreateChatTaskInput,
-  CreateSpaceTaskInput,
   CreateSpaceTaskCommentInput,
-  SpaceWorkPage,
   SpaceWorkPageOptions,
-  SpaceTask,
-  SpaceTaskCaptureInput,
-  SpaceTaskAttachment,
-  SpaceTaskComment,
-  NewTaskInput,
-  UpdateSpaceTaskPatch
+  SpaceTaskCaptureInput
 } from "@arden-hq/protocol/spaces/work"
 import type { CreateSpaceTaskAttachmentRequest } from "@arden-hq/protocol/effect/spaces/work"
 import type { RunDelivery } from "../deliveries/model.js"
 import type { WorkerAttemptPage, WorkerAttemptPageOptions } from "@arden-hq/protocol/runs"
-import type {
-  ResolveRunQuestionInput,
-  RunQuestion,
-  RunQuestionContent,
-  RunQuestionList,
-  RunQuestionListOptions
-} from "@arden-hq/protocol/runs"
+import type { RunQuestionListOptions } from "@arden-hq/protocol/runs"
 import { Context, Effect, Schema } from "effect"
 import type { TaskInferenceReview } from "./inference.js"
 import type { TaskDirectionChanged } from "./task-direction.js"
@@ -48,7 +53,7 @@ export type TaskFinishCheck =
   | { readonly kind: "close"; readonly record: FinishRecord }
 
 export interface WorkAttachmentContent {
-  readonly metadata: SpaceTaskAttachment
+  readonly metadata: TaskAttachmentRecord
   readonly data: Uint8Array
 }
 
@@ -77,7 +82,7 @@ export type TaskScope =
   | { readonly kind: "chat"; readonly sessionId: string }
   | { readonly kind: "none" }
 
-export type CreateTaskInput = NewTaskInput & { readonly key?: string }
+export type CreateTaskInput = TaskDraft & { readonly key?: string }
 
 export type TaskAddress =
   | { readonly kind: "key"; readonly scope: TaskScope; readonly key: string }
@@ -91,6 +96,18 @@ export type FocusQuestionTargetInput =
       readonly purpose?: string
       readonly starts_with?: ReadonlyArray<string>
     }
+
+export const itemPage = (itemId: string): SpaceWorkPageOptions => ({
+  scope: { kind: WORK_PAGE_SCOPE.item, item_id: itemId },
+  start: { kind: WORK_PAGE_START.first },
+  limit: WORK_PAGE_DEFAULT_LIMIT
+})
+
+export const pageWithItem = (itemId: string): SpaceWorkPageOptions => ({
+  scope: { kind: WORK_PAGE_SCOPE.all },
+  start: { kind: WORK_PAGE_START.with_item, item_id: itemId },
+  limit: 1
+})
 
 export class WorkStoreError extends Schema.TaggedError<WorkStoreError>()("WorkStoreError", {
   reason: storeReasons(["invalid", "not_found", "conflict", "storage"]),
@@ -112,7 +129,7 @@ export type TaskExecutionReceipt =
   | { readonly kind: "queued" }
   | { readonly kind: "working" }
   | { readonly kind: "scheduled"; readonly at: string }
-  | { readonly kind: "inactive"; readonly state: SpaceTask["status"] | SpaceTask["activity"] }
+  | { readonly kind: "inactive"; readonly state: TaskRecord["status"] | TaskRecord["activity"] }
 
 export class WorkStore extends Context.Service<
   WorkStore,
@@ -147,18 +164,18 @@ export class WorkStore extends Context.Service<
     ) => Effect.Effect<void, WorkStoreError>
     readonly questions: (
       options: RunQuestionListOptions
-    ) => Effect.Effect<RunQuestionList, WorkStoreError>
+    ) => Effect.Effect<StoredRunQuestionList, WorkStoreError>
     readonly expireQuestions: () => Effect.Effect<void, WorkStoreError>
     readonly askQuestion: (options: {
       readonly runId: string
       readonly toolCallId: string
-      readonly content: RunQuestionContent
+      readonly content: StoredRunQuestionContent
       readonly reuseOpenTaskQuestion?: true
       readonly timeout?: { readonly seconds: number; readonly fallbackChoiceId: string }
       readonly focusTarget?: FocusQuestionTargetInput
       readonly permissionOffer?: PermissionOfferRecord
       readonly contractProposal?: ContractProposalRecord
-    }) => Effect.Effect<RunQuestion, WorkStoreError>
+    }) => Effect.Effect<StoredRunQuestion, WorkStoreError>
     readonly meetCriterion: (input: {
       readonly itemId: string
       readonly lineId: number
@@ -166,8 +183,8 @@ export class WorkStore extends Context.Service<
     }) => Effect.Effect<CriterionMet, WorkStoreError>
     readonly resolveQuestion: (options: {
       readonly questionId: string
-      readonly input: ResolveRunQuestionInput
-    }) => Effect.Effect<RunQuestion, WorkStoreError>
+      readonly input: StoredResolveInput
+    }) => Effect.Effect<StoredRunQuestion, WorkStoreError>
     readonly moveToChat: (input: {
       readonly itemId: string
       readonly sessionId: string
@@ -184,11 +201,11 @@ export class WorkStore extends Context.Service<
     ) => Effect.Effect<TaskWorkerSnapshot | undefined, WorkStoreError>
     readonly taskIntent: (itemId: string) => Effect.Effect<TaskIntent | undefined, WorkStoreError>
     readonly execution: (itemId: string) => Effect.Effect<TaskExecutionReceipt, WorkStoreError>
-    readonly page: (options: SpaceWorkPageOptions) => Effect.Effect<SpaceWorkPage, WorkStoreError>
+    readonly page: (options: SpaceWorkPageOptions) => Effect.Effect<WorkPageRecord, WorkStoreError>
     readonly create: (
       scope: TaskScope,
       input: CreateTaskInput
-    ) => Effect.Effect<SpaceTask, WorkStoreError>
+    ) => Effect.Effect<TaskRecord, WorkStoreError>
     readonly inferenceReview: (
       spaceId: string
     ) => Effect.Effect<TaskInferenceReview, WorkStoreError>
@@ -206,40 +223,40 @@ export class WorkStore extends Context.Service<
     readonly stopSpent: (scope: SpentScope) => Effect.Effect<void, WorkStoreError>
     readonly createInChat: (
       sessionId: string,
-      input: CreateChatTaskInput
-    ) => Effect.Effect<SpaceTask, WorkStoreError>
+      input: ChatTaskDraft
+    ) => Effect.Effect<TaskRecord, WorkStoreError>
     readonly createFromChat: (options: {
       readonly scope: TaskScope
-      readonly input: CreateSpaceTaskInput
+      readonly input: KeyedTaskDraft
       readonly sessionId: string
       readonly runId: string
       readonly toolCallId?: string
       readonly capture: SpaceTaskCaptureInput
-    }) => Effect.Effect<SpaceTask, WorkStoreError>
-    readonly get: (address: TaskAddress) => Effect.Effect<SpaceTask, WorkStoreError>
+    }) => Effect.Effect<TaskRecord, WorkStoreError>
+    readonly get: (address: TaskAddress) => Effect.Effect<TaskRecord, WorkStoreError>
     readonly getFromJob: (
       originAutomationId: string,
       key: string,
       requestedSpaceId?: string
-    ) => Effect.Effect<SpaceTask, WorkStoreError>
+    ) => Effect.Effect<TaskRecord, WorkStoreError>
     readonly update: (
       address: TaskAddress,
       expectedUpdatedAt: string,
-      patch: UpdateSpaceTaskPatch,
+      patch: TaskPatch,
       runId?: string,
       toolCallId?: string,
       actor?: "user"
-    ) => Effect.Effect<SpaceTask, WorkStoreError | TaskDirectionChanged>
+    ) => Effect.Effect<TaskRecord, WorkStoreError | TaskDirectionChanged>
     readonly stop: (
       address: TaskAddress,
       expectedUpdatedAt: string
-    ) => Effect.Effect<SpaceTask, WorkStoreError>
+    ) => Effect.Effect<TaskRecord, WorkStoreError>
     readonly comment: (
       address: TaskAddress,
       input: CreateSpaceTaskCommentInput,
       runId?: string,
       toolCallId?: string
-    ) => Effect.Effect<SpaceTaskComment, WorkStoreError | TaskDirectionChanged>
+    ) => Effect.Effect<TaskCommentRecord, WorkStoreError | TaskDirectionChanged>
     readonly finishCheck: (options: {
       readonly runId: string
       readonly itemId: string
@@ -248,11 +265,11 @@ export class WorkStore extends Context.Service<
       originAutomationId: AutomationId,
       key: string,
       expectedUpdatedAt: string,
-      patch: UpdateSpaceTaskPatch,
+      patch: TaskPatch,
       spaceId?: string,
       runId?: string,
       toolCallId?: string
-    ) => Effect.Effect<SpaceTask, WorkStoreError | TaskDirectionChanged>
+    ) => Effect.Effect<TaskRecord, WorkStoreError | TaskDirectionChanged>
     readonly commentFromJob: (
       originAutomationId: AutomationId,
       key: string,
@@ -260,12 +277,12 @@ export class WorkStore extends Context.Service<
       spaceId?: string,
       runId?: string,
       toolCallId?: string
-    ) => Effect.Effect<SpaceTaskComment, WorkStoreError | TaskDirectionChanged>
+    ) => Effect.Effect<TaskCommentRecord, WorkStoreError | TaskDirectionChanged>
     readonly createAttachment: (
       address: TaskAddress,
       input: CreateSpaceTaskAttachmentRequest,
       runId?: string
-    ) => Effect.Effect<SpaceTaskAttachment, WorkStoreError>
+    ) => Effect.Effect<TaskAttachmentRecord, WorkStoreError>
     readonly attachment: (
       attachmentId: number
     ) => Effect.Effect<WorkAttachmentContent | null, WorkStoreError>

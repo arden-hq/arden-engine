@@ -4,6 +4,7 @@ import {
   BrowserProcedureSummarySchema,
   BrowserProcedureDetailSchema,
   BrowserProcedureListSchema,
+  BrowserProcedureJobSchema,
   BrowserProcedureEnabledSchema,
   BrowserProcedureMutationSchema
 } from "./schema.js"
@@ -11,6 +12,7 @@ import {
 export type BrowserProcedureSummary = typeof BrowserProcedureSummarySchema.Type
 export type BrowserProcedureDetail = typeof BrowserProcedureDetailSchema.Type
 export type BrowserProcedureList = typeof BrowserProcedureListSchema.Type
+export { BrowserProcedureJobSchema }
 export const browserProcedureDecoders = {
   list: decoderFor(BrowserProcedureListSchema, "Invalid browser procedures"),
   detail: decoderFor(BrowserProcedureDetailSchema, "Invalid browser procedure"),

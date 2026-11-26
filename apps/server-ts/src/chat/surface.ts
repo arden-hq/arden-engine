@@ -1,4 +1,6 @@
-export type Surface = "conversation" | "work"
+export const SURFACE = { conversation: "conversation", work: "work" } as const
+
+export type Surface = (typeof SURFACE)[keyof typeof SURFACE]
 
 export interface SurfaceCall {
   readonly presentation?: unknown

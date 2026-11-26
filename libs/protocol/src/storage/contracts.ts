@@ -19,16 +19,25 @@ export interface StorageCategory extends JsonRecord {
   readonly detail: string
 }
 
+export const STORAGE_LIMIT = { unlimited: "unlimited", limited: "limited" } as const
+
+export type StorageBudget =
+  | { readonly kind: "unlimited" }
+  | { readonly kind: "limited"; readonly maxBytes: number; readonly overBudgetBytes: number }
+
 export interface StorageStatus extends JsonRecord {
   readonly totalBytes: number
-  readonly maxBytes: number | null
-  readonly overBudgetBytes: number
+  readonly budget: StorageBudget
   readonly checkedAt: string
   readonly categories: ReadonlyArray<StorageCategory>
 }
 
+export type StorageSpaceLimit =
+  | { readonly kind: "unlimited" }
+  | { readonly kind: "limited"; readonly gib: number }
+
 export interface StorageSettings extends JsonRecord {
-  readonly maxSpaceGiB: number | null
+  readonly maxSpace: StorageSpaceLimit
   readonly allowArchivedSessionDeletion: boolean
   readonly allowInactiveSessionDeletion: boolean
   readonly inactiveSessionDays: number
@@ -40,15 +49,21 @@ export type StorageSettingsPatch = StorageSettings
 /** The factory cleanup policy. The server seeds a fresh install from it and
  *  the Desktop's "Restore defaults" writes it back, so both read one source. */
 export const DEFAULT_STORAGE_SETTINGS: StorageSettings = Object.freeze({
-  maxSpaceGiB: null,
+  maxSpace: { kind: STORAGE_LIMIT.unlimited },
   allowArchivedSessionDeletion: false,
   allowInactiveSessionDeletion: false,
   inactiveSessionDays: 90,
   minimumCurrentSessions: 100
 })
 
+export const STORAGE_CURRENT_SESSION = { none: "none", session: "session" } as const
+
+export type StorageCurrentSession =
+  | { readonly kind: "none" }
+  | { readonly kind: "session"; readonly sessionId: string }
+
 export interface StorageCleanupContext {
-  readonly currentSessionId: string | null
+  readonly currentSession: StorageCurrentSession
   readonly pinnedSessionIds: ReadonlyArray<string>
 }
 
@@ -70,10 +85,13 @@ export interface StorageCleanupAction extends JsonRecord {
   readonly description: string
 }
 
+export type StorageCleanupTarget =
+  | { readonly kind: "unlimited" }
+  | { readonly kind: "limited"; readonly budgetBytes: number; readonly targetBytes: number }
+
 export interface StorageCleanupPlan extends JsonRecord {
   readonly beforeBytes: number
-  readonly budgetBytes: number | null
-  readonly targetBytes: number | null
+  readonly target: StorageCleanupTarget
   readonly estimatedAfterBytes: number
   readonly estimatedReclaimableBytes: number
   readonly attainable: boolean

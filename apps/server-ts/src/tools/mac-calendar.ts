@@ -53,7 +53,7 @@ const READ = {
 
 const WRITE = {
   effect: "external",
-  display: { card: "calendar" },
+  display: [{ fact: "card", value: "calendar" }],
   kind: "tool",
   action: "write",
   source: MAC_APPS_SOURCE,

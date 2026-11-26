@@ -23,14 +23,12 @@ const response = (result: ManualCompactionResult) => {
       return {
         status: result.status,
         message: result.message,
-        message_count: result.messageCount,
-        before_tokens: result.beforeTokens
+        message_count: result.messageCount
       } as const
     case "compacted":
       return {
         status: result.status,
         message: result.message,
-        before_tokens: result.beforeTokens,
         before_messages: result.beforeMessages,
         after_messages: result.afterMessages,
         messages_compressed: result.messagesCompressed

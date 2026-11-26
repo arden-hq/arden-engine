@@ -29,15 +29,11 @@ export type PermissionRuleList =
 
 /** What a rule is about, with the names the owner knows its parts by. */
 export type PermissionRuleSubject =
-  /** One tool; `server` is the connector it belongs to, null for one of Arden's own. */
   | {
       readonly kind: "tool"
       readonly tool: string
-      readonly server: string | null
-      /** The tool's own name ("Delete calendar event"). */
       readonly title: string
-      /** The connector's name ("GitHub"); null for one of Arden's own tools. */
-      readonly server_title: string | null
+      readonly owner: PermissionToolOwner
     }
   /** One browser tool on one site: `origin` is the site ("https://jobs.lever.co"). */
   | {
@@ -60,14 +56,28 @@ export type PermissionRuleSubject =
   /** One saved key, by its Vault name ("Todoist"): the agent may use it without asking. */
   | { readonly kind: "vault_key"; readonly name: string; readonly key_id: string }
 
+export const PERMISSION_TOOL_OWNER = { arden: "arden", connector: "connector" } as const
+
+export type PermissionToolOwner =
+  | { readonly kind: typeof PERMISSION_TOOL_OWNER.arden }
+  | {
+      readonly kind: typeof PERMISSION_TOOL_OWNER.connector
+      readonly server: string
+      readonly title: string
+    }
+
+export const PERMISSION_RULE_ORIGIN = { standalone: "standalone", words: "words" } as const
+
+export type PermissionRuleOrigin =
+  | { readonly kind: typeof PERMISSION_RULE_ORIGIN.standalone }
+  | { readonly kind: typeof PERMISSION_RULE_ORIGIN.words; readonly rule_id: string }
+
 export interface PermissionRuleItem extends JsonRecord {
   readonly id: string
   readonly list: PermissionRuleList
   readonly decision: PermissionRuleDecision
   readonly subject: PermissionRuleSubject
-  /** The words rule this hard rule was compiled from (its id); null for a
-   *  rule saved on its own. The list shows it under those words. */
-  readonly from: string | null
+  readonly from: PermissionRuleOrigin
 }
 
 /** The rules one page shows, newest first: Settings' global and system
@@ -103,7 +113,7 @@ export interface DefaultApprovalMode {
 
 /** The mode a Chat or Automation runs under until someone picks another: Auto,
  *  where the Helper review (Guardian) approves routine calls and asks when unsure. */
-export const DEFAULT_APPROVAL_MODE = "safe" satisfies SessionPermission["approval_mode"]
+export const DEFAULT_APPROVAL_MODE = "safe" satisfies ApprovalMode
 
 export type SessionPermission =
   | {
@@ -114,10 +124,36 @@ export type SessionPermission =
       readonly kind: "automation"
       readonly automation_id: string
       readonly tool_scope: string
-      readonly auto_approve: boolean
-      readonly approval_mode?: "read_only" | "ask" | "safe" | "allow"
+      readonly approval: AutomationApproval
     }
-  | { readonly kind: "inherited"; readonly approval_mode?: "read_only" | "ask" | "safe" | "allow" }
+  | { readonly kind: "inherited"; readonly mode: InheritedMode }
+
+export const sessionApprovalMode = (permission: SessionPermission): ApprovalMode | null => {
+  if (permission.kind === SESSION_PERMISSION.chat) return permission.approval_mode
+  if (permission.kind === SESSION_PERMISSION.automation)
+    return permission.approval.kind === AUTOMATION_APPROVAL.space
+      ? permission.approval.approval_mode
+      : null
+  return permission.mode.kind === INHERITED_MODE.set ? permission.mode.approval_mode : null
+}
+
+export const SESSION_PERMISSION = {
+  chat: "chat",
+  automation: "automation",
+  inherited: "inherited"
+} as const
+
+export const AUTOMATION_APPROVAL = { space: "space", own: "own" } as const
+
+export type AutomationApproval =
+  | { readonly kind: typeof AUTOMATION_APPROVAL.space; readonly approval_mode: ApprovalMode }
+  | { readonly kind: typeof AUTOMATION_APPROVAL.own; readonly auto_approve: boolean }
+
+export const INHERITED_MODE = { set: "set", unset: "unset" } as const
+
+export type InheritedMode =
+  | { readonly kind: typeof INHERITED_MODE.set; readonly approval_mode: ApprovalMode }
+  | { readonly kind: typeof INHERITED_MODE.unset }
 
 /** One hard rule a words rule compiles to, as the owner confirms it. */
 export interface CompiledRule extends JsonRecord {
@@ -139,12 +175,16 @@ export interface PermissionWordsCompiled extends JsonRecord {
   readonly dropped: ReadonlyArray<string>
 }
 
-/** `POST /permissions/rules/words`: a words rule and the hard rules the owner
- *  confirmed, saved together; `replaces` is the words rule an edit replaces. */
+export const WORDS_RULE_REPLACES = { nothing: "nothing", rule: "rule" } as const
+
+export type WordsRuleReplaces =
+  | { readonly kind: typeof WORDS_RULE_REPLACES.nothing }
+  | { readonly kind: typeof WORDS_RULE_REPLACES.rule; readonly rule_id: string }
+
 export interface NewWordsRule extends JsonRecord {
   readonly list: PermissionRuleList
   readonly text: string
   readonly decision: PermissionRuleDecision
   readonly rules: ReadonlyArray<CompiledRule>
-  readonly replaces?: string
+  readonly replaces: WordsRuleReplaces
 }

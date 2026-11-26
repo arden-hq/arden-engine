@@ -89,7 +89,7 @@ it("a post lands in its Space chat as an unread assistant message, with a notice
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, spaces, post, drain, message } = yield* setup
-      const taxes = yield* spaces.create({ name: "Taxes" })
+      const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
       const posted = yield* post(1, { spaceId: taxes.space_id, text: "The bank wrote back." })
       expect(yield* message(posted.sessionId, posted.messageId)).toBeUndefined()
       expect(yield* drain).toBe(1)
@@ -125,7 +125,7 @@ it("no Space, an unknown Space or an archived Space posts in Main; the same atte
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, spaces, main, post, drain } = yield* setup
-      const gone = yield* spaces.create({ name: "Gone" })
+      const gone = yield* spaces.create({ name: "Gone", instructions: { kind: "unwritten" } })
       yield* spaces.archive(gone.space_id)
       const places = [
         yield* post(1),
@@ -149,8 +149,8 @@ it("a later event of a thread lands under the first post, in its chat, whatever 
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, spaces, thread, post, drain, message } = yield* setup
-      const taxes = yield* spaces.create({ name: "Taxes" })
-      const travel = yield* spaces.create({ name: "Travel" })
+      const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
+      const travel = yield* spaces.create({ name: "Travel", instructions: { kind: "unwritten" } })
       yield* thread("mail-1", "t1")
       yield* thread("mail-2", "t1")
       yield* thread("other-account", "t1", "work@example.com")
@@ -196,7 +196,7 @@ it("a thread whose chat was archived maps to the new post", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, spaces, thread, post, drain, message } = yield* setup
-      const taxes = yield* spaces.create({ name: "Taxes" })
+      const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
       yield* thread("mail-1", "t1")
       yield* thread("mail-2", "t1")
       yield* thread("mail-3", "t1")
@@ -234,7 +234,10 @@ it("a post whose earlier message was cleared away is delivered without the quote
       const delivered = yield* message(second.sessionId, second.messageId)
       expect(delivered).toMatchObject({ role: ROLE.assistant, content: "Post 2" })
       expect(delivered?.replyTo).toBeUndefined()
-      const travel = yield* (yield* SpaceStore).create({ name: "Travel" })
+      const travel = yield* (yield* SpaceStore).create({
+        name: "Travel",
+        instructions: { kind: "unwritten" }
+      })
       yield* thread("mail-3", "t1")
       const third = yield* post(3, { itemIds: ["mail-3"], spaceId: travel.space_id })
       expect(third.sessionId).toBe(second.sessionId)
@@ -275,12 +278,22 @@ it("a post waits while its chat has a turn open, with no failed attempt, and com
       )
       expect(yield* message(posted.sessionId, posted.messageId)).toBeUndefined()
       expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toEqual([])
-      expect((yield* work.page({ spaceId: main.space_id })).items).toEqual([])
+      expect(
+        (yield* work.page({
+          scope: { kind: "space", space_id: main.space_id },
+          start: { kind: "first" },
+          limit: 50
+        })).items
+      ).toEqual([])
       yield* sql`UPDATE chat_runs SET status = 'completed', ended_at = updated_at
         WHERE run_id = ${started.runId}`
       expect(yield* drain).toBe(1)
       expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toHaveLength(1)
-      const page = yield* work.page({ spaceId: main.space_id })
+      const page = yield* work.page({
+        scope: { kind: "space", space_id: main.space_id },
+        start: { kind: "first" },
+        limit: 50
+      })
       expect(page.items).toMatchObject([
         { text: "Pay the bill", body: "Pay it before Friday.", owner: "worker" }
       ])
@@ -296,7 +309,7 @@ it("an undecodable post and one whose chat was archived are withdrawn, and the w
     Effect.gen(function* () {
       const { sql, spaces, post, drain, delivery } = yield* setup
       const work = yield* WorkStore
-      const taxes = yield* spaces.create({ name: "Taxes" })
+      const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
       yield* post(1)
       yield* post(2, { spaceId: taxes.space_id })
       expect(yield* work.pendingDeliveries()).toEqual([])
@@ -467,7 +480,7 @@ it("a post to a Space whose inference is off arrives without its Task", async ()
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, spaces, post, drain, message } = yield* setup
-      const quiet = yield* spaces.create({ name: "Quiet" })
+      const quiet = yield* spaces.create({ name: "Quiet", instructions: { kind: "unwritten" } })
       yield* sql`UPDATE spaces SET inference_policy = json_set(inference_policy, '$.enabled', json('false'))
         WHERE space_id = ${quiet.space_id}`
       const posted = yield* post(1, {
@@ -489,7 +502,7 @@ it("a thread counts as owned for its sent mail only while its post is live, like
     Effect.gen(function* () {
       const { thread, post, drain, spaces } = yield* setup
       const items = yield* ConnectionItemStore
-      const taxes = yield* spaces.create({ name: "Taxes" })
+      const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
       const owned = () =>
         items.threadOwned({ source: "gmail", account: "me@example.com", threadKey: "t-1" })
       const before = yield* owned()

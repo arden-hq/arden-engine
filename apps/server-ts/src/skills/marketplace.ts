@@ -13,7 +13,7 @@ import {
   resolveRemoteSkill,
   searchMarketplace
 } from "./marketplace-source.js"
-import { parseSkillMetadata } from "./metadata.js"
+import { declaredVersion, parseSkillMetadata } from "./metadata.js"
 import { currentMillis } from "../runtime/clock.js"
 
 const POPULAR_LIMIT = 12
@@ -149,7 +149,7 @@ const install = Effect.fn("SkillMarketplace.install")(function* (
       status: "installed",
       name: metadata.name,
       description: metadata.description,
-      version: metadata.version ?? null
+      version: declaredVersion(metadata.version)
     } satisfies SkillInstallReceipt
   }).pipe(
     Effect.ensuring(

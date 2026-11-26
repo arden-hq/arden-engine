@@ -15,7 +15,7 @@ import {
   nativeDelivery,
   requireForegroundWindow
 } from "../computer/contract.js"
-import type { ComputerControl } from "../computer/control.js"
+import { DESKTOP, labelled, windowSurface, type ComputerControl } from "../computer/control.js"
 import type { NativeDriver } from "../computer/driver.js"
 import { defineServerTool, type ServerTool, type ServerToolMetadataInput } from "./define.js"
 import { waivesRequirement } from "../execution/decide.js"
@@ -23,6 +23,7 @@ import { nativeActImpact } from "./input-impact.js"
 import type { ComputerStep } from "@arden-hq/protocol/computer"
 import {
   actStep,
+  appNameOf,
   actionQuestion,
   actionWords,
   elementWords,
@@ -248,7 +249,8 @@ export const computerNativeTools = (
         return driver.run(signal, async (call) => {
           const finish = control.begin({
             target: "System clipboard",
-            operation: { label: "Copying text to clipboard", delivery: null, feedback: null },
+            surface: DESKTOP,
+            operation: labelled("Copying text to clipboard", "none"),
             activity: "acting",
             signal,
             sessionId: ctx.run.sessionId
@@ -321,7 +323,8 @@ export const computerNativeTools = (
         return driver.run(signal, async (call) => {
           const finish = control.begin({
             target: input.bundle_id,
-            operation: { label: "Opening app", delivery: "background", feedback: null },
+            surface: DESKTOP,
+            operation: labelled("Opening app", "background"),
             activity: "acting",
             signal,
             sessionId: ctx.run.sessionId
@@ -365,13 +368,11 @@ export const computerNativeTools = (
         return driver.run(signal, async (call) => {
           const finish = control.begin({
             target: input.operation === "state" ? "App window" : "App discovery",
-            surface:
-              input.operation === "state" ? `${input.target.pid}:${input.target.window_id}` : null,
-            operation: {
-              label: input.operation === "state" ? "Inspecting window" : "Finding apps and windows",
-              delivery: null,
-              feedback: null
-            },
+            surface: input.operation === "state" ? windowSurface(input.target) : DESKTOP,
+            operation: labelled(
+              input.operation === "state" ? "Inspecting window" : "Finding apps and windows",
+              "none"
+            ),
             activity: "observing",
             signal,
             sessionId: ctx.run.sessionId
@@ -383,12 +384,7 @@ export const computerNativeTools = (
               const application = windows.isError
                 ? undefined
                 : await driver.application(input.pid, signal)
-              return output(
-                windows,
-                undefined,
-                false,
-                application ? findStep(application) : undefined
-              )
+              return output(windows, undefined, false, findStep(application))
             }
             if (input.accessibility === false && input.screenshot !== true)
               throw new ToolExecutionError("A visual-only observation requires screenshot=true", {
@@ -415,7 +411,7 @@ export const computerNativeTools = (
             const application = await driver.application(state.pid, signal)
             signal.throwIfAborted()
             const target =
-              [state.app_name ?? application?.name, state.window_title]
+              [state.app_name ?? appNameOf(application), state.window_title]
                 .filter(Boolean)
                 .join(" — ") || "App window"
             control.identify(target, application)
@@ -453,7 +449,7 @@ export const computerNativeTools = (
                   }
                 : undefined
             const reference = randomUUID()
-            const appName = application?.name ?? state.app_name
+            const appName = appNameOf(application) ?? state.app_name
             driver.observations.remember(reference, {
               owner: ctx.run.sessionId,
               label: target,
@@ -507,12 +503,12 @@ export const computerNativeTools = (
           const finish = control.begin({
             target: observation.label,
             activity: "acting",
-            surface: `${input.target.pid}:${input.target.window_id}`,
-            operation: {
-              label: actionLabel(input),
-              delivery: nativeDelivery(input),
-              feedback: nativeFeedback({ action: input, visual: observation.visual })
-            },
+            surface: windowSurface(input.target),
+            operation: labelled(
+              actionLabel(input),
+              nativeDelivery(input),
+              nativeFeedback({ action: input, visual: observation.visual })
+            ),
             signal,
             sessionId: ctx.run.sessionId
           })
@@ -532,7 +528,7 @@ export const computerNativeTools = (
             }
             const application = await driver.application(input.target.pid, signal)
             signal.throwIfAborted()
-            const appName = observation.app ?? application?.name
+            const appName = observation.app ?? appNameOf(application)
             await effects.target(
               appTarget({
                 objectId: `${input.target.pid}:${input.target.window_id}`,
@@ -551,7 +547,7 @@ export const computerNativeTools = (
               actStep(
                 input,
                 application,
-                observation.app ?? application?.name ?? "the app",
+                observation.app ?? appNameOf(application) ?? "the app",
                 observation.window
               )
             )

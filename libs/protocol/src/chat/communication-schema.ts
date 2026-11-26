@@ -100,7 +100,6 @@ const arrivalBase = {
   occurrence_key: IdentifierSchema,
   source_run_id: IdentifierSchema,
   source_session_ref: IdentifierSchema,
-  destination_space_id: Schema.NullOr(IdentifierSchema),
   destination_session_ref: IdentifierSchema,
   source_sequence: NonNegativeIntSchema,
   occurred_at: IsoDateTimeStringSchema,
@@ -145,7 +144,6 @@ export const ChatUpdateSchema: Schema.Codec<ChatUpdate> = withExtras({
 export const CommunicationEnvelopeSchema: Schema.Codec<CommunicationEnvelope> = Schema.Union([
   withExtras({
     kind: Schema.Literal("arrival"),
-    arrival: CommunicationArrivalSchema,
-    shown: Schema.optionalKey(Schema.Boolean)
+    arrival: CommunicationArrivalSchema
   })
 ]).pipe(Schema.toTaggedUnion("kind"))

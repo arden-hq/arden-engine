@@ -7,9 +7,10 @@ import type { AskReason } from "../../execution/decide.js"
 import type { ReviewAssessment, ReviewEnding, ReviewJudgement } from "../../execution/review.js"
 
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
-import type { SessionPermission } from "@arden-hq/protocol/permissions"
+import { sessionApprovalMode, type SessionPermission } from "@arden-hq/protocol/permissions"
 export { ApprovalModeSchema }
 export type { SessionPermission }
+export { sessionApprovalMode }
 
 export interface AuthorityLiveState {
   readonly state: "active" | "settling" | "revoked"
@@ -45,7 +46,7 @@ export class ApprovalPolicyStore extends Context.Service<
     readonly session: (sessionId: string) => Effect.Effect<SessionPermission, ApprovalPolicyError>
     readonly setSession: (input: {
       readonly sessionId: string
-      readonly mode?: typeof ApprovalModeSchema.Type
+      readonly mode: typeof ApprovalModeSchema.Type
     }) => Effect.Effect<SessionPermission, ApprovalPolicyError>
     readonly defaultMode: () => Effect.Effect<ApprovalMode, ApprovalPolicyError>
     readonly setDefaultMode: (

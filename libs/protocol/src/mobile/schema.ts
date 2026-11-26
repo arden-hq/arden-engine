@@ -11,9 +11,6 @@ import { ChatSentFromSchema } from "../chat/schema.js"
  * functions the desktop reads (`@arden-hq/protocol/views`), so the two surfaces
  * cannot word one state two ways. Writes are not here — the phone reuses the
  * ordinary chat, cancel, approval and answer routes.
- *
- * Every field is required; absence is `null`, so a Codable client needs no
- * optional handling beyond nullability.
  */
 
 const Id = Schema.NonEmptyString
@@ -39,11 +36,27 @@ export const MobileChangeSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("summary"), text: Schema.String })
 ]).pipe(Schema.toTaggedUnion("kind"))
 
-/** Where an ask was raised: its chat, and the Space it is filed on. `place` is
- *  the name to show — the Space's when the chat is its home, else the chat's. */
+export const MOBILE_FILING = { loose: "loose", space: "space" } as const
+export const MOBILE_CHAT_LINK = { unlinked: "unlinked", linked: "linked" } as const
+
+export const MobileFilingSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("loose") }),
+  Schema.Struct({ kind: Schema.Literal("space"), space_id: Id })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+export const MobileDetailSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("plain") }),
+  Schema.Struct({ kind: Schema.Literal("detailed"), text: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+export const MobileChatLinkSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unlinked") }),
+  Schema.Struct({ kind: Schema.Literal("linked"), session_id: Id })
+]).pipe(Schema.toTaggedUnion("kind"))
+
 const askPlace = {
   session_id: Id,
-  space_id: Schema.NullOr(Id),
+  space: MobileFilingSchema,
   place: Schema.String,
   asked_at: At
 } as const
@@ -56,12 +69,12 @@ export const MobileAskSchema = Schema.Union([
     run_id: Id,
     ...askPlace,
     prompt: Schema.String,
-    detail: Schema.NullOr(Schema.String),
+    detail: MobileDetailSchema,
     /** True when the answer may pick several options (`answer` with `option_ids`). */
     multiple: Schema.Boolean,
     /** Empty for a free-text answer. */
     options: Schema.Array(
-      Schema.Struct({ id: Id, label: Schema.String, detail: Schema.NullOr(Schema.String) })
+      Schema.Struct({ id: Id, label: Schema.String, detail: MobileDetailSchema })
     )
   }),
   Schema.Struct({
@@ -86,16 +99,25 @@ export const MobileLetterSchema = Schema.Struct({
   generated_at: At,
   /** Paragraphs of segments; a segment with a link is a tappable phrase. */
   paragraphs: Schema.Array(
-    Schema.Array(Schema.Struct({ text: Schema.String, link: Schema.NullOr(MobileLinkSchema) }))
+    Schema.Array(
+      Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("text"), text: Schema.String }),
+        Schema.Struct({ kind: Schema.Literal("link"), text: Schema.String, link: MobileLinkSchema })
+      ])
+    )
   )
 })
 
 export const MobileHomeSchema = Schema.Struct({
   asks: Schema.Array(MobileAskSchema),
-  /** The newest letter with something to say; null before the first. */
-  letter: Schema.NullOr(MobileLetterSchema),
-  /** When the next letter is due on the clock; null while letters are paused. */
-  next_at: Schema.NullOr(At),
+  letter: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("awaiting") }),
+    Schema.Struct({ kind: Schema.Literal("written"), ...MobileLetterSchema.fields })
+  ]),
+  next: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("paused") }),
+    Schema.Struct({ kind: Schema.Literal("due"), at: At })
+  ]),
   /** The global bus head (`GET /automations/events?after_seq=`) this view reflects. */
   cursor: Seq
 })
@@ -113,9 +135,10 @@ export const MobileSpacesSchema = Schema.Struct({
     Schema.Struct({
       id: Id,
       name: Schema.String,
-      /** The Space's own conversation; null until it has one (opening the Space
-       *  with `POST /spaces/:id/conversation` makes it). */
-      conversation_session_id: Schema.NullOr(Id),
+      conversation: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("unopened") }),
+        Schema.Struct({ kind: Schema.Literal("opened"), session_id: Id })
+      ]),
       state_line: MobileStateLineSchema
     })
   ),
@@ -125,7 +148,10 @@ export const MobileSpacesSchema = Schema.Struct({
       session_id: Id,
       title: Schema.String,
       has_unread: Schema.Boolean,
-      run_status: Schema.NullOr(RuntimeRunStatusSchema),
+      run: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("unrun") }),
+        Schema.Struct({ kind: Schema.Literal("run"), status: RuntimeRunStatusSchema })
+      ]),
       /** The chat has a run in flight (`isActiveRunStatus`); the one rule for the ring. */
       working: Schema.Boolean,
       updated_at: At
@@ -144,51 +170,65 @@ export const MobileConversationItemSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("user"),
     id: Id,
-    /** The sender's retry identity, which confirms an optimistic bubble. */
-    client_id: Schema.NullOr(Schema.String),
+    client: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("untracked") }),
+      Schema.Struct({ kind: Schema.Literal("tracked"), client_id: Schema.String })
+    ]),
     text: Schema.String,
     /** How many photos the message carried. */
     photos: Seq,
     /** The names of the files it attached by path; the paths stay on the Mac. */
     files: Schema.Array(Schema.String),
-    /** The message this one replies to, as one plain line. */
-    reply_to: Schema.NullOr(
-      Schema.Struct({ role: Schema.Literals(["user", "assistant"]), text: Schema.String })
-    ),
-    /** The UI surface that wrote the message's words for the person to confirm. */
-    sent_from: Schema.NullOr(ChatSentFromSchema)
+    reply_to: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("fresh") }),
+      Schema.Struct({
+        kind: Schema.Literal("quote"),
+        role: Schema.Literals(["user", "assistant"]),
+        text: Schema.String
+      })
+    ]),
+    sent_from: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("typed") }),
+      Schema.Struct({ kind: Schema.Literal("surface"), surface: ChatSentFromSchema })
+    ])
   }),
   Schema.Struct({ kind: Schema.Literal("reply"), id: Id, markdown: Schema.String }),
   Schema.Struct({
     kind: Schema.Literal("handoff"),
     id: Id,
-    /** The chat it came from: its id, and its name when the server has one. */
-    from_session_id: Schema.NullOr(Id),
-    from_title: Schema.NullOr(Schema.String),
+    from_session_id: Id,
+    from_title: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("unnamed") }),
+      Schema.Struct({ kind: Schema.Literal("named"), title: Schema.String })
+    ]),
     markdown: Schema.String,
     at: At
   }),
   Schema.Struct({
     kind: Schema.Literal("sender"),
     id: Id,
-    sender: Schema.Literals(["agent", "automation", "workflow", "command"]),
-    /** The agent's or automation's name; null for a workflow, which has none. */
-    name: Schema.NullOr(Schema.String),
+    sender: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("workflow") }),
+      Schema.Struct({ kind: Schema.Literals(["automation", "command"]), name: Schema.String }),
+      Schema.Struct({
+        kind: Schema.Literal("agent"),
+        name: Schema.String,
+        chat: MobileChatLinkSchema
+      })
+    ]),
     /** One line of inline Markdown for the row. */
     preview: Schema.String,
     /** The whole text, for reading it. */
     body: Schema.String,
     /** True when the sender says its work did not complete. */
     failed: Schema.Boolean,
-    /** The agent's own chat, when it has one the phone can open. */
-    session_id: Schema.NullOr(Id),
     at: At
   }),
   Schema.Struct({
     kind: Schema.Literal("sent"),
     /** The send's tool call. */
     id: Id,
-    session_id: Schema.NullOr(Id),
+    chat: MobileChatLinkSchema,
     title: Schema.String
   })
 ]).pipe(Schema.toTaggedUnion("kind"))
@@ -196,21 +236,28 @@ export const MobileConversationItemSchema = Schema.Union([
 export const MobileConversationSchema = Schema.Struct({
   session_id: Id,
   title: Schema.String,
-  space_id: Schema.NullOr(Id),
+  space: MobileFilingSchema,
   /** Oldest first. */
   items: Schema.Array(MobileConversationItemSchema),
-  /** The running turn's one live line; null when nothing runs. */
-  live_row: Schema.NullOr(Schema.Struct({ text: Schema.String, started_at: At })),
+  live: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("idle") }),
+    Schema.Struct({ kind: Schema.Literal("running"), text: Schema.String, started_at: At })
+  ]),
   /** The other chats of the same Space; empty for a loose chat. */
   chats: Schema.Array(
     Schema.Struct({ session_id: Id, title: Schema.String, updated_at: At, working: Schema.Boolean })
   ),
-  /** Pass as `?before=` for the page before this one; null at the start. */
-  before: Schema.NullOr(Schema.String),
+  before: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("beginning") }),
+    Schema.Struct({ kind: Schema.Literal("earlier"), cursor: Schema.String })
+  ]),
   /** The chat stream position this page reflects (`GET /chat/events/:id`). */
   latest_event_seq: Seq
 })
 
+export type MobileFiling = typeof MobileFilingSchema.Type
+export type MobileDetail = typeof MobileDetailSchema.Type
+export type MobileChatLink = typeof MobileChatLinkSchema.Type
 export type MobileChange = typeof MobileChangeSchema.Type
 export type MobileAsk = typeof MobileAskSchema.Type
 export type MobileLink = typeof MobileLinkSchema.Type

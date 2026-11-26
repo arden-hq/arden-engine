@@ -1,3 +1,4 @@
+import { RETENTION } from "@arden-hq/protocol/storage"
 import { Effect } from "effect"
 import type { AutomationJobResult } from "../../persistence/automations/store.js"
 import { AutomationId } from "../../persistence/automations/model.js"
@@ -11,13 +12,15 @@ const collectManagedHistory = Effect.fn("ManagedHistoryRunner")(function* (servi
   readonly wiki: Pick<Wiki["Service"], "collectHistory">
 }): Effect.fn.Return<AutomationJobResult, Error> {
   const retention = yield* services.retentionPolicy.retention()
-  if (retention.wikiHistoryDays === null) {
+  if (retention.wikiHistory.kind === RETENTION.forever) {
     return jobResult.withoutRun(
       "no_input",
       "Automatic Wiki history cleanup is off in Storage settings."
     )
   }
-  const report = yield* services.wiki.collectHistory({ gracePeriodDays: retention.wikiHistoryDays })
+  const report = yield* services.wiki.collectHistory({
+    gracePeriodDays: retention.wikiHistory.days
+  })
   return jobResult.completed(
     report.removed === 0 ? "no_change" : "finished",
     `memory storage maintenance: scanned ${report.scanned}, removed ${report.removed}, ` +
@@ -33,7 +36,17 @@ export const managedHistoryHandler: SystemAutomationHandler<"managed_history_col
     description: "Collect expired unreachable managed-history objects.",
     prompt: "Collect expired unreachable managed-history objects.",
     handler: "managed_history_collection",
-    triggers: [{ type: "time", every: "7d" }],
+    triggers: [
+      {
+        type: "time",
+        schedule: {
+          kind: "interval",
+          every: "7d",
+          days: { kind: "every_day" },
+          window: { kind: "all_day" }
+        }
+      }
+    ],
     enabled: true,
     cooldownMinutes: null,
     toolScope: "read_only",

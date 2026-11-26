@@ -1,4 +1,5 @@
 import { withCurrentSessionActivity } from "./lifecycle-presentation.js"
+import { linkedItemId, taskSpace } from "./event-links.js"
 import type { AutomationEvent, RuntimeRunStatus, TaskWorkChangedEvent } from "@arden-hq/protocol"
 import type { SpaceTaskStatus } from "@arden-hq/protocol/spaces/work"
 import {
@@ -17,7 +18,6 @@ import {
   TaskWorkChangedEventSchema,
   WorkChangedEventSchema
 } from "@arden-hq/protocol/effect/events"
-import { ListedSessionSchema } from "@arden-hq/protocol/effect/sessions"
 import {
   appendInTransaction as appendJournalInTransaction,
   journalHeadSequenceSql,
@@ -53,50 +53,12 @@ import {
   type InternalLifecycleEvent
 } from "../sessions/internal-events.js"
 import { sessionBlockingWorkPredicate } from "./session-blocking-work.js"
-import { latestSessionRunQuery } from "./session-latest-run.js"
-import { sessionOriginColumns, sessionParentFields, type ParentStepRow } from "./session-origin.js"
-import { sessionPresentations } from "./session-presentation.js"
-import { pendingDecisionCards } from "./pending-decision-cards.js"
-import { decodeJsonWith } from "./json.js"
-import { freshTriage, StoredTriageSchema } from "../sessions/triage.js"
-import { StoredForkSchema } from "../sessions/fork.js"
+import { loadSessionSnapshot } from "./session-snapshot.js"
 import type { PersistenceDeps } from "./deps.js"
 import { deleteJournalSequences, scanJournalWindows } from "./journal-windows.js"
 import { toldKey, UnitOfWork } from "../unit-of-work.js"
 import { touchedThrough } from "./tells/capture.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-
-interface SessionListRow extends ParentStepRow {
-  readonly session_id: string
-  readonly public_ref: string
-  readonly started_at: string
-  readonly last_activity: string
-  readonly last_accessed_at: string | null
-  readonly name: string | null
-  readonly message_count: number
-  readonly space_id: string | null
-  readonly chat_model: string | null
-  readonly session_type: string | null
-  readonly origin_automation_id: string | null
-  readonly parent_session_id: string | null
-  readonly parent_run_id: string | null
-  readonly parent_message_id: string | null
-  readonly has_unread: number
-  readonly latest_event_seq: number
-  readonly checkpoint_seq: number
-  readonly run_id: string | null
-  readonly run_turn_id: string | null
-  readonly run_status: RuntimeRunStatus | null
-  readonly run_error_code: string | null
-  readonly run_stop_reason: string | null
-  readonly pending_approvals_count: number
-  readonly pending_connections_count: number
-  readonly triage_json: string | null
-  readonly fork_json: string | null
-  readonly thread_source_id: string | null
-  readonly thread_source_ref: string | null
-  readonly origin: "capture" | "onboarding" | null
-}
 
 interface TaskWorkRow {
   readonly space_id: string | null
@@ -109,128 +71,6 @@ interface TaskWorkRow {
   readonly started_at: string
   readonly ended_at: string | null
 }
-
-const loadSessionSnapshot = Effect.fn("SessionLifecycleEvents.loadSessionSnapshot")(function* (
-  sql: SqlClient.SqlClient,
-  sessionId: string
-) {
-  const rows = yield* sql<SessionListRow>`
-    SELECT s.session_id, s.public_ref, s.started_at, s.last_activity,
-           s.last_accessed_at, s.name,
-           s.visible_message_count AS message_count, s.space_id, s.chat_model,
-           s.session_type, s.origin_automation_id, s.parent_session_id,
-           s.parent_run_id, s.parent_tool_call_id, s.parent_message_id,
-           s.has_unread,
-           json_extract(s.metadata, '$.triage') AS triage_json,
-           json_extract(s.metadata, '$.fork') AS fork_json,
-           json_extract(s.metadata, '$.thread.source_session_id') AS thread_source_id,
-           (SELECT source.public_ref FROM sessions AS source
-             WHERE source.session_id = json_extract(s.metadata, '$.thread.source_session_id')
-           ) AS thread_source_ref,
-           ${sql.literal(sessionOriginColumns)},
-           COALESCE(${journalHeadSequenceSql(sql, sql.literal("s.session_id"))}, 0) AS latest_event_seq,
-           COALESCE((
-             SELECT checkpoint_seq FROM session_event_checkpoints
-             WHERE session_id = s.session_id
-           ), 0) AS checkpoint_seq,
-           latest_run.run_id AS run_id,
-           json_extract(latest_run.metadata_json, '$.turn_id') AS run_turn_id,
-           latest_run.status AS run_status,
-           latest_run.error_code AS run_error_code,
-           latest_run.stop_reason AS run_stop_reason,
-           (
-             SELECT COUNT(*) FROM (${pendingDecisionCards(sql)}) AS pending_approval
-             WHERE pending_approval.session_id = s.session_id
-               AND COALESCE(
-                 json_extract(pending_approval.payload_json, '$.approval_data._tag'),
-                 ''
-               ) != 'ConnectionRequired'
-           ) AS pending_approvals_count,
-           (
-             SELECT COUNT(*) FROM (${pendingDecisionCards(sql)}) AS pending_connection
-             WHERE pending_connection.session_id = s.session_id
-               AND json_extract(
-                 pending_connection.payload_json,
-                 '$.approval_data._tag'
-               ) = 'ConnectionRequired'
-           ) AS pending_connections_count
-    FROM sessions AS s
-    LEFT JOIN chat_runs AS latest_run
-      ON latest_run.run_id = (${sql.literal(latestSessionRunQuery)})
-    WHERE s.session_id = ${sessionId} AND s.archived_at IS NULL
-    LIMIT 1
-  `.pipe(
-    Effect.mapError((cause) =>
-      lifecycleError("append", "Could not read the Session lifecycle snapshot", cause)
-    )
-  )
-  const row = rows[0]
-  if (row === undefined) {
-    return yield* lifecycleError("append", "Session lifecycle snapshot does not exist")
-  }
-  if (row.run_id !== null && (row.run_turn_id === null || row.run_turn_id.length === 0)) {
-    return yield* lifecycleError("append", `Stored Chat run ${row.run_id} has no durable turn id`)
-  }
-  const isActive = row.run_status !== null && isActiveRunStatus(row.run_status)
-  const presentations = yield* sessionPresentations(sql, [sessionId]).pipe(
-    Effect.mapError((cause) => lifecycleError("append", "Could not classify Session", cause))
-  )
-  const triage =
-    row.triage_json === null
-      ? undefined
-      : yield* decodeJsonWith(StoredTriageSchema, row.triage_json, (cause) =>
-          lifecycleError("append", "Stored triage decision is corrupt", cause)
-        )
-  const fork =
-    row.fork_json === null
-      ? null
-      : yield* decodeJsonWith(StoredForkSchema, row.fork_json, (cause) =>
-          lifecycleError("append", "Stored fork origin is corrupt", cause)
-        )
-  return yield* Schema.decodeUnknownEffect(ListedSessionSchema)({
-    presentation: presentations.get(sessionId),
-    session_id: row.session_id,
-    public_ref: row.public_ref,
-    started_at: row.started_at,
-    last_activity: row.last_activity,
-    last_accessed_at: row.last_accessed_at,
-    has_unread: row.has_unread !== 0,
-    name: row.name,
-    message_count: row.message_count,
-    space_id: row.space_id,
-    chat_model: row.chat_model,
-    session_type: row.session_type ?? "chat",
-    origin_automation_id: row.origin_automation_id,
-    parent_session_id: row.parent_session_id,
-    parent_run_id: row.parent_run_id,
-    ...sessionParentFields(row),
-    parent_message_id: row.parent_message_id,
-    active_run_id: isActive ? row.run_id : null,
-    latest_run_id: row.run_id,
-    active_turn_id: isActive ? row.run_turn_id : null,
-    run_status: row.run_status,
-    checkpoint_seq: row.checkpoint_seq,
-    latest_event_seq: row.latest_event_seq,
-    is_active: isActive,
-    pending_approvals_count: row.pending_approvals_count,
-    pending_connections_count: row.pending_connections_count,
-    run_error_code: row.run_error_code,
-    run_stop_reason: row.run_stop_reason,
-    triage:
-      freshTriage(triage, { messageCount: row.message_count, lastActivity: row.last_activity }) ??
-      null,
-    fork,
-    thread_source:
-      row.thread_source_id === null
-        ? null
-        : { session_id: row.thread_source_id, session_ref: row.thread_source_ref },
-    origin: row.origin
-  }).pipe(
-    Effect.mapError((cause) =>
-      lifecycleError("append", "Stored Session lifecycle snapshot is corrupt", cause)
-    )
-  )
-})
 
 const loadSessionBlockingWork = Effect.fn("SessionLifecycleEvents.loadSessionBlockingWork")(
   function* (sql: SqlClient.SqlClient, sessionId: string) {
@@ -286,7 +126,7 @@ const loadTaskWork = Effect.fn("SessionLifecycleEvents.loadTaskWork")(function* 
   if (row === undefined) return undefined
   const common = {
     type: "task_work_changed" as const,
-    space_id: row.space_id,
+    space: taskSpace(row.space_id),
     item_id: row.item_id,
     task_name: row.task_name,
     run_session_id: row.session_id,
@@ -362,8 +202,6 @@ interface FeedEventMessages {
 type FeedEventSpecs = {
   readonly [Type in LifecycleFeedEvent["type"]]: FeedEventMessages & {
     readonly schema: Schema.Decoder<Extract<LifecycleFeedEvent, { readonly type: Type }>>
-    /** Announced to the followers connected now and never stored: a status that
-     * is stale once the run ends. Every other type is stored and replays. */
     readonly live?: true
   }
 }
@@ -461,9 +299,10 @@ const feedEventSpecs: FeedEventSpecs = {
 const taskWorkItemId = (event: LifecycleFeedEvent): string | null => {
   switch (event.type) {
     case "work_changed":
-    case "question_changed":
     case "task_visibility_changed":
       return event.item_id
+    case "question_changed":
+      return linkedItemId(event.task)
     case "automation_progress":
     case "automation_finished":
     case "record_told":

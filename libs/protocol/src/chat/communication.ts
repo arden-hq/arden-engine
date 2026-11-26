@@ -72,7 +72,6 @@ interface CommunicationArrivalBase extends JsonRecord {
   readonly occurrence_key: string
   readonly source_run_id: string
   readonly source_session_ref: string
-  readonly destination_space_id: string | null
   readonly destination_session_ref: string
   readonly source_sequence: number
   readonly occurred_at: string
@@ -120,7 +119,4 @@ export interface ChatUpdate extends JsonRecord {
 export type CommunicationEnvelope = {
   readonly kind: "arrival"
   readonly arrival: CommunicationArrival
-  /** Legacy notification hint: false keeps the chat quiet. It does not
-   *  authorize publishing the report; the envelope remains model input. */
-  readonly shown?: boolean
 }

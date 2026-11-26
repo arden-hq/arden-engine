@@ -45,16 +45,18 @@ export class SessionLifecycleEventError extends Schema.TaggedError<SessionLifecy
   }
 ) {}
 
+export const LIFECYCLE_DELIVERY = { record: "record", reset: "reset" } as const
+
 export type SessionLifecycleDelivery =
   | {
-      readonly kind: "record"
+      readonly kind: typeof LIFECYCLE_DELIVERY.record
       readonly sequence: number
       readonly createdAtMs: number
       readonly event: AutomationEvent | InternalLifecycleEvent
       readonly replayed: boolean
     }
   | {
-      readonly kind: "reset"
+      readonly kind: typeof LIFECYCLE_DELIVERY.reset
       readonly reason: "future_cursor" | "replay_gap"
       readonly cursor: number
     }

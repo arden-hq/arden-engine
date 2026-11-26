@@ -12,21 +12,25 @@ export type CliToolSkill =
   | { readonly kind: "installed"; readonly name: string; readonly enabled: boolean }
   | { readonly kind: "none" }
 
-/** One known command-line tool found on the person's login-shell PATH. */
+export const CLI_TOOL_VERSION = { reported: "reported", unreported: "unreported" } as const
+
+export type CliToolVersion =
+  | { readonly kind: "reported"; readonly text: string }
+  | { readonly kind: "unreported" }
+
+export type CliToolLogin =
+  | { readonly kind: "command"; readonly command: string }
+  | { readonly kind: "none" }
+
 export interface CliTool extends JsonRecord {
-  /** The curated id, e.g. "gh". */
   readonly id: string
   readonly name: string
   readonly description: string
-  /** The command as typed, e.g. "gh" or "huggingface-cli". */
   readonly command: string
   readonly path: string
-  /** Parsed from its own version command; null when it has none we run or it did not answer. */
-  readonly version: string | null
+  readonly version: CliToolVersion
   readonly sign_in: CliToolSignIn
-  /** The command that signs it in, as the person types it in a terminal; null
-   *  when Arden knows none. */
-  readonly login_command: string | null
+  readonly login: CliToolLogin
   readonly skill: CliToolSkill
 }
 

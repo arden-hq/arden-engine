@@ -10,7 +10,7 @@ import {
   type ToolDefinition,
   type ToolResultOutput
 } from "@arden-hq/loop"
-import type { ApprovalPresentation } from "@arden-hq/protocol/chat"
+import type { ApprovalPresentationDraft } from "../persistence/tools/approval-draft.js"
 import { ToolDisplaySchema } from "@arden-hq/protocol/effect/tools"
 import { Effect, Option, Predicate, Schema } from "effect"
 
@@ -115,7 +115,7 @@ type DefaultedKey =
 export type ServerToolMetadata = Omit<ServerToolMetadataInput, DefaultedKey> &
   Required<Pick<ServerToolMetadataInput, DefaultedKey>>
 
-export type ServerApprovalPrompt = ToolApprovalPrompt<ApprovalPresentation>
+export type ServerApprovalPrompt = ToolApprovalPrompt<ApprovalPresentationDraft>
 
 export interface ServerToolDefinition<S extends StandardSchemaV1> extends Omit<
   ToolDefinition<S, ServerRunContext, ServerToolMetadataInput>,

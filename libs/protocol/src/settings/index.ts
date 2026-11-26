@@ -33,8 +33,24 @@ export const intelligenceSettingsRoutes = {
   settings: "/settings/intelligence"
 } as const
 
-export { DEFAULT_LIMIT_SETTINGS, effectiveBackgroundLimit } from "./limits.js"
-export type { AutomationLimit, LimitSettings, LimitSettingsPatch } from "./limits.js"
+export {
+  applyLimitSettingsPatch,
+  DEFAULT_LIMIT_SETTINGS,
+  effectiveBackgroundLimit,
+  KEEP_GOING,
+  LIMIT_SETTINGS_CHANGE,
+  PLAN_STOP,
+  TOKEN_CAP
+} from "./limits.js"
+export type {
+  AutomationLimit,
+  KeepGoing,
+  LimitSettings,
+  LimitSettingsChange,
+  LimitSettingsPatch,
+  PlanStop,
+  TokenCap
+} from "./limits.js"
 
 export const limitSettingsDecoders = {
   settings: projectedDecoderFor(

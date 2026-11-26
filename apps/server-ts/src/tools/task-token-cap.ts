@@ -1,10 +1,10 @@
+import { type TaskRecord } from "../persistence/work/task-record.js"
+import { type TaskPatch } from "../persistence/work/task-patch.js"
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
-import type { UpdateSpaceTaskPatch } from "@arden-hq/protocol/spaces/work"
 import { Effect } from "effect"
 import type { TaskAddress, WorkStore, WorkStoreError } from "../persistence/work/store.js"
 import type { ServerApprovalPrompt } from "./define.js"
-import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
 import type { TaskDirectionChanged } from "../persistence/work/task-direction.js"
 
 const tokenCapWords = (tokenBudget: number | null): string =>
@@ -13,7 +13,7 @@ const tokenCapWords = (tokenBudget: number | null): string =>
 const capRaised = (current: number | null, next: number | null): boolean =>
   current !== null && (next === null || next > current)
 
-export const refuseCapChange = (patch: UpdateSpaceTaskPatch, fromWorker: boolean): void => {
+export const refuseCapChange = (patch: TaskPatch, fromWorker: boolean): void => {
   if (Object.keys(patch).length > 1)
     throw new ToolExecutionError("Change the Task's token cap alone, in its own task_update call", {
       preview: "Separate cap change",
@@ -56,7 +56,7 @@ export const saveCap = (
   address: TaskAddress,
   cap: number | null,
   run: { readonly runId: string; readonly toolCallId: string }
-): Effect.Effect<SpaceTask, WorkStoreError | TaskDirectionChanged, never> =>
+): Effect.Effect<TaskRecord, WorkStoreError | TaskDirectionChanged, never> =>
   work
     .get(address)
     .pipe(

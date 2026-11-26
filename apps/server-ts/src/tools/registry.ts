@@ -84,7 +84,7 @@ import { McpStore } from "../persistence/mcp/store.js"
 import { mcpServiceTitle } from "../mcp/transport.js"
 import { DeferredToolCalls } from "../persistence/tools/deferred.js"
 import { JsonObjectSchema } from "../persistence/json.js"
-import { sanitizeApprovalPresentation } from "@arden-hq/protocol/chat"
+import { cleanApprovalDraft } from "../persistence/tools/approval-draft.js"
 import { browserPointerTools } from "./browser-pointer.js"
 import { browserTools } from "./browser.js"
 import { browserProcedureTools } from "./browser-procedure.js"
@@ -199,11 +199,7 @@ const policy = (metadata: ServerToolMetadata): ToolPolicy => ({
   action: metadata.action,
   scope: metadata.policy_scope,
   requiresApproval: metadata.default_approval === "ask",
-  permissions: metadata.permissions,
-  concurrencyGroup: metadata.concurrency_group,
-  destructive: metadata.destructive,
-  openWorld: metadata.open_world,
-  idempotent: metadata.idempotent
+  permissions: metadata.permissions
 })
 
 const catalogEntry = (tool: ServerTool, description: string): ToolCatalogEntry => ({
@@ -214,7 +210,7 @@ const catalogEntry = (tool: ServerTool, description: string): ToolCatalogEntry =
   source: tool.meta.source,
   effectivePolicy: policy(tool.meta),
   defaultApproval: tool.meta.default_approval,
-  display: tool.meta.display ?? {}
+  display: tool.meta.display ?? []
 })
 
 export interface RuleNames {
@@ -599,7 +595,7 @@ export class ServerToolRegistry extends Context.Service<
                   const decoded = Schema.decodeUnknownOption(JsonObjectSchema)(args)
                   if (Option.isNone(decoded))
                     return yield* Effect.die(new Error(`${name} arguments are not JSON`))
-                  const presentation = sanitizeApprovalPresentation(prompt.presentation)
+                  const presentation = cleanApprovalDraft(prompt.presentation)
                   return yield* deferred.defer({
                     call: {
                       runId: current.runId,

@@ -1,6 +1,5 @@
 import type {
   HistoryResponse,
-  HistoryMessage,
   HistoryRouteOptions,
   TurnDetailsResponse,
   TurnDetailsRouteOptions,
@@ -11,6 +10,13 @@ import type {
   ToolResultValueRouteOptions,
   ToolResultValueResponse
 } from "@arden-hq/protocol/chat"
+import {
+  callResult,
+  HISTORY_WINDOW,
+  TOOL_CALL_STATUS,
+  TURN_WORK_VIEW
+} from "@arden-hq/protocol/chat"
+import { IDLE_WORK, pageBefore, runningWork, turnEnding } from "./history-shells.js"
 import { readToolResult } from "@arden-hq/answer-ui/tool-result"
 import { Context, Effect, Layer, Predicate } from "effect"
 import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
@@ -29,7 +35,7 @@ import {
   type ToolExecutionResultMetadata
 } from "../persistence/tools/history-queries.js"
 import type { ToolExecutionStoreError } from "../persistence/tools/store.js"
-import { boundActiveWorkTail, type HistoryRows } from "./history-budget.js"
+import { unresolvedBudget, type HistoryRows } from "./history-budget.js"
 import {
   ChatHistoryError,
   ChatSessionNotFound,
@@ -40,18 +46,19 @@ import {
   activeRunSnapshot,
   compactTurnWork,
   contentText,
-  emptyHistory,
   historyPage,
   historyToolCallIds,
-  historyToolCalls,
   isConversationRecord,
   mergeTurnWorkRecords,
   pinnedConversationCalls,
   projectMessages,
   requireTurnStamps,
   toolResultTexts,
+  workSources,
   type StampedTranscriptMessageRecord
 } from "./history-projection.js"
+import { historyToolCalls } from "./history-tool-calls.js"
+import type { ChatHandoffSource } from "./history-rows.js"
 import { loadStableSnapshot, loadStableTurnWorkSnapshot } from "./history-snapshot.js"
 import { chatOpenTimer, logChatOpenTiming } from "./open-timing.js"
 
@@ -116,13 +123,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             .pipe(
               Effect.catch((error) =>
                 error.reason === "unavailable"
-                  ? Effect.succeed({
-                      model: input.model,
-                      hard_limit: null,
-                      compaction_trigger: null,
-                      input_tokens: input.inputTokens,
-                      message_count: input.messageCount
-                    })
+                  ? Effect.succeed(unresolvedBudget(input))
                   : Effect.fail(
                       new ChatHistoryError({
                         message: "Could not resolve the Chat context budget",
@@ -162,13 +163,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
           const timer = chatOpenTimer()
           const header = yield* sessions.loadHistoryHeader(input.sessionId)
           if (header === null) {
-            if (input.sessionId !== undefined) {
-              return yield* new ChatSessionNotFound({ sessionId: input.sessionId })
-            }
-            return {
-              history: emptyHistory,
-              budget: { model: null, inputTokens: 0, messageCount: 0 }
-            }
+            return yield* new ChatSessionNotFound({ sessionId: input.sessionId })
           }
 
           const sessionId = header.sessionId
@@ -180,8 +175,8 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
           const records = yield* requireTurnStamps(page.records, sessionId)
           const activeWorkTail =
             snapshot.work === null
-              ? null
-              : boundActiveWorkTail(
+              ? IDLE_WORK
+              : runningWork(
                   compactTurnWork(
                     yield* projectTurnWork(
                       tools,
@@ -277,9 +272,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               has_work: turnIdsWithWork.has(shell.turnId),
               has_tool_work: turnIdsWithToolWork.has(shell.turnId),
               tool_calls: toolCallCounts.get(shell.turnId) ?? [],
-              ...(shell.failure === undefined
-                ? {}
-                : { error_code: shell.failure.code, error_message: shell.failure.message })
+              ending: turnEnding(shell.failure)
             }))
           }
           return {
@@ -329,7 +322,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             snapshot.results,
             parentSource
           )
-          return input.view === "compact" ? compactTurnWork(response) : response
+          return input.view === TURN_WORK_VIEW.compact ? compactTurnWork(response) : response
         })
         const getTurnDetails = Effect.fn("ChatHistory.getTurnDetails")(function* (
           input: TurnDetailsRouteOptions
@@ -354,8 +347,11 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               sessionId: input.sessionId,
               turnId: input.turnId,
               limit: TURN_WORK_PAGE_CARRIERS,
-              view: "compact",
-              ...(before === undefined ? {} : { before })
+              view: TURN_WORK_VIEW.compact,
+              window:
+                before === undefined
+                  ? { kind: HISTORY_WINDOW.latest }
+                  : { kind: HISTORY_WINDOW.before, cursor: before }
             })
             const page = yield* projectTurnWork(
               tools,
@@ -367,7 +363,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             )
             pages.unshift(compactTurnWork(page))
             complete = !page.page.has_more_before
-            before = page.page.before ?? undefined
+            before = pageBefore(page.page)
             if (complete || before === undefined) break
           }
           return {
@@ -406,7 +402,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               tool_call_id: input.toolCallId,
               name: recorded.name,
               arguments: recorded.arguments,
-              result: recorded.result ?? null,
+              result: callResult(recorded.result),
               is_error: recorded.isError
             }
           }
@@ -419,13 +415,15 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
           const isError =
             result !== undefined && Predicate.isBoolean(result.envelope.is_error)
               ? result.envelope.is_error
-              : call.is_error
+              : call.status.kind === TOOL_CALL_STATUS.settled && call.status.is_error
           return {
             tool_call_id: call.id,
             name: call.name,
             arguments: call.arguments,
-            result: result === undefined ? null : contentText(result.envelope.content),
-            ...(isError === undefined ? {} : { is_error: isError })
+            result: callResult(
+              result === undefined ? undefined : contentText(result.envelope.content)
+            ),
+            is_error: isError
           }
         })
 
@@ -460,7 +458,7 @@ const projectConversationMessages = Effect.fn("ChatHistory.projectConversationMe
   tools: ToolHistoryQueries["Service"],
   sessionId: string,
   records: ReadonlyArray<StampedTranscriptMessageRecord>,
-  parentSource: HistoryMessage["from_chat"]
+  parentSource: ChatHandoffSource | undefined
 ): Effect.fn.Return<
   HistoryResponse["messages"],
   ChatHistoryError | ToolExecutionStoreError | TranscriptQueryFailure
@@ -492,7 +490,7 @@ const projectTurnWork = Effect.fn("ChatHistory.projectTurnWork")(function* (
   turnId: string,
   carrierPage: TranscriptPage,
   resultRecords: ReadonlyArray<TranscriptMessageRecord>,
-  parentSource: HistoryMessage["from_chat"]
+  parentSource: ChatHandoffSource | undefined
 ): Effect.fn.Return<TurnWorkResponse, ChatHistoryError | ToolExecutionStoreError> {
   const records = mergeTurnWorkRecords(
     yield* requireTurnStamps(carrierPage.records, sessionId),
@@ -502,7 +500,12 @@ const projectTurnWork = Effect.fn("ChatHistory.projectTurnWork")(function* (
     sessionId,
     toolCallIds: historyToolCallIds(records)
   })
-  const messages = yield* projectMessages(records, resultMetadata, "work", { parentSource })
+  const messages = yield* projectMessages(
+    records,
+    resultMetadata,
+    "work",
+    workSources(parentSource)
+  )
   return {
     turn_id: turnId,
     messages,

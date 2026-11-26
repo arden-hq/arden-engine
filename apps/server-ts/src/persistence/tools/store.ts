@@ -1,6 +1,6 @@
 import type { StandingRuleList } from "@arden-hq/protocol/chat"
 import type { JsonObject, ToolResult } from "@arden-hq/loop"
-import type { ApprovalPresentation } from "@arden-hq/protocol/chat"
+import type { ApprovalPresentationDraft } from "./approval-draft.js"
 import type { PendingConnectionDecision } from "../../connections/recovery.js"
 import { Context, Effect, Schema } from "effect"
 import { attachMutationReceipt } from "./mutation-receipt.js"
@@ -42,7 +42,7 @@ export interface ToolApprovalPrompt {
   readonly detail?: string
   readonly preview?: string
   readonly diff?: string
-  readonly presentation?: ApprovalPresentation
+  readonly presentation?: ApprovalPresentationDraft
   readonly data?: JsonObject
 }
 

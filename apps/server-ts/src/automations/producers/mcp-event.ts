@@ -1,4 +1,8 @@
-import type { EventAutomationTrigger, McpEventSelector } from "@arden-hq/protocol/automations"
+import {
+  APP_EVENT,
+  type EventAutomationTrigger,
+  type McpEventSelector
+} from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 
 import { engineOrderedJson } from "@arden-hq/std/json"
@@ -48,8 +52,8 @@ const subscriptionsOf = (
 ): ReadonlyArray<McpEventSubscription> => {
   const bySource = new Map<string, McpEventSubscription>()
   for (const trigger of triggers) {
+    if (trigger.event_type !== APP_EVENT) continue
     const selector = trigger.mcp_event
-    if (selector === undefined) continue
     const key = mcpEventSource(selector)
     bySource.set(key, {
       key,
@@ -69,7 +73,7 @@ export const mcpEventProducer: AutomationEventProducer<
   available: ({ mcpServers }) =>
     mcpServers.some((server) => server.status === "connected" && server.events.length > 0),
   accepts: (trigger, event) =>
-    trigger.mcp_event !== undefined &&
+    trigger.event_type === APP_EVENT &&
     readField(event.context, "app.source") === mcpEventSource(trigger.mcp_event),
   source: {
     kind: "live",

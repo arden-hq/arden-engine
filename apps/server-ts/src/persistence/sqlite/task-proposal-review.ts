@@ -1,4 +1,4 @@
-import type { TaskProposalReview } from "@arden-hq/protocol/proposals"
+import { TASK_PROPOSAL_PLACEMENT, type TaskProposalReview } from "@arden-hq/protocol/proposals"
 import { Effect, Result } from "effect"
 import type { SpaceReviewStore } from "../automations/space-review-store.js"
 import { TaskProposalStore, TaskProposalStoreError } from "../proposals/store.js"
@@ -52,7 +52,7 @@ export const withTaskProposalReview = (
         )
       if (proposal.revision !== expectedRevision)
         return yield* Effect.fail(conflict("proposal_changed", "The Task proposal changed"))
-      if (proposal.place !== "space" || proposal.space_id === null)
+      if (proposal.placement.kind !== TASK_PROPOSAL_PLACEMENT.space)
         return yield* Effect.fail(
           conflict("not_offered", "This proposal is not offered on a Space")
         )

@@ -1,4 +1,4 @@
-import { CancelInputSchema } from "@arden-hq/protocol/effect/chat"
+import { RunCancelTargetSchema } from "../chat/send-contracts.js"
 import { DateTime, Effect } from "effect"
 import type { ChatWriteStore } from "../chat/store.js"
 import { mapFailure, validateInput } from "./chat-write-errors.js"
@@ -18,7 +18,7 @@ export const makeStopEndedWork = ({
   const stopEndedWork: ChatWriteStore["Service"]["stopEndedWork"] = Effect.fn(
     "SqliteChatWriteStore.stopEndedWork"
   )(function* (input) {
-    yield* validateInput(CancelInputSchema, input, "cancel")
+    yield* validateInput(RunCancelTargetSchema, input, "cancel")
     const now = DateTime.formatIso(yield* DateTime.now)
     const target =
       input.runId !== undefined

@@ -24,6 +24,7 @@ import { type StoredMessageEnvelope, visibleMessageCount } from "../persistence/
 import { PROMPTS } from "../prompts/catalog.js"
 import type { Wiki } from "../wiki/service.js"
 import { createSpaceWithPage } from "../wiki/space-page.js"
+import { SPACE_INSTRUCTIONS_INPUT } from "@arden-hq/protocol/spaces"
 import { conversationLine, newestWithinBudget } from "./conversation.js"
 import type { SessionQueryFailure } from "../persistence/sessions/queries.js"
 import type { SpaceStoreError } from "../persistence/spaces/store.js"
@@ -210,7 +211,10 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
       return { space_id: target.space_id, title: target.title, created: false }
     }
     case "create": {
-      const space = yield* createSpaceWithPage(dependencies, { name: decision.new_title }).pipe(
+      const space = yield* createSpaceWithPage(dependencies, {
+        name: decision.new_title,
+        instructions: { kind: SPACE_INSTRUCTIONS_INPUT.unwritten }
+      }).pipe(
         Effect.catchIf(
           (error) => error._tag === "SpaceStoreError" && error.reason === "conflict",
           () => Effect.fail(staleSuggestion(`A Space named ${decision.new_title} already exists`))

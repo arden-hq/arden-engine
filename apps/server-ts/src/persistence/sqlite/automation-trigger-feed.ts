@@ -170,7 +170,7 @@ export const makeAutomationTriggerFeed = ({
                       source: "count",
                       queued_at: iso(nowMs),
                       session_id: record.sessionId,
-                      through_sequence: record.sequence,
+                      through: { kind: "message", sequence: record.sequence },
                       every_n: task.count
                     })
                     yield* sql`

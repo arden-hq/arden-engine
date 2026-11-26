@@ -1,14 +1,18 @@
-import {
-  RunContextSchema,
-  RunQuestionContentSchema,
-  RunQuestionSchema
-} from "@arden-hq/protocol/effect/runs"
+import { StoredRunQuestionContentSchema, type StoredRunQuestion } from "../runs/stored-question.js"
+import { RunContextSchema } from "../runs/stored-context.js"
+import { StoredRunQuestionSchema } from "../runs/stored-question.js"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
 import type { WorkStore, WorkStoreError } from "../work/store.js"
-import type { RunQuestion } from "@arden-hq/protocol/runs"
-import type { Statement } from "effect/unstable/sql/Statement"
+import {
+  RUN_PAGE,
+  RUN_PAGE_NEXT,
+  RUN_QUESTION_FILTER,
+  RUN_QUESTION_STATE,
+  type RunQuestionFilter
+} from "@arden-hq/protocol/runs"
+import type { Fragment, Statement } from "effect/unstable/sql/Statement"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import { decodeJson } from "./json.js"
@@ -40,18 +44,18 @@ export interface QuestionRow {
 const CursorSchema = Schema.Struct({ at: Schema.String, id: Schema.String })
 
 export interface RunQuestionReader {
-  readonly get: (id: string) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly get: (id: string) => Effect.Effect<StoredRunQuestion, WorkStoreError>
   readonly questions: WorkStore["Service"]["questions"]
   readonly select: Statement<Row>
   readonly openSelect: Statement<Row>
-  readonly decode: (row: QuestionRow) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly decode: (row: QuestionRow) => Effect.Effect<StoredRunQuestion, WorkStoreError>
 }
 
 export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionReader => {
   const decode = Effect.fn(
     function* (row: QuestionRow) {
       const context = yield* decodeJson(RunContextSchema, row.context)
-      const content = yield* decodeJson(RunQuestionContentSchema, row.content)
+      const content = yield* decodeJson(StoredRunQuestionContentSchema, row.content)
       const resolution =
         row.resolution === null ? null : yield* decodeJson(Schema.Json, row.resolution)
       const continuation =
@@ -69,7 +73,7 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionRead
       const contractProposal =
         encodedProposal === null ? undefined : yield* decodeJson(Schema.Json, encodedProposal)
       const permissionOffer = offer === null ? null : yield* decodeJson(Schema.Json, offer)
-      return yield* Schema.decodeUnknownEffect(RunQuestionSchema)({
+      return yield* Schema.decodeUnknownEffect(StoredRunQuestionSchema)({
         ...fields,
         permission_offer: permissionOffer,
         context,
@@ -182,54 +186,69 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionRead
     return yield* decode(rows[0])
   })
 
-  const questions: WorkStore["Service"]["questions"] = Effect.fn(function* (request) {
-    const encodedCursor = request.cursor
-    const decodedCursor =
-      encodedCursor === undefined ? undefined : decodeOpaque(CursorSchema, encodedCursor)
-    if (decodedCursor !== undefined && Option.isNone(decodedCursor)) {
-      return yield* workError("invalid", "Invalid question cursor")
-    }
-    const cursor = decodedCursor?.value
-    const clauses = [sql`1 = 1`]
-    if (request.session_id)
-      clauses.push(sql`(session_id = ${request.session_id}
-      OR json_extract(context, '$.origin.session_id') = ${request.session_id}
+  const questionFilterClauses = (filter: RunQuestionFilter): ReadonlyArray<Fragment> => {
+    switch (filter.kind) {
+      case RUN_QUESTION_FILTER.all:
+        return []
+      case RUN_QUESTION_FILTER.session:
+        return [
+          sql`(session_id = ${filter.session_id}
+      OR json_extract(context, '$.origin.session_id') = ${filter.session_id}
       OR EXISTS (SELECT 1 FROM chat_runs AS destined_run
         WHERE destined_run.run_id = question_scope.run_id
-          AND ${runDestinationSessionId(sql, runColumns(sql, "destined_run"))} = ${request.session_id})
+          AND ${runDestinationSessionId(sql, runColumns(sql, "destined_run"))} = ${filter.session_id})
       OR EXISTS (SELECT 1 FROM space_tasks AS asking_task
         WHERE asking_task.item_id = json_extract(question_scope.context, '$.task.item_id')
-          AND asking_task.home_session_id = ${request.session_id}))`)
-    if (request.space_id)
-      clauses.push(sql`EXISTS (
+          AND asking_task.home_session_id = ${filter.session_id}))`
+        ]
+      case RUN_QUESTION_FILTER.space:
+        return [
+          sql`EXISTS (
       SELECT 1 FROM chat_runs AS owner_run
       JOIN sessions AS owner_session
         ON owner_session.session_id = ${runDestinationSessionId(sql, runColumns(sql, "owner_run"))}
       JOIN spaces AS owner_space ON owner_space.space_id = owner_session.space_id
       WHERE owner_run.run_id = question_scope.run_id
-        AND owner_session.space_id = ${request.space_id}
+        AND owner_session.space_id = ${filter.space_id}
         AND owner_session.archived_at IS NULL
         AND owner_space.archived_at IS NULL
-    )`)
-    if (request.item_id)
-      clauses.push(sql`json_extract(context, '$.task.item_id') = ${request.item_id}`)
-    if (request.state !== "all") clauses.push(sql`status = 'open'`)
+    )`
+        ]
+      case RUN_QUESTION_FILTER.task:
+        return [sql`json_extract(context, '$.task.item_id') = ${filter.item_id}`]
+    }
+  }
+
+  const questions: WorkStore["Service"]["questions"] = Effect.fn(function* (request) {
+    const decodedCursor =
+      request.page.kind === RUN_PAGE.first
+        ? undefined
+        : decodeOpaque(CursorSchema, request.page.cursor)
+    if (decodedCursor !== undefined && Option.isNone(decodedCursor)) {
+      return yield* workError("invalid", "Invalid question cursor")
+    }
+    const cursor = decodedCursor?.value
+    const clauses = [sql`1 = 1`, ...questionFilterClauses(request.filter)]
+    if (request.state !== RUN_QUESTION_STATE.all) clauses.push(sql`status = 'open'`)
     if (cursor)
       clauses.push(
         sql`(created_at < ${cursor.at} OR (created_at = ${cursor.at} AND question_id < ${cursor.id}))`
       )
     const rows =
-      yield* sql<QuestionRow>`SELECT * FROM (${request.state === "all" ? select : openSelect}) AS question_scope WHERE ${sql.and(clauses)} ORDER BY created_at DESC, question_id DESC LIMIT 101`.pipe(
+      yield* sql<QuestionRow>`SELECT * FROM (${request.state === RUN_QUESTION_STATE.all ? select : openSelect}) AS question_scope WHERE ${sql.and(clauses)} ORDER BY created_at DESC, question_id DESC LIMIT 101`.pipe(
         Effect.mapError((cause) => workError("storage", "Could not list Run questions", cause))
       )
     const visible = rows.slice(0, 100)
     const last = visible.at(-1)
     return {
       questions: yield* Effect.forEach(visible, decode),
-      next_cursor:
+      next:
         rows.length > 100 && last
-          ? encodeOpaque({ at: last.created_at, id: last.question_id })
-          : null
+          ? {
+              kind: RUN_PAGE_NEXT.more,
+              cursor: encodeOpaque({ at: last.created_at, id: last.question_id })
+            }
+          : { kind: RUN_PAGE_NEXT.end }
     }
   })
   return { get, questions, select, openSelect, decode }

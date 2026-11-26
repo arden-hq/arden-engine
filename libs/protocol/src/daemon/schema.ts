@@ -1,5 +1,10 @@
 import { Schema } from "effect"
 import {
+  OFFERED_TOOLS,
+  OPERATIONAL_SESSION,
+  PREVIOUS_WRITE,
+  RUN_EXECUTION,
+  STREAM_MARK,
   daemonHandshake,
   type CliAccess,
   type ConfiguredServerReady,
@@ -11,35 +16,67 @@ import {
   PositiveIntSchema
 } from "../common/schema.js"
 
-const CauseSchema = Schema.NullOr(
-  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000))
-)
+const CauseSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000))
 const IdentifierSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const OperationalEventBaseFields = {
   version: Schema.Literal(1),
-  occurredAt: IsoDateTimeStringSchema,
-  cause: CauseSchema
+  occurredAt: IsoDateTimeStringSchema
 }
 
-export const ModelPhaseTimingSchema = Schema.Struct({
+const StreamMarkSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(STREAM_MARK.unseen) }),
+  Schema.Struct({ kind: Schema.Literal(STREAM_MARK.seen), ms: NonNegativeIntSchema })
+])
+
+const PhaseOutcomeSchema = Schema.Literals(["completed", "failed", "cancelled", "interrupted"])
+
+const LocalModelPhaseFields = {
   sampleId: IdentifierSchema,
-  phase: Schema.Literals([
-    "admission",
-    "preparation",
-    "compaction",
-    "provider",
-    "accounting",
-    "checkpoint"
-  ]),
-  outcome: Schema.Literals(["completed", "failed", "cancelled", "interrupted"]),
+  phase: Schema.Literals(["admission", "preparation", "compaction", "accounting", "checkpoint"]),
+  outcome: PhaseOutcomeSchema,
+  durationMs: NonNegativeIntSchema
+}
+
+const ProviderModelPhaseFields = {
+  sampleId: IdentifierSchema,
+  phase: Schema.Literal("provider"),
+  outcome: PhaseOutcomeSchema,
   durationMs: NonNegativeIntSchema,
   consumerMs: NonNegativeIntSchema,
-  firstItemMs: Schema.NullOr(NonNegativeIntSchema),
-  firstTextMs: Schema.NullOr(NonNegativeIntSchema),
-  firstToolMs: Schema.NullOr(NonNegativeIntSchema),
+  firstItem: StreamMarkSchema,
+  firstText: StreamMarkSchema,
+  firstTool: StreamMarkSchema,
   retries: NonNegativeIntSchema,
   scheduledBackoffMs: NonNegativeIntSchema
-})
+}
+
+export const ModelPhaseTimingSchema = Schema.Union([
+  Schema.Struct(LocalModelPhaseFields),
+  Schema.Struct(ProviderModelPhaseFields)
+])
+
+const ModelPhaseEventFields = {
+  ...OperationalEventBaseFields,
+  code: Schema.Literal("chat.model_phase"),
+  severity: Schema.Literal("info"),
+  runId: IdentifierSchema,
+  sessionId: IdentifierSchema
+}
+
+const SchemaDriftFields = {
+  ...OperationalEventBaseFields,
+  code: Schema.Literal("storage.schema_drift"),
+  objectType: IdentifierSchema,
+  objectName: IdentifierSchema
+}
+
+const IdleCompactionFields = {
+  ...OperationalEventBaseFields,
+  code: Schema.Literal("context.idle_compaction"),
+  severity: Schema.Literal("info"),
+  sessionId: IdentifierSchema,
+  reason: Schema.String
+}
 
 export const OperationalEventSchema = Schema.Union([
   Schema.Struct({
@@ -49,29 +86,30 @@ export const OperationalEventSchema = Schema.Union([
     runId: IdentifierSchema,
     sessionId: IdentifierSchema,
     waitMs: NonNegativeIntSchema,
-    executionMs: Schema.NullOr(NonNegativeIntSchema),
+    execution: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(RUN_EXECUTION.neverAcquired) }),
+      Schema.Struct({ kind: Schema.Literal(RUN_EXECUTION.acquired), ms: NonNegativeIntSchema })
+    ]),
     outcome: Schema.Literals(["completed", "failed", "interrupted"] as const)
   }),
+  Schema.Struct({ ...ModelPhaseEventFields, ...LocalModelPhaseFields }),
+  Schema.Struct({ ...ModelPhaseEventFields, ...ProviderModelPhaseFields }),
   Schema.Struct({
-    ...OperationalEventBaseFields,
-    code: Schema.Literal("chat.model_phase"),
-    severity: Schema.Literal("info"),
-    runId: IdentifierSchema,
-    sessionId: IdentifierSchema,
-    ...ModelPhaseTimingSchema.fields
+    ...SchemaDriftFields,
+    severity: Schema.Literal("warning"),
+    verdict: Schema.Literal("foreign_warning")
   }),
   Schema.Struct({
-    ...OperationalEventBaseFields,
-    code: Schema.Literal("storage.schema_drift"),
-    severity: Schema.Literals(["warning", "error"] as const),
-    objectType: IdentifierSchema,
-    objectName: IdentifierSchema,
-    verdict: Schema.Literals(["foreign_warning", "owned_fatal"] as const)
+    ...SchemaDriftFields,
+    severity: Schema.Literal("error"),
+    verdict: Schema.Literal("owned_fatal"),
+    cause: CauseSchema
   }),
   Schema.Struct({
     ...OperationalEventBaseFields,
     code: Schema.Literal("delivery.retry_scheduled"),
     severity: Schema.Literal("warning"),
+    cause: CauseSchema,
     deliveryId: IdentifierSchema,
     sourceRunId: IdentifierSchema,
     destinationSessionId: IdentifierSchema,
@@ -92,6 +130,7 @@ export const OperationalEventSchema = Schema.Union([
     ...OperationalEventBaseFields,
     code: Schema.Literal("delivery.unroutable"),
     severity: Schema.Literal("error"),
+    cause: CauseSchema,
     deliveryId: IdentifierSchema,
     sourceRunId: IdentifierSchema,
     attempt: NonNegativeIntSchema,
@@ -101,19 +140,27 @@ export const OperationalEventSchema = Schema.Union([
     ...OperationalEventBaseFields,
     code: Schema.Literal("automation.firing_deferred"),
     severity: Schema.Literal("info"),
+    cause: CauseSchema,
     automationTaskId: IdentifierSchema,
     automationRunId: PositiveIntSchema,
     queueId: PositiveIntSchema,
-    sessionId: Schema.NullOr(IdentifierSchema),
+    session: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(OPERATIONAL_SESSION.none) }),
+      Schema.Struct({
+        kind: Schema.Literal(OPERATIONAL_SESSION.session),
+        sessionId: IdentifierSchema
+      })
+    ]),
     nextAttemptAt: IsoDateTimeStringSchema
   }),
   Schema.Struct({
-    ...OperationalEventBaseFields,
-    code: Schema.Literal("context.idle_compaction"),
-    severity: Schema.Literal("info"),
-    sessionId: IdentifierSchema,
-    decision: Schema.Literals(["queued", "skipped", "ran", "failed"] as const),
-    reason: Schema.String
+    ...IdleCompactionFields,
+    decision: Schema.Literals(["queued", "skipped", "ran"] as const)
+  }),
+  Schema.Struct({
+    ...IdleCompactionFields,
+    decision: Schema.Literal("failed"),
+    cause: CauseSchema
   }),
   Schema.Struct({
     ...OperationalEventBaseFields,
@@ -121,7 +168,10 @@ export const OperationalEventSchema = Schema.Union([
     severity: Schema.Literal("warning"),
     lane: Schema.Literals(["interactive", "ordinary"] as const),
     operation: Schema.String,
-    previousOperation: Schema.NullOr(Schema.String),
+    previous: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(PREVIOUS_WRITE.none) }),
+      Schema.Struct({ kind: Schema.Literal(PREVIOUS_WRITE.operation), operation: Schema.String })
+    ]),
     waitMs: NonNegativeIntSchema,
     queued: NonNegativeIntSchema
   }),
@@ -183,7 +233,10 @@ export const ConfiguredServerReadySchema: Schema.Codec<ConfiguredServerReady> = 
   dataDirectory: PathSchema,
   accessFile: PathSchema,
   usageFile: PathSchema,
-  offeredTools: Schema.optionalKey(NamesSchema),
+  offeredTools: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(OFFERED_TOOLS.all) }),
+    Schema.Struct({ kind: Schema.Literal(OFFERED_TOOLS.listed), names: NamesSchema })
+  ]),
   toolsWithoutRule: NamesSchema,
   mcpServers: NamesSchema,
   provider: IdentifierSchema,

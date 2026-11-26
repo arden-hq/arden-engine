@@ -18,22 +18,43 @@ import type {
   ChatFindResponse,
   ChatSearchResponse
 } from "./contracts.js"
+import { SESSION_LIST_FILTER, SESSION_LIST_NEXT, SESSION_LIST_PAGE } from "./contracts.js"
 import { FIND_QUERY_MAX_LENGTH } from "../views/find-text.js"
 import { ContextBudgetSnapshotSchema } from "../chat/schema.js"
 import { ImageDataSchema, ImageMediaTypeSchema } from "../chat/schema-fields.js"
 import {
   IsoDateTimeStringSchema,
-  SessionListItemSchema,
-  SessionForkOriginSchema,
   SessionTypeSchema,
   withExtras,
   NonNegativeIntSchema,
   PositiveIntSchema
 } from "../common/schema.js"
+import {
+  BRANCH_REQUEST,
+  CAPTURE_LINE,
+  CLEARED,
+  REVERT_TO,
+  RUNNING_WORK,
+  SEARCH_PREVIEW,
+  SESSION_TARGET
+} from "./contracts.js"
+import {
+  FirstLineSchema,
+  LinkedAutomationSchema,
+  ListedSessionSchema,
+  ParentMessageSchema,
+  SessionChatModelSchema,
+  SessionNameSchema,
+  SessionOriginSchema,
+  SessionParentSchema,
+  SessionSpaceSchema,
+  SessionChatModelInputSchema,
+  SessionNameInputSchema,
+  SessionSpaceInputSchema
+} from "./state-schema.js"
 
 const strict = { onExcessProperty: "error" } as const
 const TrimmedTextSchema = Schema.Trimmed.check(Schema.isMinLength(1))
-const NullableTrimmedTextSchema = Schema.NullOr(TrimmedTextSchema)
 const QueryBooleanSchema = Schema.Union([
   Schema.Boolean,
   Schema.Literals(["true", "false"] as const)
@@ -52,73 +73,55 @@ const SessionListCursorSchema = Schema.Struct({
   session_id: Schema.NonEmptyString
 })
 
-const requiredListedSessionKeys = [
-  "presentation",
-  "public_ref",
-  "last_accessed_at",
-  "has_unread",
-  "space_id",
-  "chat_model",
-  "session_type",
-  "origin_automation_id",
-  "parent_session_id",
-  "parent_tool_call_id",
-  "parent_message_id",
-  "parent_run_id",
-  "active_run_id",
-  "active_turn_id",
-  "run_status",
-  "checkpoint_seq",
-  "latest_event_seq",
-  "is_active",
-  "pending_approvals_count",
-  "pending_connections_count",
-  "run_error_code",
-  "run_stop_reason"
+const SessionIdListSchema = Schema.Trimmed.check(Schema.isMinLength(1))
+
+const listFilters = [
+  { filter: Schema.Literal(SESSION_LIST_FILTER.all) },
+  { filter: Schema.Literal(SESSION_LIST_FILTER.space), space_id: Schema.NonEmptyString },
+  {
+    filter: Schema.Literal(SESSION_LIST_FILTER.children),
+    parent_session_ids: SessionIdListSchema
+  },
+  { filter: Schema.Literal(SESSION_LIST_FILTER.sessions), session_ids: SessionIdListSchema },
+  { filter: Schema.Literal(SESSION_LIST_FILTER.ref), session_ref: Schema.NonEmptyString }
 ] as const
 
-export const SessionListQuerySchema = withExtras({
-  space_id: Schema.optionalKey(Schema.NonEmptyString),
-  scope: Schema.optionalKey(SessionListScopeSchema),
-  live: Schema.optionalKey(QueryBooleanSchema),
-  parent_session_ids: Schema.optionalKey(Schema.Trimmed.check(Schema.isMinLength(1))),
-  limit: Schema.optionalKey(QueryLimitSchema),
-  offset: Schema.optionalKey(QueryNonNegativeIntSchema),
-  sort: Schema.optionalKey(SessionListSortSchema),
-  cursor_at: Schema.optionalKey(IsoDateTimeStringSchema),
-  cursor_id: Schema.optionalKey(Schema.NonEmptyString),
-  session_ids: Schema.optionalKey(Schema.Trimmed.check(Schema.isMinLength(1))),
-  session_ref: Schema.optionalKey(Schema.NonEmptyString)
-}).check(
-  Schema.makeFilter((query) =>
-    (query.cursor_at === undefined) === (query.cursor_id === undefined)
-      ? undefined
-      : "session-list cursor requires both timestamp and session id"
+const listPages = [
+  { page: Schema.Literal(SESSION_LIST_PAGE.first) },
+  { page: Schema.Literal(SESSION_LIST_PAGE.offset), offset: QueryNonNegativeIntSchema },
+  {
+    page: Schema.Literal(SESSION_LIST_PAGE.after),
+    cursor_at: IsoDateTimeStringSchema,
+    cursor_id: Schema.NonEmptyString
+  }
+] as const
+
+const listQueryFields = {
+  scope: SessionListScopeSchema,
+  live: QueryBooleanSchema,
+  limit: QueryLimitSchema,
+  sort: SessionListSortSchema
+}
+
+export const SessionListQuerySchema = Schema.Union(
+  listFilters.flatMap((filter) =>
+    listPages.map((page) => withExtras({ ...listQueryFields, ...filter, ...page }))
   )
 )
 
-type ListedSessionItem = typeof SessionListItemSchema.Type
-type ListedSessionShape = ListedSessionItem &
-  Required<Pick<ListedSessionItem, (typeof requiredListedSessionKeys)[number]>>
-
-export const ListedSessionSchema = SessionListItemSchema.pipe(
-  Schema.refine(
-    (session): session is ListedSessionShape =>
-      requiredListedSessionKeys.every((key) => Object.hasOwn(session, key)),
-    { message: "missing a field required by the session-list response" }
-  )
-)
-
-export const SessionListResponseSchema: Schema.Codec<SessionListResponse, unknown> = withExtras({
+export const SessionListResponseSchema: Schema.Codec<SessionListResponse> = withExtras({
   sessions: Schema.Array(ListedSessionSchema),
-  next_cursor: Schema.NullOr(SessionListCursorSchema)
+  next: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SESSION_LIST_NEXT.end) }),
+    Schema.Struct({ kind: Schema.Literal(SESSION_LIST_NEXT.more), cursor: SessionListCursorSchema })
+  ])
 })
 
 export const CreateSessionRequestSchema = Schema.Struct({
-  name: Schema.optionalKey(NullableTrimmedTextSchema),
-  space_id: Schema.optionalKey(Schema.NullOr(Schema.NonEmptyString)),
-  chat_model: Schema.optionalKey(Schema.NullOr(TrimmedTextSchema)),
-  origin: Schema.optionalKey(Schema.Literals(["capture", "onboarding"]))
+  name: SessionNameInputSchema,
+  space: SessionSpaceInputSchema,
+  chat_model: SessionChatModelInputSchema,
+  origin: SessionOriginSchema
 })
 
 export const HandCaptureRequestSchema = Schema.Struct({
@@ -138,7 +141,10 @@ export const HandCaptureResponseSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("kept"),
     session_id: Schema.NonEmptyString,
-    line: Schema.NullOr(Schema.String)
+    line: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(CAPTURE_LINE.none) }),
+      Schema.Struct({ kind: Schema.Literal(CAPTURE_LINE.line), text: Schema.String })
+    ])
   })
 ])
 
@@ -151,32 +157,35 @@ export const encodeHandCaptureRequestEffect = (
 
 export const CreateSessionResponseSchema: Schema.Codec<CreateSessionResponse> = withExtras({
   session_id: Schema.NonEmptyString,
-  name: Schema.NullOr(Schema.String),
+  name: SessionNameSchema,
   started_at: IsoDateTimeStringSchema,
   last_activity: IsoDateTimeStringSchema,
   message_count: NonNegativeIntSchema,
-  space_id: Schema.NullOr(Schema.String),
-  chat_model: Schema.NullOr(Schema.String),
-  origin: Schema.NullOr(Schema.Literals(["capture", "onboarding"] as const))
+  space: SessionSpaceSchema,
+  chat_model: SessionChatModelSchema,
+  origin: SessionOriginSchema
 })
 
 export const BranchSessionRequestSchema = Schema.Struct({
-  disposition: Schema.optionalKey(Schema.Literals(["retained", "disposable"])),
-  request_id: Schema.optionalKey(
-    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
-  ),
-  share_resources: Schema.optionalKey(Schema.Boolean),
-  name: Schema.optionalKey(NullableTrimmedTextSchema),
-  up_to_message_id: Schema.optionalKey(Schema.NullOr(Schema.NonEmptyString))
+  disposition: Schema.Literals(["retained", "disposable"]),
+  request: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(BRANCH_REQUEST.once) }),
+    Schema.Struct({
+      kind: Schema.Literal(BRANCH_REQUEST.keyed),
+      request_id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
+    })
+  ]),
+  share_resources: Schema.Boolean,
+  name: SessionNameInputSchema,
+  up_to: ParentMessageSchema
 })
 
 export const BranchSessionResponseSchema: Schema.Codec<BranchSessionResponse> = withExtras({
-  fork_origin: Schema.optionalKey(Schema.NullOr(SessionForkOriginSchema)),
   session_id: Schema.NonEmptyString,
-  name: Schema.NullOr(Schema.String),
+  name: SessionNameSchema,
   started_at: IsoDateTimeStringSchema,
   last_activity: IsoDateTimeStringSchema,
-  space_id: Schema.NullOr(Schema.String)
+  space: SessionSpaceSchema
 })
 
 export const RenameSessionRequestSchema = Schema.Struct({
@@ -189,34 +198,30 @@ export const RenameSessionResponseSchema: Schema.Codec<RenameSessionResponse> = 
 })
 
 export const UpdateSessionModelRequestSchema = Schema.Struct({
-  chat_model: Schema.NullOr(TrimmedTextSchema)
+  chat_model: SessionChatModelInputSchema
 })
 
 export const UpdateSessionModelResponseSchema: Schema.Codec<UpdateSessionModelResponse> =
   withExtras({
     session_id: Schema.NonEmptyString,
-    chat_model: Schema.NullOr(Schema.String),
+    chat_model: SessionChatModelSchema,
     context_budget: ContextBudgetSnapshotSchema
   })
 
 export const ArchivedSessionSchema = withExtras({
   session_id: Schema.NonEmptyString,
-  public_ref: Schema.NullOr(Schema.String),
+  public_ref: Schema.String,
   started_at: IsoDateTimeStringSchema,
   last_activity: IsoDateTimeStringSchema,
-  last_accessed_at: Schema.NullOr(IsoDateTimeStringSchema),
-  name: Schema.NullOr(Schema.String),
+  name: SessionNameSchema,
   archived_at: IsoDateTimeStringSchema,
-  first_line: Schema.NullOr(Schema.String),
+  first_line: FirstLineSchema,
   message_count: NonNegativeIntSchema,
-  space_id: Schema.NullOr(Schema.String),
-  chat_model: Schema.NullOr(Schema.String),
+  space: SessionSpaceSchema,
+  chat_model: SessionChatModelSchema,
   session_type: SessionTypeSchema,
-  origin_automation_id: Schema.NullOr(Schema.String),
-  parent_session_id: Schema.NullOr(Schema.String),
-  parent_tool_call_id: Schema.NullOr(Schema.String),
-  parent_message_id: Schema.NullOr(Schema.String),
-  parent_run_id: Schema.NullOr(Schema.String)
+  origin_automation: LinkedAutomationSchema,
+  parent: SessionParentSchema
 })
 
 export const ArchivedSessionsResponseSchema: Schema.Codec<ArchivedSessionsResponse> = withExtras({
@@ -240,27 +245,43 @@ export const ChatRunningWorkSchema: Schema.Codec<ChatRunningWork> = withExtras({
 
 export const SessionEndConflictSchema: Schema.Codec<SessionEndConflict> = withExtras({
   detail: Schema.String,
-  running: Schema.NullOr(ChatRunningWorkSchema)
+  running: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUNNING_WORK.none) }),
+    Schema.Struct({ kind: Schema.Literal(RUNNING_WORK.running), work: ChatRunningWorkSchema })
+  ])
 })
 
 /** `stop=true` on an archive or a permanent delete: stop the chat's running work first. */
 export const SessionEndQuerySchema = Schema.Struct({
-  stop: Schema.optionalKey(QueryBooleanSchema)
+  stop: QueryBooleanSchema
 })
 
+const SessionTargetSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(SESSION_TARGET.latest) }),
+  Schema.Struct({ kind: Schema.Literal(SESSION_TARGET.session), session_id: Schema.NonEmptyString })
+])
+
 export const ClearSessionRequestSchema = Schema.Struct({
-  session_id: Schema.optionalKey(Schema.NullOr(Schema.NonEmptyString))
+  target: SessionTargetSchema
 })
 
 export const ClearSessionResponseSchema: Schema.Codec<ClearSessionResponse> = withExtras({
   status: Schema.Literal("cleared"),
-  session_id: Schema.NullOr(Schema.String)
+  cleared: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(CLEARED.none) }),
+    Schema.Struct({ kind: Schema.Literal(CLEARED.session), session_id: Schema.String })
+  ])
 })
 
 export const RevertSessionRequestSchema = Schema.Struct({
-  session_id: Schema.optionalKey(Schema.NullOr(Schema.NonEmptyString)),
-  turns: Schema.optionalKey(PositiveIntSchema),
-  message_id: Schema.optionalKey(Schema.NullOr(Schema.NonEmptyString))
+  target: SessionTargetSchema,
+  to: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(REVERT_TO.turns), turns: PositiveIntSchema }),
+    Schema.Struct({
+      kind: Schema.Literal(REVERT_TO.message),
+      message_id: Schema.NonEmptyString
+    })
+  ])
 })
 
 export const RevertSessionResponseSchema: Schema.Codec<RevertSessionResponse> = withExtras({
@@ -269,7 +290,7 @@ export const RevertSessionResponseSchema: Schema.Codec<RevertSessionResponse> = 
 })
 
 export const MoveSessionToSpaceRequestSchema = Schema.Struct({
-  space_id: Schema.NullOr(Schema.NonEmptyString)
+  space: SessionSpaceInputSchema
 })
 
 export const StartOnboardingResponseSchema: Schema.Codec<StartOnboardingResponse> = withExtras({
@@ -280,7 +301,7 @@ export const StartOnboardingResponseSchema: Schema.Codec<StartOnboardingResponse
 export const MoveSessionToSpaceResponseSchema: Schema.Codec<MoveSessionToSpaceResponse> =
   withExtras({
     session_id: Schema.NonEmptyString,
-    space_id: Schema.NullOr(Schema.String)
+    space: SessionSpaceSchema
   })
 
 export const SessionExportFormatSchema = Schema.Literals([
@@ -356,7 +377,7 @@ const ChatSearchHitSchema = withExtras({
 
 const chatSearchBase = {
   session_id: Schema.NonEmptyString,
-  session_name: Schema.NullOr(Schema.String),
+  session_name: SessionNameSchema,
   name_ranges: RangesSchema,
   last_activity: IsoDateTimeStringSchema
 }
@@ -368,34 +389,21 @@ export const ChatSearchResponseSchema: Schema.Codec<ChatSearchResponse> = withEx
       withExtras({
         ...chatSearchBase,
         match: Schema.Literal("name"),
-        preview: Schema.NullOr(ChatSearchHitSchema)
+        preview: Schema.Union([
+          Schema.Struct({ kind: Schema.Literal(SEARCH_PREVIEW.none) }),
+          Schema.Struct({ kind: Schema.Literal(SEARCH_PREVIEW.message), hit: ChatSearchHitSchema })
+        ])
       })
     ])
   ),
   has_more: Schema.Boolean
 })
 
-export { SessionTriageDecisionSchema } from "../common/schema.js"
+export * from "./state-schema.js"
 
 export const SessionTriageActionRequestSchema = Schema.Struct({
   action: Schema.Literals(["dismiss", "accept", "undo"] as const)
 })
-
-const resolveSessionListQuery = (query: typeof SessionListQuerySchema.Type) => ({
-  ...query,
-  scope: query.scope ?? "all",
-  live: query.live === true || query.live === "true",
-  limit: query.limit ?? 100,
-  ...(query.offset === undefined ? {} : { offset: query.offset }),
-  sort: query.sort ?? "activity"
-})
-
-export const decodeSessionListQueryEffect = (
-  value: unknown
-): Effect.Effect<ReturnType<typeof resolveSessionListQuery>, Schema.SchemaError> =>
-  Schema.decodeUnknownEffect(SessionListQuerySchema)(value).pipe(
-    Effect.map(resolveSessionListQuery)
-  )
 
 export const decodeCreateSessionRequestEffect = (
   value: unknown
@@ -420,8 +428,11 @@ export const decodeRenameSessionRequestEffect = (
 
 export const decodeUpdateSessionModelRequestEffect = (
   value: unknown
-): Effect.Effect<{ readonly chat_model: string | null }, Schema.SchemaError, never> =>
-  Schema.decodeUnknownEffect(UpdateSessionModelRequestSchema)(value, strict)
+): Effect.Effect<
+  Schema.Schema.Type<typeof UpdateSessionModelRequestSchema>,
+  Schema.SchemaError,
+  never
+> => Schema.decodeUnknownEffect(UpdateSessionModelRequestSchema)(value, strict)
 
 export const decodeClearSessionRequestEffect = (
   value: unknown

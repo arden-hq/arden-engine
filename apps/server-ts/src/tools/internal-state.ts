@@ -5,12 +5,18 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import { utcDay } from "@arden-hq/std/time"
 import { DateTime, Effect, Option, Schema } from "effect"
 import { usageGroup } from "@arden-hq/protocol/runs"
-import { effectiveBackgroundLimit } from "@arden-hq/protocol/settings"
+import { effectiveBackgroundLimit, KEEP_GOING } from "@arden-hq/protocol/settings"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { UsageStore } from "../persistence/usage/store.js"
 import { IntelligenceSettingsStore, LimitSettingsStore } from "../persistence/settings/store.js"
 import { ModelProviderService } from "../models/provider.js"
-import { currentPlanReading, planLimitsReport } from "../models/plan-limits.js"
+import {
+  capTokens,
+  currentPlanReading,
+  keepGoingUntil,
+  planLimitsReport,
+  stopPercent
+} from "../models/plan-limits.js"
 import { WorkerStatus } from "../automations/worker-status.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { runInspectTool } from "./run-inspection.js"
@@ -137,17 +143,26 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
         Effect.all([services.limits.settings(), services.runs.planLimitPauses()]),
         { signal: ctx.signal }
       )
-      const arden = settings.ardenLimitPercent
+      const arden = stopPercent(settings.ardenLimit) ?? null
+      const until = keepGoingUntil(settings)
       const report = {
         ...planLimitsReport(reading, source?.history() ?? [], arden ?? 100, now),
         limits: {
           arden_limit_percent: arden,
-          background_limit_percent: effectiveBackgroundLimit(settings),
+          background_limit_percent: stopPercent(effectiveBackgroundLimit(settings)) ?? null,
           keep_going_until:
-            settings.keepGoingUntil !== null && Date.parse(settings.keepGoingUntil) > now
-              ? settings.keepGoingUntil
+            settings.keepGoing.kind === KEEP_GOING.until && until !== undefined && until > now
+              ? settings.keepGoing.until
               : null,
-          automation_limits: settings.automationLimits
+          automation_limits: Object.fromEntries(
+            Object.entries(settings.automationLimits).map(([id, limit]) => [
+              id,
+              {
+                pauseAtPercent: stopPercent(limit.pause) ?? null,
+                maxTokensPerRun: capTokens(limit.cap) ?? null
+              }
+            ])
+          )
         },
         paused_runs: paused.map((run) => ({
           run_id: run.runId,

@@ -1,3 +1,4 @@
+import { RUN_PAGE, RUN_QUESTION_FILTER, RUN_QUESTION_STATE } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { SummaryStore } from "../persistence/summaries/store.js"
@@ -60,7 +61,11 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
     const summarized = yield* summaries.chats(
       (detail?.sessions ?? []).map((session) => session.session_id)
     )
-    const questions = yield* work.questions({ space_id: spaceId, state: "actionable" })
+    const questions = yield* work.questions({
+      filter: { kind: RUN_QUESTION_FILTER.space, space_id: spaceId },
+      state: RUN_QUESTION_STATE.actionable,
+      page: { kind: RUN_PAGE.first }
+    })
     const items = new Map((detail?.work.work_items ?? []).map((task) => [task.item_id, task]))
     const page =
       space.page_id === null || memory === undefined

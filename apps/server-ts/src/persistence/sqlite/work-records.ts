@@ -1,14 +1,14 @@
-import type {
-  SpaceTaskAttachment,
-  SpaceTaskComment,
-  SpaceTaskEvent
-} from "@arden-hq/protocol/spaces/work"
 import {
-  SpaceTaskAttachmentSchema,
-  SpaceTaskCommentSchema,
-  SpaceTaskEventSchema,
-  EvidenceSourceRefSchema
-} from "@arden-hq/protocol/effect/spaces/work"
+  TaskAttachmentRecordSchema,
+  TaskCommentRecordSchema,
+  TaskEventRecordSchema
+} from "../work/task-record.js"
+import {
+  type TaskAttachmentRecord,
+  type TaskCommentRecord,
+  type TaskEventRecord
+} from "../work/task-record.js"
+import { EvidenceSourceRefSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema } from "effect"
 import { WorkStoreError } from "../work/store.js"
 import { decodeJson } from "./json.js"
@@ -62,8 +62,8 @@ export const workError = (
 
 export const decodeWorkAttachment = Effect.fn("SqliteWorkStore.decodeWorkAttachment")(function* (
   row: WorkAttachmentRow
-): Effect.fn.Return<SpaceTaskAttachment, WorkStoreError> {
-  return yield* Schema.decodeUnknownEffect(SpaceTaskAttachmentSchema)(row).pipe(
+): Effect.fn.Return<TaskAttachmentRecord, WorkStoreError> {
+  return yield* Schema.decodeUnknownEffect(TaskAttachmentRecordSchema)(row).pipe(
     Effect.mapError((cause) =>
       workError("storage", "Stored Space work attachment is corrupt", cause)
     )
@@ -72,14 +72,14 @@ export const decodeWorkAttachment = Effect.fn("SqliteWorkStore.decodeWorkAttachm
 
 export const decodeWorkEvent = Effect.fn("SqliteWorkStore.decodeWorkEvent")(function* (
   row: WorkEventRow
-): Effect.fn.Return<SpaceTaskEvent, WorkStoreError> {
+): Effect.fn.Return<TaskEventRecord, WorkStoreError> {
   const source_refs = yield* decodeJson(evidenceSourceRefsSchema, row.source_refs).pipe(
     Effect.mapError((cause) =>
       workError("storage", "Stored Space task event evidence is corrupt", cause)
     )
   )
   const { summary, content_kind, ...event } = row
-  return yield* Schema.decodeUnknownEffect(SpaceTaskEventSchema)({
+  return yield* Schema.decodeUnknownEffect(TaskEventRecordSchema)({
     ...event,
     source_refs,
     content: { kind: content_kind, text: inArdenWords(summary) }
@@ -90,8 +90,8 @@ export const decodeWorkEvent = Effect.fn("SqliteWorkStore.decodeWorkEvent")(func
 
 export const decodeWorkComment = Effect.fn("SqliteWorkStore.decodeWorkComment")(function* (
   row: WorkCommentRow
-): Effect.fn.Return<SpaceTaskComment, WorkStoreError> {
-  return yield* Schema.decodeUnknownEffect(SpaceTaskCommentSchema)(row).pipe(
+): Effect.fn.Return<TaskCommentRecord, WorkStoreError> {
+  return yield* Schema.decodeUnknownEffect(TaskCommentRecordSchema)(row).pipe(
     Effect.mapError((cause) => workError("storage", "Stored Space work comment is corrupt", cause))
   )
 })

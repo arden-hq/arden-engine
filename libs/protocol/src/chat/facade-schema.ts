@@ -1,33 +1,45 @@
 import { Effect, Schema } from "effect"
-import {
-  IsoDateTimeStringSchema,
-  NonNegativeIntSchema,
-  optionalNullableString,
-  withExtras
-} from "../common/schema.js"
+import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../common/schema.js"
 import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
-import { CHAT_QUEUE_LIMIT, CHAT_REPLY_QUOTES_MAX, chatReplyContexts } from "./contracts.js"
-import type { PreparedChatMessage, QueuedChatMessage, QueuedChatMessages } from "./contracts.js"
 import {
-  ChatCaptureViaSchema,
-  ChatImageSchema,
-  ChatReceiptStatusSchema,
-  ChatSentFromSchema,
-  TurnWorkViewSchema
-} from "./schema.js"
+  APPROVAL_REPLY,
+  CANCEL_TARGET,
+  CHAT_DELIVERY,
+  CHAT_QUEUE_LIMIT,
+  CHAT_RECEIPT_STATUS,
+  CHAT_REPLY_QUOTES_MAX,
+  HISTORY_WINDOW,
+  QUEUED_FAILURE,
+  RECEIPT_RUN
+} from "./contracts.js"
+import {
+  AnswerShapeSchema,
+  ChatCaptureSchema,
+  ConnectionResultTextSchema,
+  DecisionAskedSchema,
+  RelayCommandSchema,
+  RequestedApprovalModeSchema,
+  SentFromSchema,
+  ToolDecisionSchema
+} from "./request-schema.js"
+import type {
+  HistoryWindow,
+  PreparedChatMessage,
+  QueuedChatMessage,
+  QueuedChatMessages
+} from "./contracts.js"
+import { ChatImageSchema, ChatReceiptStatusSchema, TurnWorkViewSchema } from "./schema.js"
 import {
   chatIdentifier,
   chatMessage,
   ImageDataSchema,
   ImageMediaTypeSchema
 } from "./schema-fields.js"
-import { APPROVAL_MODES } from "../permissions/modes.js"
 
 type EncodedText = Effect.Effect<string, Schema.SchemaError>
 
 const strict = { onExcessProperty: "error" } as const
 const chatResult = Schema.String.check(Schema.isMaxLength(100_000))
-const optionalChatIdentifier = Schema.optionalKey(chatIdentifier)
 
 export const ActiveRunStatusSchema = Schema.Literals(ACTIVE_RUN_STATUSES)
 
@@ -67,34 +79,32 @@ export const ChatReplyContextSchema = Schema.Struct({
   content: chatMessage
 })
 
+const ImageInputSchema = Schema.Struct({ mediaType: ImageMediaTypeSchema, data: ImageDataSchema })
+
+const imageWire = (images: ReadonlyArray<typeof ImageInputSchema.Type>) =>
+  images.map((image) => ({ type: "image" as const, media_type: image.mediaType, data: image.data }))
+
 export const ChatMessageInputSchema = Schema.Struct({
   sessionId: chatIdentifier,
-  clientId: Schema.optionalKey(chatIdentifier),
+  clientId: chatIdentifier,
   message: chatMessage,
-  approvalReply: Schema.optionalKey(
-    Schema.Struct({ runId: chatIdentifier, toolId: chatIdentifier })
-  ),
-  approvalMode: Schema.optionalKey(Schema.Literals(APPROVAL_MODES)),
-  images: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        mediaType: ImageMediaTypeSchema,
-        data: ImageDataSchema
-      })
-    )
-  ),
-  replyTo: Schema.optionalKey(
-    Schema.Union([
-      ChatReplyContextSchema,
-      Schema.NonEmptyArray(ChatReplyContextSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX))
-    ])
-  ),
-  sentFrom: Schema.optionalKey(ChatSentFromSchema),
-  capture: Schema.optionalKey(ChatCaptureViaSchema),
-  outputSchema: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json))
+  images: Schema.Array(ImageInputSchema),
+  replyTo: Schema.Array(ChatReplyContextSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX)),
+  approvalReply: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(APPROVAL_REPLY.none) }),
+    Schema.Struct({
+      kind: Schema.Literal(APPROVAL_REPLY.deny),
+      runId: chatIdentifier,
+      toolId: chatIdentifier
+    })
+  ]),
+  approvalMode: RequestedApprovalModeSchema,
+  sentFrom: SentFromSchema,
+  capture: ChatCaptureSchema,
+  outputSchema: AnswerShapeSchema
 }).check(
   Schema.makeFilter((request) =>
-    request.message.trim().length > 0 || (request.images?.length ?? 0) > 0
+    request.message.trim().length > 0 || request.images.length > 0
       ? undefined
       : { path: ["message"], issue: "message or images must contain content" }
   )
@@ -104,93 +114,53 @@ export const ToolResultInputSchema = Schema.Struct({
   runId: chatIdentifier,
   toolId: chatIdentifier,
   result: chatResult,
-  approved: Schema.optionalKey(Schema.Boolean),
-  grantStanding: Schema.optionalKey(Schema.Boolean),
-  grantList: Schema.optionalKey(Schema.Literals(["space", "global"])),
-  attachFolderToSpace: Schema.optionalKey(Schema.Boolean),
-  editedArguments: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
-  alternative: Schema.optionalKey(Schema.Literal("draft")),
-  askedAt: Schema.optionalKey(Schema.NonEmptyString),
-  commandId: Schema.optionalKey(Schema.NonEmptyString)
-}).check(
-  Schema.makeFilter((input) =>
-    input.grantList !== undefined && input.grantStanding !== true
-      ? { path: ["grantList"], issue: "requires grantStanding to be true" }
-      : undefined
-  ),
-  Schema.makeFilter((input) =>
-    input.editedArguments !== undefined && input.approved !== true
-      ? { path: ["editedArguments"], issue: "requires approved to be true" }
-      : undefined
-  ),
-  Schema.makeFilter((input) =>
-    input.alternative !== undefined && input.approved !== true
-      ? { path: ["alternative"], issue: "requires approved to be true" }
-      : undefined
-  ),
-  Schema.makeFilter((input) =>
-    input.attachFolderToSpace === true && input.approved !== true
-      ? { path: ["attachFolderToSpace"], issue: "requires approved to be true" }
-      : undefined
-  ),
-  Schema.makeFilter((input) =>
-    input.attachFolderToSpace === true && input.grantStanding === true
-      ? { path: ["attachFolderToSpace"], issue: "cannot be combined with grantStanding" }
-      : undefined
-  )
-)
+  decision: ToolDecisionSchema,
+  asked: DecisionAskedSchema,
+  command: RelayCommandSchema
+})
 
 export const ConnectionResultInputSchema = Schema.Struct({
   runId: chatIdentifier,
   toolId: chatIdentifier,
   connectionId: chatIdentifier,
-  result: Schema.optionalKey(chatResult),
+  result: ConnectionResultTextSchema,
   approved: Schema.Boolean
 })
 
-export const CancelInputSchema = Schema.Struct({
-  runId: optionalChatIdentifier,
-  sessionId: optionalChatIdentifier,
-  holdQueue: Schema.optionalKey(Schema.Boolean)
-}).check(
-  Schema.makeFilter((input) => {
-    const hasRun = input.runId !== undefined
-    const hasSession = input.sessionId !== undefined
-    if (hasRun === hasSession) return "requires exactly one of runId or sessionId"
-    return input.holdQueue === true && !hasSession ? "holdQueue needs a sessionId" : undefined
+export const CancelInputSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CANCEL_TARGET.run), runId: chatIdentifier }),
+  Schema.Struct({
+    kind: Schema.Literal(CANCEL_TARGET.session),
+    sessionId: chatIdentifier,
+    holdQueue: Schema.Boolean
   })
-)
+])
+
+const pageLimit = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+
+const turnWorkWindowSchemas = [
+  Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.latest) }),
+  Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.before), cursor: chatIdentifier }),
+  Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.after), cursor: chatIdentifier })
+] as const
 
 export const HistoryRouteOptionsSchema = Schema.Struct({
-  sessionId: Schema.optionalKey(chatIdentifier),
-  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
-  before: Schema.optionalKey(chatIdentifier),
-  after: Schema.optionalKey(chatIdentifier),
-  around: Schema.optionalKey(chatIdentifier),
-  aroundSeq: Schema.optionalKey(NonNegativeIntSchema)
-}).check(
-  Schema.makeFilter((query) => {
-    const cursorCount = [query.before, query.after, query.around, query.aroundSeq].filter(
-      (value) => value !== undefined
-    ).length
-    return cursorCount <= 1 ? undefined : "history accepts only one paging cursor"
-  })
-)
+  sessionId: chatIdentifier,
+  limit: pageLimit,
+  window: Schema.Union([
+    ...turnWorkWindowSchemas,
+    Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.around), cursor: chatIdentifier }),
+    Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.aroundSeq), seq: NonNegativeIntSchema })
+  ])
+})
 
 export const TurnWorkRouteOptionsSchema = Schema.Struct({
   sessionId: chatIdentifier,
   turnId: chatIdentifier,
-  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
-  before: Schema.optionalKey(chatIdentifier),
-  after: Schema.optionalKey(chatIdentifier),
-  view: Schema.optionalKey(TurnWorkViewSchema)
-}).check(
-  Schema.makeFilter((options) =>
-    options.before !== undefined && options.after !== undefined
-      ? { path: ["after"], issue: "before and after are exclusive" }
-      : undefined
-  )
-)
+  limit: pageLimit,
+  window: Schema.Union(turnWorkWindowSchemas),
+  view: TurnWorkViewSchema
+})
 
 const TurnDetailsRouteOptionsSchema = Schema.Struct({
   sessionId: chatIdentifier,
@@ -220,18 +190,20 @@ const QueuedMessagePathInputSchema = Schema.Struct({
   sessionId: chatIdentifier
 })
 
-/** `POST /chat/message` receipt. A busy receipt has no run; every other status names one. */
 export const ChatReceiptResponseSchema = withExtras({
-  run_id: Schema.NullOr(Schema.NonEmptyString),
+  run: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RECEIPT_RUN.none) }),
+    Schema.Struct({ kind: Schema.Literal(RECEIPT_RUN.run), run_id: Schema.NonEmptyString })
+  ]),
   session_id: chatIdentifier,
   status: ChatReceiptStatusSchema,
-  delivery: Schema.optionalKey(Schema.Literals(["started", "steered"] as const)),
-  client_id: optionalNullableString
+  delivery: Schema.Literals([CHAT_DELIVERY.started, CHAT_DELIVERY.steered, CHAT_DELIVERY.none]),
+  client_id: chatIdentifier
 }).check(
   Schema.makeFilter((receipt) =>
-    (receipt.status === "busy") === (receipt.run_id === null)
+    (receipt.status === CHAT_RECEIPT_STATUS.busy) === (receipt.run.kind === RECEIPT_RUN.none)
       ? undefined
-      : { path: ["run_id"], issue: "must be null exactly when status is busy" }
+      : { path: ["run"], issue: "must be none exactly when status is busy" }
   )
 )
 
@@ -263,8 +235,8 @@ export const QueuedCancelResponseSchema = withExtras({
 })
 
 const queuedMessageContent = Schema.makeFilter(
-  (value: { readonly message: string; readonly images?: ReadonlyArray<unknown> }) =>
-    value.message.trim().length > 0 || (value.images?.length ?? 0) > 0
+  (value: { readonly message: string; readonly images: ReadonlyArray<unknown> }) =>
+    value.message.trim().length > 0 || value.images.length > 0
       ? undefined
       : { path: ["message"], issue: "message or images must contain content" }
 )
@@ -272,8 +244,8 @@ const queuedMessageContent = Schema.makeFilter(
 export const EnqueueChatMessageRequestSchema = withExtras({
   client_id: chatIdentifier,
   message: chatMessage,
-  images: Schema.optionalKey(Schema.Array(ChatImageSchema)),
-  sent_from: Schema.optionalKey(ChatSentFromSchema)
+  images: Schema.Array(ChatImageSchema),
+  sent_from: SentFromSchema
 }).check(queuedMessageContent)
 
 const QueueOrderSchema = Schema.Array(chatIdentifier).check(
@@ -298,8 +270,11 @@ export const QueuedChatMessageSchema: Schema.Codec<QueuedChatMessage> = withExtr
   message: chatMessage,
   images: Schema.Array(ChatImageSchema),
   enqueued_at: IsoDateTimeStringSchema,
-  sent_from: Schema.optionalKey(ChatSentFromSchema),
-  failed_reason: Schema.optionalKey(Schema.NonEmptyString)
+  sent_from: SentFromSchema,
+  failure: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(QUEUED_FAILURE.none) }),
+    Schema.Struct({ kind: Schema.Literal(QUEUED_FAILURE.failed), reason: Schema.NonEmptyString })
+  ])
 })
 
 export const QueuedChatMessagesSchema: Schema.Codec<QueuedChatMessages> = withExtras({
@@ -317,62 +292,40 @@ export const EnqueueChatMessageInputSchema = Schema.Struct({
   sessionId: chatIdentifier,
   clientId: chatIdentifier,
   message: chatMessage,
-  images: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        mediaType: ImageMediaTypeSchema,
-        data: ImageDataSchema
-      })
-    )
-  ),
-  sentFrom: Schema.optionalKey(ChatSentFromSchema)
+  images: Schema.Array(ImageInputSchema),
+  sentFrom: SentFromSchema
 }).check(queuedMessageContent)
 
 export const encodeChatMessageRequestEffect = (
   value: unknown
 ): Effect.Effect<PreparedChatMessage, Schema.SchemaError> =>
   Schema.decodeUnknownEffect(ChatMessageInputSchema)(value, strict).pipe(
-    Effect.map((input): PreparedChatMessage => {
-      const clientId = input.clientId ?? globalThis.crypto.randomUUID()
-      return {
-        clientId,
-        body: JSON.stringify({
-          message: input.message,
-          session_id: input.sessionId,
-          client_id: clientId,
-          ...(input.approvalReply === undefined
-            ? {}
-            : {
-                approval_reply: {
-                  run_id: input.approvalReply.runId,
-                  tool_id: input.approvalReply.toolId
-                }
-              }),
-          ...(input.approvalMode === undefined ? {} : { approval_mode: input.approvalMode }),
-          ...(input.sentFrom === undefined ? {} : { sent_from: input.sentFrom }),
-          ...(input.capture === undefined ? {} : { capture: input.capture }),
-          ...(input.outputSchema === undefined ? {} : { output_schema: input.outputSchema }),
-          ...(input.replyTo === undefined
-            ? {}
-            : {
-                reply_to: chatReplyContexts(input.replyTo).map((quoted) => ({
-                  message_id: quoted.messageId,
-                  role: quoted.role,
-                  content: quoted.content
-                }))
-              }),
-          ...(input.images === undefined
-            ? {}
-            : {
-                images: input.images.map((image) => ({
-                  type: "image" as const,
-                  media_type: image.mediaType,
-                  data: image.data
-                }))
-              })
-        })
-      }
-    })
+    Effect.map((input): PreparedChatMessage => ({
+      clientId: input.clientId,
+      body: JSON.stringify({
+        session_id: input.sessionId,
+        client_id: input.clientId,
+        message: input.message,
+        images: imageWire(input.images),
+        reply_to: input.replyTo.map((quoted) => ({
+          message_id: quoted.messageId,
+          role: quoted.role,
+          content: quoted.content
+        })),
+        approval_reply:
+          input.approvalReply.kind === APPROVAL_REPLY.deny
+            ? {
+                kind: APPROVAL_REPLY.deny,
+                run_id: input.approvalReply.runId,
+                tool_id: input.approvalReply.toolId
+              }
+            : input.approvalReply,
+        approval_mode: input.approvalMode,
+        sent_from: input.sentFrom,
+        capture: input.capture,
+        output_schema: input.outputSchema
+      })
+    }))
   )
 
 export const encodeEnqueueChatMessageRequestEffect = (value: unknown): EncodedText =>
@@ -381,16 +334,8 @@ export const encodeEnqueueChatMessageRequestEffect = (value: unknown): EncodedTe
       JSON.stringify({
         client_id: input.clientId,
         message: input.message,
-        ...(input.sentFrom === undefined ? {} : { sent_from: input.sentFrom }),
-        ...(input.images === undefined
-          ? {}
-          : {
-              images: input.images.map((image) => ({
-                type: "image" as const,
-                media_type: image.mediaType,
-                data: image.data
-              }))
-            })
+        images: imageWire(input.images),
+        sent_from: input.sentFrom
       })
     )
   )
@@ -402,16 +347,9 @@ export const encodeToolResultRequestEffect = (value: unknown): EncodedText =>
         run_id: input.runId,
         tool_id: input.toolId,
         result: input.result,
-        ...(input.approved === undefined ? {} : { approved: input.approved }),
-        ...(input.grantStanding === undefined ? {} : { grant_standing: input.grantStanding }),
-        ...(input.grantList === undefined ? {} : { grant_list: input.grantList }),
-        ...(input.attachFolderToSpace === undefined
-          ? {}
-          : { attach_folder_to_space: input.attachFolderToSpace }),
-        ...(input.editedArguments === undefined ? {} : { edited_arguments: input.editedArguments }),
-        ...(input.alternative === undefined ? {} : { alternative: input.alternative }),
-        ...(input.askedAt === undefined ? {} : { asked_at: input.askedAt }),
-        ...(input.commandId === undefined ? {} : { command_id: input.commandId })
+        decision: input.decision,
+        asked: input.asked,
+        command: input.command
       })
     )
   )
@@ -423,7 +361,7 @@ export const encodeConnectionResultRequestEffect = (value: unknown): EncodedText
         run_id: input.runId,
         tool_id: input.toolId,
         connection_id: input.connectionId,
-        ...(input.result === undefined ? {} : { result: input.result }),
+        result: input.result,
         approved: input.approved
       })
     )
@@ -432,27 +370,31 @@ export const encodeConnectionResultRequestEffect = (value: unknown): EncodedText
 export const encodeCancelRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(CancelInputSchema)(value, strict).pipe(
     Effect.map((input) =>
-      input.runId !== undefined
-        ? JSON.stringify({ run_id: input.runId })
+      input.kind === CANCEL_TARGET.run
+        ? JSON.stringify({ kind: input.kind, run_id: input.runId })
         : JSON.stringify({
+            kind: input.kind,
             session_id: input.sessionId,
-            ...(input.holdQueue === true ? { hold_queue: true } : {})
+            hold_queue: input.holdQueue
           })
     )
   )
 
+const windowQuery = (query: URLSearchParams, window: HistoryWindow): void => {
+  query.set("window", window.kind)
+  if (window.kind === HISTORY_WINDOW.aroundSeq) query.set("seq", String(window.seq))
+  else if (window.kind !== HISTORY_WINDOW.latest) query.set("cursor", window.cursor)
+}
+
 export const encodeHistoryPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(HistoryRouteOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
-      const query = new URLSearchParams()
-      if (options.sessionId !== undefined) query.set("session_id", options.sessionId)
-      if (options.limit !== undefined) query.set("limit", String(options.limit))
-      if (options.before !== undefined) query.set("before", options.before)
-      if (options.after !== undefined) query.set("after", options.after)
-      if (options.around !== undefined) query.set("around", options.around)
-      if (options.aroundSeq !== undefined) query.set("around_seq", String(options.aroundSeq))
-      const suffix = query.toString()
-      return suffix.length === 0 ? "/session/history" : `/session/history?${suffix}`
+      const query = new URLSearchParams({
+        session_id: options.sessionId,
+        limit: String(options.limit)
+      })
+      windowQuery(query, options.window)
+      return `/session/history?${query.toString()}`
     })
   )
 
@@ -461,12 +403,11 @@ export const encodeTurnWorkPathEffect = (value: unknown): EncodedText =>
     Effect.map((options) => {
       const query = new URLSearchParams({
         session_id: options.sessionId,
-        turn_id: options.turnId
+        turn_id: options.turnId,
+        limit: String(options.limit),
+        view: options.view
       })
-      if (options.limit !== undefined) query.set("limit", String(options.limit))
-      if (options.before !== undefined) query.set("before", options.before)
-      if (options.after !== undefined) query.set("after", options.after)
-      if (options.view !== undefined) query.set("view", options.view)
+      windowQuery(query, options.window)
       return `/session/turn-work?${query.toString()}`
     })
   )

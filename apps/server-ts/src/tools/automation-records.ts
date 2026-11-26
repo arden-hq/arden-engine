@@ -2,8 +2,14 @@ import { ToolExecutionError } from "@arden-hq/loop"
 import type { Automation } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { AutomationCatalog } from "../persistence/automations/catalog.js"
+import { RECORDED_HISTORY_THROUGH } from "../persistence/history.js"
 import type { AutomationStoreError } from "../persistence/automations/store.js"
 import type { MakeMutationReceiptInput } from "../persistence/tools/mutation-receipt.js"
+import type {
+  SessionListEntry,
+  SessionStore,
+  SessionStoreError
+} from "../persistence/sessions/store.js"
 import { toolFailure } from "./tool-failure.js"
 
 const failurePreview = (error: AutomationStoreError): string => {
@@ -46,10 +52,17 @@ export const lastAutomationVersion = (
   signal: AbortSignal
 ): Promise<number | undefined> =>
   Effect.runPromise(
-    store.history({ id: automation.task_id, limit: 1 }).pipe(
-      Effect.map((page) => page.through_version),
-      Effect.orElseSucceed(() => undefined)
-    ),
+    store
+      .history({
+        id: automation.task_id,
+        after_version: 0,
+        limit: 1,
+        through: RECORDED_HISTORY_THROUGH.head
+      })
+      .pipe(
+        Effect.map((page) => page.through_version),
+        Effect.orElseSucceed(() => undefined)
+      ),
     { signal }
   )
 
@@ -88,3 +101,22 @@ export const deletedAutomationResource = (
         beforeVersion: String(lastVersion),
         afterVersion: "absent"
       }
+
+const sessionStoreFailure = (error: SessionStoreError): ToolExecutionError =>
+  toolFailure(error, "Chat unavailable")
+
+export const resolveChatRef = async (
+  store: SessionStore["Service"],
+  sessionRef: string,
+  signal: AbortSignal
+): Promise<SessionListEntry> => {
+  const [session] = await Effect.runPromise(
+    store.list({ sessionRef, scope: "all", limit: 1 }).pipe(Effect.mapError(sessionStoreFailure)),
+    { signal }
+  )
+  if (session !== undefined) return session
+  throw new ToolExecutionError(`No active Chat ${sessionRef}`, {
+    preview: "Chat not found",
+    retryable: false
+  })
+}

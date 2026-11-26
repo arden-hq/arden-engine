@@ -11,7 +11,7 @@ import { Schema } from "effect"
 import { closeMcpClient, connectMcpClient, makeMcpClient } from "../mcp/client.js"
 import { McpStdioTransport } from "../mcp/transport.js"
 import { KeyedSerialQueue } from "../mcp/serial.js"
-import type { ComputerStatus, ComputerSetup } from "@arden-hq/protocol/computer"
+import type { ComputerApp, ComputerSetup } from "@arden-hq/protocol/computer"
 import { nativeAppMetadata } from "./app-metadata.js"
 import { NativeObservations } from "./contract.js"
 import { currentMillis } from "../runtime/clock.js"
@@ -99,9 +99,9 @@ export class NativeDriver {
       })
   }
 
-  #app: { pid: number; at: number; metadata: ComputerStatus["application"] } | undefined
+  #app: { pid: number; at: number; metadata: ComputerApp } | undefined
 
-  async application(pid: number, signal: AbortSignal): Promise<ComputerStatus["application"]> {
+  async application(pid: number, signal: AbortSignal): Promise<ComputerApp> {
     if (this.#app?.pid === pid && currentMillis() - this.#app.at < 300_000)
       return this.#app.metadata
     const metadata = await nativeAppMetadata({ pid, signal })

@@ -5,7 +5,11 @@ import { describe, expect, it } from "vitest"
 import type { ContractBackend } from "./backend.js"
 
 const renamed = (sessionId: string, name: string) => ({
-  event: { type: "session_updated", session_id: sessionId, name } satisfies ChatProjectionEvent
+  event: {
+    type: "session_updated",
+    session_id: sessionId,
+    name: { kind: "named", name }
+  } satisfies ChatProjectionEvent
 })
 
 const runId = "contract-run"
@@ -15,7 +19,8 @@ const started = (sessionId: string) => ({
     type: "RUN_STARTED",
     run_id: runId,
     session_id: sessionId,
-    turn_id: "contract-turn"
+    turn_id: "contract-turn",
+    causes: []
   } satisfies ChatProjectionEvent,
   runId
 })

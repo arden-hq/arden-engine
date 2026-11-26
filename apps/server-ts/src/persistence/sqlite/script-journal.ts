@@ -1,3 +1,4 @@
+import { AGENT_RUN } from "@arden-hq/protocol/workflows"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
@@ -240,8 +241,10 @@ interface AgentRow {
   readonly run_status: string | null
 }
 
+const AGENT_MODES = ["research", "code", "work"] as const
+
 const agentMode = (mode: string | null): ScriptAgentView["mode"] =>
-  mode === "research" || mode === "code" ? mode : null
+  AGENT_MODES.find((each) => each === mode) ?? "unrecorded"
 
 const agentStatus = (runStatus: string | null): ScriptAgentView["status"] => {
   const run = scriptChildRun(runStatus ?? undefined, undefined)
@@ -286,9 +289,11 @@ const readAgents = Effect.fn("ScriptJournal.agents")(function* (
         ...(byKey.get(row.agent_key)?.attempts ?? []),
         {
           session_ref: row.public_ref,
-          run_id: row.run_id,
           tool_call_id: row.parent_tool_call_id,
-          status: row.run_status ?? "unavailable"
+          run:
+            row.run_id === null
+              ? { kind: AGENT_RUN.none }
+              : { kind: AGENT_RUN.run, run_id: row.run_id, status: row.run_status ?? "unavailable" }
         }
       ],
       label: row.name ?? "Agent",

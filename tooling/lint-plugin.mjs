@@ -60,8 +60,13 @@ const restrictedSyntax = {
 
 const scriptFile = /\.(?:js|mjs|cjs)$/
 const typeTag = /^@(?:type|typedef|param|returns?|template|satisfies|import|property|prop|callback|overload|this|enum|extends|implements)\b/
+const citesSource = /https?:\/\/(?!localhost|127\.0\.0\.1|\[::1\])\S+|\b[\w.-]+\/[\w.-]+#\d+\b|\bcrbug\s+\d+|\bRFC\s?\d+\b/
+const licenseHeader = /^(?:\*\s*)?(?:@license|SPDX-License-Identifier:|Copyright\b)/
+const formatterIgnore = /^(?:prettier|oxfmt)-ignore\b/
+
 const allowedComment = (comment, filename) => {
   const text = comment.value.trim()
+  if (citesSource.test(text) || licenseHeader.test(text) || formatterIgnore.test(text)) return true
   if (/^(?:oxlint|eslint)-(?:disable|enable)\S*\s.*\s--\s+\S/.test(text)) return true
   if (/^@ts-expect-error\s+\S/.test(text)) return true
   if (comment.type === "Line" && /^\/\s*<reference(?:\s+(?:types|path|lib|no-default-lib|preserve|resolution-mode)=(["'])[^"']*\1)+\s*\/>\s*$/.test(comment.value)) return true
@@ -79,7 +84,7 @@ const allowedComment = (comment, filename) => {
 }
 
 const noCommentsMessage =
-  "No comments in code: put the reason in the commit message or the PR. Allowed: `oxlint-disable… -- reason`, `@ts-expect-error reason`, and JSDoc type tags in .js/.mjs/.cjs files"
+  "No comments in code: put the reason in the commit message or the PR. Allowed: a comment that cites its source (an issue, RFC or vendor link) for a constraint code cannot express, a license header, `prettier-ignore`, `oxlint-disable… -- reason`, `@ts-expect-error reason`, and JSDoc type tags in .js/.mjs/.cjs files"
 const noStringCompareMessage =
   "Compare with a named constant from the value's owner (an `as const` list or object, or its type guard), not a bare string"
 
@@ -196,6 +201,10 @@ const isPlatformGate = (node) => {
   )
 }
 const longFileLines = 500
+const allowsUndefined = (node) => {
+  const annotation = node.typeAnnotation?.typeAnnotation
+  return annotation?.type === "TSUnionType" && annotation.types.some((member) => member.type === "TSUndefinedKeyword")
+}
 const optionalSchemas = new Set(["optional", "optionalKey", "optionalWith", "NullOr", "UndefinedOr"])
 
 export const baselinedRules = [
@@ -317,6 +326,7 @@ export const baselinedRules = [
     description: "No optional fields in shared types.",
     collect: (_context, found) => {
       let exported = 0
+      let declaring = 0
       return {
         ExportNamedDeclaration: () => {
           exported += 1
@@ -324,12 +334,24 @@ export const baselinedRules = [
         "ExportNamedDeclaration:exit": () => {
           exported -= 1
         },
+        TSTypeAliasDeclaration: () => {
+          declaring += 1
+        },
+        "TSTypeAliasDeclaration:exit": () => {
+          declaring -= 1
+        },
+        TSInterfaceDeclaration: () => {
+          declaring += 1
+        },
+        "TSInterfaceDeclaration:exit": () => {
+          declaring -= 1
+        },
         TSPropertySignature: (node) => {
-          if (exported > 0 && node.optional) found.push({ node })
+          if ((exported > 0 || declaring > 0) && (node.optional || allowsUndefined(node))) found.push({ node })
         },
         CallExpression: (node) => {
           const callee = node.callee
-          if (exported > 0 && callee.type === "MemberExpression" && objectName(callee.object) === "Schema" && optionalSchemas.has(memberName(callee))) found.push({ node })
+          if (callee.type === "MemberExpression" && objectName(callee.object) === "Schema" && optionalSchemas.has(memberName(callee))) found.push({ node })
         }
       }
     }

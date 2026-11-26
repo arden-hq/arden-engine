@@ -1,3 +1,4 @@
+import { decisionBody } from "./fixtures/chat-requests.js"
 import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Layer, Schema } from "effect"
@@ -143,8 +144,7 @@ it.each([
             run_id: runId,
             tool_id: "write",
             result: "",
-            approved: true,
-            ...(askedAt === undefined ? {} : { asked_at: askedAt })
+            ...decisionBody(true, { askedAt, commandId: undefined })
           })
         })
       const phone = relayLoopback(

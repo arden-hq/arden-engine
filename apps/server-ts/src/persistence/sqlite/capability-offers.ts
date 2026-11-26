@@ -1,5 +1,4 @@
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
-import type { RunContext } from "@arden-hq/protocol/runs"
+import { RunContextSchema, type RunContext } from "../runs/stored-context.js"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { candidateConnected, type OfferCandidate } from "../capability-offers/match.js"

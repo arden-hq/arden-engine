@@ -21,6 +21,7 @@ export const writeCommunicationEnvelopeInTransaction = Effect.fn(
   readonly envelope: CommunicationEnvelope
   readonly createdAt: string
   readonly replace: boolean
+  readonly quiet: boolean
 }) {
   const communication = yield* Schema.decodeUnknownEffect(CommunicationEnvelopeSchema)(
     options.envelope
@@ -50,7 +51,7 @@ export const writeCommunicationEnvelopeInTransaction = Effect.fn(
     yield* options.sql`UPDATE session_turns
       SET started_at = ${options.createdAt}, ended_at = ${options.createdAt}
       WHERE session_id = ${options.sessionId} AND turn_id = ${options.messageId}`
-    if (options.envelope.shown !== false)
+    if (!options.quiet)
       yield* liftChat(options.sql, options.sessionEvents, {
         sessionId: options.sessionId,
         at: options.createdAt
@@ -86,7 +87,7 @@ export const writeCommunicationEnvelopeInTransaction = Effect.fn(
       ${options.messageId}, ${options.messageId}, ${sequence}, ${sequence},
       ${options.createdAt}, ${options.createdAt}
     )`
-  if (options.envelope.shown !== false)
+  if (!options.quiet)
     yield* liftChat(options.sql, options.sessionEvents, {
       sessionId: options.sessionId,
       at: options.createdAt

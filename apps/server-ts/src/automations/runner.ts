@@ -1,3 +1,4 @@
+import type { ChatSendReceipt } from "../persistence/chat/send-contracts.js"
 import { Effect } from "effect"
 import type { ChatMessage } from "../chat/message.js"
 import { ChatMessageError, type ChatMessageFailure } from "../chat/message-errors.js"
@@ -7,7 +8,6 @@ import type {
   AutomationBlockedReport,
   TerminalAutomationChatRun
 } from "../persistence/automations/queue.js"
-import type { ChatReceipt } from "@arden-hq/protocol/chat"
 import { automationModelSelection } from "./model-selection.js"
 import { iso } from "../runtime/clock.js"
 
@@ -109,7 +109,7 @@ export const startAutomationRun = (
   chat: Pick<ChatMessage["Service"], "startAutomation">,
   job: AutomationJobLease,
   run: AutomationRunStart
-): Effect.Effect<ChatReceipt, ChatMessageFailure> =>
+): Effect.Effect<ChatSendReceipt, ChatMessageFailure> =>
   chat.startAutomation({
     lease: { id: job.id, token: job.token },
     ...(run.handlerItem === undefined ? {} : { handlerItem: run.handlerItem }),

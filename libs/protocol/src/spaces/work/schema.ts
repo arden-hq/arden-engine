@@ -22,24 +22,19 @@ import {
   WORK_ATTACHMENT_MEDIA_TYPE_MAX_CHARS,
   WORK_ATTACHMENT_NAME_MAX_CHARS,
   WORK_COMMENT_BODY_MAX_CHARS,
-  WORK_PAGE_MAX_LIMIT,
   WORK_TASK_BODY_MAX_CHARS,
   WORK_TASK_KEY_MAX_CHARS,
-  WORK_TASK_TEXT_MAX_CHARS,
-  TASK_STATE_LINE_MAX_CHARS,
-  TASK_STATE_SECTION_MAX_LINES
+  WORK_TASK_TEXT_MAX_CHARS
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
 type EncodedText = Effect.Effect<string, Schema.SchemaError>
-type Decoded<S extends Schema.Decoder<unknown>> = Effect.Effect<S["Type"], Schema.SchemaError>
 const NonEmptyStringSchema = Schema.String.check(Schema.isMinLength(1))
 const TrimmedTextSchema = Schema.Trim.check(Schema.isMinLength(1))
 const WorkTimestampSchema = IsoDateTimeStringSchema
-const NullableWorkTimestampSchema = Schema.NullOr(WorkTimestampSchema)
 /** `due_at` is display-only in the live server and historically accepts
  * free-form text; `next_attempt_at` is the scheduler-owned parsed field. */
-const DueAtSchema = Schema.String.check(Schema.isMaxLength(512))
+export const DueAtSchema = Schema.String.check(Schema.isMaxLength(512))
 
 const boundedTrimmed = (maximum: number) => TrimmedTextSchema.check(Schema.isMaxLength(maximum))
 
@@ -55,8 +50,8 @@ export const WorkTaskKeySchema = boundedTrimmed(WORK_TASK_KEY_MAX_CHARS).check(
   )
 )
 
-const taskTextInputSchema = boundedTrimmed(WORK_TASK_TEXT_MAX_CHARS).check(noLineBreaks)
-const taskBodyInputSchema = Schema.String.check(Schema.isMaxLength(WORK_TASK_BODY_MAX_CHARS))
+export const TaskTextInputSchema = boundedTrimmed(WORK_TASK_TEXT_MAX_CHARS).check(noLineBreaks)
+export const TaskBodyInputSchema = Schema.String.check(Schema.isMaxLength(WORK_TASK_BODY_MAX_CHARS))
 const commentBodyInputSchema = boundedTrimmed(WORK_COMMENT_BODY_MAX_CHARS)
 export const SpaceTaskStatusSchema = Schema.Literals([
   "open",
@@ -64,7 +59,7 @@ export const SpaceTaskStatusSchema = Schema.Literals([
   "done",
   "cancelled"
 ] as const)
-const SpaceTaskActivitySchema = Schema.Literals([
+export const SpaceTaskActivitySchema = Schema.Literals([
   "idle",
   "working",
   "needs_you",
@@ -72,10 +67,10 @@ const SpaceTaskActivitySchema = Schema.Literals([
   "on_hold",
   "stopped"
 ] as const)
-const taskWaitingOnSchema = Schema.Literals(["you", "external"] as const)
-const taskOwnerSchema = Schema.Literals(["worker", "user", "external"] as const)
-const taskRunsInSchema = Schema.Literals(["chat", "background"] as const)
-const taskCommentKindSchema = Schema.Literals(["note", "ask"] as const)
+export const TaskWaitingOnSchema = Schema.Literals(["you", "external"] as const)
+export const TaskOwnerSchema = Schema.Literals(["worker", "user", "external"] as const)
+export const TaskRunsInSchema = Schema.Literals(["chat", "background"] as const)
+export const TaskCommentKindSchema = Schema.Literals(["note", "ask"] as const)
 
 const mediaTypeInputSchema = boundedTrimmed(WORK_ATTACHMENT_MEDIA_TYPE_MAX_CHARS).check(
   Schema.makeFilter((value) =>
@@ -152,60 +147,47 @@ export const SpaceTaskCaptureSchema = Schema.Union([
   SpaceTaskCaptureInputSchema,
   Schema.Struct({ basis: Schema.Literal("unrecorded"), reason: Schema.Null })
 ])
-const sourceRevisionSchema = Schema.NullOr(sourceIdentitySchema)
+const tag = <const Tag extends string, Fields extends Schema.Struct.Fields>(
+  kind: Tag,
+  fields: Fields
+) => Schema.Struct({ kind: Schema.Literal(kind), ...fields })
+
+const sourceRevisionSchema = Schema.Union([
+  tag("unrecorded", {}),
+  tag("recorded", { revision: sourceIdentitySchema })
+]).pipe(Schema.toTaggedUnion("kind"))
+
 export const SpaceTaskSourceSchema = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("chat"),
+  tag("chat", {
     session_id: sourceIdentitySchema,
-    turn_id: Schema.NullOr(sourceIdentitySchema),
+    turn: Schema.Union([
+      tag("whole_chat", {}),
+      tag("turn", { turn_id: sourceIdentitySchema })
+    ]).pipe(Schema.toTaggedUnion("kind")),
     revision: sourceRevisionSchema
   }),
-  Schema.Struct({
-    kind: Schema.Literal("memory"),
-    page_ref: WikiPageIdSchema,
-    revision: sourceIdentitySchema
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("task"),
-    item_id: sourceIdentitySchema,
-    revision: sourceRevisionSchema
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("space"),
-    space_id: sourceIdentitySchema,
-    revision: sourceRevisionSchema
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("connection_item"),
-    item_id: sourceIdentitySchema,
-    revision: sourceIdentitySchema
-  })
-])
+  tag("memory", { page_ref: WikiPageIdSchema, revision: sourceIdentitySchema }),
+  tag("task", { item_id: sourceIdentitySchema, revision: sourceRevisionSchema }),
+  tag("space", { space_id: sourceIdentitySchema, revision: sourceRevisionSchema }),
+  tag("connection_item", { item_id: sourceIdentitySchema, revision: sourceIdentitySchema })
+]).pipe(Schema.toTaggedUnion("kind"))
 
 const SpaceTaskEvidenceSchema = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("tool_call"),
+  tag("tool_call", {
     tool_call_id: NonEmptyStringSchema,
     tool_name: NonEmptyStringSchema,
-    exit_code: Schema.optionalKey(Schema.Int)
+    exit: Schema.Union([tag("unknown", {}), tag("exited", { code: Schema.Int })]).pipe(
+      Schema.toTaggedUnion("kind")
+    )
   }),
-  Schema.Struct({
-    kind: Schema.Literal("file"),
+  tag("file", {
     path: NonEmptyStringSchema,
     size: NonNegativeIntSchema,
     modified_at: Schema.String
   }),
-  Schema.Struct({
-    kind: Schema.Literal("attachment"),
-    attachment_id: PositiveIntSchema,
-    name: NonEmptyStringSchema
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("url"),
-    url: NonEmptyStringSchema,
-    tool_call_id: NonEmptyStringSchema
-  })
-])
+  tag("attachment", { attachment_id: PositiveIntSchema, name: NonEmptyStringSchema }),
+  tag("url", { url: NonEmptyStringSchema, tool_call_id: NonEmptyStringSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
 
 const SpaceTaskContractLineSchema = Schema.Union([
   Schema.Struct({
@@ -217,96 +199,124 @@ const SpaceTaskContractLineSchema = Schema.Union([
     line_id: PositiveIntSchema,
     kind: Schema.Literal("criterion"),
     text: NonEmptyStringSchema,
-    met: Schema.NullOr(
-      Schema.Struct({ evidence: SpaceTaskEvidenceSchema, recorded_at: Schema.String })
-    )
+    met: Schema.Union([
+      tag("unmet", {}),
+      tag("met", { evidence: SpaceTaskEvidenceSchema, recorded_at: Schema.String })
+    ]).pipe(Schema.toTaggedUnion("kind"))
   }),
   Schema.Struct({
     line_id: PositiveIntSchema,
     kind: Schema.Literal("decision"),
     text: NonEmptyStringSchema,
-    rejected: Schema.NullOr(NonEmptyStringSchema)
+    rejected: Schema.Union([
+      tag("none", {}),
+      tag("rejected", { option: NonEmptyStringSchema })
+    ]).pipe(Schema.toTaggedUnion("kind"))
   })
 ])
 
-const SpaceTaskStateSchema = Schema.Struct({
-  done: Schema.Array(Schema.String),
-  in_progress: Schema.Array(
-    Schema.Struct({ what: Schema.String, handle: Schema.optionalKey(Schema.String) })
-  ),
-  decided: Schema.Array(Schema.String),
-  rejected: Schema.Array(Schema.Struct({ option: Schema.String, why: Schema.String })),
-  next: Schema.Array(Schema.String),
-  written_at: Schema.String
+const TaskBodyReadSchema = Schema.Union([
+  tag("plain", {}),
+  tag("detailed", { text: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+export const TaskJobSchema = Schema.Struct({
+  what: Schema.String,
+  handle: Schema.Union([tag("untracked", {}), tag("tracked", { handle: Schema.String })]).pipe(
+    Schema.toTaggedUnion("kind")
+  )
 })
 
+const TaskSpaceSchema = Schema.Union([
+  tag("loose", {}),
+  tag("space", { space_id: NonEmptyStringSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
+
 const spaceTaskFields = {
-  history_revision: Schema.NullOr(NonEmptyStringSchema),
+  history: Schema.Union([
+    tag("unrecorded", {}),
+    tag("recorded", { revision: NonEmptyStringSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
   item_id: NonEmptyStringSchema,
-  space_id: Schema.NullOr(NonEmptyStringSchema),
-  home_session_id: Schema.NullOr(NonEmptyStringSchema),
+  space: TaskSpaceSchema,
+  home_chat: Schema.Union([
+    tag("none", {}),
+    tag("chat", { session_id: NonEmptyStringSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
   stable_key: NonEmptyStringSchema,
   text: NonEmptyStringSchema,
-  body: Schema.NullOr(Schema.String),
-  status: SpaceTaskStatusSchema,
-  activity: SpaceTaskActivitySchema,
-  hold: Schema.NullOr(
-    Schema.Struct({ question_id: NonEmptyStringSchema, acknowledged_at: WorkTimestampSchema })
+  body: TaskBodyReadSchema,
+  activity: Schema.Union([
+    Schema.Struct({
+      kind: Schema.Literals(["idle", "working", "needs_you", "waiting", "on_hold"] as const)
+    }),
+    tag("stopped", {
+      stop: Schema.Union([
+        tag("unrecorded", {}),
+        tag("recorded", {
+          stop_kind: Schema.Literals(["restart", "cancelled", "stalled", "failed"] as const),
+          reason: Schema.String
+        })
+      ]).pipe(Schema.toTaggedUnion("kind"))
+    })
+  ]),
+  hold: Schema.Union([
+    tag("none", {}),
+    tag("held", { question_id: NonEmptyStringSchema, acknowledged_at: WorkTimestampSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  owner: TaskOwnerSchema,
+  runs_in: TaskRunsInSchema,
+  token_budget: Schema.Union([
+    tag("uncapped", {}),
+    tag("capped", { tokens: PositiveIntSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  block: Schema.Union([
+    tag("unblocked", {}),
+    tag("blocked", { waiting_on: TaskWaitingOnSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  due: Schema.Union([tag("none", {}), tag("due", { at: DueAtSchema })]).pipe(
+    Schema.toTaggedUnion("kind")
   ),
-  stop_reason: Schema.NullOr(Schema.String),
-  stop_kind: Schema.NullOr(Schema.Literals(["restart", "cancelled", "stalled", "failed"])),
-  owner: taskOwnerSchema,
-  runs_in: taskRunsInSchema,
-  token_budget: Schema.NullOr(PositiveIntSchema),
-  blocked: Schema.Boolean,
-  waiting_on: Schema.NullOr(taskWaitingOnSchema),
-  due_at: Schema.NullOr(DueAtSchema),
-  next_attempt_at: NullableWorkTimestampSchema,
+  next_attempt: Schema.Union([tag("none", {}), tag("at", { at: WorkTimestampSchema })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
   created_at: WorkTimestampSchema,
   updated_at: WorkTimestampSchema,
-  completed_at: NullableWorkTimestampSchema,
-  created_by: Schema.NullOr(Schema.String),
-  seq: Schema.NullOr(NonNegativeIntSchema),
+  created_by: Schema.Union([tag("unrecorded", {}), tag("recorded", { by: Schema.String })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
+  seq: Schema.Union([tag("unnumbered", {}), tag("numbered", { seq: NonNegativeIntSchema })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
   block_count: NonNegativeIntSchema,
   sources: Schema.Array(SpaceTaskSourceSchema),
   capture: SpaceTaskCaptureSchema,
   contract: Schema.Array(SpaceTaskContractLineSchema),
-  state: Schema.NullOr(SpaceTaskStateSchema)
+  state: Schema.Union([
+    tag("unwritten", {}),
+    tag("written", {
+      done: Schema.Array(Schema.String),
+      in_progress: Schema.Array(TaskJobSchema),
+      decided: Schema.Array(Schema.String),
+      rejected: Schema.Array(Schema.Struct({ option: Schema.String, why: Schema.String })),
+      next: Schema.Array(Schema.String),
+      written_at: Schema.String
+    })
+  ]).pipe(Schema.toTaggedUnion("kind"))
 } as const
 
-/** A blocked task names who it waits on; an unblocked one names nobody. */
-const waitingOnIssue = (task: { readonly blocked: boolean; readonly waiting_on: unknown }) => {
-  if (task.blocked) {
-    return task.waiting_on !== null
-      ? undefined
-      : { path: ["waiting_on"], issue: "is required for a blocked task" }
-  }
-  return task.waiting_on === null
-    ? undefined
-    : { path: ["waiting_on"], issue: "must be null for an unblocked task" }
-}
-
-/** Stored task invariants are also the public contract: the block owner is
- * never present on an unblocked task, and terminal tasks have a completion
- * timestamp while live tasks do not. */
-export const SpaceTaskSchema: Schema.Codec<SpaceTask> = withExtras(spaceTaskFields).check(
-  Schema.makeFilter((task) => waitingOnIssue(task)),
-  Schema.makeFilter((task) => {
-    const terminal = task.status === "done" || task.status === "cancelled"
-    return terminal === (task.completed_at !== null)
-      ? undefined
-      : {
-          path: ["completed_at"],
-          issue: terminal
-            ? "is required for a completed or cancelled task"
-            : "must be null for an active task"
-        }
+export const SpaceTaskSchema: Schema.Codec<SpaceTask> = Schema.Union([
+  withExtras({ ...spaceTaskFields, status: Schema.Literals(["open", "deferred"] as const) }),
+  withExtras({
+    ...spaceTaskFields,
+    status: Schema.Literals(["done", "cancelled"] as const),
+    completed_at: WorkTimestampSchema
   })
-)
+])
 
 export const SpaceTaskAttachmentSchema: Schema.Codec<SpaceTaskAttachment> = withExtras({
   attachment_id: PositiveIntSchema,
-  space_id: Schema.NullOr(NonEmptyStringSchema),
+  space: TaskSpaceSchema,
   item_id: NonEmptyStringSchema,
   name: NonEmptyStringSchema,
   media_type: NonEmptyStringSchema,
@@ -323,19 +333,23 @@ export const SpaceTaskAttachmentSchema: Schema.Codec<SpaceTaskAttachment> = with
 
 export const SpaceTaskCommentSchema: Schema.Codec<SpaceTaskComment> = withExtras({
   comment_id: PositiveIntSchema,
-  space_id: Schema.NullOr(NonEmptyStringSchema),
+  space: TaskSpaceSchema,
   item_id: NonEmptyStringSchema,
   author: NonEmptyStringSchema,
   body: NonEmptyStringSchema,
   created_at: WorkTimestampSchema,
-  kind: taskCommentKindSchema
+  kind: TaskCommentKindSchema
 })
 
 export const SpaceTaskEventSchema = withExtras({
   event_id: PositiveIntSchema,
-  space_id: Schema.NullOr(NonEmptyStringSchema),
-  item_id: Schema.NullOr(Schema.String),
-  run_ref: Schema.NullOr(Schema.String),
+  space: TaskSpaceSchema,
+  item: Schema.Union([tag("space_wide", {}), tag("item", { item_id: Schema.String })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
+  run: Schema.Union([tag("none", {}), tag("run", { run_ref: Schema.String })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
   event_type: NonEmptyStringSchema,
   content: Schema.Struct({
     kind: Schema.Literals(["summary", "result"]),
@@ -351,21 +365,24 @@ export const SpaceTaskEventSchema = withExtras({
   )
 )
 
+const RunRefSchema = Schema.Union([
+  tag("none", {}),
+  tag("run", { run_id: NonEmptyStringSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
+
 export const SpaceTaskResultSchema = withExtras({
   result_key: NonEmptyStringSchema,
-  summary: Schema.NullOr(boundedTrimmed(500)),
+  summary: Schema.Union([tag("none", {}), tag("summary", { text: boundedTrimmed(500) })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
   unseen: Schema.Boolean,
   item_id: NonEmptyStringSchema,
   text: NonEmptyStringSchema,
   created_at: WorkTimestampSchema,
   source: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("event"), event_id: PositiveIntSchema }),
-    Schema.Struct({
-      kind: Schema.Literal("attempt"),
-      attempt_id: PositiveIntSchema,
-      run_id: Schema.NullOr(NonEmptyStringSchema)
-    })
-  ])
+    tag("event", { event_id: PositiveIntSchema }),
+    tag("attempt", { attempt_id: PositiveIntSchema, run: RunRefSchema })
+  ]).pipe(Schema.toTaggedUnion("kind"))
 })
 
 export const SpaceSnapshotSchema = withExtras({
@@ -380,31 +397,24 @@ const SpaceTaskRunSchema = withExtras({
   attempt_count: NonNegativeIntSchema,
   item_id: NonEmptyStringSchema,
   session_id: NonEmptyStringSchema,
-  running: Schema.Boolean,
-  run_id: Schema.NullOr(PositiveIntSchema),
-  chat_run_id: Schema.NullOr(NonEmptyStringSchema),
-  started_at: NullableWorkTimestampSchema,
-  ended_at: NullableWorkTimestampSchema,
-  result: Schema.NullOr(Schema.String)
-}).check(
-  Schema.makeFilter((run) => {
-    if (run.run_id === null) {
-      return run.started_at === null && run.ended_at === null && run.result === null && !run.running
-        ? undefined
-        : { path: ["run_id"], issue: "must identify a run when run data is present" }
-    }
-    if (run.started_at === null) {
-      return { path: ["started_at"], issue: "is required for an identified run" }
-    }
-    if (run.running && run.ended_at !== null) {
-      return { path: ["ended_at"], issue: "must be null while the run is active" }
-    }
-    if (!run.running && run.ended_at === null) {
-      return { path: ["ended_at"], issue: "is required after the run settles" }
-    }
-    return undefined
-  })
-)
+  run: Schema.Union([
+    tag("none", {}),
+    tag("running", {
+      run_id: PositiveIntSchema,
+      chat_run: RunRefSchema,
+      started_at: WorkTimestampSchema
+    }),
+    tag("ended", {
+      run_id: PositiveIntSchema,
+      chat_run: RunRefSchema,
+      started_at: WorkTimestampSchema,
+      ended_at: WorkTimestampSchema,
+      result: Schema.Union([tag("none", {}), tag("result", { text: Schema.String })]).pipe(
+        Schema.toTaggedUnion("kind")
+      )
+    })
+  ]).pipe(Schema.toTaggedUnion("kind"))
+})
 
 export const MoveTaskToChatInputSchema = Schema.Struct({ session_id: NonEmptyStringSchema })
 export const AcknowledgeTaskResultInputSchema = Schema.Struct({ result_key: NonEmptyStringSchema })
@@ -424,6 +434,11 @@ export const StopSpaceTaskResponseSchema: Schema.Codec<StopSpaceTaskResponse> = 
 export type StopSpaceTaskResponseAgrees = Assert<
   Agrees<(typeof StopSpaceTaskResponseSchema)["Type"], StopSpaceTaskResponse>
 >
+export const TaskApprovalSchema = withExtras({
+  ...runApprovalFields,
+  item_id: Schema.String
+}).check(Schema.makeFilter(checkRunApprovalConnection))
+
 export const WorkOkResponseSchema = Schema.Struct({ ok: Schema.Literal(true) })
 export const SpaceWorkPageSchema: Schema.Codec<SpaceWorkPage> = withExtras({
   items: Schema.Array(SpaceTaskSchema),
@@ -432,95 +447,11 @@ export const SpaceWorkPageSchema: Schema.Codec<SpaceWorkPage> = withExtras({
   attachments: Schema.Array(SpaceTaskAttachmentSchema),
   runs: Schema.Array(SpaceTaskRunSchema),
   results: Schema.Array(SpaceTaskResultSchema),
-  approvals: Schema.Array(
-    withExtras({
-      ...runApprovalFields,
-      item_id: Schema.String
-    }).check(Schema.makeFilter(checkRunApprovalConnection))
-  ),
-  next_cursor: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024)))
-})
-
-export const SpaceWorkPageOptionsSchema = Schema.Struct({
-  spaceId: Schema.optionalKey(NonEmptyStringSchema),
-  sessionId: Schema.optionalKey(NonEmptyStringSchema),
-  turnId: Schema.optionalKey(NonEmptyStringSchema),
-  itemId: Schema.optionalKey(NonEmptyStringSchema),
-  limit: Schema.optionalKey(
-    Schema.Number.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(WORK_PAGE_MAX_LIMIT)
-    )
-  ),
-  cursor: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))),
-  targetItemId: Schema.optionalKey(NonEmptyStringSchema)
-}).check(
-  Schema.makeFilter((options) =>
-    options.turnId !== undefined && options.sessionId === undefined
-      ? { path: ["turnId"], issue: "requires a Chat session" }
-      : undefined
-  ),
-  Schema.makeFilter((options) =>
-    options.cursor !== undefined && options.targetItemId !== undefined
-      ? { path: ["targetItemId"], issue: "cannot be combined with a page cursor" }
-      : undefined
-  )
-)
-
-export const SpaceWorkPageQuerySchema = Schema.Struct({
-  space_id: Schema.optionalKey(NonEmptyStringSchema),
-  session_id: Schema.optionalKey(NonEmptyStringSchema),
-  turn_id: Schema.optionalKey(NonEmptyStringSchema),
-  item_id: Schema.optionalKey(NonEmptyStringSchema),
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(WORK_PAGE_MAX_LIMIT)
-    )
-  ),
-  cursor: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))),
-  target_item_id: Schema.optionalKey(NonEmptyStringSchema)
-}).check(
-  Schema.makeFilter((query) =>
-    query.turn_id !== undefined && query.session_id === undefined
-      ? { path: ["turn_id"], issue: "requires a Chat session" }
-      : undefined
-  ),
-  Schema.makeFilter((query) =>
-    query.cursor !== undefined && query.target_item_id !== undefined
-      ? { path: ["target_item_id"], issue: "cannot be combined with a page cursor" }
-      : undefined
-  )
-)
-
-/** A new Task as the owner files it: the server picks its key from `text`. */
-const newTaskInputFields = {
-  text: taskTextInputSchema,
-  body: Schema.optionalKey(Schema.NullOr(taskBodyInputSchema)),
-  owner: Schema.optionalKey(taskOwnerSchema),
-  runs_in: Schema.optionalKey(taskRunsInSchema),
-  token_budget: Schema.optionalKey(PositiveIntSchema)
-} as const
-
-export const NewTaskInputSchema = Schema.Struct(newTaskInputFields)
-
-/** A Task under a key its caller names (a run's own Task, an accepted inference). */
-export const CreateSpaceTaskInputSchema = Schema.Struct({
-  key: WorkTaskKeySchema,
-  ...newTaskInputFields
-})
-
-export const CreateChatTaskInputSchema = Schema.Struct({
-  request: boundedTrimmed(WORK_TASK_BODY_MAX_CHARS),
-  token_budget: Schema.optionalKey(PositiveIntSchema)
-})
-
-/** A Task without a Space: in the chat `session_id` names, or in none. */
-export const CreateLooseTaskInputSchema = Schema.Struct({
-  ...newTaskInputFields,
-  session_id: Schema.optionalKey(Schema.NonEmptyString)
+  approvals: Schema.Array(TaskApprovalSchema),
+  next: Schema.Union([
+    tag("end", {}),
+    tag("more", { cursor: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024)) })
+  ]).pipe(Schema.toTaggedUnion("kind"))
 })
 
 export const CreateSpaceTaskCommentInputSchema = Schema.Struct({
@@ -534,97 +465,6 @@ export const CreateSpaceTaskAttachmentInputSchema = Schema.Struct({
 })
 
 export type CreateSpaceTaskAttachmentRequest = typeof CreateSpaceTaskAttachmentInputSchema.Type
-
-const stateLineSchema = boundedTrimmed(TASK_STATE_LINE_MAX_CHARS)
-const stateSection = <S extends Schema.Top>(line: S) =>
-  Schema.optionalKey(Schema.Array(line).check(Schema.isMaxLength(TASK_STATE_SECTION_MAX_LINES)))
-
-const TaskStateRecordPatchSchema = Schema.Struct({
-  done: stateSection(stateLineSchema),
-  in_progress: stateSection(
-    Schema.Struct({ what: stateLineSchema, handle: Schema.optionalKey(stateLineSchema) })
-  ),
-  decided: stateSection(stateLineSchema),
-  rejected: stateSection(Schema.Struct({ option: stateLineSchema, why: stateLineSchema })),
-  next: stateSection(stateLineSchema)
-}).check(
-  Schema.makeFilter((patch) =>
-    Object.keys(patch).length > 0 ? undefined : "a state record change needs at least one section"
-  )
-)
-
-const updateSpaceTaskPatchFields = {
-  continuation_context: Schema.optionalKey(Schema.NullOr(TaskStateRecordPatchSchema)),
-  completion_result: Schema.optionalKey(boundedTrimmed(500)),
-  completion_evidence: Schema.optionalKey(
-    Schema.Array(
-      Schema.Union([
-        Schema.Struct({
-          kind: Schema.Literal("attachment").annotate({
-            description: "Evidence saved as a Task attachment."
-          }),
-          attachment_id: PositiveIntSchema.annotate({
-            description: "Exact ID of the saved Task attachment."
-          }),
-          description: boundedTrimmed(500).pipe(
-            Schema.annotateEncoded({ description: "The requirement this saved result fulfills." })
-          )
-        }),
-        Schema.Struct({
-          kind: Schema.Literal("tool").annotate({
-            description: "Evidence from a confirmed write in the current Run."
-          }),
-          tool_call_id: boundedTrimmed(512).pipe(
-            Schema.annotateEncoded({
-              description: "Exact tool_call_id of the successful current-run write."
-            })
-          ),
-          description: boundedTrimmed(500).pipe(
-            Schema.annotateEncoded({
-              description: "The requirement this confirmed write fulfills."
-            })
-          )
-        })
-      ])
-    ).check(Schema.isMinLength(1), Schema.isMaxLength(20))
-  ),
-  completion_note: Schema.optionalKey(boundedTrimmed(1_000)),
-  text: Schema.optionalKey(taskTextInputSchema),
-  body: Schema.optionalKey(Schema.NullOr(taskBodyInputSchema)),
-  status: Schema.optionalKey(SpaceTaskStatusSchema),
-  owner: Schema.optionalKey(taskOwnerSchema),
-  runs_in: Schema.optionalKey(taskRunsInSchema),
-  token_budget: Schema.optionalKey(Schema.NullOr(PositiveIntSchema)),
-  blocked: Schema.optionalKey(Schema.Boolean),
-  waiting_on: Schema.optionalKey(Schema.NullOr(taskWaitingOnSchema)),
-  block_reason: Schema.optionalKey(boundedTrimmed(200)),
-  due_at: Schema.optionalKey(Schema.NullOr(DueAtSchema)),
-  next_attempt_at: Schema.optionalKey(NullableWorkTimestampSchema)
-} as const
-
-export const UpdateSpaceTaskPatchSchema = Schema.Struct(updateSpaceTaskPatchFields).check(
-  Schema.makeFilter((patch) =>
-    Object.keys(patch).length > 0 ? undefined : "an update requires at least one field"
-  ),
-  Schema.makeFilter((patch) =>
-    patch.completion_result !== undefined && patch.status !== "done"
-      ? { path: ["completion_result"], issue: "requires an explicit Done transition" }
-      : undefined
-  ),
-  Schema.makeFilter((patch) =>
-    (patch.completion_evidence !== undefined || patch.completion_note !== undefined) &&
-    (patch.status !== "done" || patch.completion_result === undefined)
-      ? "Completion evidence and notes require a completion_result and explicit Done transition"
-      : undefined
-  )
-)
-
-/** Internal optimistic-concurrency wire shape. It is intentionally exported
- * only through the Effect subpath, never as a public contract. */
-export const InternalUpdateSpaceTaskRequestSchema = Schema.Struct({
-  expected_updated_at: WorkTimestampSchema,
-  ...updateSpaceTaskPatchFields
-})
 
 /** @internal Compile-time check that the schema and the type agree. */
 export type SpaceTaskStatusAgrees = Assert<
@@ -642,14 +482,6 @@ const CreateSpaceTaskAttachmentConsumerInputSchema = Schema.Struct({
   bytes: attachmentBytesSchema
 })
 
-const SpaceTaskBlockStateSchema = Schema.Struct({
-  blocked: Schema.Boolean,
-  waiting_on: Schema.NullOr(taskWaitingOnSchema)
-}).check(Schema.makeFilter((state) => waitingOnIssue(state)))
-
-export const decodeSpaceTaskRunEffect = (value: unknown): Decoded<typeof SpaceTaskRunSchema> =>
-  Schema.decodeUnknownEffect(SpaceTaskRunSchema)(value)
-
 export const encodeCreateSpaceTaskAttachmentRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(CreateSpaceTaskAttachmentConsumerInputSchema)(value, strict).pipe(
     Effect.flatMap((input) =>
@@ -660,44 +492,4 @@ export const encodeCreateSpaceTaskAttachmentRequestEffect = (value: unknown): En
       })
     ),
     Effect.map(JSON.stringify)
-  )
-
-export const encodeUpdateSpaceTaskRequestEffect = (
-  currentTask: unknown,
-  patch: unknown
-): EncodedText =>
-  Schema.decodeUnknownEffect(SpaceTaskSchema)(currentTask).pipe(
-    Effect.flatMap((task) =>
-      decodeUpdateSpaceTaskPatchEffect(patch).pipe(
-        Effect.flatMap((validatedPatch) => {
-          const normalizedPatch =
-            validatedPatch.blocked === false && !Object.hasOwn(validatedPatch, "waiting_on")
-              ? { ...validatedPatch, waiting_on: null }
-              : validatedPatch
-
-          return Schema.decodeUnknownEffect(SpaceTaskBlockStateSchema)({
-            blocked: normalizedPatch.blocked ?? task.blocked,
-            waiting_on: Object.hasOwn(normalizedPatch, "waiting_on")
-              ? (normalizedPatch.waiting_on ?? null)
-              : task.waiting_on
-          }).pipe(
-            Effect.map(() => ({
-              expected_updated_at: task.updated_at,
-              ...normalizedPatch
-            }))
-          )
-        })
-      )
-    ),
-    Effect.flatMap((request) =>
-      Schema.decodeUnknownEffect(InternalUpdateSpaceTaskRequestSchema)(request, strict)
-    ),
-    Effect.map(JSON.stringify)
-  )
-
-export const decodeUpdateSpaceTaskPatchEffect = (
-  value: unknown
-): Decoded<typeof UpdateSpaceTaskPatchSchema> =>
-  Schema.decodeUnknownEffect(UpdateSpaceTaskPatchSchema)(value, strict).pipe(
-    Effect.map((patch) => (patch.body?.trim() === "" ? { ...patch, body: null } : patch))
   )

@@ -1,6 +1,12 @@
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../common/schema.js"
-import type { EmbeddingIndexStatus, EmbeddingModelChoice } from "./contracts.js"
+import {
+  EMBEDDING_MODEL_REF,
+  EMBEDDING_STATE,
+  type EmbeddingIndexStatus,
+  type EmbeddingModelChoice,
+  type EmbeddingModelRef
+} from "./contracts.js"
 
 const ModelIdSchema = Schema.NonEmptyString.check(Schema.isMaxLength(512))
 const ErrorTextSchema = Schema.NonEmptyString.check(Schema.isMaxLength(4_096))
@@ -16,13 +22,22 @@ const StoredIndexWireSchema = Schema.Struct({
   bytes: NonNegativeIntSchema
 })
 
+const catalog = {
+  models: Schema.Array(ModelInfoWireSchema),
+  indexes: Schema.Array(StoredIndexWireSchema)
+}
+
 const progress = {
   model_id: ModelIdSchema,
   indexed_pages: NonNegativeIntSchema,
   total_pages: NonNegativeIntSchema,
-  models: Schema.Array(ModelInfoWireSchema),
-  indexes: Schema.Array(StoredIndexWireSchema)
+  ...catalog
 }
+
+const ModelRefWireSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(EMBEDDING_MODEL_REF.none) }),
+  Schema.Struct({ kind: Schema.Literal(EMBEDDING_MODEL_REF.model), model_id: ModelIdSchema })
+])
 
 const pagesWithinTotal = Schema.makeFilter(
   (status: { readonly indexed_pages: number; readonly total_pages: number }) =>
@@ -32,79 +47,100 @@ const pagesWithinTotal = Schema.makeFilter(
 )
 
 export const EmbeddingIndexStatusResponseSchema = Schema.Union([
+  withExtras({ state: Schema.Literal(EMBEDDING_STATE.off), kept: ModelRefWireSchema, ...catalog }),
   withExtras({
-    state: Schema.Literal("idle"),
-    kept_model_id: Schema.NullOr(ModelIdSchema),
-    unavailable_model_id: Schema.NullOr(ModelIdSchema),
-    models: Schema.Array(ModelInfoWireSchema),
-    indexes: Schema.Array(StoredIndexWireSchema)
+    state: Schema.Literal(EMBEDDING_STATE.unavailable),
+    model_id: ModelIdSchema,
+    ...catalog
   }),
-  withExtras({ state: Schema.Literal("done"), ...progress }).check(pagesWithinTotal),
+  withExtras({ state: Schema.Literal(EMBEDDING_STATE.done), ...progress }).check(pagesWithinTotal),
   withExtras({
-    state: Schema.Literals(["indexing", "paused"] as const),
+    state: Schema.Literal(EMBEDDING_STATE.indexing),
     ...progress,
-    previous_model_id: Schema.NullOr(ModelIdSchema),
+    previous: ModelRefWireSchema,
     started_at: IsoDateTimeStringSchema,
-    phase: Schema.optionalKey(Schema.Literals(["loading", "pages"] as const)),
-    eta_seconds: Schema.NullOr(NonNegativeIntSchema)
+    phase: Schema.Literals(["loading", "pages"] as const),
+    eta: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("estimating") }),
+      Schema.Struct({ kind: Schema.Literal("estimated"), seconds: NonNegativeIntSchema })
+    ])
   }).check(pagesWithinTotal),
   withExtras({
-    state: Schema.Literal("failed"),
+    state: Schema.Literal(EMBEDDING_STATE.paused),
     ...progress,
-    previous_model_id: Schema.NullOr(ModelIdSchema),
+    previous: ModelRefWireSchema,
+    started_at: IsoDateTimeStringSchema
+  }).check(pagesWithinTotal),
+  withExtras({
+    state: Schema.Literal(EMBEDDING_STATE.failed),
+    ...progress,
+    previous: ModelRefWireSchema,
     error: ErrorTextSchema
   }).check(pagesWithinTotal)
 ])
 
 type EmbeddingIndexStatusWire = Schema.Schema.Type<typeof EmbeddingIndexStatusResponseSchema>
+type ModelRefWire = Schema.Schema.Type<typeof ModelRefWireSchema>
 
-const modelsFromWire = (models: EmbeddingIndexStatusWire["models"]) =>
-  models.map((model) => ({ modelId: model.model_id, dimensions: model.dimensions }))
+const modelRefFromWire = (ref: ModelRefWire): EmbeddingModelRef =>
+  ref.kind === EMBEDDING_MODEL_REF.model ? { kind: ref.kind, modelId: ref.model_id } : ref
+
+const modelRefToWire = (ref: EmbeddingModelRef): ModelRefWire =>
+  ref.kind === EMBEDDING_MODEL_REF.model ? { kind: ref.kind, model_id: ref.modelId } : ref
 
 export const mapStatus = (status: EmbeddingIndexStatusWire): EmbeddingIndexStatus => {
-  const models = modelsFromWire(status.models)
+  const models = status.models.map((model) => ({
+    modelId: model.model_id,
+    dimensions: model.dimensions
+  }))
   const indexes = status.indexes.map((index) => ({
     modelId: index.model_id,
     role: index.role,
     bytes: index.bytes
   }))
   switch (status.state) {
-    case "idle":
-      return {
-        state: "idle",
-        keptModelId: status.kept_model_id,
-        unavailableModelId: status.unavailable_model_id,
-        models,
-        indexes
-      }
-    case "done":
-      return {
-        state: "done",
-        modelId: status.model_id,
-        indexedPages: status.indexed_pages,
-        totalPages: status.total_pages,
-        models,
-        indexes
-      }
-    case "indexing":
-    case "paused":
+    case EMBEDDING_STATE.off:
+      return { state: status.state, kept: modelRefFromWire(status.kept), models, indexes }
+    case EMBEDDING_STATE.unavailable:
+      return { state: status.state, modelId: status.model_id, models, indexes }
+    case EMBEDDING_STATE.done:
       return {
         state: status.state,
         modelId: status.model_id,
-        previousModelId: status.previous_model_id,
         indexedPages: status.indexed_pages,
         totalPages: status.total_pages,
-        startedAt: status.started_at,
-        phase: status.phase ?? "pages",
-        etaSeconds: status.eta_seconds,
         models,
         indexes
       }
-    case "failed":
+    case EMBEDDING_STATE.indexing:
       return {
-        state: "failed",
+        state: status.state,
         modelId: status.model_id,
-        previousModelId: status.previous_model_id,
+        previous: modelRefFromWire(status.previous),
+        indexedPages: status.indexed_pages,
+        totalPages: status.total_pages,
+        startedAt: status.started_at,
+        phase: status.phase,
+        eta: status.eta,
+        models,
+        indexes
+      }
+    case EMBEDDING_STATE.paused:
+      return {
+        state: status.state,
+        modelId: status.model_id,
+        previous: modelRefFromWire(status.previous),
+        indexedPages: status.indexed_pages,
+        totalPages: status.total_pages,
+        startedAt: status.started_at,
+        models,
+        indexes
+      }
+    case EMBEDDING_STATE.failed:
+      return {
+        state: status.state,
+        modelId: status.model_id,
+        previous: modelRefFromWire(status.previous),
         indexedPages: status.indexed_pages,
         totalPages: status.total_pages,
         error: status.error,
@@ -125,42 +161,48 @@ export const embeddingStatusResponse = (status: EmbeddingIndexStatus): Embedding
     bytes: index.bytes
   }))
   switch (status.state) {
-    case "idle":
+    case EMBEDDING_STATE.off:
+      return { state: status.state, kept: modelRefToWire(status.kept), models, indexes }
+    case EMBEDDING_STATE.unavailable:
+      return { state: status.state, model_id: status.modelId, models, indexes }
+    case EMBEDDING_STATE.done:
       return {
-        state: "idle",
-        kept_model_id: status.keptModelId,
-        unavailable_model_id: status.unavailableModelId,
-        models,
-        indexes
-      }
-    case "done":
-      return {
-        state: "done",
+        state: status.state,
         model_id: status.modelId,
         indexed_pages: status.indexedPages,
         total_pages: status.totalPages,
         models,
         indexes
       }
-    case "indexing":
-    case "paused":
+    case EMBEDDING_STATE.indexing:
       return {
         state: status.state,
         model_id: status.modelId,
-        previous_model_id: status.previousModelId,
+        previous: modelRefToWire(status.previous),
         indexed_pages: status.indexedPages,
         total_pages: status.totalPages,
         started_at: status.startedAt,
         phase: status.phase,
-        eta_seconds: status.etaSeconds,
+        eta: status.eta,
         models,
         indexes
       }
-    case "failed":
+    case EMBEDDING_STATE.paused:
       return {
-        state: "failed",
+        state: status.state,
         model_id: status.modelId,
-        previous_model_id: status.previousModelId,
+        previous: modelRefToWire(status.previous),
+        indexed_pages: status.indexedPages,
+        total_pages: status.totalPages,
+        started_at: status.startedAt,
+        models,
+        indexes
+      }
+    case EMBEDDING_STATE.failed:
+      return {
+        state: status.state,
+        model_id: status.modelId,
+        previous: modelRefToWire(status.previous),
         indexed_pages: status.indexedPages,
         total_pages: status.totalPages,
         error: status.error,
@@ -170,8 +212,6 @@ export const embeddingStatusResponse = (status: EmbeddingIndexStatus): Embedding
   }
 }
 
-/** A model id turns that model on; `model_id: null` turns search off and says
- *  whether the current index is kept. */
 export const EmbeddingModelChoiceRequestSchema = Schema.Union([
   Schema.Struct({ model_id: ModelIdSchema }),
   Schema.Struct({ model_id: Schema.Null, keep_index: Schema.Boolean })

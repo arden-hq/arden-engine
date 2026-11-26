@@ -15,7 +15,6 @@ export const EventLoopMonitor: Layer.Layer<never> = Layer.effectDiscard(
       yield* diagnostics.operational({
         code: "runtime.event_loop_stall",
         severity: "warning",
-        cause: null,
         stallMs: Math.round(stallMs)
       })
     })

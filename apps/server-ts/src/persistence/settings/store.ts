@@ -42,6 +42,9 @@ export class LimitSettingsStore extends Context.Service<
   LimitSettingsStore,
   {
     readonly settings: () => Effect.Effect<LimitSettings, LimitSettingsStoreError>
+    readonly automationTokenCap: (
+      automationId: string
+    ) => Effect.Effect<number | undefined, LimitSettingsStoreError>
     readonly updateSettings: (
       patch: LimitSettingsPatch
     ) => Effect.Effect<LimitSettings, LimitSettingsStoreError>

@@ -1,3 +1,4 @@
+import { MESSAGE_PREVIEW, recoverBy } from "@arden-hq/protocol/workflows"
 import { Cause, Effect, Layer, Stream } from "effect"
 
 import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
@@ -57,7 +58,8 @@ const resumeScripts = Effect.fn("ScriptBoot.resume")(function* () {
                       code: "interrupted",
                       message: "Arden restarted and could not continue the script",
                       retryable: true,
-                      recovery_action: "retry"
+                      recovery: recoverBy("retry"),
+                      preview: MESSAGE_PREVIEW
                     },
                     sourceRefs: []
                   }

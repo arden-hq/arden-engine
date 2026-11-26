@@ -1,4 +1,4 @@
-import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
+import { type TaskRecord } from "../work/task-record.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { WorkStore, WorkStoreError, TaskExecutionReceipt } from "../work/store.js"
@@ -12,8 +12,8 @@ export const makeWorkExecution = (sql: SqlClient.SqlClient): WorkStore["Service"
     WorkStoreError
   > {
     const rows = yield* sql<{
-      readonly status: SpaceTask["status"]
-      readonly activity: SpaceTask["activity"]
+      readonly status: TaskRecord["status"]
+      readonly activity: TaskRecord["activity"]
       readonly next_attempt_at: string | null
       readonly can_run: number
       readonly queued: number

@@ -1,24 +1,13 @@
 import { Effect, Schema } from "effect"
 
 import {
-  aliasesSchema,
   strict,
   WikiPageIdSchema,
   WikiPathSchema,
   WikiRestoreSideSchema,
   WikiRevisionIdSchema,
-  WikiTitleSchema,
-  WikiMetadataSchema
+  WikiTitleSchema
 } from "./shared.js"
-
-export const CreateWikiPageInputSchema = Schema.Struct({
-  path: WikiPathSchema,
-  title: WikiTitleSchema,
-  body: Schema.optionalKey(Schema.String),
-  pageId: Schema.optionalKey(WikiPageIdSchema),
-  aliases: Schema.optionalKey(aliasesSchema),
-  metadata: Schema.optionalKey(WikiMetadataSchema)
-})
 
 export const RenameWikiPageInputSchema = Schema.Struct({
   newPath: WikiPathSchema,
@@ -29,11 +18,6 @@ export const WikiPageGuardSchema = Schema.Struct({
   pageId: WikiPageIdSchema,
   version: WikiRevisionIdSchema,
   repositoryHead: WikiRevisionIdSchema
-})
-
-export const WikiCreateRequestContextSchema = Schema.Struct({
-  repositoryHead: Schema.NullOr(WikiRevisionIdSchema),
-  input: CreateWikiPageInputSchema
 })
 
 export const WikiUpdateRequestContextSchema = Schema.Struct({
@@ -51,16 +35,6 @@ export const WikiRenameRequestContextSchema = Schema.Struct({
   input: RenameWikiPageInputSchema
 })
 
-export const WikiCreateRequestSchema = Schema.Struct({
-  path: WikiPathSchema,
-  title: WikiTitleSchema,
-  body: Schema.String,
-  page_id: Schema.optionalKey(WikiPageIdSchema),
-  aliases: aliasesSchema,
-  metadata: WikiMetadataSchema,
-  expected_head: Schema.NullOr(WikiRevisionIdSchema)
-})
-
 export const WikiUpdateRequestSchema = Schema.Struct({
   content: Schema.String,
   expected_version: WikiRevisionIdSchema,
@@ -72,11 +46,10 @@ export const WikiVersionRequestSchema = Schema.Struct({
   expected_head: WikiRevisionIdSchema
 })
 
-/** `side` is absent from releases that could only undo a Maintenance change: it means `before`. */
 export const WikiHistoryRestoreRequestSchema = Schema.Struct({
   expected_version: WikiRevisionIdSchema,
   expected_head: WikiRevisionIdSchema,
-  side: Schema.optionalKey(WikiRestoreSideSchema)
+  side: WikiRestoreSideSchema
 })
 
 export const WikiRenameRequestSchema = Schema.Struct({
@@ -86,26 +59,6 @@ export const WikiRenameRequestSchema = Schema.Struct({
   expected_version: WikiRevisionIdSchema,
   expected_head: WikiRevisionIdSchema
 })
-
-/** Encode the public create input into the server's revision-aware request body. */
-export const encodeCreateWikiRequestEffect = (
-  value: unknown
-): Effect.Effect<string, Schema.SchemaError, never> =>
-  Schema.decodeUnknownEffect(WikiCreateRequestContextSchema)(value, strict).pipe(
-    Effect.map(({ repositoryHead, input }) => ({
-      path: input.path,
-      title: input.title,
-      body: input.body ?? "",
-      ...(input.pageId === undefined ? {} : { page_id: input.pageId }),
-      aliases: input.aliases ?? [],
-      metadata: input.metadata ?? {},
-      expected_head: repositoryHead
-    })),
-    Effect.flatMap((request) =>
-      Schema.decodeUnknownEffect(WikiCreateRequestSchema)(request, strict)
-    ),
-    Effect.map(JSON.stringify)
-  )
 
 /** Encode a page edit while deriving both optimistic-concurrency guards. */
 export const encodeUpdateWikiRequestEffect = (

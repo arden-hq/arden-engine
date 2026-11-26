@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { linkedTask } from "./event-links.js"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sessions/events.js"
@@ -70,7 +71,9 @@ export const appendQuestionChange = Effect.fn(function* (options: {
   yield* options.sessionEvents.appendEventInTransaction({
     type: "question_changed",
     question_id: options.questionId,
-    ...row
+    run_id: row.run_id,
+    session_id: row.session_id,
+    task: linkedTask(row.item_id)
   })
   return true
 })

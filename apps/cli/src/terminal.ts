@@ -1,8 +1,28 @@
+import {
+  APPROVAL_ASKED,
+  APPROVAL_CARD,
+  APPROVED_AS,
+  ARGUMENT_EDITS,
+  CONNECTION_RESULT,
+  DECISION_ASKED,
+  FOLDER_ATTACH,
+  GRANT_LIST,
+  PRESENTATION_BODY,
+  RELAY_COMMAND,
+  STANDING_GRANT,
+  TOOL_DECISION,
+  APPROVAL_PREVIEW,
+  TOOL_DATA,
+  TOOL_TITLE,
+  type ToolDecision
+} from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { liveSessions } from "./session-list.js"
+import { activeRunId } from "@arden-hq/protocol/sessions"
 import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { grantedOnlyInTheApp, type ToolCatalogResponse } from "@arden-hq/protocol/tools"
-import { runDecoders, type RunQuestion } from "@arden-hq/protocol/runs"
+import { QUESTION_TEXT, runDecoders, type RunQuestion } from "@arden-hq/protocol/runs"
 import { errorMessage } from "@arden-hq/std/errors"
 import { sleep } from "@arden-hq/std/sleep"
 import { clipLine, cutText } from "@arden-hq/std/text"
@@ -20,10 +40,10 @@ export const progressLines = (): ((event: HeadlessRunEvent) => string | undefine
     if (data.type === "run_cancelled") return "the Run was cancelled"
     if (data.type === "TOOL_CALL_START") {
       if (named.has(data.tool_call_id)) return undefined
-      const name = data.display_name ?? data.tool_call_name
-      const title = data.display_title
+      const name = data.display_name
+      const title = data.title.kind === TOOL_TITLE.titled ? data.title.text : ""
       calls.set(data.tool_call_id, {
-        name: title === undefined || title === "" || title === name ? name : `${name} · ${title}`,
+        name: title === "" || title === name ? name : `${name} · ${title}`,
         args: ""
       })
       return undefined
@@ -164,14 +184,14 @@ export const requestResponder = (input: {
     signal: AbortSignal | undefined
   ): Promise<void> => {
     const card = ask === undefined ? "unknown" : await cardOf(data.name, signal)
-    const offered = approvalChoices(card, (data.rule_places ?? []).length > 0)
+    const offered = approvalChoices(card, data.rule_places.length > 0)
     const note = cardNote(card)
-    const presentation = data.presentation
+    const presentation =
+      data.card.kind === APPROVAL_CARD.presented ? data.card.presentation : undefined
     const shown = [
       ...(presentation?.fields ?? []).map((field) => `${field.label}: ${field.value}`),
-      ...(presentation?.body === undefined ? [] : [presentation.body.text]),
-      data.path,
-      data.content_preview
+      ...(presentation?.body.kind === PRESENTATION_BODY.body ? [presentation.body.text] : []),
+      data.preview.kind === APPROVAL_PREVIEW.preview ? data.preview.text : undefined
     ]
       .filter((line): line is string => typeof line === "string" && line.length > 0)
       .map((line) => `  ${clip(line)}`)
@@ -186,8 +206,7 @@ export const requestResponder = (input: {
     await input.client.answerApproval({
       ...answering(data, runId),
       result: "",
-      approved: choice !== "deny",
-      grantStanding: choice === "always_allow"
+      decision: decisionOf(choice !== "deny", choice === "always_allow")
     })
     say(`${approvalLabel(choice)}: ${name}`)
   }
@@ -205,6 +224,7 @@ export const requestResponder = (input: {
       runId,
       toolId: data.tool_id,
       connectionId: data.connection_id,
+      result: { kind: CONNECTION_RESULT.cardDefault },
       approved: choice === "connected"
     })
     say(`${CONNECTION_LABELS[choice]}: ${data.label}`)
@@ -224,14 +244,14 @@ export const requestResponder = (input: {
         await input.client.answerApproval({
           ...answering(data, runId),
           result: DECLINED_NOTE,
-          approved: false
+          decision: decisionOf(false, false)
         })
       } else {
         await input.client.answerConnection({
           runId,
           toolId: data.tool_id,
           connectionId: data.connection_id,
-          result: DECLINED_NOTE,
+          result: { kind: CONNECTION_RESULT.stated, text: DECLINED_NOTE },
           approved: false
         })
       }
@@ -250,7 +270,7 @@ export const requestResponder = (input: {
     const content = question.content
     const heading = [
       `Arden asks: ${content.prompt}`,
-      ...(content.detail === null ? [] : [`  ${clip(content.detail)}`])
+      ...(content.detail.kind === QUESTION_TEXT.none ? [] : [`  ${clip(content.detail.text)}`])
     ].join("\n")
     if (ask === undefined) return undefined
     const answer =
@@ -284,9 +304,10 @@ export const requestResponder = (input: {
 
   const nextRunIn = async (sessionId: string): Promise<string | undefined> => {
     for (let attempt = 0; attempt < NEXT_RUN_ATTEMPTS; attempt += 1) {
-      const { sessions } = await input.client.listSessions({ live: true })
-      const active = sessions.find((session) => session.session_id === sessionId)?.active_run_id
-      if (typeof active === "string" && !runs.has(active)) return active
+      const { sessions } = await input.client.listSessions(liveSessions)
+      const session = sessions.find((candidate) => candidate.session_id === sessionId)
+      const active = session === undefined ? null : activeRunId(session.run)
+      if (active !== null && !runs.has(active)) return active
       await sleep(NEXT_RUN_POLL_MS)
     }
     return undefined
@@ -308,12 +329,12 @@ export const requestResponder = (input: {
     },
     onEvent: async (event, signal) => {
       const data = event.data
-      if (data.type === "TOOL_CALL_START")
-        toolNames.set(data.tool_call_id, data.display_name ?? data.tool_call_name)
+      if (data.type === "TOOL_CALL_START") toolNames.set(data.tool_call_id, data.display_name)
       const runId = "run_id" in data && typeof data.run_id === "string" ? data.run_id : input.runId
       if (!runs.has(runId)) return
       if (data.type === "TOOL_CALL_RESULT") {
-        const question = questionOf(data.data)
+        const question =
+          data.data.kind === TOOL_DATA.attached ? questionOf(data.data.value) : undefined
         if (question === undefined || handled.has(question.question_id)) return
         handled.add(question.question_id)
         if (ask === undefined) say(`question: ${question.content.prompt} (answer it in Arden)`)
@@ -336,8 +357,27 @@ const answering = (
 ) => ({
   runId,
   toolId: card.tool_id,
-  ...(card.asked_at === undefined ? {} : { askedAt: card.asked_at })
+  asked:
+    card.asked.kind === APPROVAL_ASKED.recorded
+      ? { kind: DECISION_ASKED.at, at: card.asked.at }
+      : { kind: DECISION_ASKED.unstated },
+  command: { kind: RELAY_COMMAND.none }
 })
+
+const decisionOf = (approved: boolean, standing: boolean): ToolDecision => {
+  const grant = standing
+    ? { kind: STANDING_GRANT.standing, list: GRANT_LIST.cardDefault }
+    : { kind: STANDING_GRANT.once }
+  return approved
+    ? {
+        kind: TOOL_DECISION.approved,
+        grant,
+        folder: FOLDER_ATTACH.keep,
+        edits: { kind: ARGUMENT_EDITS.asAsked },
+        as: APPROVED_AS.asAsked
+      }
+    : { kind: TOOL_DECISION.denied, grant }
+}
 
 const plainError = (cause: unknown): string =>
   cause instanceof HeadlessHttpError ? plainHttpMessage(cause) : errorMessage(cause)

@@ -3,10 +3,16 @@ import {
   SkillNameSchema,
   SkillVersionSchema
 } from "@arden-hq/protocol/effect/skills"
+import { SKILL_VERSION, type SkillVersion } from "@arden-hq/protocol/skills"
 import { Effect, Schema } from "effect"
 import { parseDocument } from "yaml"
 
 import { skillError, type SkillOperation } from "./errors.js"
+
+export const declaredVersion = (version: string | undefined): SkillVersion =>
+  version === undefined
+    ? { kind: SKILL_VERSION.unversioned }
+    : { kind: SKILL_VERSION.versioned, version }
 
 const ToolGroupSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))
 

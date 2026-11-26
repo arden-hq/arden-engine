@@ -1,5 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { TurnToolCallCount } from "@arden-hq/protocol/chat"
+import { TOOL_COUNT_NAME, type TurnToolCallCount } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { TranscriptQueryError, type TranscriptQueries } from "../transcript/queries.js"
@@ -89,7 +89,10 @@ export const makeToolCallCounts = (
       const list = counts.get(row.turn_id) ?? []
       list.push({
         name: row.name,
-        display_name: row.display_name,
+        display_name:
+          row.display_name === null
+            ? { kind: TOOL_COUNT_NAME.unnamed }
+            : { kind: TOOL_COUNT_NAME.named, text: row.display_name },
         count: row.count,
         rejected: row.rejected,
         seqs: row.seqs

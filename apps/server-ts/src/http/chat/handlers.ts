@@ -1,14 +1,32 @@
 import type {
-  CancelInput,
   ChatApprovalMode,
-  ChatReceiptStatus,
   ChatSentFrom,
   HistoryRouteOptions,
   ToolCallRouteOptions,
   TurnWorkRouteOptions
 } from "@arden-hq/protocol/chat"
+import {
+  cancelTarget,
+  connectionDeferredText,
+  connectionResultText,
+  decisionFields,
+  messageExtras,
+  outputSchemaOf,
+  queuedMessageResponse,
+  receiptRun,
+  cardChoices,
+  requestedMode,
+  sentFromField,
+  sentFromOf
+} from "./request-mapping.js"
+import {
+  CANCEL_TARGET,
+  chatDelivery,
+  historyWindow,
+  RELAY_COMMAND,
+  turnWorkWindow
+} from "@arden-hq/protocol/chat"
 import { Effect, Option } from "effect"
-import { randomUUID } from "node:crypto"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
 import { ChatEventStream } from "../../chat/events.js"
@@ -32,7 +50,6 @@ import type { ConnectionCheckError } from "../../connections/recovery.js"
 import {
   ChatWriteConflictError,
   ChatWriteStore,
-  type ChatQueuedMessage,
   type ChatWriteFailure
 } from "../../persistence/chat/store.js"
 import { ToolExecutionStore, ToolExecutionStoreError } from "../../persistence/tools/store.js"
@@ -65,7 +82,7 @@ import { ModelStore } from "../../persistence/models/store.js"
 import { SessionStore } from "../../persistence/sessions/store.js"
 import { SummaryStore } from "../../persistence/summaries/store.js"
 import { WorkStore } from "../../persistence/work/store.js"
-import { makeSessionCreation } from "../../sessions/create.js"
+import { keptCapture, makeSessionCreation } from "../../sessions/create.js"
 
 const historyError = (
   error: ChatHistoryFailure
@@ -91,19 +108,6 @@ const queueError = (error: ChatWriteFailure) => {
   return storeErrorToHttp({ reason: error.reason, message: error.message })
 }
 
-const queuedMessageResponse = (message: ChatQueuedMessage) => ({
-  client_id: message.clientId,
-  message: message.message,
-  images: message.images.map((image) => ({
-    type: "image" as const,
-    media_type: image.mediaType,
-    data: image.data
-  })),
-  enqueued_at: message.enqueuedAt,
-  ...(message.sentFrom === undefined ? {} : { sent_from: message.sentFrom }),
-  ...(message.failedReason === undefined ? {} : { failed_reason: message.failedReason })
-})
-
 type ConnectionResultHttpError =
   | StoreConflict
   | StoreInvalid
@@ -126,13 +130,6 @@ const connectionCheckError = (error: ConnectionCheckError): ConnectionResultHttp
     case "storage":
       return new HttpApiError.InternalServerError({})
   }
-}
-
-/** The plain name for what a sent message did: `queued` is the older status of a steered one. */
-const deliveryOf = (status: ChatReceiptStatus): { readonly delivery?: "started" | "steered" } => {
-  if (status === "running") return { delivery: "started" }
-  if (status === "queued") return { delivery: "steered" }
-  return {}
 }
 
 export const ChatHandlers = HttpApiBuilder.group(
@@ -254,75 +251,38 @@ export const ChatHandlers = HttpApiBuilder.group(
               capture: "screenshot"
             })
             .pipe(Effect.mapError(messageError))
-          return { kind: "kept" as const, session_id: created.sessionId, line: null }
+          return keptCapture(created.sessionId)
         })
       )
       .handle("message", ({ payload }) => {
-        if (
-          payload.session_id === undefined ||
-          payload.session_id === null ||
-          payload.session_id.trim() === ""
-        ) {
-          return Effect.fail(new HttpApiError.BadRequest({}))
-        }
+        if (payload.session_id.trim() === "") return Effect.fail(new HttpApiError.BadRequest({}))
         const route = models.current()
+        const outputSchema = outputSchemaOf(payload)
         const problem =
-          payload.output_schema === undefined || route === undefined
+          outputSchema === undefined || route === undefined
             ? undefined
-            : outputSchemaProblem(payload.output_schema, route.structuredOutputDialect)
+            : outputSchemaProblem(outputSchema, route.structuredOutputDialect)
         if (problem !== undefined) return Effect.fail(new OutputSchemaRejected({ detail: problem }))
         const sessionId = payload.session_id
-        const clientId = payload.client_id ?? randomUUID()
-        const capture = payload.capture
-        return sender(payload.approval_mode, payload.sent_from).pipe(
+        const clientId = payload.client_id
+        return sender(requestedMode(payload.approval_mode), sentFromOf(payload.sent_from)).pipe(
           Effect.flatMap(({ approvalMode, sentFrom }) =>
             message
               .send({
                 sessionId,
                 clientId,
                 message: payload.message,
-                ...(payload.approval_reply === undefined
-                  ? {}
-                  : {
-                      approvalReply: {
-                        runId: payload.approval_reply.run_id,
-                        toolId: payload.approval_reply.tool_id
-                      }
-                    }),
                 ...(approvalMode === undefined ? {} : { approvalMode }),
                 ...(sentFrom === undefined ? {} : { sentFrom }),
-                ...(payload.output_schema === undefined
-                  ? {}
-                  : { outputSchema: payload.output_schema }),
-                ...(capture === undefined ? {} : { capture }),
-                ...(payload.reply_to === undefined
-                  ? {}
-                  : {
-                      replyTo: ("message_id" in payload.reply_to
-                        ? [payload.reply_to]
-                        : payload.reply_to
-                      ).map((quoted) => ({
-                        messageId: quoted.message_id,
-                        role: quoted.role,
-                        content: quoted.content
-                      }))
-                    }),
-                ...(payload.images === undefined
-                  ? {}
-                  : {
-                      images: payload.images.map((image) => ({
-                        mediaType: image.media_type,
-                        data: image.data
-                      }))
-                    })
+                ...messageExtras(payload)
               })
               .pipe(
                 Effect.map((receipt) => ({
-                  run_id: receipt.runId,
+                  run: receiptRun(receipt.runId),
                   session_id: receipt.sessionId,
                   status: receipt.status,
-                  ...deliveryOf(receipt.status),
-                  ...(receipt.clientId === undefined ? {} : { client_id: receipt.clientId })
+                  delivery: chatDelivery(receipt.status),
+                  client_id: receipt.clientId
                 })),
                 Effect.mapError(messageError),
                 Effect.ensuring(queueHold.release(sessionId))
@@ -333,15 +293,9 @@ export const ChatHandlers = HttpApiBuilder.group(
       .handle(
         "cancel",
         Effect.fn("ChatHandlers.cancel")(function* ({ payload }) {
-          let target: CancelInput
-          if (payload.run_id !== undefined && payload.run_id !== null)
-            target = { runId: payload.run_id }
-          else if (payload.session_id !== undefined && payload.session_id !== null) {
-            target = { sessionId: payload.session_id }
-          } else return yield* new HttpApiError.BadRequest({})
-          if (payload.hold_queue === true && target.sessionId !== undefined) {
-            yield* queueHold.hold(target.sessionId)
-          }
+          const target = cancelTarget(payload)
+          if (payload.kind === CANCEL_TARGET.session && payload.hold_queue)
+            yield* queueHold.hold(payload.session_id)
           return yield* message.cancel(target).pipe(
             Effect.map((result) => ({
               status: result.status,
@@ -356,31 +310,20 @@ export const ChatHandlers = HttpApiBuilder.group(
       .handle("toolResult", ({ payload }) =>
         Effect.flatMap(LocalCaller, (caller) => {
           const commandId =
-            caller === "phone" || caller === "other" ? payload.command_id : undefined
-          if ((caller === "phone" || commandId !== undefined) && payload.asked_at === undefined)
+            (caller === "phone" || caller === "other") &&
+            payload.command.kind === RELAY_COMMAND.command
+              ? payload.command.id
+              : undefined
+          const fields = decisionFields(payload)
+          if ((caller === "phone" || commandId !== undefined) && fields.askedAt === undefined)
             return Effect.fail(new StoreInvalid({ detail: PHONE_NEEDS_UPDATE }))
-          return refuseAppOnlyGrant(payload)
+          return refuseAppOnlyGrant({ ...payload, approved: fields.approved })
             .pipe(
               Effect.andThen(
                 deferred.decide({
                   runId: payload.run_id,
                   toolCallId: payload.tool_id,
-                  result: payload.result,
-                  ...(payload.approved === undefined ? {} : { approved: payload.approved }),
-                  ...(payload.grant_standing === undefined
-                    ? {}
-                    : { grantStanding: payload.grant_standing }),
-                  ...(payload.grant_list === undefined ? {} : { grantList: payload.grant_list }),
-                  ...(payload.attach_folder_to_space === undefined
-                    ? {}
-                    : { attachFolderToSpace: payload.attach_folder_to_space }),
-                  ...(payload.edited_arguments === undefined
-                    ? {}
-                    : { editedArguments: payload.edited_arguments }),
-                  ...(payload.alternative === undefined
-                    ? {}
-                    : { alternative: payload.alternative }),
-                  ...(payload.asked_at === undefined ? {} : { askedAt: payload.asked_at }),
+                  ...fields,
                   ...(commandId === undefined ? {} : { commandId })
                 })
               )
@@ -393,34 +336,7 @@ export const ChatHandlers = HttpApiBuilder.group(
                   : message.resolveTool({
                       runId: payload.run_id,
                       toolId: payload.tool_id,
-                      result: payload.result,
-                      ...(payload.approved === undefined ? {} : { approved: payload.approved }),
-                      ...(payload.grant_standing === undefined
-                        ? {}
-                        : { grantStanding: payload.grant_standing }),
-                      ...(payload.grant_list === undefined
-                        ? {}
-                        : { grantList: payload.grant_list }),
-                      ...(payload.attach_folder_to_space === undefined
-                        ? {}
-                        : { attachFolderToSpace: payload.attach_folder_to_space }),
-                      ...(payload.edited_arguments === undefined
-                        ? {}
-                        : {
-                            edits: {
-                              patch: payload.edited_arguments,
-                              apply: toolRegistry.applyApprovalEdits
-                            }
-                          }),
-                      ...(payload.alternative === undefined
-                        ? {}
-                        : {
-                            alternative: {
-                              kind: payload.alternative,
-                              offeredBy: toolRegistry.offersApprovalDraft
-                            }
-                          }),
-                      ...(payload.asked_at === undefined ? {} : { askedAt: payload.asked_at }),
+                      ...cardChoices(fields, toolRegistry),
                       ...(commandId === undefined ? {} : { commandId })
                     })
               ),
@@ -457,7 +373,7 @@ export const ChatHandlers = HttpApiBuilder.group(
                 runId: payload.run_id,
                 toolCallId: payload.tool_id,
                 approved: payload.approved,
-                result: payload.result ?? ""
+                result: connectionDeferredText(payload.result)
               })
               .pipe(Effect.mapError(connectionStoreError))
             if (decided !== "decided") return yield* new HttpApiError.Conflict({})
@@ -468,7 +384,7 @@ export const ChatHandlers = HttpApiBuilder.group(
               runId: payload.run_id,
               toolId: payload.tool_id,
               approved: payload.approved,
-              result: payload.result ?? (payload.approved ? "connected" : "not now")
+              result: connectionResultText(payload.result, payload.approved)
             })
             .pipe(Effect.mapError(messageError))
         })
@@ -520,12 +436,9 @@ export const ChatHandlers = HttpApiBuilder.group(
       )
       .handle("history", ({ query }) => {
         const input: HistoryRouteOptions = {
-          ...(query.session_id === undefined ? {} : { sessionId: query.session_id }),
-          ...(query.limit === undefined ? {} : { limit: query.limit }),
-          ...(query.before === undefined ? {} : { before: query.before }),
-          ...(query.after === undefined ? {} : { after: query.after }),
-          ...(query.around === undefined ? {} : { around: query.around }),
-          ...(query.around_seq === undefined ? {} : { aroundSeq: query.around_seq })
+          sessionId: query.session_id,
+          limit: query.limit,
+          window: historyWindow(query)
         }
         return history.get(input).pipe(
           Effect.tapError((error) =>
@@ -541,10 +454,9 @@ export const ChatHandlers = HttpApiBuilder.group(
         const input: TurnWorkRouteOptions = {
           sessionId: query.session_id,
           turnId: query.turn_id,
-          ...(query.limit === undefined ? {} : { limit: query.limit }),
-          ...(query.before === undefined ? {} : { before: query.before }),
-          ...(query.after === undefined ? {} : { after: query.after }),
-          ...(query.view === undefined ? {} : { view: query.view })
+          limit: query.limit,
+          window: turnWorkWindow(query),
+          view: query.view
         }
         return history.getTurnWork(input).pipe(
           Effect.tapError((error) =>
@@ -591,7 +503,7 @@ export const ChatHandlers = HttpApiBuilder.group(
           .getToolResultValue({
             sessionId: params.sessionId,
             toolCallId: params.toolCallId,
-            path: query.path ?? ""
+            path: query.path
           })
           .pipe(
             Effect.tapError((error) =>
@@ -649,11 +561,11 @@ export const ChatHandlers = HttpApiBuilder.group(
             sessionId: params.sessionId,
             clientId: payload.client_id,
             message: payload.message,
-            images: (payload.images ?? []).map((image) => ({
+            images: payload.images.map((image) => ({
               mediaType: image.media_type,
               data: image.data
             })),
-            ...(payload.sent_from === undefined ? {} : { sentFrom: payload.sent_from })
+            ...sentFromField(payload.sent_from)
           })
           .pipe(Effect.map(queuedMessageResponse), Effect.mapError(queueError))
       )

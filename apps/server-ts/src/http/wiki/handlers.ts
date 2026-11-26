@@ -1,10 +1,20 @@
-import type {
-  WikiHistoryChange,
-  WikiLink,
-  WikiPage,
-  WikiPageSummary,
-  WikiRenamePlan,
-  WikiResourceVersion
+import {
+  WIKI_CHANGE_ACTION,
+  WIKI_CHAT_NAME,
+  WIKI_CHAT_SOURCE,
+  WIKI_CHAT_SPACE,
+  WIKI_CHAT_SUMMARY,
+  WIKI_CONFLICT_CURRENT,
+  WIKI_DIFF_BASE,
+  WIKI_LINK_STATUS,
+  WIKI_LIST_START,
+  WIKI_PAGE_LIST,
+  type WikiHistoryChange,
+  type WikiLink,
+  type WikiPage,
+  type WikiPageSummary,
+  type WikiRenamePlan,
+  type WikiResourceVersion
 } from "@arden-hq/protocol/wiki"
 import type { WikiRenameRequestSchema } from "@arden-hq/protocol/effect/wiki"
 import { Effect } from "effect"
@@ -29,12 +39,11 @@ const pageSummary = (page: WikiPageSummary) => ({
   excerpt: page.excerpt,
   aliases: page.aliases,
   lifecycle: page.lifecycle,
-  redirect_to: page.redirectTo,
   metadata: page.metadata,
   version: page.version,
   repository_head: page.repositoryHead,
-  created_at: page.createdAt,
-  updated_at: page.updatedAt
+  created: page.created,
+  updated: page.updated
 })
 
 const pageDetail = (page: WikiPage) => ({
@@ -42,38 +51,29 @@ const pageDetail = (page: WikiPage) => ({
   content: page.content
 })
 
-const version = (value: WikiResourceVersion | null) =>
-  value === null
-    ? null
-    : {
-        resource_id: value.resourceId,
-        path: value.path,
-        state: value.state,
-        version_id: value.versionId
-      }
-
-const historyChange = (change: WikiHistoryChange) => ({
-  action: change.action,
-  before: version(change.before),
-  after: version(change.after)
+const version = (value: WikiResourceVersion) => ({
+  resource_id: value.resourceId,
+  path: value.path,
+  state: value.state,
+  version_id: value.versionId
 })
 
-const linkNode = (link: WikiLink) => {
-  const page =
-    link.heading === null ? link.target : link.target.slice(0, -(link.heading.length + 1))
-  return {
-    page: page === "" ? null : page,
-    fragment: link.heading,
-    alias: link.alias
+const historyChange = (change: WikiHistoryChange) =>
+  change.action === WIKI_CHANGE_ACTION.create
+    ? { action: change.action, after: version(change.after) }
+    : { action: change.action, before: version(change.before), after: version(change.after) }
+
+const link = (value: WikiLink) => {
+  const fields = {
+    source_page_id: value.sourcePageId,
+    target: value.target,
+    anchor: value.anchor,
+    label: value.label
   }
+  return value.status === WIKI_LINK_STATUS.resolved
+    ? { ...fields, status: value.status, target_page_id: value.targetPageId }
+    : { ...fields, status: value.status }
 }
-
-const link = (value: WikiLink) => ({
-  source_page_id: value.sourcePageId,
-  node: linkNode(value),
-  status: value.status,
-  target_page_id: value.targetPageId
-})
 
 const renamePlan = (plan: WikiRenamePlan) => ({
   old_path: plan.oldPath,
@@ -98,9 +98,14 @@ const conflictError = (error: WikiError) => ({
   detail: {
     error: "page_revision_conflict" as const,
     message: error.message,
-    ...(error.currentContent === undefined ? {} : { current_content: error.currentContent }),
-    ...(error.currentVersion === undefined ? {} : { current_revision: error.currentVersion }),
-    ...(error.currentHead === undefined ? {} : { current_head: error.currentHead })
+    current:
+      error.currentVersion === undefined || error.currentContent === undefined
+        ? { kind: WIKI_CONFLICT_CURRENT.unavailable }
+        : {
+            kind: WIKI_CONFLICT_CURRENT.page,
+            version: error.currentVersion,
+            content: error.currentContent
+          }
   }
 })
 
@@ -121,15 +126,23 @@ export const WikiHandlers = HttpApiBuilder.group(
         wiki
           .list({
             includeRedirects: query.include_redirects === "true",
-            ...(query.limit === undefined ? {} : { limit: query.limit }),
-            ...(query.cursor === undefined ? {} : { cursor: query.cursor })
+            limit: query.limit,
+            start:
+              query.start === WIKI_LIST_START.after
+                ? { kind: query.start, cursor: query.cursor }
+                : { kind: query.start }
           })
           .pipe(
-            Effect.map((snapshot) => ({
-              repository_head: snapshot.repositoryHead,
-              pages: snapshot.pages.map(pageSummary),
-              next_cursor: snapshot.nextCursor
-            })),
+            Effect.map((listed) =>
+              listed.kind === WIKI_PAGE_LIST.empty
+                ? { kind: listed.kind }
+                : {
+                    kind: listed.kind,
+                    repository_head: listed.repositoryHead,
+                    pages: listed.pages.map(pageSummary),
+                    next: listed.next
+                  }
+            ),
             Effect.mapError(wikiErrorToHttp)
           )
       )
@@ -187,35 +200,31 @@ export const WikiHandlers = HttpApiBuilder.group(
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )
       .handle("history", ({ params, query }) =>
-        wiki
-          .history(params.pageId, {
-            ...(query.limit === undefined ? {} : { limit: query.limit })
-          })
-          .pipe(
-            Effect.map((result) => ({
-              page_id: result.pageId,
-              repository_head: result.repositoryHead,
-              commits: result.commits.map((commit) => ({
-                added_lines: commit.addedLines,
-                removed_lines: commit.removedLines,
-                commit_id: commit.commitId,
-                parent_id: commit.parentId,
-                actor: commit.actor,
-                origin: commit.origin,
-                reason: commit.reason,
-                timestamp: commit.timestamp,
-                changes: commit.changes.map(historyChange),
-                restorable: commit.restorable
-              }))
-            })),
-            Effect.mapError(wikiErrorToHttp)
-          )
+        wiki.history(params.pageId, { limit: query.limit }).pipe(
+          Effect.map((result) => ({
+            page_id: result.pageId,
+            repository_head: result.repositoryHead,
+            commits: result.commits.map((commit) => ({
+              added_lines: commit.addedLines,
+              removed_lines: commit.removedLines,
+              commit_id: commit.commitId,
+              parent: commit.parent,
+              actor: commit.actor,
+              origin: commit.origin,
+              reason: commit.reason,
+              timestamp: commit.timestamp,
+              changes: commit.changes.map(historyChange),
+              restorable: commit.restorable
+            }))
+          })),
+          Effect.mapError(wikiErrorToHttp)
+        )
       )
       .handle("restoreHistory", ({ params, payload }) =>
         wiki
           .restore({
             pageId: params.pageId,
-            version: { commitId: params.commitId, side: payload.side ?? "before" },
+            version: { commitId: params.commitId, side: payload.side },
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
             authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
@@ -231,11 +240,13 @@ export const WikiHandlers = HttpApiBuilder.group(
       .handle("diff", ({ params, query }) =>
         wiki
           .diff(params.pageId, {
-            ...(query.base === undefined ? {} : { base: query.base }),
-            ...(query.target === undefined ? {} : { target: query.target }),
-            ...(query.offset === undefined ? {} : { offset: query.offset }),
-            ...(query.limit === undefined ? {} : { limit: query.limit }),
-            ...(query.tail === undefined ? {} : { tail: query.tail === "true" })
+            base:
+              query.from === WIKI_DIFF_BASE.version
+                ? { kind: query.from, version: query.base }
+                : { kind: query.from },
+            target: query.target,
+            offset: query.offset,
+            limit: query.limit
           })
           .pipe(
             Effect.map((result) => ({
@@ -298,11 +309,22 @@ export const WikiHandlers = HttpApiBuilder.group(
             backlinks: result.backlinks.map(link),
             came_from: cameFrom.map((chat) => ({
               session_ref: chat.sessionRef,
-              name: chat.name,
-              space_id: chat.spaceId,
-              space_name: chat.spaceName,
-              saved_at: chat.savedAt,
-              summary: chat.summary
+              name:
+                chat.name === null
+                  ? { kind: WIKI_CHAT_NAME.untitled }
+                  : { kind: WIKI_CHAT_NAME.named, name: chat.name },
+              space:
+                chat.spaceId === null || chat.spaceName === null
+                  ? { kind: WIKI_CHAT_SPACE.loose }
+                  : { kind: WIKI_CHAT_SPACE.space, id: chat.spaceId, name: chat.spaceName },
+              source:
+                chat.savedAt === null
+                  ? { kind: WIKI_CHAT_SOURCE.cited }
+                  : { kind: WIKI_CHAT_SOURCE.saved, at: chat.savedAt },
+              summary:
+                chat.summary === null
+                  ? { kind: WIKI_CHAT_SUMMARY.pending }
+                  : { kind: WIKI_CHAT_SUMMARY.summarized, text: chat.summary }
             }))
           })),
           Effect.mapError(wikiErrorToHttp)

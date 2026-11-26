@@ -5,7 +5,9 @@ export {
   grantedOnlyInTheApp,
   LEGACY_TOOL_DISPLAY,
   TOOL_DISPLAY_FACTS,
-  type ToolDisplay
+  toolDisplayFact,
+  type ToolDisplay,
+  type ToolDisplayFact
 } from "./display.js"
 
 export type {

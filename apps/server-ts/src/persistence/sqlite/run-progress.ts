@@ -1,9 +1,14 @@
 import { journalRunIdSql } from "./journal-run-boundary.js"
-import { isActiveRunStatus, type RunProgress } from "@arden-hq/protocol/runs"
+import { TOOL_TITLE, isActiveRunStatus } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
-import { RunDataCorruptionError, RunQueryError, type RunQueries } from "../runs/queries.js"
+import {
+  RunDataCorruptionError,
+  RunQueryError,
+  type RunProgressRecord,
+  type RunQueries
+} from "../runs/queries.js"
 import { decodeJson } from "./json.js"
 import type { Writer } from "./deps.js"
 
@@ -52,13 +57,13 @@ export const makeRunProgressQuery = ({
         trace_removed: run.metadata.trace_removed_at != null
       }
       if (base.trace_removed || !isActiveRunStatus(run.status)) {
-        return { ...base, active_tools: [] } satisfies RunProgress
+        return { ...base, active_tools: [] } satisfies RunProgressRecord
       }
       const rows = yield* sql<{ readonly data_json: string }>`
     SELECT CASE WHEN event_type = 'model_response_reset'
       THEN json_object('type', event_type, 'tool_call_ids', json_extract(data_json, '$.tool_call_ids'))
       ELSE json_object('type', event_type, 'tool_call_id', json_extract(data_json, '$.tool_call_id'),
-        'title', json_extract(data_json, '$.display_title')) END AS data_json
+        'title', COALESCE(json_extract(data_json, '$.title.text'), json_extract(data_json, '$.display_title'))) END AS data_json
     FROM ${journalRecordsSql(sql)}
     WHERE stream_id = ${run.sessionId}
       AND sequence <= ${base.through_sequence}
@@ -73,7 +78,7 @@ export const makeRunProgressQuery = ({
       AND event_type IN ('TOOL_CALL_START', 'TOOL_CALL_END', 'TOOL_CALL_RESULT', 'model_response_reset')
     ORDER BY sequence ASC
   `
-      const active = new Map<string, RunProgress["active_tools"][number]>()
+      const active = new Map<string, RunProgressRecord["active_tools"][number]>()
       for (const row of rows) {
         const event = yield* decodeJson(ActivityEventSchema, row.data_json).pipe(
           Effect.mapError(
@@ -83,7 +88,13 @@ export const makeRunProgressQuery = ({
         )
         switch (event.type) {
           case "TOOL_CALL_START":
-            active.set(event.tool_call_id, { tool_call_id: event.tool_call_id, title: event.title })
+            active.set(event.tool_call_id, {
+              tool_call_id: event.tool_call_id,
+              title:
+                event.title === null
+                  ? { kind: TOOL_TITLE.untitled }
+                  : { kind: TOOL_TITLE.titled, title: event.title }
+            })
             break
           case "TOOL_CALL_END":
           case "TOOL_CALL_RESULT":
@@ -94,7 +105,7 @@ export const makeRunProgressQuery = ({
             break
         }
       }
-      return { ...base, active_tools: [...active.values()] } satisfies RunProgress
+      return { ...base, active_tools: [...active.values()] } satisfies RunProgressRecord
     },
     snapshot,
     Effect.catchTag("SqlError", (cause) =>

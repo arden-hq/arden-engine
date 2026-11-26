@@ -9,8 +9,6 @@ type SessionFocusStatus = "active" | "paused" | "blocked" | "budget_limited" | "
 interface FocusEvidence extends JsonRecord {
   readonly text: string
   readonly created_at: string
-  readonly kind?: string
-  readonly blocked_reason?: string
 }
 
 export interface SessionFocus extends JsonRecord {
@@ -19,8 +17,6 @@ export interface SessionFocus extends JsonRecord {
   readonly objective: string
   readonly status: SessionFocusStatus
   readonly evidence: ReadonlyArray<FocusEvidence>
-  readonly blocked_reason?: string | null
-  readonly token_budget?: number | null
   readonly tokens_used: number
   readonly time_used_seconds: number
   readonly created_at: string

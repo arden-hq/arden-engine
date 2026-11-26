@@ -9,6 +9,11 @@ import type {
   StorageOverview,
   StorageSettings
 } from "@arden-hq/protocol/storage"
+import {
+  STORAGE_CURRENT_SESSION,
+  STORAGE_LIMIT,
+  type StorageCleanupTarget
+} from "@arden-hq/protocol/storage"
 import { Context, Effect, Layer, Semaphore } from "effect"
 
 import { StoragePolicyStore } from "../persistence/storage/store.js"
@@ -90,12 +95,11 @@ const planId = (
     JSON.stringify({
       settings,
       context: {
-        currentSessionId: context.currentSessionId,
+        currentSession: context.currentSession,
         pinnedSessionIds: [...context.pinnedSessionIds].sort()
       },
       plan: {
-        budgetBytes: plan.budgetBytes,
-        targetBytes: plan.targetBytes,
+        target: plan.target,
         actions: plan.actions
       },
       candidates: candidates.map((candidate) => candidate.session)
@@ -103,11 +107,19 @@ const planId = (
   )
 
 const maxBytes = (settings: StorageSettings): number | null =>
-  settings.maxSpaceGiB === null ? null : Math.floor(settings.maxSpaceGiB * GIB_BYTES)
+  settings.maxSpace.kind === STORAGE_LIMIT.limited
+    ? Math.floor(settings.maxSpace.gib * GIB_BYTES)
+    : null
 
-const cleanupTargetBytes = (settings: StorageSettings): number | null => {
+const cleanupTarget = (settings: StorageSettings): StorageCleanupTarget => {
   const budgetBytes = maxBytes(settings)
-  return budgetBytes === null ? null : Math.floor(budgetBytes * CLEANUP_TARGET_SHARE)
+  return budgetBytes === null
+    ? { kind: STORAGE_LIMIT.unlimited }
+    : {
+        kind: STORAGE_LIMIT.limited,
+        budgetBytes,
+        targetBytes: Math.floor(budgetBytes * CLEANUP_TARGET_SHARE)
+      }
 }
 
 const inventoryTotal = (tallies: Record<RootBucket, CategoryTally>): number =>
@@ -212,8 +224,14 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
     return {
       status: {
         totalBytes,
-        maxBytes: budgetBytes,
-        overBudgetBytes: budgetBytes === null ? 0 : Math.max(0, totalBytes - budgetBytes),
+        budget:
+          budgetBytes === null
+            ? { kind: STORAGE_LIMIT.unlimited }
+            : {
+                kind: STORAGE_LIMIT.limited,
+                maxBytes: budgetBytes,
+                overBudgetBytes: Math.max(0, totalBytes - budgetBytes)
+              },
         checkedAt,
         categories
       },
@@ -240,8 +258,9 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
     const sessions = sessionSnapshot.candidates
     const createdAt = currentIso()
     const beforeBytes = inventoryTotal(tallies)
-    const budgetBytes = maxBytes(settings)
-    const targetBytes = cleanupTargetBytes(settings)
+    const target = cleanupTarget(settings)
+    const budgetBytes = target.kind === STORAGE_LIMIT.limited ? target.budgetBytes : null
+    const targetBytes = target.kind === STORAGE_LIMIT.limited ? target.targetBytes : null
     const databaseBytes = tallies.database.totalBytes
     const sessionPhysicalScale =
       sessionSnapshot.totalLogicalBytes === 0
@@ -262,7 +281,10 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
     const protectionsFor = (session: StorageSessionCandidate): ReadonlyArray<PlanProtection> => {
       const protections: Array<PlanProtection> = [...session.protections]
       const tree = [session.sessionId, ...session.deletesWith.sessionIds]
-      if (context.currentSessionId !== null && tree.includes(context.currentSessionId))
+      if (
+        context.currentSession.kind === STORAGE_CURRENT_SESSION.session &&
+        tree.includes(context.currentSession.sessionId)
+      )
         protections.push("current_session")
       if (tree.some((sessionId) => pinned.has(sessionId))) protections.push("pinned_session")
       if (!session.archived && minimumCurrent.has(session.sessionId)) {
@@ -354,8 +376,7 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
     }
     const plan: StorageCleanupPlan = {
       beforeBytes,
-      budgetBytes,
-      targetBytes,
+      target,
       estimatedAfterBytes,
       estimatedReclaimableBytes: selectedBytes,
       attainable,

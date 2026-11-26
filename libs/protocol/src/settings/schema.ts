@@ -1,6 +1,10 @@
 import { Effect, Schema } from "effect"
 import { withExtras } from "../common/schema.js"
-import type { IntelligenceSettings, IntelligenceSettingsPatch } from "./contracts.js"
+import {
+  INTELLIGENCE_SETTINGS_CHANGE,
+  type IntelligenceSettings,
+  type IntelligenceSettingsPatch
+} from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
 /** Counts the chat itself: 1 = no sub-agents, 2 = one level, 3 = two. */
@@ -56,44 +60,24 @@ export const IntelligenceSettingsResponseSchema = withExtras({
   summary_max_tokens: SummaryMaxTokensSchema
 })
 
-export const IntelligenceSettingsPatchSchema = Schema.Struct({
-  assistantName: Schema.optionalKey(AssistantNameSchema),
-  maxAgentDepth: Schema.optionalKey(MaxAgentDepthSchema),
-  maxConcurrentAgents: Schema.optionalKey(MaxConcurrentAgentsSchema),
-  maxConcurrentWorkers: Schema.optionalKey(MaxConcurrentWorkersSchema),
-  compactionThreshold: Schema.optionalKey(CompactionThresholdSchema),
-  compactionKeepRatio: Schema.optionalKey(CompactionKeepRatioSchema),
-  summaryMaxTokens: Schema.optionalKey(SummaryMaxTokensSchema)
-}).check(
-  Schema.makeFilter((patch) =>
-    Object.keys(patch).length > 0
-      ? undefined
-      : "an intelligence settings patch requires at least one field"
-  )
-)
+const valueChange = <K extends string, S extends Schema.Top>(kind: K, value: S) =>
+  Schema.Struct({ kind: Schema.Literal(kind), value })
+
+const IntelligenceSettingsChangeSchema = Schema.Union([
+  valueChange(INTELLIGENCE_SETTINGS_CHANGE.assistantName, AssistantNameSchema),
+  valueChange(INTELLIGENCE_SETTINGS_CHANGE.maxAgentDepth, MaxAgentDepthSchema),
+  valueChange(INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentAgents, MaxConcurrentAgentsSchema),
+  valueChange(INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentWorkers, MaxConcurrentWorkersSchema),
+  valueChange(INTELLIGENCE_SETTINGS_CHANGE.compactionThreshold, CompactionThresholdSchema),
+  valueChange(INTELLIGENCE_SETTINGS_CHANGE.compactionKeepRatio, CompactionKeepRatioSchema),
+  valueChange(INTELLIGENCE_SETTINGS_CHANGE.summaryMaxTokens, SummaryMaxTokensSchema)
+])
 
 export const IntelligenceSettingsPatchRequestSchema = Schema.Struct({
-  assistant_name: Schema.optionalKey(AssistantNameSchema),
-  max_agent_depth: Schema.optionalKey(MaxAgentDepthSchema),
-  max_concurrent_agents: Schema.optionalKey(MaxConcurrentAgentsSchema),
-  max_concurrent_workers: Schema.optionalKey(MaxConcurrentWorkersSchema),
-  compaction_threshold: Schema.optionalKey(CompactionThresholdSchema),
-  compaction_keep_ratio: Schema.optionalKey(CompactionKeepRatioSchema),
-  summary_max_tokens: Schema.optionalKey(SummaryMaxTokensSchema)
-}).check(
-  Schema.makeFilter((patch) =>
-    Object.keys(patch).length > 0
-      ? undefined
-      : "an intelligence settings patch requires at least one field"
-  )
-)
+  changes: Schema.NonEmptyArray(IntelligenceSettingsChangeSchema)
+})
 
 type IntelligenceSettingsWire = Schema.Schema.Type<typeof IntelligenceSettingsResponseSchema>
-type IntelligenceSettingsPatchWire = Schema.Schema.Type<typeof IntelligenceSettingsPatchSchema>
-type IntelligenceSettingsPatchRequestWire = Schema.Schema.Type<
-  typeof IntelligenceSettingsPatchRequestSchema
->
-
 export const mapSettings = (settings: IntelligenceSettingsWire): IntelligenceSettings => ({
   assistantName: settings.assistant_name,
   maxAgentDepth: settings.max_agent_depth,
@@ -104,55 +88,17 @@ export const mapSettings = (settings: IntelligenceSettingsWire): IntelligenceSet
   summaryMaxTokens: settings.summary_max_tokens
 })
 
-const mapPatchRequest = (
-  patch: IntelligenceSettingsPatchRequestWire
-): IntelligenceSettingsPatch => ({
-  ...(patch.assistant_name === undefined ? {} : { assistantName: patch.assistant_name }),
-  ...(patch.max_agent_depth === undefined ? {} : { maxAgentDepth: patch.max_agent_depth }),
-  ...(patch.max_concurrent_agents === undefined
-    ? {}
-    : { maxConcurrentAgents: patch.max_concurrent_agents }),
-  ...(patch.max_concurrent_workers === undefined
-    ? {}
-    : { maxConcurrentWorkers: patch.max_concurrent_workers }),
-  ...(patch.compaction_threshold === undefined
-    ? {}
-    : { compactionThreshold: patch.compaction_threshold }),
-  ...(patch.compaction_keep_ratio === undefined
-    ? {}
-    : { compactionKeepRatio: patch.compaction_keep_ratio }),
-  ...(patch.summary_max_tokens === undefined ? {} : { summaryMaxTokens: patch.summary_max_tokens })
-})
-
-const encodePatch = (patch: IntelligenceSettingsPatchWire): Record<string, unknown> => ({
-  ...(patch.assistantName === undefined ? {} : { assistant_name: patch.assistantName }),
-  ...(patch.maxAgentDepth === undefined ? {} : { max_agent_depth: patch.maxAgentDepth }),
-  ...(patch.maxConcurrentAgents === undefined
-    ? {}
-    : { max_concurrent_agents: patch.maxConcurrentAgents }),
-  ...(patch.maxConcurrentWorkers === undefined
-    ? {}
-    : { max_concurrent_workers: patch.maxConcurrentWorkers }),
-  ...(patch.compactionThreshold === undefined
-    ? {}
-    : { compaction_threshold: patch.compactionThreshold }),
-  ...(patch.compactionKeepRatio === undefined
-    ? {}
-    : { compaction_keep_ratio: patch.compactionKeepRatio }),
-  ...(patch.summaryMaxTokens === undefined ? {} : { summary_max_tokens: patch.summaryMaxTokens })
-})
-
 export const decodeIntelligenceSettingsPatchRequestEffect = (
   value: unknown
-): Effect.Effect<Partial<IntelligenceSettings>, Schema.SchemaError, never> =>
+): Effect.Effect<IntelligenceSettingsPatch, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(IntelligenceSettingsPatchRequestSchema)(value, strict).pipe(
-    Effect.map(mapPatchRequest)
+    Effect.map((patch) => patch.changes)
   )
 
 export const encodeIntelligenceSettingsPatchEffect = (
-  value: unknown
+  value: IntelligenceSettingsPatch
 ): Effect.Effect<string, Schema.SchemaError, never> =>
-  Schema.decodeUnknownEffect(IntelligenceSettingsPatchSchema)(value, strict).pipe(
-    Effect.map(encodePatch),
-    Effect.map(JSON.stringify)
-  )
+  Schema.decodeUnknownEffect(IntelligenceSettingsPatchRequestSchema)(
+    { changes: value },
+    strict
+  ).pipe(Effect.map(JSON.stringify))

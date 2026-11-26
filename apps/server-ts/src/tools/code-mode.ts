@@ -119,7 +119,7 @@ const makeCodeModeTool = (services: CodeModeServices): ServerTool =>
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
     metadata: {
-      display: { row: "code" },
+      display: [{ fact: "row", value: "code" }],
       effect: "none",
       detached: true,
       code_mode: false,

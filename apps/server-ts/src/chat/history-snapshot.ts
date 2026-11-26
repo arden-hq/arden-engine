@@ -1,4 +1,8 @@
-import type { HistoryRouteOptions, TurnWorkRouteOptions } from "@arden-hq/protocol/chat"
+import {
+  HISTORY_WINDOW,
+  type HistoryRouteOptions,
+  type TurnWorkRouteOptions
+} from "@arden-hq/protocol/chat"
 import { isForegroundRunStatus } from "@arden-hq/protocol/runs"
 import { Effect, Schedule, Schema } from "effect"
 import type { ChatEventStore } from "../persistence/events/store.js"
@@ -24,43 +28,46 @@ const loadPage = Effect.fn("ChatHistory.loadPage")(function* (
   sessionId: string,
   input: HistoryRouteOptions
 ): Effect.fn.Return<TranscriptPage, TranscriptQueryFailure | ChatHistoryInvalidCursor> {
-  const limit = input.limit ?? 100
-  if (input.aroundSeq !== undefined) {
-    return yield* transcript.conversationPage({
-      _tag: "Around",
-      sessionId,
-      limit,
-      sequence: input.aroundSeq
-    })
+  const { limit, window } = input
+  switch (window.kind) {
+    case HISTORY_WINDOW.latest:
+      return yield* transcript.conversationPage({ _tag: "Latest", sessionId, limit })
+    case HISTORY_WINDOW.aroundSeq:
+      return yield* transcript.conversationPage({
+        _tag: "Around",
+        sessionId,
+        limit,
+        sequence: window.seq
+      })
+    case HISTORY_WINDOW.around: {
+      const sequence = yield* transcript.resolveReference(sessionId, window.cursor)
+      if (sequence === null) {
+        return yield* new ChatHistoryInvalidCursor({ sessionId, cursor: window.cursor })
+      }
+      return yield* transcript.conversationPage({ _tag: "Around", sessionId, limit, sequence })
+    }
+    case HISTORY_WINDOW.before:
+    case HISTORY_WINDOW.after: {
+      const sequence = yield* transcript.resolveConversationReference(sessionId, window.cursor)
+      if (sequence === null) {
+        return yield* new ChatHistoryInvalidCursor({ sessionId, cursor: window.cursor })
+      }
+      return yield* transcript.conversationPage({
+        _tag: window.kind === HISTORY_WINDOW.before ? "Before" : "After",
+        sessionId,
+        limit,
+        sequence
+      })
+    }
   }
-
-  const cursor = input.around ?? input.before ?? input.after
-  if (cursor === undefined) {
-    return yield* transcript.conversationPage({ _tag: "Latest", sessionId, limit })
-  }
-
-  const sequence = yield* input.around === undefined
-    ? transcript.resolveConversationReference(sessionId, cursor)
-    : transcript.resolveReference(sessionId, cursor)
-  if (sequence === null) {
-    return yield* new ChatHistoryInvalidCursor({ sessionId, cursor })
-  }
-  if (input.around !== undefined) {
-    return yield* transcript.conversationPage({ _tag: "Around", sessionId, limit, sequence })
-  }
-  if (input.before !== undefined) {
-    return yield* transcript.conversationPage({ _tag: "Before", sessionId, limit, sequence })
-  }
-  return yield* transcript.conversationPage({ _tag: "After", sessionId, limit, sequence })
 })
 
 const loadTurnWorkPage = Effect.fn("ChatHistory.loadTurnWorkPage")(function* (
   transcript: TranscriptQueries["Service"],
   input: TurnWorkRouteOptions
 ): Effect.fn.Return<TranscriptPage, TranscriptQueryFailure | ChatHistoryInvalidCursor> {
-  const limit = input.limit ?? 100
-  const cursor = input.before ?? input.after
-  if (cursor === undefined) {
+  const { limit, window } = input
+  if (window.kind === HISTORY_WINDOW.latest) {
     return yield* transcript.turnWorkPage({
       _tag: "Latest",
       sessionId: input.sessionId,
@@ -68,15 +75,19 @@ const loadTurnWorkPage = Effect.fn("ChatHistory.loadTurnWorkPage")(function* (
       limit
     })
   }
-  const sequence = yield* transcript.resolveTurnWorkReference(input.sessionId, input.turnId, cursor)
+  const sequence = yield* transcript.resolveTurnWorkReference(
+    input.sessionId,
+    input.turnId,
+    window.cursor
+  )
   if (sequence === null) {
     return yield* new ChatHistoryInvalidCursor({
       sessionId: input.sessionId,
-      cursor
+      cursor: window.cursor
     })
   }
   return yield* transcript.turnWorkPage({
-    _tag: input.before !== undefined ? "Before" : "After",
+    _tag: window.kind === HISTORY_WINDOW.before ? "Before" : "After",
     sessionId: input.sessionId,
     turnId: input.turnId,
     limit,
@@ -101,11 +112,7 @@ export const loadStableSnapshot = Effect.fn("ChatHistory.loadStableSnapshot")(
     const before = yield* journal.watermarks(sessionId)
     const run = yield* runs.latestForSession(sessionId)
     const page = yield* loadPage(transcript, sessionId, input)
-    const isLatestPage =
-      input.before === undefined &&
-      input.after === undefined &&
-      input.around === undefined &&
-      input.aroundSeq === undefined
+    const isLatestPage = input.window.kind === HISTORY_WINDOW.latest
     const activeTurnId =
       isLatestPage && run !== null && isForegroundRunStatus(run.status) ? run.turnId : null
     const workPage =

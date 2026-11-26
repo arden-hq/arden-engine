@@ -1,5 +1,5 @@
 import { countOf } from "@arden-hq/std/count"
-import { ToolExecutionError } from "@arden-hq/loop"
+import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 
 import { commandTarget } from "./action-targets.js"
@@ -16,11 +16,11 @@ import {
   ruleDecision,
   type RunRules
 } from "../execution/rules.js"
-import type { RunAuthority } from "../execution/authority.js"
+import { sharedResourceSessions, type RunAuthority } from "../execution/authority.js"
 import { ConversationArtifacts } from "../artifacts/conversation.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
 import { changesNothing, isReadOnlyCommand } from "./bash-safe-commands.js"
-import { parseCommandSegments } from "./bash-permissions.js"
+import { parseCommandSegments, type HostCommandGrantPlan } from "./bash-permissions.js"
 import { refuseNeverPaths } from "./command-paths.js"
 import {
   approvalPrompt,
@@ -48,7 +48,6 @@ import {
   type TypedLine
 } from "./typed-input.js"
 import { sessionPathPolicy } from "../storage/local-paths.js"
-import type { HostCommandGrantPlan } from "./bash-permissions.js"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { ardenDataRoots, mentionsArdenData } from "./arden-data-mention.js"
 import { ServerConfig } from "../config/service.js"
@@ -65,10 +64,8 @@ import { TerminalSessions } from "../terminals/service.js"
 import type { TerminalInfo, TerminalStore } from "../terminals/store.js"
 import { spawnLiveProcess, type ProcessExit } from "../terminals/live-process.js"
 import type { ServerRunContext } from "./run-context.js"
-import { sharedResourceSessions } from "../execution/authority.js"
 import { refusalPath } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
-import type { ToolContext } from "@arden-hq/loop"
 import { toolRefusal } from "./tool-failure.js"
 import { keyVariables, VaultKeys, type VaultKeysService } from "../credentials/vault-keys.js"
 import type { KeyProxy } from "./shell-policy.js"
@@ -171,7 +168,10 @@ const makeExecCommandTool = (
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ExecParametersSchema),
     metadata: {
-      display: { card: "command", refresh: "terminals" },
+      display: [
+        { fact: "card", value: "command" },
+        { fact: "refresh", value: "terminals" }
+      ],
       effect: "local_files",
       detached: true,
       read_only_mode: "self_gated",

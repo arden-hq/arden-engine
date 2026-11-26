@@ -53,11 +53,23 @@ export interface GoogleDisconnectReceipt extends JsonRecord {
   readonly accountId: string
 }
 
-/** A Google OAuth client the user configured for this device. */
+export const GOOGLE_CLIENT_SECRET = { public: "public", confidential: "confidential" } as const
+
+export type GoogleClientSecret =
+  | { readonly kind: typeof GOOGLE_CLIENT_SECRET.public }
+  | { readonly kind: typeof GOOGLE_CLIENT_SECRET.confidential; readonly clientSecret: string }
+
 export interface GoogleOAuthClient {
   readonly clientId: string
-  readonly clientSecret?: string
+  readonly secret: GoogleClientSecret
 }
+
+export const sameGoogleClient = (left: GoogleOAuthClient, right: GoogleOAuthClient): boolean =>
+  left.clientId === right.clientId &&
+  (left.secret.kind === GOOGLE_CLIENT_SECRET.confidential
+    ? right.secret.kind === GOOGLE_CLIENT_SECRET.confidential &&
+      left.secret.clientSecret === right.secret.clientSecret
+    : right.secret.kind === GOOGLE_CLIENT_SECRET.public)
 
 /** Saving a client succeeds, or is blocked while accounts depend on the current one. */
 export type GoogleClientConfigured =
@@ -68,16 +80,15 @@ type GoogleAuthUri =
   | "https://accounts.google.com/o/oauth2/auth"
   | "https://accounts.google.com/o/oauth2/v2/auth"
 
-/** The downloaded Desktop-app client file; endpoint fields cannot redirect credentials. */
 export interface GoogleDesktopClientFile {
   readonly installed: {
     readonly client_id: string
     readonly client_secret: string
-    readonly project_id?: string
-    readonly auth_uri?: GoogleAuthUri
-    readonly token_uri?: "https://oauth2.googleapis.com/token"
-    readonly auth_provider_x509_cert_url?: "https://www.googleapis.com/oauth2/v1/certs"
-    readonly redirect_uris?: ReadonlyArray<"http://localhost" | "http://127.0.0.1">
+    readonly project_id: string
+    readonly auth_uri: GoogleAuthUri
+    readonly token_uri: "https://oauth2.googleapis.com/token"
+    readonly auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs"
+    readonly redirect_uris: ReadonlyArray<"http://localhost" | "http://127.0.0.1">
   }
 }
 

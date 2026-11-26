@@ -1,8 +1,13 @@
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import { sanitizeApprovalPresentation, type ApprovalPresentation } from "@arden-hq/protocol/chat"
+import { APPROVAL_ASKED, APPROVAL_ASKER } from "@arden-hq/protocol/chat"
 import { ApprovalPresentationSchema } from "@arden-hq/protocol/effect/chat"
+import {
+  cleanApprovalDraft,
+  draftPayload,
+  wireApprovalPresentation,
+  type ApprovalPresentationDraft
+} from "../tools/approval-draft.js"
 import { Effect, Schema } from "effect"
-import type { RuleSavedIn } from "@arden-hq/protocol/runs"
 import { SqlClient } from "effect/unstable/sql"
 import { ChatEventStore } from "../events/store.js"
 import {
@@ -20,7 +25,7 @@ import {
   type ToolExecutionIdentity
 } from "../tools/store.js"
 import { spaceFolderGrantOf } from "../permissions/space-folder-approval.js"
-import { grantFolderField } from "../permissions/grant-folder.js"
+import { grantFolderOf } from "../permissions/grant-folder.js"
 import { decodeJson, encodeJson } from "./json.js"
 import type { ApprovalPermissionContext } from "./permissions.js"
 import { toldKey, UnitOfWork } from "../unit-of-work.js"
@@ -36,7 +41,7 @@ import {
 } from "./tool-rows.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { loadPendingDecisionRoutes, type DecisionRouteRef } from "./decision-route-journal.js"
-import { workOf } from "./run-approvals.js"
+import { approvalCard, approvalDiff, approvalPreview, workOf } from "./run-approvals.js"
 import { resumeToolCoordinator } from "./tool-coordinator.js"
 import { detachedWorkflowCalls } from "./detached-workflow-calls.js"
 
@@ -50,7 +55,7 @@ export interface PendingToolApprovalInput {
   readonly scope: string
   readonly preview: string | null
   readonly diff?: string | null
-  readonly presentation?: ApprovalPresentation
+  readonly presentation?: ApprovalPresentationDraft
   readonly description: string | null
   readonly data?: JsonObject
   readonly permissionContext?: ApprovalPermissionContext
@@ -61,54 +66,37 @@ const ToolApprovalPromptSchema = Schema.Struct({
   detail: Schema.optionalKey(Schema.String),
   preview: Schema.optionalKey(Schema.String),
   diff: Schema.optionalKey(Schema.String),
-  presentation: Schema.optionalKey(ApprovalPresentationSchema),
   data: Schema.optionalKey(JsonObjectSchema)
 })
+
+const isWirePresentation = Schema.is(ApprovalPresentationSchema)
 
 export const decodePrompt = Effect.fn("SqliteToolExecutionStore.decodePrompt")(function* (
   prompt: ToolApprovalPrompt,
   identity: ToolExecutionIdentity
 ): Effect.fn.Return<ToolApprovalPrompt, ToolExecutionStoreError> {
   const presentation =
-    prompt.presentation === undefined
-      ? undefined
-      : sanitizeApprovalPresentation(prompt.presentation)
-  if (prompt.presentation !== undefined && presentation === undefined) {
+    prompt.presentation === undefined ? undefined : cleanApprovalDraft(prompt.presentation)
+  if (
+    prompt.presentation !== undefined &&
+    (presentation === undefined || !isWirePresentation(wireApprovalPresentation(presentation)))
+  ) {
     return yield* toolError("pause", "invalid", "Invalid tool approval presentation", identity)
   }
-  const sanitized = {
-    ...prompt,
-    ...(presentation === undefined ? {} : { presentation })
-  }
-  return yield* Schema.decodeUnknownEffect(ToolApprovalPromptSchema)(sanitized, {
+  const { presentation: _authored, ...rest } = prompt
+  const decoded = yield* Schema.decodeUnknownEffect(ToolApprovalPromptSchema)(rest, {
     onExcessProperty: "error"
   }).pipe(
     Effect.mapError((cause) =>
       toolError("pause", "invalid", "Invalid tool approval prompt", identity, cause)
     )
   )
+  return presentation === undefined ? decoded : { ...decoded, presentation }
 })
 
 const approvalIdentity = (
   input: Pick<PendingToolApprovalInput, "runId" | "toolCallId">
 ): Pick<ToolExecutionIdentity, "runId" | "toolCallId"> => input
-
-const approvalPresentationPayload = (presentation: ApprovalPresentation): JsonObject => ({
-  title: presentation.title,
-  ...(presentation.subject === undefined ? {} : { subject: presentation.subject }),
-  fields: presentation.fields.map((field) => ({ label: field.label, value: field.value })),
-  ...(presentation.body === undefined
-    ? {}
-    : { body: { label: presentation.body.label, text: presentation.body.text } }),
-  ...(presentation.approve_label === undefined
-    ? {}
-    : { approve_label: presentation.approve_label }),
-  ...(presentation.reject_label === undefined ? {} : { reject_label: presentation.reject_label }),
-  ...(presentation.note === undefined ? {} : { note: presentation.note }),
-  ...(presentation.why === undefined ? {} : { why: presentation.why }),
-  ...(presentation.grant_label === undefined ? {} : { grant_label: presentation.grant_label }),
-  ...(presentation.grant_rule === undefined ? {} : { grant_rule: presentation.grant_rule })
-})
 
 const canAttachFolderToSpace = (input: PendingToolApprovalInput): boolean =>
   spaceFolderGrantOf(input.toolName, input.data) !== undefined
@@ -139,16 +127,9 @@ const approvalGrantPayload = (input: PendingToolApprovalInput): JsonObject => {
   }
 }
 
-const approvalGrantEvent = (
-  input: PendingToolApprovalInput
-): { readonly rule_places?: ReadonlyArray<RuleSavedIn> } =>
-  input.permissionContext === undefined ? {} : { rule_places: input.permissionContext.places }
-
 export const approvalPayload = (input: PendingToolApprovalInput): JsonObject => ({
   ...(input.description === null ? {} : { description: input.description }),
-  ...(input.presentation === undefined
-    ? {}
-    : { presentation: approvalPresentationPayload(input.presentation) }),
+  ...(input.presentation === undefined ? {} : { presentation: draftPayload(input.presentation) }),
   ...(input.data === undefined ? {} : { approval_data: input.data }),
   ...(canAttachFolderToSpace(input) ? { can_attach_folder_to_space: true } : {}),
   ...approvalGrantPayload(input)
@@ -162,11 +143,13 @@ const approvalNeededDraft = (
   event: {
     type: "approval_needed",
     tool_id: input.toolCallId,
-    asked_at: askedAt,
+    asked: { kind: APPROVAL_ASKED.recorded, at: askedAt },
     name: input.toolName,
-    content_preview: input.preview,
-    ...(input.diff === undefined ? {} : { diff: input.diff }),
-    ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+    preview: approvalPreview(input.preview),
+    diff: approvalDiff(input.diff ?? null),
+    card: approvalCard(
+      input.presentation === undefined ? undefined : wireApprovalPresentation(input.presentation)
+    ),
     run_id: input.runId,
     session_id: input.sessionId,
     decision_route: {
@@ -175,10 +158,10 @@ const approvalNeededDraft = (
       basis: "source_v1"
     },
     action: input.action,
-    scope: input.scope,
-    ...(canAttachFolderToSpace(input) ? { can_attach_folder_to_space: true } : {}),
-    ...grantFolderField(input.toolName, input.data),
-    ...approvalGrantEvent(input)
+    rule_places: input.permissionContext?.places ?? [],
+    can_attach_folder_to_space: canAttachFolderToSpace(input),
+    grant_folder: grantFolderOf(input.toolName, input.data),
+    asker: { kind: APPROVAL_ASKER.chat }
   } satisfies ChatProjectionEvent,
   runId: input.runId
 })
@@ -205,14 +188,11 @@ export const pendingDecisionDraft = Effect.fn("SqliteToolExecutionStore.pendingD
         )
       )
       return {
-        event: {
-          ...connectionNeededEvent(pendingConnectionDecision(input, data)),
-          decision_route: {
-            source_kind: sourceKind,
-            source_session_id: input.sessionId,
-            basis: "source_v1"
-          }
-        },
+        event: connectionNeededEvent(pendingConnectionDecision(input, data, sourceKind), {
+          source_kind: sourceKind,
+          source_session_id: input.sessionId,
+          basis: "source_v1"
+        }),
         runId: input.runId
       }
     }
@@ -539,7 +519,7 @@ export const appendEscalatedApprovalDraft = Effect.fn(
                 },
                 ...(work === null || recipient.viewer_session_id === sourceSessionId
                   ? {}
-                  : { work })
+                  : { asker: { kind: APPROVAL_ASKER.work, work } })
               },
               admission: "detached"
             }

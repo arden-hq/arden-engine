@@ -13,67 +13,102 @@ export interface EmbeddingStoredIndex extends JsonRecord {
   readonly bytes: number
 }
 
-interface EmbeddingIndexIdle extends JsonRecord {
-  readonly state: "idle"
-  /** The model whose index was kept when search was turned off; turning it on needs no re-index. */
-  readonly keptModelId: string | null
-  /** The model the person chose that is not installed, so search uses words only; null when Off by choice. */
-  readonly unavailableModelId: string | null
+export type EmbeddingModelRef =
+  | { readonly kind: "none" }
+  | { readonly kind: "model"; readonly modelId: string }
+
+export type EmbeddingEta =
+  | { readonly kind: "estimating" }
+  | { readonly kind: "estimated"; readonly seconds: number }
+
+interface EmbeddingIndexCatalog extends JsonRecord {
   readonly models: ReadonlyArray<EmbeddingModelInfo>
   readonly indexes: ReadonlyArray<EmbeddingStoredIndex>
 }
 
-interface EmbeddingIndexDone extends JsonRecord {
+interface EmbeddingIndexProgress extends EmbeddingIndexCatalog {
+  readonly modelId: string
+  readonly indexedPages: number
+  readonly totalPages: number
+}
+
+interface EmbeddingIndexOff extends EmbeddingIndexCatalog {
+  readonly state: "off"
+  readonly kept: EmbeddingModelRef
+}
+
+interface EmbeddingIndexUnavailable extends EmbeddingIndexCatalog {
+  readonly state: "unavailable"
+  readonly modelId: string
+}
+
+interface EmbeddingIndexDone extends EmbeddingIndexProgress {
   readonly state: "done"
-  readonly modelId: string
-  readonly indexedPages: number
-  readonly totalPages: number
-  readonly models: ReadonlyArray<EmbeddingModelInfo>
-  readonly indexes: ReadonlyArray<EmbeddingStoredIndex>
 }
 
-interface EmbeddingIndexJob extends JsonRecord {
-  readonly state: "indexing" | "paused"
-  readonly modelId: string
-  /** The model search uses until this job finishes; null when there is none. */
-  readonly previousModelId: string | null
-  readonly indexedPages: number
-  readonly totalPages: number
+interface EmbeddingIndexIndexing extends EmbeddingIndexProgress {
+  readonly state: "indexing"
+  readonly previous: EmbeddingModelRef
   readonly startedAt: string
-  /** `loading` while the model starts, before its first page; `pages` after (and while paused). */
   readonly phase: "loading" | "pages"
-  /** Rough seconds left; null until enough pages finished in this run. */
-  readonly etaSeconds: number | null
-  readonly models: ReadonlyArray<EmbeddingModelInfo>
-  readonly indexes: ReadonlyArray<EmbeddingStoredIndex>
+  readonly eta: EmbeddingEta
 }
 
-interface EmbeddingIndexFailed extends JsonRecord {
+interface EmbeddingIndexPaused extends EmbeddingIndexProgress {
+  readonly state: "paused"
+  readonly previous: EmbeddingModelRef
+  readonly startedAt: string
+}
+
+interface EmbeddingIndexFailed extends EmbeddingIndexProgress {
   readonly state: "failed"
-  readonly modelId: string
-  readonly previousModelId: string | null
-  readonly indexedPages: number
-  readonly totalPages: number
+  readonly previous: EmbeddingModelRef
   readonly error: string
-  readonly models: ReadonlyArray<EmbeddingModelInfo>
-  readonly indexes: ReadonlyArray<EmbeddingStoredIndex>
 }
 
-/**
- * Wiki semantic search state.
- *
- * - `idle`: embeddings are off (or no model can run); no embedding work, word search only.
- *   The last index may be kept (`keptModelId`).
- * - `done`: the chosen model's index is the one search uses.
- * - `indexing` / `paused`: a new index for `modelId` is built beside the previous model's,
- *   which search keeps using until the new one covers every page.
- * - `failed`: the last indexing step failed; it is tried again on the next change or resume.
- */
 export type EmbeddingIndexStatus =
-  | EmbeddingIndexIdle
+  | EmbeddingIndexOff
+  | EmbeddingIndexUnavailable
   | EmbeddingIndexDone
-  | EmbeddingIndexJob
+  | EmbeddingIndexIndexing
+  | EmbeddingIndexPaused
   | EmbeddingIndexFailed
+
+export const EMBEDDING_STATE = {
+  off: "off",
+  unavailable: "unavailable",
+  done: "done",
+  indexing: "indexing",
+  paused: "paused",
+  failed: "failed"
+} as const
+
+export const EMBEDDING_MODEL_REF = { none: "none", model: "model" } as const
+
+export const isEmbeddingSearchStopped = (
+  status: EmbeddingIndexStatus
+): status is EmbeddingIndexOff | EmbeddingIndexUnavailable =>
+  status.state === EMBEDDING_STATE.off || status.state === EMBEDDING_STATE.unavailable
+
+export const embeddingSearchUsesModel = (
+  status: EmbeddingIndexStatus,
+  modelId: string
+): boolean => {
+  switch (status.state) {
+    case EMBEDDING_STATE.off:
+    case EMBEDDING_STATE.unavailable:
+      return false
+    case EMBEDDING_STATE.done:
+      return status.modelId === modelId
+    case EMBEDDING_STATE.indexing:
+    case EMBEDDING_STATE.paused:
+    case EMBEDDING_STATE.failed:
+      return (
+        status.modelId === modelId ||
+        (status.previous.kind === EMBEDDING_MODEL_REF.model && status.previous.modelId === modelId)
+      )
+  }
+}
 
 /** Which model embeds the Wiki, or Off, keeping or deleting the current index. */
 export type EmbeddingModelChoice =

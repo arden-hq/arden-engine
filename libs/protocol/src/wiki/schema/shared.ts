@@ -1,7 +1,8 @@
 import { nonRelativePathSegment } from "../../common/routes.js"
 import { Schema } from "effect"
 
-import { IsoDateTimeStringSchema, withExtras } from "../../common/schema.js"
+import { IsoDateTimeStringSchema } from "../../common/schema.js"
+import { WIKI_DIFF_BASE, WIKI_EXCERPT, WIKI_MOMENT, WIKI_PAGE_LIFECYCLE } from "../contracts.js"
 
 export const strict = { onExcessProperty: "error" } as const
 
@@ -46,32 +47,42 @@ export const WikiPathSchema = trimmedText(4_096).check(
 )
 export const WikiTitleSchema = trimmedText(4_096)
 export const WikiResourceStateSchema = Schema.Literals(["active", "archived"] as const)
-export const WikiPageLifecycleSchema = Schema.Literals(["active", "redirect"] as const)
 export const WikiRestoreSideSchema = Schema.Literals(["after", "before"] as const)
 export const WikiMetadataSchema = Schema.Record(Schema.String, Schema.Json)
 
-export const aliasesSchema = Schema.Array(trimmedText(4_096)).check(Schema.isMaxLength(100))
-export const nullableRevisionIdSchema = Schema.NullOr(WikiRevisionIdSchema)
+const aliasesSchema = Schema.Array(trimmedText(4_096)).check(Schema.isMaxLength(100))
+
+export const WikiPageLifecycleSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_PAGE_LIFECYCLE.active) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_PAGE_LIFECYCLE.redirect), to: boundedText(4_096) })
+])
+
+export const WikiExcerptSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_EXCERPT.blank) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_EXCERPT.text), text: Schema.String })
+])
+
+export const WikiMomentSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_MOMENT.unrecorded) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_MOMENT.at), at: IsoDateTimeStringSchema })
+])
+
+export const WikiDiffBaseSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_DIFF_BASE.empty) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_DIFF_BASE.version), version: WikiRevisionIdSchema })
+])
 
 export const pageFields = {
   page_id: WikiPageIdSchema,
   path: boundedText(4_096),
   resource_state: WikiResourceStateSchema,
   title: boundedText(4_096),
-  excerpt: Schema.NullOr(Schema.String),
+  excerpt: WikiExcerptSchema,
   aliases: aliasesSchema,
   lifecycle: WikiPageLifecycleSchema,
-  redirect_to: Schema.NullOr(boundedText(4_096)),
   metadata: WikiMetadataSchema,
   version: WikiRevisionIdSchema,
   repository_head: WikiRevisionIdSchema,
-  created_at: Schema.NullOr(IsoDateTimeStringSchema),
-  updated_at: Schema.NullOr(IsoDateTimeStringSchema)
+  created: WikiMomentSchema,
+  updated: WikiMomentSchema
 } as const
-
-/** Visible wikilink fields. Parser offsets and content identities stay server-internal. */
-export const WikilinkNodeSchema = withExtras({
-  page: Schema.NullOr(Schema.String),
-  fragment: Schema.NullOr(Schema.String),
-  alias: Schema.NullOr(Schema.String)
-})

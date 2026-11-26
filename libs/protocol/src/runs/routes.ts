@@ -1,12 +1,64 @@
 import { Schema } from "effect"
-import { RunQuestionListOptionsSchema } from "./questions.js"
-import { WorkerAttemptPageOptionsSchema } from "./attempts.js"
+import {
+  RUN_LIST_FILTER,
+  RUN_PAGE,
+  RUN_QUESTION_FILTER,
+  RunEventPageOptionsSchema,
+  RunListOptionsSchema,
+  RunQuestionListOptionsSchema,
+  SessionUsageOptionsSchema,
+  UsageReportOptionsSchema,
+  WorkerAttemptPageOptionsSchema,
+  type RunListFilter,
+  type RunPage,
+  type RunQuestionFilter
+} from "./list-options.js"
 
 import { appendSearch, encodeRouteEffect, encodeSegment, routeSegment } from "../common/routes.js"
-import { NonNegativeIntSchema, PositiveIntSchema } from "../common/schema.js"
 import type { Effect } from "effect/Effect"
 
+type SearchEntries = ReadonlyArray<readonly [string, string | number]>
+
 const RunIdSchema = routeSegment()
+
+const pageParams = <C extends string | number>(page: RunPage<C>): SearchEntries =>
+  page.kind === RUN_PAGE.first
+    ? [["page", page.kind]]
+    : [
+        ["page", page.kind],
+        ["cursor", page.cursor]
+      ]
+
+const questionFilterParams = (filter: RunQuestionFilter): SearchEntries => {
+  switch (filter.kind) {
+    case RUN_QUESTION_FILTER.all:
+      return [["filter", filter.kind]]
+    case RUN_QUESTION_FILTER.space:
+      return [
+        ["filter", filter.kind],
+        ["space_id", filter.space_id]
+      ]
+    case RUN_QUESTION_FILTER.session:
+      return [
+        ["filter", filter.kind],
+        ["session_id", filter.session_id]
+      ]
+    case RUN_QUESTION_FILTER.task:
+      return [
+        ["filter", filter.kind],
+        ["item_id", filter.item_id]
+      ]
+  }
+}
+
+const runListFilterParams = (filter: RunListFilter): SearchEntries =>
+  filter.kind === RUN_LIST_FILTER.all
+    ? [["filter", filter.kind]]
+    : [
+        ["filter", filter.kind],
+        ["session_id", filter.session_id]
+      ]
+
 export const encodeTaskAttemptsPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> =>
@@ -15,8 +67,8 @@ export const encodeTaskAttemptsPathEffect = (
     value,
     ({ itemId, options }) =>
       appendSearch(`/spaces/work/${encodeSegment(itemId)}/attempts`, [
-        ["cursor", options.cursor],
-        ["limit", options.limit]
+        ["limit", options.limit],
+        ...pageParams(options.page)
       ])
   )
 export const encodeRunQuestionsPathEffect = (
@@ -24,23 +76,31 @@ export const encodeRunQuestionsPathEffect = (
 ): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(RunQuestionListOptionsSchema, value, (options) =>
     appendSearch("/chat/questions", [
-      ["space_id", options.space_id],
-      ["session_id", options.session_id],
-      ["item_id", options.item_id],
+      ...questionFilterParams(options.filter),
       ["state", options.state],
-      ["cursor", options.cursor]
+      ...pageParams(options.page)
     ])
   )
 export const encodeRunQuestionAnswerPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(routeSegment(), value, (id) => `/chat/questions/${encodeSegment(id)}/answer`)
+
+export const encodeRunListPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
+  encodeRouteEffect(RunListOptionsSchema, value, (options) =>
+    appendSearch("/chat/runs", [
+      ...runListFilterParams(options.filter),
+      ["active", options.active],
+      ["limit", options.limit],
+      ...pageParams(options.page)
+    ])
+  )
+
 const RunEventPageRouteSchema = Schema.Struct({
   runId: RunIdSchema,
-  options: Schema.Struct({
-    afterSequence: Schema.optionalKey(NonNegativeIntSchema),
-    limit: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(200)))
-  })
+  options: RunEventPageOptionsSchema
 })
 
 const runPath = (runId: string): string => `/chat/runs/${encodeSegment(runId)}`
@@ -59,24 +119,16 @@ export const encodeRunEventPagePathEffect = (
     ])
   )
 
-const UsageReportRouteSchema = Schema.Struct({
-  options: Schema.Struct({
-    days: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(365)))
-  })
-})
-
 export const encodeUsageReportPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> =>
-  encodeRouteEffect(UsageReportRouteSchema, value, ({ options }) =>
+  encodeRouteEffect(Schema.Struct({ options: UsageReportOptionsSchema }), value, ({ options }) =>
     appendSearch("/usage", [["days", options.days]])
   )
 
 const SessionUsageRouteSchema = Schema.Struct({
   sessionId: routeSegment(),
-  options: Schema.Struct({
-    limit: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(50)))
-  })
+  options: SessionUsageOptionsSchema
 })
 
 export const encodeSessionUsagePathEffect = (

@@ -1,5 +1,11 @@
 import type { ToolResult } from "@arden-hq/loop"
-import type { ChangeEvidence, ChangeEntry } from "@arden-hq/protocol/chat"
+import {
+  CHANGE_ENTRY_LINK,
+  CHANGE_ENTRY_PLACE,
+  CHANGE_ENTRY_TITLE,
+  type ChangeEvidence,
+  type ChangeEntry
+} from "@arden-hq/protocol/chat"
 export type { ChangeEvidence, ChangeEntry } from "@arden-hq/protocol/chat"
 import type { EffectTargetOrigin } from "../../execution/tool-effect.js"
 import {
@@ -46,19 +52,39 @@ const versionSide = (version: string): ChangeEntry["before"] =>
 const entryId = (operationId: string, kind: "resource" | "target", index: number): string =>
   index === 0 ? `${operationId}:${kind}` : `${operationId}:${kind}:${index}`
 
+const entryLabel = (label: {
+  readonly title?: string
+  readonly href?: string
+}): Pick<ChangeEntry, "title" | "link"> => {
+  const bounded = boundedLabel(label)
+  return {
+    title:
+      bounded.title === undefined
+        ? { kind: CHANGE_ENTRY_TITLE.untitled }
+        : { kind: CHANGE_ENTRY_TITLE.titled, text: bounded.title },
+    link:
+      bounded.href === undefined
+        ? { kind: CHANGE_ENTRY_LINK.unlinked }
+        : { kind: CHANGE_ENTRY_LINK.linked, href: bounded.href }
+  }
+}
+
+const unplaced: ChangeEntry["place"] = { kind: CHANGE_ENTRY_PLACE.unplaced }
+
 const resourceEntry = (
   resource: ListedResource,
   outcome: ChangeEntry["outcome"],
   entry_id: string,
   fileComparison: "patch" | "truncated" | "unavailable"
 ): ChangeEntry => {
-  const label = boundedLabel(resource)
+  const label = entryLabel(resource)
   if (resource.kind === "target") {
     return {
       entry_id,
       domain: resource.domain,
       resource_ref: resource.resource_ref,
       ...label,
+      place: unplaced,
       outcome,
       before: { kind: "unrecorded" },
       after: { kind: "unrecorded" },
@@ -71,6 +97,7 @@ const resourceEntry = (
     domain: resource.domain ?? (file ? "file" : "resource"),
     resource_ref: resource.resource_ref,
     ...label,
+    place: unplaced,
     outcome,
     before: versionSide(resource.before_version),
     after: versionSide(resource.after_version),
@@ -86,17 +113,17 @@ const targetEntry = (
   entry_id,
   domain: targetDomain(target.source),
   resource_ref: `${target.source}:${target.objectId}`,
-  ...boundedLabel(target),
-  ...placeOf(target),
+  ...entryLabel(target),
+  place: placeOf(target),
   outcome,
   before: target.origin === "created" ? { kind: "absent" } : { kind: "unrecorded" },
   after: { kind: "unrecorded" },
   comparison: "unavailable"
 })
 
-const placeOf = (target: CallTarget): { readonly place?: string } => {
+const placeOf = (target: CallTarget): ChangeEntry["place"] => {
   const place = boundedPlace(target.place)
-  return place === undefined ? {} : { place }
+  return place === undefined ? unplaced : { kind: CHANGE_ENTRY_PLACE.placed, place }
 }
 
 const hasTitle = (target: CallTarget): target is CallTarget & { readonly title: string } =>

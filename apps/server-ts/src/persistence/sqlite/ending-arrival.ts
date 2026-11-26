@@ -40,7 +40,6 @@ export const postQuietLine = Effect.fn("EndingArrival.postQuietLine")(function* 
     occurrence_key: options.occurrenceKey,
     source_run_id: options.sourceRunId,
     source_session_ref: options.sourceSessionRef,
-    destination_space_id: destination.space_id,
     destination_session_ref: destination.public_ref,
     source_sequence: sequence,
     occurred_at: occurredAt,

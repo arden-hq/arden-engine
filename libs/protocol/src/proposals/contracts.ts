@@ -8,28 +8,18 @@ import type { JsonRecord } from "../common/json.js"
 
 export type TaskProposalPlace = "space" | "chat"
 
-export interface TaskProposalCapturePolicy extends JsonRecord {
-  readonly origin: "chat" | "automation" | "task" | "space" | "unrecorded"
-  readonly task_item_id: string | null
-  readonly task_generation: number | null
-}
+export type TaskProposalSignalSender =
+  | { readonly kind: "unnamed" }
+  | { readonly kind: "named"; readonly name: string }
 
-/** The outside item a suggestion came from, kept after the item expires.
- *  `source` is a signal source id (`@arden-hq/protocol/signals`). */
-export interface TaskProposalSignal extends JsonRecord {
-  readonly source: string
-  readonly title: string
-  readonly from: string | null
-}
-
-/** A record a review cited as proof that an offer's outcome is done, named for the person.
- *  A label is null when the record is gone or never had a name. */
 export type TaskProposalRetirementEvidence =
   | {
       readonly kind: "chat"
       readonly session_id: string
-      readonly turn_id: string | null
-      readonly label: string | null
+      readonly turn:
+        | { readonly kind: "whole_chat" }
+        | { readonly kind: "turn"; readonly turn_id: string }
+      readonly label: TaskProposalSignalSender
     }
   | { readonly kind: "memory"; readonly page_ref: string }
   | { readonly kind: "task"; readonly item_id: string; readonly label: string }
@@ -37,49 +27,91 @@ export type TaskProposalRetirementEvidence =
       readonly kind: "connection_item"
       readonly item_id: string
       readonly label: string
-      /** The item's web page; null for a mail, which has none of its own. */
-      readonly url: string | null
+      readonly link:
+        | { readonly kind: "unlinked" }
+        | { readonly kind: "linked"; readonly url: string }
     }
 
-/** Why a review closed an offer as done, and what it cited. */
 export interface TaskProposalRetirement extends JsonRecord {
   readonly reason: string
   readonly evidence: ReadonlyArray<TaskProposalRetirementEvidence>
 }
 
-export interface TaskProposal extends JsonRecord {
+export const TASK_PROPOSAL_PLACEMENT = { space: "space", chat: "chat" } as const
+
+export type TaskProposalPlacement =
+  | { readonly kind: "space"; readonly space_id: string }
+  | { readonly kind: "chat"; readonly session_id: string }
+
+export type TaskProposalBody =
+  | { readonly kind: "plain" }
+  | { readonly kind: "detailed"; readonly text: string }
+
+export type TaskProposalSignal =
+  | { readonly kind: "unsignalled" }
+  | {
+      readonly kind: "signal"
+      readonly source: string
+      readonly title: string
+      readonly from: TaskProposalSignalSender
+    }
+
+export const TASK_PROPOSAL_ORIGIN = { router: "router", run: "run" } as const
+
+export type TaskProposalOrigin =
+  | { readonly kind: "router" }
+  | {
+      readonly kind: "run"
+      readonly run_id: string
+      readonly session_id: string
+      readonly turn_id: string
+      readonly tool_call_id: string
+    }
+
+export type TaskProposalPutOff =
+  | { readonly kind: "in_view" }
+  | { readonly kind: "put_off"; readonly until: string }
+
+export const TASK_PROPOSAL_TASK = { kept: "kept", gone: "gone" } as const
+
+export type TaskProposalStartedTask =
+  | { readonly kind: "kept"; readonly item_id: string }
+  | { readonly kind: "gone" }
+
+export type TaskProposalState =
+  | { readonly status: "held" }
+  | { readonly status: "offered"; readonly put_off: TaskProposalPutOff }
+  | {
+      readonly status: "accepted"
+      readonly settled_at: string
+      readonly task: TaskProposalStartedTask
+    }
+  | { readonly status: "rejected" | "expired"; readonly settled_at: string }
+  | {
+      readonly status: "retired"
+      readonly settled_at: string
+      readonly retirement: TaskProposalRetirement
+    }
+
+export type TaskProposalStatus = TaskProposalState["status"]
+
+export interface TaskProposalFields extends JsonRecord {
   readonly proposal_id: string
-  readonly place: TaskProposalPlace
-  /** The Space it waits on (place `space`). */
-  readonly space_id: string | null
-  /** The chat it waits in (place `chat`). */
-  readonly chat_session_id: string | null
+  readonly placement: TaskProposalPlacement
   readonly stable_key: string
   readonly text: string
-  readonly body: string | null
+  readonly body: TaskProposalBody
   readonly owner: SpaceTaskOwner
-  /** `reason` says why it was suggested. */
   readonly capture: SpaceTaskCaptureInput
   readonly sources: ReadonlyArray<SpaceTaskSource>
-  readonly signal: TaskProposalSignal | null
-  /** The run, turn and tool call that proposed it; all null for the item router's. */
-  readonly source_run_id: string | null
-  readonly source_session_id: string | null
-  readonly source_turn_id: string | null
-  readonly source_tool_call_id: string | null
-  readonly capture_policy: TaskProposalCapturePolicy | null
+  readonly signal: TaskProposalSignal
+  readonly origin: TaskProposalOrigin
   readonly revision: number
-  readonly status: "held" | "offered" | "accepted" | "rejected" | "expired" | "retired"
-  /** Set exactly when `status` is `retired`. */
-  readonly retirement: TaskProposalRetirement | null
-  /** The Task Start created; null before, or once that Task is gone. */
-  readonly item_id: string | null
-  /** An open offer the owner put off with Later stays out of sight until then; null otherwise. */
-  readonly put_off_until: string | null
   readonly created_at: string
   readonly updated_at: string
-  readonly settled_at: string | null
 }
+
+export type TaskProposal = TaskProposalFields & TaskProposalState
 
 export interface TaskProposalList extends JsonRecord {
   readonly proposals: ReadonlyArray<TaskProposal>
@@ -89,20 +121,38 @@ export type TaskProposalScope =
   | { readonly place: "space"; readonly spaceId: string }
   | { readonly place: "chat"; readonly sessionId: string }
 
-export interface ResolveTaskProposalInput {
+interface ResolveTaskProposalBase {
   readonly expected_revision: number
   readonly client_id: string
-  /** `later` keeps an open offer but puts it out of sight for a while; it settles nothing. */
-  readonly decision: "accept" | "reject" | "later"
-  /** The chat it was accepted in, which then hears how the Task goes. */
-  readonly session_id?: string
-  readonly space_id?: string
 }
+
+export const TASK_PROPOSAL_START_SPACE = { proposed: "proposed", chosen: "chosen" } as const
+export const TASK_PROPOSAL_ACCEPTED_IN = { elsewhere: "elsewhere", chat: "chat" } as const
+
+export type TaskProposalStartSpace =
+  | { readonly kind: "proposed" }
+  | { readonly kind: "chosen"; readonly space_id: string }
+
+export type TaskProposalAcceptedIn =
+  | { readonly kind: "elsewhere" }
+  | { readonly kind: "chat"; readonly session_id: string }
+
+export type ResolveTaskProposalInput =
+  | (ResolveTaskProposalBase & {
+      readonly decision: "accept"
+      readonly space: TaskProposalStartSpace
+      readonly accepted_in: TaskProposalAcceptedIn
+    })
+  | (ResolveTaskProposalBase & { readonly decision: "reject" })
+  | (ResolveTaskProposalBase & { readonly decision: "later" })
+
+export type ResolveTaskProposalTask =
+  | { readonly kind: "started"; readonly task: SpaceTask }
+  | { readonly kind: "unstarted" }
 
 export interface ResolveTaskProposalResponse extends JsonRecord {
   readonly proposal: TaskProposal
-  /** The Task Start created; null for a Skip or a Later, or a Start whose Task is gone. */
-  readonly task: SpaceTask | null
+  readonly task: ResolveTaskProposalTask
 }
 
 /** Exact applied action evidence is available only when retiring a suggestion. */
@@ -131,13 +181,14 @@ export interface TaskProposalConflict {
   readonly message: string
 }
 
-/** The latest explicit recheck, projected from the existing Space review queue/run. */
 export interface TaskProposalReview {
   readonly expected_revision: number
   readonly state: "queued" | "running" | "completed" | "failed"
   readonly message: string
   readonly proposal: TaskProposal
 }
+
+export type TaskProposalReviewStatus = { readonly state: "unrequested" } | TaskProposalReview
 
 export interface RecheckTaskProposalInput {
   readonly expected_revision: number

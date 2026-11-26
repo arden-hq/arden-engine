@@ -1,4 +1,5 @@
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
+import { CONTENT_START } from "@arden-hq/protocol/chat"
 import type { SessionEventRecord } from "./model.js"
 
 export function withContentAnchor(
@@ -14,5 +15,7 @@ export function withContentAnchor(
       record.event.message_id === event.message_id &&
       record.event.delta.trim().length > 0
   )
-  return first === undefined ? event : { ...event, content_start_seq: first.fromSequence }
+  return first === undefined
+    ? event
+    : { ...event, content_start: { kind: CONTENT_START.anchored, seq: first.fromSequence } }
 }

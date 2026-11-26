@@ -147,8 +147,10 @@ const setup = Effect.gen(function* () {
       const fresh = sql`claimed_at IS NULL AND source = 'event'
         AND task_id = ${eventsHandler.spec.automationId}`
       yield* sql`UPDATE automation_event_queue SET context = json_set(context, '$.event_batch',
-          json_object('omitted', 0, 'events', json((SELECT json_group_array(json(json_patch(json_remove(
-            json_extract(waiting.context, '$.trigger_context_snapshot'), '$.source'),
+          json_object('omitted', 0, 'events', json((SELECT json_group_array(json(json_patch(json_set(
+            json_remove(json_extract(waiting.context, '$.trigger_context_snapshot'), '$.source'),
+            '$.produced_by',
+            json_extract(waiting.context, '$.trigger_context_snapshot.produced_by.automation_id')),
             json_object('run_only_if', json_extract(waiting.context, '$.run_only_if')))))
             FROM automation_event_queue AS waiting WHERE ${fresh}))))
         WHERE id = (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
@@ -191,7 +193,7 @@ it("post_message posts in the named Space, and a retried job posts nothing twice
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, spaces, arrive, runEvents, drain, postedIn } = yield* setup
-      const taxes = yield* spaces.create({ name: "Taxes" })
+      const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
       const lease = yield* arrive("mail-1")
       const call = yield* posting({
         space_id: taxes.space_id,
@@ -265,7 +267,7 @@ it("a post with a task starts it in the post's Space, under the message; a secon
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, spaces, arrive, runEvents, settle, drain } = yield* setup
-      const home = yield* spaces.create({ name: "Home" })
+      const home = yield* spaces.create({ name: "Home", instructions: { kind: "unwritten" } })
       const task = { title: "Send the form", brief: "Fill in the bank form and send it." }
       const lease = yield* arrive("mail-1")
       const first = yield* runEvents(lease, [

@@ -1,5 +1,5 @@
+import { type TaskSourceRecord } from "../work/task-record.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
 import type { ProposalRow } from "./task-proposals.js"
 
 // The rules that decide whether a task offer is made, stays, or comes back. Each is a pure
@@ -29,7 +29,7 @@ export const citedTurnFinished = (runStatuses: ReadonlyArray<string>): boolean =
 export const UNFINISHED_TURN =
   "That chat turn has not finished, or is not a turn of one of your chats; wait for its outcome and review again"
 
-const anchors = (kind: SpaceTaskSource["kind"]): boolean => {
+const anchors = (kind: TaskSourceRecord["kind"]): boolean => {
   switch (kind) {
     case "chat":
     case "task":
@@ -45,7 +45,7 @@ export const OFFER_NEEDS_ANCHOR =
   "A Memory page is background, not a reason to offer a Task. Cite the chat turn or the mail item that asks for this outcome (a Task's worker may cite its own Task); if none does, offer nothing."
 
 export const offerAnchorRefusal = (
-  sources: ReadonlyArray<{ readonly kind: SpaceTaskSource["kind"] }>
+  sources: ReadonlyArray<{ readonly kind: TaskSourceRecord["kind"] }>
 ): string | undefined =>
   sources.some((source) => anchors(source.kind)) ? undefined : OFFER_NEEDS_ANCHOR
 

@@ -1,11 +1,8 @@
+import { type TaskRecord } from "../work/task-record.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import type {
-  SpaceTask,
-  SpaceTaskActivity,
-  SpaceTaskStopKind
-} from "@arden-hq/protocol/spaces/work"
+import type { SpaceTaskActivity, SpaceTaskStopKind } from "@arden-hq/protocol/spaces/work"
 import { workError } from "./work-records.js"
 import { taskHasHold } from "./task-hold-state.js"
 import { hasPendingTaskQuestion } from "./task-question-state.js"
@@ -166,7 +163,7 @@ export const readWorkState = Effect.fn(function* (
   itemIds: ReadonlyArray<string>
 ) {
   if (itemIds.length === 0)
-    return new Map<string, Pick<SpaceTask, "activity" | "hold" | "stop_reason" | "stop_kind">>()
+    return new Map<string, Pick<TaskRecord, "activity" | "hold" | "stop_reason" | "stop_kind">>()
   const rows = yield* sql<{
     readonly item_id: string
     readonly activity: SpaceTaskActivity

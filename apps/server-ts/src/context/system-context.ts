@@ -1,6 +1,6 @@
 import { cutText } from "@arden-hq/std/text"
-import type { CliTool, CliToolsReport } from "@arden-hq/protocol/cli-tools"
-import type { TodoSnapshot } from "@arden-hq/protocol/sessions/todos"
+import { CLI_TOOL_VERSION, type CliTool, type CliToolsReport } from "@arden-hq/protocol/cli-tools"
+import { TODO_EXPLANATION, type TodoSnapshot } from "@arden-hq/protocol/sessions/todos"
 
 import type { AutomationOriginPolicy } from "../persistence/automations/catalog.js"
 import type { SessionRunReference } from "../persistence/runs/queries.js"
@@ -11,7 +11,7 @@ import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
 import { machineTimeZone } from "@arden-hq/std/time"
 import type { AutomationId } from "../persistence/automations/model.js"
 import type { ChatTaskContext } from "../persistence/work/store.js"
-import type { SessionForkOrigin } from "@arden-hq/protocol/sessions"
+import type { SessionForkOrigin } from "../persistence/sessions/fork-origin.js"
 import { currentMillis } from "../runtime/clock.js"
 import { chatHref } from "../sessions/chat-href.js"
 
@@ -165,7 +165,9 @@ export const renderTodoOverrideContext = (todo: TodoSnapshot | null): string | u
     ...(todo.items.length === 0
       ? ["- no current items"]
       : todo.items.map((item) => `- [${item.status}] ${jsonText(item.content, 500)}`)),
-    ...(todo.explanation === null ? [] : [`Explanation: ${jsonText(todo.explanation, 2_000)}`])
+    ...(todo.explanation.kind === TODO_EXPLANATION.none
+      ? []
+      : [`Explanation: ${jsonText(todo.explanation.text, 2_000)}`])
   ].join("\n")
   return renderPromptSection(
     "Todo list (edited by the user)",
@@ -183,11 +185,20 @@ export const renderCliToolsContext = (report: CliToolsReport | undefined): strin
 }
 
 const describeCliTool = (tool: CliTool): string => {
-  const head = [tool.command, tool.version, signInWords(tool.sign_in)]
+  const head = [tool.command, versionWords(tool.version), signInWords(tool.sign_in)]
     .filter((part): part is string => part !== null && part !== undefined)
     .join(" ")
   const skill = usableSkill(tool.skill)
   return skill === undefined ? head : `${head}, Skill ${skill}`
+}
+
+const versionWords = (version: CliTool["version"]): string | undefined => {
+  switch (version.kind) {
+    case CLI_TOOL_VERSION.reported:
+      return version.text
+    case CLI_TOOL_VERSION.unreported:
+      return undefined
+  }
 }
 
 const signInWords = (signIn: CliTool["sign_in"]): string | undefined => {

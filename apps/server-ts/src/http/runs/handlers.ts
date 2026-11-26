@@ -1,17 +1,23 @@
 import { LocalCaller } from "../middleware/local-only.js"
+import { runListOptions } from "@arden-hq/protocol/effect/runs"
 import {
-  RUN_LIST_PAGE_MAX,
-  RunLocalInstructionSourceSchema,
-  RunTerminalResultSchema
-} from "@arden-hq/protocol/effect/runs"
-import type { RunDetail, SessionUsageReport } from "@arden-hq/protocol/runs"
-import { DateTime, Effect, Schema } from "effect"
+  RUN_LIST_FILTER,
+  RUN_PAGE,
+  RUN_PAGE_NEXT,
+  RUN_PURPOSE,
+  RUN_TRACE,
+  type RunProgress
+} from "@arden-hq/protocol/runs"
+import { runDetail } from "./run-detail.js"
+import { wireSessionRun, wireUsageReport } from "./usage-wire.js"
+import { wirePlanLimits } from "./plan-limits-wire.js"
+import type { SessionUsageReport } from "@arden-hq/protocol/runs"
+import { DateTime, Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
-import { currentPlanReading, planLimitsReport } from "../../models/plan-limits.js"
+import { currentPlanReading, planLimitsReport, stopPercent } from "../../models/plan-limits.js"
 import { LimitSettingsStore } from "../../persistence/settings/store.js"
 import { ModelStore } from "../../persistence/models/store.js"
 import { ModelProviderService } from "../../models/provider.js"
-import type { ChatRunRecord } from "../../persistence/runs/model.js"
 import { ChatEventStore } from "../../persistence/events/store.js"
 import { RunQueries } from "../../persistence/runs/queries.js"
 import { UsageStore, UsageStoreError } from "../../persistence/usage/store.js"
@@ -23,53 +29,13 @@ import { currentMillis } from "../../runtime/clock.js"
  * time never holds it. */
 const RUN_LIST_CURSOR_SEPARATOR = "|"
 
+const runPurpose = (purpose: string | null | undefined): RunProgress["purpose"] =>
+  purpose === null || purpose === undefined
+    ? { kind: RUN_PURPOSE.none }
+    : { kind: RUN_PURPOSE.stated, text: purpose }
+
 const elapsedSeconds = (now: DateTime.Utc, then: DateTime.Utc): number =>
   Math.max(0, Math.floor((DateTime.toEpochMillis(now) - DateTime.toEpochMillis(then)) / 1_000))
-
-const runDetail = Effect.fn("RunHandlers.runDetail")(function* (
-  run: ChatRunRecord
-): Effect.fn.Return<RunDetail, HttpApiError.InternalServerError> {
-  const storedResult = run.metadata.terminal_result
-  const result =
-    storedResult === undefined || storedResult === null
-      ? null
-      : yield* Schema.decodeUnknownEffect(RunTerminalResultSchema)(storedResult).pipe(
-          Effect.catch(failInternal("Runs"))
-        )
-  const localInstructions =
-    run.metadata.local_instructions === undefined
-      ? undefined
-      : yield* Schema.decodeUnknownEffect(Schema.Array(RunLocalInstructionSourceSchema))(
-          run.metadata.local_instructions
-        ).pipe(Effect.catch(failInternal("Runs")))
-  return {
-    version: 1 as const,
-    run_id: run.runId,
-    session_id: run.sessionId,
-    turn_id: run.turnId,
-    status: run.status,
-    started_at: DateTime.formatIso(run.startedAt),
-    updated_at: DateTime.formatIso(run.updatedAt),
-    ended_at: run.endedAt === null ? null : DateTime.formatIso(run.endedAt),
-    stop_reason: run.stopReason,
-    last_event_sequence: run.lastSequence,
-    model_id: run.modelId,
-    reasoning_effort: run.reasoningEffort,
-    client_id: run.clientId,
-    result,
-    late_result_at:
-      run.metadata.late_result_at === undefined || run.metadata.late_result_at === null
-        ? null
-        : yield* Schema.decodeUnknownEffect(Schema.String)(run.metadata.late_result_at).pipe(
-            Effect.catch(failInternal("Runs"))
-          ),
-    error:
-      run.errorCode === null || run.errorMessage === null
-        ? null
-        : { code: run.errorCode, message: run.errorMessage },
-    ...(localInstructions === undefined ? {} : { local_instructions: localInstructions })
-  } satisfies RunDetail
-})
 
 export const RunHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -96,20 +62,26 @@ export const RunHandlers = HttpApiBuilder.group(
         Effect.fn("RunsHandlers.list")(function* ({ query }) {
           // Every chat's Runs at once is the owner's view; the command line sees its own chats.
           if ((yield* LocalCaller) === "cli") return yield* new HttpApiError.Forbidden({})
-          const cut = query.after?.indexOf(RUN_LIST_CURSOR_SEPARATOR) ?? -1
+          const options = runListOptions(query)
+          const cut =
+            options.page.kind === RUN_PAGE.after
+              ? options.page.cursor.indexOf(RUN_LIST_CURSOR_SEPARATOR)
+              : -1
           const snapshot = yield* queries
             .list({
-              ...(query.after === undefined || cut < 0
+              ...(options.page.kind === RUN_PAGE.first || cut < 0
                 ? {}
                 : {
                     after: {
-                      startedAt: query.after.slice(0, cut),
-                      runId: query.after.slice(cut + 1)
+                      startedAt: options.page.cursor.slice(0, cut),
+                      runId: options.page.cursor.slice(cut + 1)
                     }
                   }),
-              ...(query.session_id === undefined ? {} : { sessionId: query.session_id }),
-              activeOnly: query.active === "true",
-              limit: query.limit ?? RUN_LIST_PAGE_MAX
+              ...(options.filter.kind === RUN_LIST_FILTER.all
+                ? {}
+                : { sessionId: options.filter.session_id }),
+              activeOnly: options.active,
+              limit: options.limit
             })
             .pipe(Effect.catch(failInternal("Runs")))
           const last = snapshot.runs.at(-1)
@@ -121,9 +93,13 @@ export const RunHandlers = HttpApiBuilder.group(
               active: run.active,
               started_at: run.startedAt
             })),
-            ...(snapshot.more && last !== undefined
-              ? { next: `${last.startedAt}${RUN_LIST_CURSOR_SEPARATOR}${last.runId}` }
-              : {}),
+            next:
+              snapshot.more && last !== undefined
+                ? {
+                    kind: RUN_PAGE_NEXT.more,
+                    cursor: `${last.startedAt}${RUN_LIST_CURSOR_SEPARATOR}${last.runId}`
+                  }
+                : { kind: RUN_PAGE_NEXT.end },
             idle:
               snapshot.pendingDeliveries === 0 &&
               snapshot.runningScripts === 0 &&
@@ -162,8 +138,7 @@ export const RunHandlers = HttpApiBuilder.group(
           const memory = yield* queries
             .memoryContext(run.runId)
             .pipe(Effect.catch(failInternal("Runs")))
-          const detail = yield* runDetail(run)
-          return memory.length === 0 ? detail : { ...detail, memory_context: memory }
+          return yield* runDetail(run, memory)
         })
       )
       .handle(
@@ -175,7 +150,9 @@ export const RunHandlers = HttpApiBuilder.group(
           if (progress === null) return yield* new HttpApiError.NotFound({})
           return {
             ...progress,
-            purpose: events.currentActivity(progress.session_id, progress.run_id)?.purpose ?? null
+            purpose: runPurpose(
+              events.currentActivity(progress.session_id, progress.run_id)?.purpose
+            )
           }
         })
       )
@@ -185,15 +162,18 @@ export const RunHandlers = HttpApiBuilder.group(
           const page = yield* queries
             .events({
               runId: params.runId,
-              afterSequence: query.after_sequence ?? 0,
-              limit: query.limit ?? 100
+              afterSequence: query.after_sequence,
+              limit: query.limit
             })
             .pipe(Effect.catch(failInternal("Runs")))
           if (page === null) return yield* new HttpApiError.NotFound({})
           return {
             run_id: page.runId,
             session_id: page.sessionId,
-            trace_removed_at: page.traceRemovedAt,
+            trace:
+              page.traceRemovedAt === null
+                ? { kind: RUN_TRACE.kept }
+                : { kind: RUN_TRACE.removed, at: page.traceRemovedAt },
             events: page.events.map((record) => ({
               sequence: record.sequence,
               created_at: record.createdAt,
@@ -213,38 +193,41 @@ export const RunHandlers = HttpApiBuilder.group(
             source === undefined
               ? undefined
               : yield* Effect.promise(() => currentPlanReading(source, now))
-          return planLimitsReport(
-            reading,
-            source?.history() ?? [],
-            settings.ardenLimitPercent ?? 100,
-            now
+          return wirePlanLimits(
+            planLimitsReport(
+              reading,
+              source?.history() ?? [],
+              stopPercent(settings.ardenLimit) ?? 100,
+              now
+            )
           )
         }).pipe(Effect.catch(failInternal("Runs")))
       )
       .handle("usage", ({ query }) =>
-        usage
-          .report({ days: query.days ?? 7 })
-          .pipe(
-            Effect.mapError((cause) =>
-              cause instanceof UsageStoreError
-                ? storeErrorToHttp(cause)
-                : new HttpApiError.InternalServerError({})
-            )
+        usage.report({ days: query.days }).pipe(
+          Effect.map(wireUsageReport),
+          Effect.mapError((cause) =>
+            cause instanceof UsageStoreError
+              ? storeErrorToHttp(cause)
+              : new HttpApiError.InternalServerError({})
           )
+        )
       )
       .handle(
         "sessionUsage",
         Effect.fn("RunHandlers.sessionUsage")(function* ({ params, query }) {
           const stored = yield* usage
-            .sessionUsage({ sessionId: params.sessionId, limit: query.limit ?? 20 })
+            .sessionUsage({ sessionId: params.sessionId, limit: query.limit })
             .pipe(Effect.mapError(storeErrorToHttp))
           const windows = yield* contextWindows(stored.runs.map((run) => run.model_id))
           return {
             session_id: stored.session_id,
-            runs: stored.runs.map((run) => ({
-              ...run,
-              context_window: run.model_id === null ? null : (windows.get(run.model_id) ?? null)
-            }))
+            runs: stored.runs.map((run) =>
+              wireSessionRun(
+                run,
+                run.model_id === null ? null : (windows.get(run.model_id) ?? null)
+              )
+            )
           } satisfies SessionUsageReport
         })
       )

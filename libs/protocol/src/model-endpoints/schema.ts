@@ -1,18 +1,20 @@
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../common/schema.js"
-import type {
-  ChatEndpointCheck,
-  ChatEndpointDraft,
-  ChatEndpointSaveResult,
-  ChatModelEndpoint,
-  DecisionSiteStatus,
-  DecisionSource,
-  DecisionStatus,
-  ModelEndpoint,
-  ModelEndpointCheck,
-  ModelEndpointDraft,
-  ModelEndpoints,
-  ModelEndpointSaveResult
+import {
+  MODEL_ENDPOINT_SLOT,
+  type ChatEndpointCheck,
+  type ChatEndpointDraft,
+  type ChatEndpointSaveResult,
+  type ChatModelEndpoint,
+  type DecisionSiteStatus,
+  type DecisionSource,
+  type DecisionStatus,
+  type ModelEndpoint,
+  type ModelEndpointCheck,
+  type ModelEndpointDraft,
+  type ModelEndpoints,
+  type ModelEndpointSaveResult,
+  type ModelEndpointSlot
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
@@ -159,7 +161,6 @@ const EndpointWireSchema = withExtras({
     Schema.Struct({ kind: Schema.Literal("bearer") }),
     Schema.Struct({ kind: Schema.Literal("header"), name: HeaderNameSchema })
   ]),
-  dimensions: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   health: HealthWireSchema
 })
 
@@ -275,9 +276,16 @@ const ChatEndpointWireSchema = withExtras({
 
 type ChatEndpointWire = typeof ChatEndpointWireSchema.Type
 
+const EndpointSlotWireSchema = Schema.Union([
+  Schema.Struct({ state: Schema.Literal(MODEL_ENDPOINT_SLOT.unset) }),
+  Schema.Struct({ state: Schema.Literal(MODEL_ENDPOINT_SLOT.saved), endpoint: EndpointWireSchema })
+])
+
+type EndpointSlotWire = typeof EndpointSlotWireSchema.Type
+
 export const ModelEndpointsResponseSchema = withExtras({
-  search: Schema.NullOr(EndpointWireSchema),
-  decision: Schema.NullOr(EndpointWireSchema),
+  search: EndpointSlotWireSchema,
+  decision: EndpointSlotWireSchema,
   chat: Schema.Array(ChatEndpointWireSchema)
 })
 
@@ -287,7 +295,6 @@ export const ModelEndpointCheckResponseSchema = Schema.Union([
   Schema.Struct({
     result: Schema.Literal("works"),
     input: InputSchema,
-    dimensions: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
     ms: NonNegativeIntSchema
   }),
   FailureWireSchema
@@ -319,9 +326,10 @@ const ChatFailureWireSchema = Schema.Union([
   }),
   Schema.Struct({
     result: Schema.Literal("model_missing"),
-    model: Schema.NullOr(ModelNameSchema),
+    model: ModelNameSchema,
     message: MessageSchema
-  })
+  }),
+  Schema.Struct({ result: Schema.Literal("no_model"), message: MessageSchema })
 ])
 
 export const ChatEndpointCheckResponseSchema = Schema.Union([
@@ -380,7 +388,6 @@ const endpointFromWire = (wire: EndpointWire): ModelEndpoint => ({
   model: wire.model,
   input: wire.input,
   auth: wire.auth.kind === "header" ? { kind: "header", name: wire.auth.name } : { kind: "bearer" },
-  dimensions: wire.dimensions,
   health:
     wire.health.state === "works"
       ? { state: "works" }
@@ -399,7 +406,6 @@ export const endpointResponse = (endpoint: ModelEndpoint): EndpointWire => ({
   model: endpoint.model,
   input: endpoint.input,
   auth: endpoint.auth,
-  dimensions: endpoint.dimensions,
   health: endpoint.health
 })
 
@@ -443,19 +449,29 @@ export const chatEndpointResponse = (endpoint: ChatModelEndpoint): ChatEndpointW
   health: endpoint.health
 })
 
+const slotFromWire = (wire: EndpointSlotWire): ModelEndpointSlot =>
+  wire.state === MODEL_ENDPOINT_SLOT.saved
+    ? { state: wire.state, endpoint: endpointFromWire(wire.endpoint) }
+    : wire
+
+const slotResponse = (slot: ModelEndpointSlot): EndpointSlotWire =>
+  slot.state === MODEL_ENDPOINT_SLOT.saved
+    ? { state: slot.state, endpoint: endpointResponse(slot.endpoint) }
+    : slot
+
 export const mapModelEndpoints = (
   wire: typeof ModelEndpointsResponseSchema.Type
 ): ModelEndpoints => ({
-  search: wire.search === null ? null : endpointFromWire(wire.search),
-  decision: wire.decision === null ? null : endpointFromWire(wire.decision),
+  search: slotFromWire(wire.search),
+  decision: slotFromWire(wire.decision),
   chat: wire.chat.map(chatEndpointFromWire)
 })
 
 export const modelEndpointsResponse = (
   endpoints: ModelEndpoints
 ): typeof ModelEndpointsResponseSchema.Type => ({
-  search: endpoints.search === null ? null : endpointResponse(endpoints.search),
-  decision: endpoints.decision === null ? null : endpointResponse(endpoints.decision),
+  search: slotResponse(endpoints.search),
+  decision: slotResponse(endpoints.decision),
   chat: endpoints.chat.map(chatEndpointResponse)
 })
 

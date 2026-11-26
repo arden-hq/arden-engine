@@ -102,13 +102,27 @@ const CAPABILITY = "c".repeat(43)
 const accessFile = (pid = 4242): string =>
   JSON.stringify({ version: 1, serverUrl: "http://127.0.0.1:51234/", capability: CAPABILITY, pid })
 
+const answered = (toolId: string, approved: boolean, standing: boolean, askedAt?: string) => {
+  const grant = standing ? { kind: "standing", list: "default" } : { kind: "once" }
+  return {
+    runId: "run-1",
+    toolId,
+    result: "",
+    decision: approved
+      ? { kind: "approved", grant, folder: "keep", edits: { kind: "as_asked" }, as: "as_asked" }
+      : { kind: "denied", grant },
+    asked: askedAt === undefined ? { kind: "unstated" } : { kind: "at", at: askedAt },
+    command: { kind: "none" }
+  }
+}
+
 describe("arden run", () => {
   it("reads stdin, creates an unnamed chat, and emits one JSON receipt", async () => {
     let submittedPrompt = ""
     let created: unknown
     const client: CliClient = {
       ...defaultClient(),
-      createSession: async (input = {}) => {
+      createSession: async (input) => {
         created = input
         return defaultClient().createSession(input)
       },
@@ -140,7 +154,12 @@ describe("arden run", () => {
         declined: []
       })
     ])
-    expect(created).toEqual({})
+    expect(created).toEqual({
+      name: { kind: "unnamed" },
+      space: { kind: "none" },
+      chat_model: { kind: "inherited" },
+      origin: "ordinary"
+    })
     expect(submittedPrompt).toBe("Prompt from stdin")
   })
 
@@ -177,7 +196,7 @@ describe("arden run", () => {
     const receipts = jsonLines(io.stdout())
 
     expect(exitCode).toBe(130)
-    expect(cancellations).toEqual([{ runId: "run-1" }])
+    expect(cancellations).toEqual([{ kind: "run", runId: "run-1" }])
     expect(receipts).toHaveLength(1)
     expect(receipts[0]).toMatchObject({
       type: "command_receipt",
@@ -325,22 +344,30 @@ const QUESTION: RunQuestion = {
   turn_id: "turn-1",
   session_id: "session-1",
   destination_session_id: "session-1",
-  context: { origin: { kind: "chat", session_id: "session-1", turn_id: "turn-1" }, task: null },
+  context: {
+    origin: { kind: "chat", session_id: "session-1", turn_id: "turn-1", chain_depth: 0 },
+    task: { kind: "none" },
+    belongs_to: { kind: "own" }
+  },
   content: {
     prompt: "Which inbox?",
-    detail: null,
+    detail: { kind: "none" },
     choices: [
-      { id: "work", label: "Work" },
-      { id: "home", label: "Home" }
-    ]
+      { id: "work", label: "Work", detail: { kind: "none" } },
+      { id: "home", label: "Home", detail: { kind: "none" } }
+    ],
+    multiple: false
   },
   status: "open",
-  resolution: null,
-  continuation: null,
-  focus_choice: null,
-  permission_offer: null,
-  continuity_revision: null,
-  created_at: "2026-08-30T00:00:00.000Z"
+  resolution: { kind: "unresolved" },
+  continuation: { kind: "none" },
+  focus_choice: { kind: "none" },
+  permission_offer: { kind: "none" },
+  contract_proposal: { kind: "none" },
+  source_title: { kind: "none" },
+  continuity: { kind: "none" },
+  created_at: "2026-08-30T00:00:00.000Z",
+  timer: { kind: "none" }
 }
 
 const QUESTION_EVENT: HeadlessRunEvent = {
@@ -351,7 +378,20 @@ const QUESTION_EVENT: HeadlessRunEvent = {
     name: "ask_user",
     run_id: "run-1",
     session_id: "session-1",
-    data: { question: QUESTION }
+    seq: 1,
+    timestamp: 1,
+    replay: false,
+    content: "",
+    preview: "",
+    display_name: "ask_user",
+    kind: "tool",
+    is_error: false,
+    retry: "unstated",
+    duration_ms: 0,
+    data: { kind: "attached", value: { question: QUESTION } },
+    source_refs: [],
+    gmail_send: { kind: "unconfirmed" },
+    execution: "runtime"
   }
 }
 
@@ -415,11 +455,15 @@ describe("progress and asks at a terminal", () => {
         askInTerminal: asking.askInTerminal
       })
     ).toBe(0)
-    expect(approvals).toEqual([
-      { runId: "run-1", toolId: "tool-1", result: "", approved: true, grantStanding: true }
-    ])
+    expect(approvals).toEqual([answered("tool-1", true, true)])
     expect(connections).toEqual([
-      { runId: "run-1", toolId: "tool-2", connectionId: "connection-1", approved: false }
+      {
+        runId: "run-1",
+        toolId: "tool-2",
+        connectionId: "connection-1",
+        result: { kind: "default" },
+        approved: false
+      }
     ])
   })
 
@@ -429,7 +473,10 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
+        await emit(options, {
+          ...card,
+          data: { ...card.data, asked: { kind: "recorded", at: ASKED_AT } }
+        })
         await emit(options, approvalNeeded("tool-2"))
         return completedRun()
       },
@@ -446,15 +493,8 @@ describe("progress and asks at a terminal", () => {
       })
     ).toBe(0)
     expect(approvals).toEqual([
-      {
-        runId: "run-1",
-        toolId: "tool-1",
-        result: "",
-        approved: true,
-        grantStanding: false,
-        askedAt: ASKED_AT
-      },
-      { runId: "run-1", toolId: "tool-2", result: "", approved: false, grantStanding: false }
+      answered("tool-1", true, false, ASKED_AT),
+      answered("tool-2", false, false)
     ])
   })
 
@@ -467,7 +507,7 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       toolCatalog: async () => ({
-        tools: [catalogEntry("vault_pay", { card: "vault_card_pay" })],
+        tools: [catalogEntry("vault_pay", [{ fact: "card", value: "vault_card_pay" }])],
         unlisted: {}
       }),
       wait: async (_run, options) => {
@@ -490,9 +530,7 @@ describe("progress and asks at a terminal", () => {
     ).toBe(0)
     const card = `Arden asks to run vault_pay. ${APP_ONLY}\n  1) Deny\n  2) Leave it waiting\nChoose 1-2: `
     expect(asking.prompts).toEqual([card, card])
-    expect(approvals).toEqual([
-      { runId: "run-1", toolId: "pay-1", result: "", approved: false, grantStanding: false }
-    ])
+    expect(approvals).toEqual([answered("pay-1", false, false)])
     expect(io.stderr()).toBe("arden: Deny: vault_pay\narden: vault_pay stays waiting.\n")
   })
 
@@ -525,9 +563,7 @@ describe("progress and asks at a terminal", () => {
     expect(asking.prompts).toEqual([
       `Arden asks to run write_file. ${UNCHECKED}\n  1) Deny\n  2) Leave it waiting\nChoose 1-2: `
     ])
-    expect(approvals).toEqual([
-      { runId: "run-1", toolId: "tool-1", result: "", approved: false, grantStanding: false }
-    ])
+    expect(approvals).toEqual([answered("tool-1", false, false)])
 
     const missing: CliClient = {
       ...defaultClient(),
@@ -647,8 +683,15 @@ describe("no empty chat is left behind", () => {
           throw new HeadlessHttpError(422, "POST", "/chat/message", "")
         },
         listSessions: async () => ({
-          sessions: [{ ...listedSession(messageCount), is_active: active }],
-          next_cursor: null
+          sessions: [
+            {
+              ...listedSession(messageCount),
+              run: active
+                ? { kind: "active", run_id: "run-1", turn_id: "turn-1", status: "running" }
+                : { kind: "none" }
+            }
+          ],
+          next: { kind: "end" }
         }),
         deleteSession: async (sessionId) => {
           deleted.push(sessionId)
@@ -668,7 +711,7 @@ describe("no empty chat is left behind", () => {
       wait: async () => {
         throw new Error("lost the connection")
       },
-      listSessions: async () => ({ sessions: [listedSession(0)], next_cursor: null }),
+      listSessions: async () => ({ sessions: [listedSession(0)], next: { kind: "end" } }),
       deleteSession: async (sessionId) => {
         deleted.push(sessionId)
       }
@@ -686,7 +729,7 @@ describe("no empty chat is left behind", () => {
       submit: async () => {
         throw new HeadlessHttpError(503, "POST", "/chat/message", "")
       },
-      listSessions: async () => ({ sessions: [listedSession(0)], next_cursor: null }),
+      listSessions: async () => ({ sessions: [listedSession(0)], next: { kind: "end" } }),
       deleteSession: async (sessionId) => {
         deleted.push(sessionId)
       }
@@ -721,8 +764,14 @@ describe("approvals with no one at the terminal", () => {
       client: {
         ...approvalClient(answers),
         wait: async (_run, options) => {
-          await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
-          await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
+          await emit(options, {
+            ...card,
+            data: { ...card.data, asked: { kind: "recorded", at: ASKED_AT } }
+          })
+          await emit(options, {
+            ...card,
+            data: { ...card.data, asked: { kind: "recorded", at: ASKED_AT } }
+          })
           await emit(options, approvalNeeded("tool-9", "run-other"))
           return completedRun()
         }
@@ -739,8 +788,8 @@ describe("approvals with no one at the terminal", () => {
       expect.objectContaining({
         runId: "run-1",
         toolId: "tool-1",
-        approved: false,
-        askedAt: ASKED_AT
+        decision: { kind: "denied", grant: { kind: "once" } },
+        asked: { kind: "at", at: ASKED_AT }
       })
     ])
     expect(jsonLines(io.stdout())[0]).toMatchObject({
@@ -769,7 +818,9 @@ describe("approvals with no one at the terminal", () => {
     for (const flags of [[], ["--mode", "read-only"], ["--mode", "ask"], ["--mode=never-ask"]]) {
       expect(await runCli(["run", "Prompt", ...URL_ARGS, ...flags], io.dependencies)).toBe(0)
     }
-    expect(modes).toEqual(["safe", "read_only", "ask", "allow"])
+    expect(modes).toEqual(
+      ["safe", "read_only", "ask", "allow"].map((mode) => ({ kind: "mode", mode }))
+    )
     const refused = testIo({ client })
     expect(
       await runCli(
@@ -987,7 +1038,7 @@ describe("the model a Run runs on", () => {
     const created: Array<unknown> = []
     const client: CliClient = {
       ...defaultClient(),
-      createSession: async (input = {}) => {
+      createSession: async (input) => {
         created.push(input)
         return defaultClient().createSession(input)
       }
@@ -996,7 +1047,7 @@ describe("the model a Run runs on", () => {
     expect(
       await runCli(["run", "hi", ...URL_ARGS, "--model", "gemma-4"], listed.dependencies)
     ).toBe(0)
-    expect(created).toEqual([{ chat_model: "gemma-4" }])
+    expect(created).toMatchObject([{ chat_model: { kind: "pinned", model_id: "gemma-4" } }])
 
     const other = testIo({ client })
     expect(
@@ -1005,7 +1056,7 @@ describe("the model a Run runs on", () => {
         other.dependencies
       )
     ).toBe(2)
-    expect(created).toEqual([{ chat_model: "gemma-4" }])
+    expect(created).toMatchObject([{ chat_model: { kind: "pinned", model_id: "gemma-4" } }])
     expect(jsonLines(other.stdout())[0]).toMatchObject({
       status: "failed",
       exit_code: 2,

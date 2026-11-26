@@ -1,5 +1,6 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { SkillNameSchema, SkillVersionSchema } from "@arden-hq/protocol/effect/skills"
+import { skillVersionText } from "@arden-hq/protocol/skills"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -123,7 +124,7 @@ const makeSkillTool = ({ skills }: { readonly skills: SkillCatalog["Service"] })
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
     metadata: {
-      display: { row: "skill" },
+      display: [{ fact: "row", value: "skill" }],
       effect: "none",
       code_mode: false,
       display_name: "Load Skill",
@@ -152,7 +153,7 @@ const makeSkillTool = ({ skills }: { readonly skills: SkillCatalog["Service"] })
           skill: {
             name: content.name,
             description: content.description,
-            version: content.version,
+            version: skillVersionText(content.version),
             builtin: content.builtin
           }
         },
@@ -225,9 +226,17 @@ const makeSkillCreateTool = ({
         href: SKILLS_HREF
       })
       return {
-        result: `Created /${created.name} v${created.version}. It is available on the next model step.`,
-        preview: `Created /${created.name} v${created.version}`,
-        data: { skill: created },
+        result: `Created /${created.name} v${skillVersionText(created.version)}. It is available on the next model step.`,
+        preview: `Created /${created.name} v${skillVersionText(created.version)}`,
+        data: {
+          skill: {
+            name: created.name,
+            description: created.description,
+            version: skillVersionText(created.version),
+            enabled: created.enabled,
+            builtin: false
+          }
+        },
         host
       }
     }

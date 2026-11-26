@@ -1,9 +1,9 @@
 import type {
-  RunUsage,
-  SessionRunUsage,
-  UsageDailyCell,
-  UsageReport
-} from "@arden-hq/protocol/runs"
+  StoredSessionRun as SessionRunUsage,
+  StoredUsageDailyCell as UsageDailyCell,
+  StoredUsageReport as UsageReport
+} from "../usage/report.js"
+import type { StoredRunUsage as RunUsage } from "../runs/stored-result.js"
 import { utcDay as utcDayOf } from "@arden-hq/std/time"
 import { DateTime, Effect, Option } from "effect"
 

@@ -1,5 +1,6 @@
-import type { SpaceTask, SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
-import { SpaceTaskCaptureSchema, SpaceTaskSchema } from "@arden-hq/protocol/effect/spaces/work"
+import { TaskRecordSchema } from "../work/task-record.js"
+import { type TaskRecord, type TaskSourceRecord } from "../work/task-record.js"
+import { SpaceTaskCaptureSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { WorkStoreError } from "../work/store.js"
@@ -89,14 +90,14 @@ const ContractJsonSchema = Schema.fromJsonString(Schema.Array(Schema.Unknown))
 
 export const decodeWorkItem = Effect.fn("SqliteWorkStore.decodeWorkItem")(function* (
   row: WorkItemRow,
-  sources: ReadonlyArray<SpaceTaskSource>,
-  state: Pick<SpaceTask, "activity" | "hold" | "stop_reason" | "stop_kind"> = {
+  sources: ReadonlyArray<TaskSourceRecord>,
+  state: Pick<TaskRecord, "activity" | "hold" | "stop_reason" | "stop_kind"> = {
     activity: "idle",
     hold: null,
     stop_reason: null,
     stop_kind: null
   }
-): Effect.fn.Return<SpaceTask, WorkStoreError> {
+): Effect.fn.Return<TaskRecord, WorkStoreError> {
   const { contract_json: contractJson, state_json: stateJson, ...fields } = row
   const record = yield* readTaskState(stateJson)
   const stateRecord =
@@ -110,7 +111,7 @@ export const decodeWorkItem = Effect.fn("SqliteWorkStore.decodeWorkItem")(functi
           next: record.next,
           written_at: record.written_at
         }
-  return yield* Schema.decodeUnknownEffect(SpaceTaskSchema)({
+  return yield* Schema.decodeUnknownEffect(TaskRecordSchema)({
     ...fields,
     contract: yield* Schema.decodeUnknownEffect(ContractJsonSchema)(contractJson).pipe(
       Effect.mapError(

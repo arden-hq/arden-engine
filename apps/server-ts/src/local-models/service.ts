@@ -1,3 +1,4 @@
+import { embeddingSearchUsesModel, isEmbeddingSearchStopped } from "@arden-hq/protocol/embeddings"
 import type {
   LocalModelInfo,
   LocalModelInstall,
@@ -161,14 +162,20 @@ export const localModelsLayer = (options: {
                 licenseUrl: manifest.license.url,
                 input: manifest.input,
                 totalBytes: totalBytesOf(manifest),
-                dimensions: manifest.kind === "embedding" ? manifest.dimensions : null,
                 install
               }))
             )
         )
         yield* Effect.promise(() => mkdir(options.root, { recursive: true }).catch(() => undefined))
         const free = yield* freeBytesAt(options.root)
-        return { models, freeBytes: free ?? null, runtime: yield* llama.runtime() }
+        return {
+          models,
+          freeSpace:
+            free === undefined
+              ? { kind: "unmeasured" as const }
+              : { kind: "measured" as const, bytes: free },
+          runtime: yield* llama.runtime()
+        }
       })
 
       const adoptForSearch = (manifest: ModelManifest) =>
@@ -176,7 +183,7 @@ export const localModelsLayer = (options: {
           ? Effect.void
           : embeddings.status().pipe(
               Effect.flatMap((search) =>
-                search.state === "idle"
+                isEmbeddingSearchStopped(search)
                   ? embeddings.control({ kind: "choose", modelId: manifest.id })
                   : Effect.void
               ),
@@ -287,10 +294,7 @@ export const localModelsLayer = (options: {
       const remove = Effect.fn("LocalModels.remove")(function* (id: string) {
         const manifest = yield* find(id)
         const search = yield* embeddings.status().pipe(Effect.orElseSucceed(() => undefined))
-        const inUse =
-          search !== undefined &&
-          search.state !== "idle" &&
-          (search.modelId === id || search.previousModelId === id)
+        const inUse = search !== undefined && embeddingSearchUsesModel(search, id)
         if (inUse) return yield* new LocalModelInUse({ id })
         yield* FiberMap.remove(downloads, id)
         yield* writeResume((ids) => ids.delete(id))

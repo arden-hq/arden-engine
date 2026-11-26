@@ -1,8 +1,8 @@
+import { RetirementSourceRecordSchema, type RetirementSourceRecord } from "../work/task-record.js"
 import type {
   TaskProposalRetirement,
   TaskProposalRetirementEvidence
 } from "@arden-hq/protocol/proposals"
-import { TaskProposalRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { githubItemUrl } from "../connections/item-url.js"
@@ -10,10 +10,10 @@ import { decodeJson } from "./json.js"
 
 const StoredRetirementSchema = Schema.Struct({
   reason: Schema.String,
-  sources: Schema.optionalKey(Schema.Array(TaskProposalRetirementSourceSchema))
+  sources: Schema.optionalKey(Schema.Array(RetirementSourceRecordSchema))
 })
 
-type StoredSource = typeof TaskProposalRetirementSourceSchema.Type
+type StoredSource = RetirementSourceRecord
 
 const NO_RETIREMENT: TaskProposalRetirement = { reason: "", evidence: [] }
 
@@ -114,7 +114,15 @@ const evidenceOf = (
       const label = names.chats.get(source.session_id)
       return label === undefined
         ? undefined
-        : { kind: "chat", session_id: source.session_id, turn_id: source.turn_id, label }
+        : {
+            kind: "chat",
+            session_id: source.session_id,
+            turn:
+              source.turn_id === null
+                ? { kind: "whole_chat" }
+                : { kind: "turn", turn_id: source.turn_id },
+            label: label === null ? { kind: "unnamed" } : { kind: "named", name: label }
+          }
     }
     case "memory":
       return { kind: "memory", page_ref: source.page_ref }
@@ -126,7 +134,12 @@ const evidenceOf = (
       const item = names.items.get(source.item_id)
       return item === undefined
         ? undefined
-        : { kind: "connection_item", item_id: source.item_id, label: item.title, url: item.url }
+        : {
+            kind: "connection_item",
+            item_id: source.item_id,
+            label: item.title,
+            link: item.url === null ? { kind: "unlinked" } : { kind: "linked", url: item.url }
+          }
     }
     case "space":
       return undefined

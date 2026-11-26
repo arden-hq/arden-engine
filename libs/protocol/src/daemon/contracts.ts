@@ -41,20 +41,21 @@ export interface DaemonReadyMessage extends JsonRecord {
 interface OperationalEventBase extends JsonRecord {
   readonly version: 1
   readonly occurredAt: string
-  readonly cause: string | null
 }
 
-export interface SchemaDriftOperationalEvent extends OperationalEventBase {
+export type SchemaDriftOperationalEvent = OperationalEventBase & {
   readonly code: "storage.schema_drift"
-  readonly severity: "warning" | "error"
   readonly objectType: string
   readonly objectName: string
-  readonly verdict: "foreign_warning" | "owned_fatal"
-}
+} & (
+    | { readonly severity: "warning"; readonly verdict: "foreign_warning" }
+    | { readonly severity: "error"; readonly verdict: "owned_fatal"; readonly cause: string }
+  )
 
 export interface DeliveryRetryScheduledOperationalEvent extends OperationalEventBase {
   readonly code: "delivery.retry_scheduled"
   readonly severity: "warning"
+  readonly cause: string
   readonly deliveryId: string
   readonly sourceRunId: string
   readonly destinationSessionId: string
@@ -75,45 +76,52 @@ export interface DeliveryReroutedOperationalEvent extends OperationalEventBase {
 export interface DeliveryUnroutableOperationalEvent extends OperationalEventBase {
   readonly code: "delivery.unroutable"
   readonly severity: "error"
+  readonly cause: string
   readonly deliveryId: string
   readonly sourceRunId: string
   readonly attempt: number
   readonly incidentId: string
 }
 
+export const OPERATIONAL_SESSION = { none: "none", session: "session" } as const
+
 export interface AutomationFiringDeferredOperationalEvent extends OperationalEventBase {
   readonly code: "automation.firing_deferred"
   readonly severity: "info"
+  readonly cause: string
   readonly automationTaskId: string
   readonly automationRunId: number
   readonly queueId: number
-  /** Null when the job was held back on a plan limit before it started a Run. */
-  readonly sessionId: string | null
+  readonly session:
+    | { readonly kind: "none" }
+    | { readonly kind: "session"; readonly sessionId: string }
   readonly nextAttemptAt: string
 }
 
-/** One decision about compacting an idle chat: queued, dropped, ran or failed, with its reason. */
-export interface ContextIdleCompactionOperationalEvent extends OperationalEventBase {
+export type ContextIdleCompactionOperationalEvent = OperationalEventBase & {
   readonly code: "context.idle_compaction"
   readonly severity: "info"
   readonly sessionId: string
-  readonly decision: "queued" | "skipped" | "ran" | "failed"
   readonly reason: string
-}
+} & (
+    | { readonly decision: "queued" | "skipped" | "ran" }
+    | { readonly decision: "failed"; readonly cause: string }
+  )
 
-/** A write sat in the persistence queue this long before it ran. */
+export const PREVIOUS_WRITE = { none: "none", operation: "operation" } as const
+
 export interface StorageWriteWaitOperationalEvent extends OperationalEventBase {
   readonly code: "storage.write_wait"
   readonly severity: "warning"
   readonly lane: "interactive" | "ordinary"
   readonly operation: string
-  readonly previousOperation: string | null
+  readonly previous:
+    | { readonly kind: "none" }
+    | { readonly kind: "operation"; readonly operation: string }
   readonly waitMs: number
-  /** Writes still queued in both lanes when this one started. */
   readonly queued: number
 }
 
-/** Execution time for an operation that held the serialized writer. */
 export interface StorageWriteSlowOperationalEvent extends OperationalEventBase {
   readonly code: "storage.write_slow"
   readonly severity: "warning"
@@ -122,53 +130,61 @@ export interface StorageWriteSlowOperationalEvent extends OperationalEventBase {
   readonly durationMs: number
 }
 
-/** The event loop ran this much later than scheduled: nothing else could run meanwhile. */
 export interface EventLoopStallOperationalEvent extends OperationalEventBase {
   readonly code: "runtime.event_loop_stall"
   readonly severity: "warning"
   readonly stallMs: number
 }
 
-/** Time before a Run acquired its agent-tree permit, and time after acquisition. */
+export const RUN_EXECUTION = { neverAcquired: "never_acquired", acquired: "acquired" } as const
+
 export interface AgentRunTimingOperationalEvent extends OperationalEventBase {
   readonly code: "chat.agent_run_timing"
   readonly severity: "info"
   readonly runId: string
   readonly sessionId: string
   readonly waitMs: number
-  /** Null when cancelled before acquiring a permit. */
-  readonly executionMs: number | null
+  readonly execution:
+    | { readonly kind: "never_acquired" }
+    | { readonly kind: "acquired"; readonly ms: number }
   readonly outcome: "completed" | "failed" | "interrupted"
 }
 
-/** Monotonic timings. First-item offsets refer to mapped provider items, not network bytes. */
-export interface ModelPhaseTiming extends JsonRecord {
+export const STREAM_MARK = { unseen: "unseen", seen: "seen" } as const
+
+export type StreamMark =
+  | { readonly kind: "unseen" }
+  | { readonly kind: "seen"; readonly ms: number }
+
+interface ModelPhaseTimingBase extends JsonRecord {
   readonly sampleId: string
-  readonly phase:
-    | "admission"
-    | "preparation"
-    | "compaction"
-    | "provider"
-    | "accounting"
-    | "checkpoint"
   readonly outcome: "completed" | "failed" | "cancelled" | "interrupted"
   readonly durationMs: number
-  /** Time the stream was suspended while Loop consumed its items; included in durationMs. */
+}
+
+export interface LocalModelPhaseTiming extends ModelPhaseTimingBase {
+  readonly phase: "admission" | "preparation" | "compaction" | "accounting" | "checkpoint"
+}
+
+export interface ProviderModelPhaseTiming extends ModelPhaseTimingBase {
+  readonly phase: "provider"
   readonly consumerMs: number
-  readonly firstItemMs: number | null
-  readonly firstTextMs: number | null
-  readonly firstToolMs: number | null
+  readonly firstItem: StreamMark
+  readonly firstText: StreamMark
+  readonly firstTool: StreamMark
   readonly retries: number
-  /** Advertised retry delays, not a measurement of actual sleep. */
   readonly scheduledBackoffMs: number
 }
 
-interface ModelPhaseOperationalEvent extends OperationalEventBase, ModelPhaseTiming {
-  readonly code: "chat.model_phase"
-  readonly severity: "info"
-  readonly runId: string
-  readonly sessionId: string
-}
+export type ModelPhaseTiming = LocalModelPhaseTiming | ProviderModelPhaseTiming
+
+type ModelPhaseOperationalEvent = OperationalEventBase &
+  ModelPhaseTiming & {
+    readonly code: "chat.model_phase"
+    readonly severity: "info"
+    readonly runId: string
+    readonly sessionId: string
+  }
 
 export type OperationalEvent =
   | SchemaDriftOperationalEvent
@@ -221,6 +237,12 @@ export const CONFIGURED_SERVER_EXIT = { settings: 2, providerUnreachable: 3 } as
  * is in place. The server writes it (`apps/server-ts/src/serve/main.ts`);
  * `@arden-hq/headless` reads it.
  */
+export const OFFERED_TOOLS = { all: "all", listed: "listed" } as const
+
+export type OfferedTools =
+  | { readonly kind: "all" }
+  | { readonly kind: "listed"; readonly names: ReadonlyArray<string> }
+
 export interface ConfiguredServerReady extends JsonRecord {
   readonly type: "ready"
   readonly url: string
@@ -229,8 +251,7 @@ export interface ConfiguredServerReady extends JsonRecord {
   readonly accessFile: string
   /** The data folder's model requests and tokens, rewritten after every request. */
   readonly usageFile: string
-  /** The tools the settings offer; absent when they offer every tool. */
-  readonly offeredTools?: ReadonlyArray<string>
+  readonly offeredTools: OfferedTools
   /** Tools that always ask on a card, so the settings could give them no rule. */
   readonly toolsWithoutRule: ReadonlyArray<string>
   readonly mcpServers: ReadonlyArray<string>

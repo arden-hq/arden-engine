@@ -55,7 +55,14 @@ export const wikiMaintenanceHandler: SystemAutomationHandler<"wiki_maintenance">
     description: "Reconcile cross-page Wiki consistency after each Wiki commit.",
     prompt: PROMPTS.wikiMaintenance,
     handler: "wiki_maintenance",
-    triggers: [{ type: "event", event_type: "wiki.changed" }],
+    triggers: [
+      {
+        type: "event",
+        event_type: "wiki.changed",
+        run_only_if: { kind: "any_event" },
+        condition: { kind: "none" }
+      }
+    ],
     enabled: true,
     cooldownMinutes: null,
     toolScope: "memory_capture",

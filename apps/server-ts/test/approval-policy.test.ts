@@ -127,7 +127,7 @@ it("keeps disposable Side chat runs and their agents free of approval requests",
         throw new Error("Missing runs")
       expect(yield* policy.session(side.sessionId)).toEqual({
         kind: "inherited",
-        approval_mode: "ask"
+        mode: { kind: "set", approval_mode: "ask" }
       })
       expect(
         (yield* policy.setSession({ sessionId: side.sessionId, mode: "allow" }).pipe(Effect.result))
@@ -249,7 +249,7 @@ it("a changed approval mode reaches the run and its agent without resolving pend
         })
         expect(yield* policy.session(child.sessionId)).toEqual({
           kind: "inherited",
-          approval_mode: "safe"
+          mode: { kind: "set", approval_mode: "safe" }
         })
         const approval = makeToolApprovalPolicy({ policy, rules })
         const decisions = () => decided(approval, run.runId, report)
@@ -272,7 +272,7 @@ it("a changed approval mode reaches the run and its agent without resolving pend
         expect(yield* liveMode(child.runId)).toBe("allow")
         expect(yield* policy.session(child.sessionId)).toEqual({
           kind: "inherited",
-          approval_mode: "allow"
+          mode: { kind: "set", approval_mode: "allow" }
         })
         const off = yield* rules.save({
           subject: { kind: "tool", tool: "wiki_publish_report", server: null },
@@ -288,7 +288,7 @@ it("a changed approval mode reaches the run and its agent without resolving pend
         expect(yield* decisions()).toBe("ask")
         expect(yield* policy.session(child.sessionId)).toEqual({
           kind: "inherited",
-          approval_mode: "ask"
+          mode: { kind: "set", approval_mode: "ask" }
         })
       }).pipe(Effect.provide(seedLayer))
     )
@@ -443,7 +443,10 @@ it("refuses every tool call after a Task attempt loses authority", async () => {
         const work = yield* WorkStore
         const policy = yield* ApprovalPolicyStore
         const rules = yield* PermissionRules
-        const space = yield* spaces.create({ name: "Revoked toolset" })
+        const space = yield* spaces.create({
+          name: "Revoked toolset",
+          instructions: { kind: "unwritten" }
+        })
         const session = yield* sessions.create({ name: "Task source", spaceId: space.space_id })
         const parent = yield* chat.start({
           sessionId: session.sessionId,

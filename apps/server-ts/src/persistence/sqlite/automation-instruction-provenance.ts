@@ -3,6 +3,7 @@ import { Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { AutomationTriggersSchema } from "./automation-schedule.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import { triggerRecord } from "../automations/trigger-record.js"
 
 export interface AutomationWriteSource {
   readonly runId: string
@@ -53,7 +54,9 @@ export const instructionPayload = (row: InstructionSnapshot): string =>
     prompt: row.prompt,
     model: row.model,
     context_mode: row.context_mode,
-    triggers: Schema.decodeUnknownSync(AutomationTriggersSchema)(parseJsonText(row.triggers)),
+    triggers: Schema.decodeUnknownSync(AutomationTriggersSchema)(parseJsonText(row.triggers)).map(
+      triggerRecord
+    ),
     thread_id: row.thread_id,
     cooldown_minutes: row.cooldown_minutes
   })
@@ -84,11 +87,7 @@ export const matchesInstructionReceipt = (input: {
     field(data, "cooldown_minutes") !== input.instruction.cooldown_minutes ||
     field(data, "history") !== (input.instruction.context_mode === "fresh" ? "fresh" : "chat") ||
     JSON.stringify(field(data, "triggers")) !==
-      JSON.stringify(
-        Schema.decodeUnknownSync(AutomationTriggersSchema)(
-          parseJsonText(input.instruction.triggers)
-        )
-      )
+      JSON.stringify(parseJsonText(input.instruction.triggers))
   )
     return false
   if (input.destination === undefined) return false

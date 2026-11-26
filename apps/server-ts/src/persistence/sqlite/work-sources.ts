@@ -1,11 +1,11 @@
-import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
-import { SpaceTaskSourceSchema } from "@arden-hq/protocol/effect/spaces/work"
+import { TaskSourceRecordSchema } from "../work/task-record.js"
+import { type TaskSourceRecord } from "../work/task-record.js"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { WorkStoreError } from "../work/store.js"
 import { decodeJson } from "./json.js"
 
-const taskSourceKey = (source: SpaceTaskSource): string => {
+const taskSourceKey = (source: TaskSourceRecord): string => {
   switch (source.kind) {
     case "chat":
       return JSON.stringify([source.kind, source.session_id, source.turn_id, source.revision])
@@ -23,21 +23,21 @@ const taskSourceKey = (source: SpaceTaskSource): string => {
 export interface WorkSourceSql {
   readonly add: (options: {
     readonly itemId: string
-    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly sources: ReadonlyArray<TaskSourceRecord>
     readonly now: string
   }) => Effect.Effect<void, WorkStoreError>
   readonly read: (
     itemIds: readonly string[]
-  ) => Effect.Effect<Map<string, SpaceTaskSource[]>, WorkStoreError>
+  ) => Effect.Effect<Map<string, TaskSourceRecord[]>, WorkStoreError>
 }
 
 export const makeWorkSourceSql = (sql: SqlClient.SqlClient): WorkSourceSql => {
   const add = Effect.fn("WorkSources.add")(function* (options: {
     readonly itemId: string
-    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly sources: ReadonlyArray<TaskSourceRecord>
     readonly now: string
   }) {
-    const sources = yield* Schema.decodeUnknownEffect(Schema.Array(SpaceTaskSourceSchema))(
+    const sources = yield* Schema.decodeUnknownEffect(Schema.Array(TaskSourceRecordSchema))(
       options.sources,
       { onExcessProperty: "error" }
     ).pipe(
@@ -69,7 +69,7 @@ export const makeWorkSourceSql = (sql: SqlClient.SqlClient): WorkSourceSql => {
   })
 
   const read = Effect.fn("WorkSources.read")(function* (itemIds: ReadonlyArray<string>) {
-    const result = new Map<string, Array<SpaceTaskSource>>()
+    const result = new Map<string, Array<TaskSourceRecord>>()
     if (itemIds.length === 0) return result
     const rows = yield* sql<{ readonly item_id: string; readonly source: string }>`
       SELECT item_id, source FROM space_task_sources
@@ -86,7 +86,7 @@ export const makeWorkSourceSql = (sql: SqlClient.SqlClient): WorkSourceSql => {
       )
     )
     for (const row of rows) {
-      const source = yield* decodeJson(SpaceTaskSourceSchema, row.source).pipe(
+      const source = yield* decodeJson(TaskSourceRecordSchema, row.source).pipe(
         Effect.mapError(
           (cause) =>
             new WorkStoreError({

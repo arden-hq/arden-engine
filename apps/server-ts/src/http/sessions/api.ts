@@ -70,7 +70,7 @@ export class SessionsApi extends HttpApiGroup.make("sessions", { topLevel: true 
     error: storeErrors
   }),
   HttpApiEndpoint.post("clear", "/session/clear", {
-    payload: Schema.UndefinedOr(ClearSessionRequestSchema),
+    payload: ClearSessionRequestSchema,
     success: ClearSessionResponseSchema,
     error: [
       HttpApiError.BadRequestNoContent,
@@ -81,7 +81,7 @@ export class SessionsApi extends HttpApiGroup.make("sessions", { topLevel: true 
     ]
   }),
   HttpApiEndpoint.post("revert", "/session/revert", {
-    payload: Schema.UndefinedOr(RevertSessionRequestSchema),
+    payload: RevertSessionRequestSchema,
     success: RevertSessionResponseSchema,
     error: [
       HttpApiError.BadRequestNoContent,

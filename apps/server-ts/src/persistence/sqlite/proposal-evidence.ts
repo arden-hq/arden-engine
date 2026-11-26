@@ -1,7 +1,7 @@
-import type { SpaceTaskSourceSchema } from "@arden-hq/protocol/effect/spaces/work"
+import { type TaskSourceRecordSchema } from "../work/task-record.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-export const sourceIdentity = (source: typeof SpaceTaskSourceSchema.Type): string => {
+export const sourceIdentity = (source: typeof TaskSourceRecordSchema.Type): string => {
   switch (source.kind) {
     case "chat":
       return JSON.stringify([source.kind, source.session_id, source.turn_id])
@@ -16,13 +16,13 @@ export const sourceIdentity = (source: typeof SpaceTaskSourceSchema.Type): strin
   }
 }
 
-export const sourceRevision = (source: typeof SpaceTaskSourceSchema.Type): string =>
+export const sourceRevision = (source: typeof TaskSourceRecordSchema.Type): string =>
   JSON.stringify([sourceIdentity(source), source.revision])
 
 export const normalized = (
-  sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>,
-  key: (source: typeof SpaceTaskSourceSchema.Type) => string
+  sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>,
+  key: (source: typeof TaskSourceRecordSchema.Type) => string
 ): ReadonlyArray<string> => [...new Set(sources.map(key))].sort()
 
-export const evidenceKey = (sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>): string =>
+export const evidenceKey = (sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>): string =>
   sha256Hex(JSON.stringify(normalized(sources, sourceRevision)))

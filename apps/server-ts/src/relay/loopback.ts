@@ -1,4 +1,4 @@
-import { decodeSseFrameStream } from "@arden-hq/protocol"
+import { SSE_FRAME_ID, decodeSseFrameStream } from "@arden-hq/protocol"
 import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { Option, Schema } from "effect"
 import type { HttpServer } from "effect/unstable/http"
@@ -33,14 +33,16 @@ export const relayLoopback = (
         headers: {
           ...auth,
           accept: "text/event-stream",
-          ...(lastEventId === undefined ? {} : { "last-event-id": lastEventId })
+          ...(lastEventId.kind === SSE_FRAME_ID.identified
+            ? { "last-event-id": lastEventId.id }
+            : {})
         },
         signal
       })
       if (!response.ok || response.body === null)
         throw new Error(`The event stream answered ${response.status}`)
       for await (const frame of decodeSseFrameStream(response.body)) {
-        yield frame.id === undefined ? { data: frame.data } : { id: frame.id, data: frame.data }
+        yield { id: frame.id, data: frame.data }
       }
     }
   }

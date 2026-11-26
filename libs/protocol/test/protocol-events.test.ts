@@ -3,24 +3,29 @@ import fc from "fast-check"
 import { expect, it } from "vitest"
 
 import {
+  type ChatEventFrame,
+  type Framed,
   ProtocolError,
   isKnownServerEventType,
   decodeServerEvent,
   decodeServerEventStream,
   decodeServerEventStreamBuffer,
-  encodeServerEventFrame
+  encodeServerEventFrame,
+  SSE_DECODE_DEFAULTS,
+  sseFrameId
 } from "@arden-hq/protocol"
 import { reasoningStreamEventSchemas, textStreamEventSchemas } from "@arden-hq/protocol/effect/chat"
+import { isChatEventFrame } from "@arden-hq/protocol/effect/common"
 import { collect } from "./kit.js"
 
 const resumeHistory = {
   messages: [],
-  active_work_tail: null,
+  active_work_tail: { kind: "idle" },
   runtime: {
     session_id: "session-1",
     latest_event_seq: 1,
     checkpoint_seq: 0,
-    active_run: null,
+    active_run: { kind: "idle" },
     blocking_work: false,
     pending_approvals: [],
     pending_connections: []
@@ -28,16 +33,17 @@ const resumeHistory = {
   page: {
     has_more_before: false,
     has_more_after: false,
-    before: null,
-    after: null
+    bounds: { kind: "empty" }
   },
   context_budget: {
+    kind: "resolved",
     model: "test",
     hard_limit: 100,
     compaction_trigger: 80,
     input_tokens: 0,
     message_count: 0
-  }
+  },
+  turn_shells: []
 }
 
 it("rejects frame ids that could inject fields and headers that disagree with the data", () => {
@@ -49,8 +55,12 @@ it("rejects frame ids that could inject fields and headers that disagree with th
     message_id: "message-1",
     delta: "x"
   }
-  expect(() => encodeServerEventFrame(event, { id: "7\nevent: injected" })).toThrow(ProtocolError)
-  expect(() => encodeServerEventFrame(event, { id: "7\0ignored" })).toThrow(ProtocolError)
+  expect(() => encodeServerEventFrame(event, { id: sseFrameId("7\nevent: injected") })).toThrow(
+    ProtocolError
+  )
+  expect(() => encodeServerEventFrame(event, { id: sseFrameId("7\0ignored") })).toThrow(
+    ProtocolError
+  )
   expect(() =>
     decodeServerEventStreamBuffer(
       'event: TEXT_MESSAGE_START\ndata: {"type":"TEXT_MESSAGE_CONTENT","message_id":"m","delta":"x"}\n\n'
@@ -69,6 +79,7 @@ it("skips an event type this build does not know and keeps the stream open", asy
 
   expect(() =>
     decodeServerEventStreamBuffer('event: RUN_FINISHED\ndata: {"type":"RUN_FINISHED"}\n\n', {
+      ...SSE_DECODE_DEFAULTS,
       onUnknownEvent: () => {
         throw new Error("must not be called")
       }
@@ -88,11 +99,19 @@ it("skips an event type this build does not know and keeps the stream open", asy
           type: "TEXT_MESSAGE_CONTENT",
           session_id: "session-1",
           seq: 1,
+          timestamp: 1,
           replay: true,
           message_id: "message-1",
           delta: "partial"
         },
-        { type: "run_teleported", session_id: "session-1", seq: 2, replay: true, run_id: "run-1" }
+        {
+          type: "run_teleported",
+          session_id: "session-1",
+          seq: 2,
+          timestamp: 2,
+          replay: true,
+          run_id: "run-1"
+        }
       ]
     }
   })
@@ -104,9 +123,17 @@ it("skips an event type this build does not know and keeps the stream open", asy
 
 it("streams any mix of known and unknown events, split anywhere: known ones arrive in order, unknown ones are reported and skipped", async () => {
   const EventSchema = Schema.Union([...textStreamEventSchemas, ...reasoningStreamEventSchemas])
-  const known = Schema.toArbitrary(EventSchema)(fc)
-    .map((event): unknown => JSON.parse(JSON.stringify(event)))
-    .filter(Schema.is(EventSchema))
+  const FramedSchema = EventSchema.pipe(
+    Schema.refine((event): event is Framed<typeof EventSchema.Type, ChatEventFrame> =>
+      isChatEventFrame(event)
+    )
+  )
+  const known = fc
+    .tuple(Schema.toArbitrary(EventSchema)(fc), fc.nat({ max: 99 }), fc.boolean())
+    .map(([event, seq, replay]): unknown =>
+      JSON.parse(JSON.stringify({ ...event, session_id: "session-1", seq, timestamp: seq, replay }))
+    )
+    .filter(Schema.is(FramedSchema))
     .map((event) => ({ known: true as const, event }))
   const unknown = fc
     .record({
@@ -123,10 +150,9 @@ it("streams any mix of known and unknown events, split anywhere: known ones arri
         const text = items
           .map((item) =>
             item.known
-              ? encodeServerEventFrame(
-                  item.event,
-                  item.event.seq === undefined ? {} : { id: String(item.event.seq) }
-                )
+              ? encodeServerEventFrame(item.event, {
+                  id: sseFrameId(String(item.event.seq))
+                })
               : `${item.id === undefined ? "" : `id: ${item.id}\n`}event: ${item.type}\ndata: ${JSON.stringify({ ...item.payload, type: item.type })}\n\n`
           )
           .join("")
@@ -143,7 +169,7 @@ it("streams any mix of known and unknown events, split anywhere: known ones arri
             (async function* () {
               yield* chunks
             })(),
-            { onUnknownEvent: (frame) => dropped.push(frame) }
+            { ...SSE_DECODE_DEFAULTS, onUnknownEvent: (frame) => dropped.push(frame) }
           )
         )
         let lastId: string | undefined
@@ -152,7 +178,7 @@ it("streams any mix of known and unknown events, split anywhere: known ones arri
         for (const item of items) {
           const id = item.known ? item.event.seq : item.id
           if (id !== undefined) lastId = String(id)
-          const withId = lastId === undefined ? {} : { id: lastId }
+          const withId = { id: sseFrameId(lastId) }
           if (item.known) expected.push({ ...withId, event: item.event.type, data: item.event })
           else expectedDropped.push({ ...withId, event: item.type, type: item.type })
         }

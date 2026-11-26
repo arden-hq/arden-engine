@@ -1,9 +1,9 @@
-import { Effect, Schema, SchemaTransformation } from "effect"
+import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, withExtras, NonNegativeIntSchema } from "../common/schema.js"
 import { APPROVAL_MODES } from "../permissions/modes.js"
 import { ChatRunningWorkSchema } from "../sessions/schema.js"
 import { SpaceSnapshotSchema, SpaceTaskStatusSchema } from "./work/schema.js"
-import { SPACE_KINDS, SPACE_MARK_COLOURS, SPACE_MARK_MEDIA } from "./contracts.js"
+import { SPACE_AGENT, SPACE_KINDS, SPACE_MARK_COLOURS, SPACE_MARK_MEDIA } from "./contracts.js"
 import type {
   SpaceConversationResponse,
   Space,
@@ -16,98 +16,98 @@ import type {
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
-const TrimmedNameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(200))
-const nullableBoundedText = (maximum: number) =>
-  Schema.NullOr(Schema.String.check(Schema.isMaxLength(maximum)))
+export const SpaceNameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(200))
+export const SpaceInstructionsTextSchema = Schema.String.check(Schema.isMaxLength(20_000))
 
-/** Same three modes a Chat has; the Space applies one to its task workers. */
 export const SpaceApprovalModeSchema = Schema.Literals(APPROVAL_MODES)
 export const TaskInferencePolicySchema = Schema.Struct({
   enabled: Schema.Boolean
 })
 
 const unit = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
-export const SpaceMarkLookSchema = Schema.Struct({
-  colour: Schema.NullOr(Schema.Literals(SPACE_MARK_COLOURS)),
+const SpaceMarkLookSchema = Schema.Struct({
+  colour: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("automatic") }),
+    Schema.Struct({ kind: Schema.Literal("chosen"), colour: Schema.Literals(SPACE_MARK_COLOURS) })
+  ]).pipe(Schema.toTaggedUnion("kind")),
   medium: Schema.Literals(SPACE_MARK_MEDIA),
   zoom: unit,
   aberration: unit,
   focus: unit
 })
 
-const legacySpaceMarkLook = Schema.Struct({
-  colour: Schema.NullOr(Schema.Literals([...SPACE_MARK_COLOURS, "white", "black"] as const)),
-  medium: Schema.Literals([...SPACE_MARK_MEDIA, "ink"] as const),
-  zoom: unit,
-  aberration: unit,
-  focus: unit
-}).pipe(
-  Schema.decodeTo(
-    SpaceMarkLookSchema,
-    SchemaTransformation.transform({
-      decode: (look) => ({
-        ...look,
-        colour:
-          look.colour === "white" || look.colour === "black" ? ("mono" as const) : look.colour,
-        medium: look.medium === "ink" ? ("pool" as const) : look.medium
-      }),
-      encode: (look) => look
-    })
-  )
-)
+export const SpaceMarkSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("automatic") }),
+  Schema.Struct({ kind: Schema.Literal("set"), look: SpaceMarkLookSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
 
-/** What a stored mark may hold: the current shape, or one from before the migration ran. The
- *  current shape comes first, so encoding writes it. */
-export const StoredSpaceMarkLookSchema = Schema.Union([SpaceMarkLookSchema, legacySpaceMarkLook])
-
-export const SpaceInstructionsSourceSchema = Schema.Literals(["manual", "generated"] as const)
+const SpacePageSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unbound") }),
+  Schema.Struct({ kind: Schema.Literal("bound"), path: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
 
 export const SpaceKindSchema = Schema.Literals(SPACE_KINDS)
+
+const SpaceInstructionsSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unwritten") }),
+  Schema.Struct({ kind: Schema.Literal("cleared") }),
+  Schema.Struct({ kind: Schema.Literal("manual"), text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("generated"), text: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
 
 export const SpaceSchema: Schema.Codec<Space> = withExtras({
   inference: TaskInferencePolicySchema,
   space_id: Schema.NonEmptyString,
   kind: SpaceKindSchema,
   name: Schema.String,
-  instructions: Schema.NullOr(Schema.String),
-  instructions_source: Schema.NullOr(SpaceInstructionsSourceSchema),
-  page_path: Schema.NullOr(Schema.String),
-  mark: Schema.NullOr(SpaceMarkLookSchema),
+  instructions: SpaceInstructionsSchema,
+  page: SpacePageSchema,
+  mark: SpaceMarkSchema,
   created_at: IsoDateTimeStringSchema,
   updated_at: IsoDateTimeStringSchema,
-  archived_at: Schema.NullOr(IsoDateTimeStringSchema)
-}).check(
-  Schema.makeFilter((space) =>
-    Object.hasOwn(space, "page_id")
-      ? { path: ["page_id"], issue: "is not part of the Space API" }
-      : undefined
-  )
-)
+  state: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("active") }),
+    Schema.Struct({ kind: Schema.Literal("archived"), archived_at: IsoDateTimeStringSchema })
+  ]).pipe(Schema.toTaggedUnion("kind"))
+})
 
 export const SpaceListResponseSchema: Schema.Codec<SpaceListResponse> = withExtras({
   spaces: Schema.Array(SpaceSchema)
 })
 
+const SpaceInstructionsInputSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("cleared") }),
+  Schema.Struct({ kind: Schema.Literal("written"), text: SpaceInstructionsTextSchema })
+])
+
 export const CreateSpaceInputSchema = Schema.Struct({
-  name: TrimmedNameSchema,
-  instructions: Schema.optionalKey(nullableBoundedText(20_000)),
-  // Effect ignores unknown keys by default. Reject the old Wiki attachment field explicitly.
-  page_path: Schema.optionalKey(Schema.Never)
+  name: SpaceNameSchema,
+  instructions: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("unwritten") }),
+    ...SpaceInstructionsInputSchema.members
+  ]).pipe(Schema.toTaggedUnion("kind"))
 })
 
 export const UpdateSpaceInputSchema = Schema.Struct({
-  expected_updated_at: Schema.optionalKey(IsoDateTimeStringSchema),
-  name: Schema.optionalKey(TrimmedNameSchema),
-  instructions: Schema.optionalKey(nullableBoundedText(20_000)),
-  page_path: Schema.optionalKey(nullableBoundedText(1_000)),
-  mark: Schema.optionalKey(Schema.NullOr(SpaceMarkLookSchema))
-}).check(
-  Schema.makeFilter((input) =>
-    Object.keys(input).some((key) => key !== "expected_updated_at")
-      ? undefined
-      : "a Space update requires at least one field"
+  expected: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("latest") }),
+    Schema.Struct({ kind: Schema.Literal("at"), updated_at: IsoDateTimeStringSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  changes: Schema.Array(
+    Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("name"), name: SpaceNameSchema }),
+      Schema.Struct({
+        kind: Schema.Literal("instructions"),
+        instructions: SpaceInstructionsInputSchema.pipe(Schema.toTaggedUnion("kind"))
+      }),
+      Schema.Struct({ kind: Schema.Literal("mark"), mark: SpaceMarkSchema })
+    ]).pipe(Schema.toTaggedUnion("kind"))
+  ).check(
+    Schema.makeFilter((changes) =>
+      changes.length > 0 ? undefined : "a Space update requires at least one field"
+    )
   )
-)
+})
 
 export const SpaceArchiveResponseSchema: Schema.Codec<SpaceArchiveResponse> = withExtras({
   status: Schema.Literal("archived"),
@@ -119,50 +119,62 @@ export const SpaceEndConflictSchema: Schema.Codec<SpaceEndConflict> = withExtras
   chats: Schema.Array(Schema.Struct({ name: Schema.String, running: ChatRunningWorkSchema }))
 })
 
-export const SpaceUnseenSchema = withExtras({
+const LetterSubjectSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
+  Schema.Struct({ kind: Schema.Literal("given"), subject: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+const spaceUnseenFields = {
   at: IsoDateTimeStringSchema,
   session_id: Schema.NonEmptyString,
   line: Schema.String,
-  subject: Schema.NullOr(Schema.String)
-})
+  subject: LetterSubjectSchema
+} as const
 
 export const SpaceUnseenEntrySchema = withExtras({
-  at: IsoDateTimeStringSchema,
-  session_id: Schema.NonEmptyString,
-  line: Schema.String,
-  subject: Schema.NullOr(Schema.String),
+  ...spaceUnseenFields,
   space_id: Schema.NonEmptyString,
   space_title: Schema.String
 })
+
+export const LastLineSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
+  Schema.Struct({ kind: Schema.Literal("line"), text: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
 
 export const SpaceSummarySchema = withExtras({
   updated_at: IsoDateTimeStringSchema,
   key: Schema.NonEmptyString,
   kind: SpaceKindSchema,
   title: Schema.String,
-  page_path: Schema.NullOr(Schema.String),
+  page: SpacePageSchema,
   live: Schema.Boolean,
-  /** The owner placed it: it stands among the first, in their order. */
   pinned: Schema.Boolean,
-  mark: Schema.NullOr(SpaceMarkLookSchema),
-  unseen: Schema.NullOr(SpaceUnseenSchema),
-  last_line: Schema.optionalKey(Schema.NullOr(Schema.String))
+  mark: SpaceMarkSchema,
+  unseen: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("caught_up") }),
+    withExtras({ kind: Schema.Literal("unseen"), ...spaceUnseenFields })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  last_line: LastLineSchema
 })
 
-export const SpaceBriefItemSchema = withExtras({
+const briefFields = {
   space_id: Schema.NonEmptyString,
   space_title: Schema.String,
   stable_key: Schema.NonEmptyString,
   text: Schema.String,
-  status: Schema.optionalKey(SpaceTaskStatusSchema),
-  owner: Schema.optionalKey(Schema.Literals(["worker", "user", "external"] as const)),
-  completed_at: Schema.NullOr(IsoDateTimeStringSchema),
   updated_at: IsoDateTimeStringSchema
-})
+} as const
 
 export const SpacesBriefSchema = withExtras({
-  done: Schema.Array(SpaceBriefItemSchema),
-  in_progress: Schema.Array(SpaceBriefItemSchema)
+  done: Schema.Array(withExtras({ ...briefFields, completed_at: IsoDateTimeStringSchema })),
+  in_progress: Schema.Array(
+    withExtras({
+      ...briefFields,
+      status: SpaceTaskStatusSchema,
+      owner: Schema.Literals(["worker", "user", "external"] as const)
+    })
+  )
 })
 
 export const SpacesOverviewSchema: Schema.Codec<SpacesOverview> = withExtras({
@@ -182,41 +194,68 @@ export const SpacesOverviewSchema: Schema.Codec<SpacesOverview> = withExtras({
   })
 )
 
+const tagged = <const Tag extends string, Fields extends Schema.Struct.Fields>(
+  tag: Tag,
+  fields: Fields
+) => Schema.Struct({ kind: Schema.Literal(tag), ...fields })
+
 export const SpaceAgentStatusSchema = withExtras({
-  latest_run_id: Schema.NullOr(Schema.NonEmptyString),
-  last_checked: Schema.NullOr(IsoDateTimeStringSchema),
-  next_check: Schema.NullOr(IsoDateTimeStringSchema),
-  last_report: Schema.NullOr(Schema.String),
+  latest_run: Schema.Union([
+    tagged("none", {}),
+    tagged("run", { run_id: Schema.NonEmptyString })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  last_checked: Schema.Union([
+    tagged("never", {}),
+    tagged("at", { at: IsoDateTimeStringSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  last_report: Schema.Union([tagged("none", {}), tagged("report", { text: Schema.String })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
   woken_by: Schema.Array(Schema.String),
   runs_today: NonNegativeIntSchema,
   runs_cap: NonNegativeIntSchema,
-  running_since: Schema.NullOr(IsoDateTimeStringSchema),
+  running: Schema.Union([
+    tagged("idle", {}),
+    tagged("running", { since: IsoDateTimeStringSchema })
+  ]).pipe(Schema.toTaggedUnion("kind")),
   availability: Schema.Literals(["ready", "stale", "unavailable", "error"] as const),
-  last_error: Schema.NullOr(Schema.String)
+  last_error: Schema.Union([tagged("none", {}), tagged("failed", { error: Schema.String })]).pipe(
+    Schema.toTaggedUnion("kind")
+  )
 })
 
 export const SpaceSessionSchema = withExtras({
   session_id: Schema.NonEmptyString,
-  session_ref: Schema.optionalKey(Schema.NonEmptyString),
-  name: Schema.NullOr(Schema.String),
-  last_line: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  summary: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  last_activity: Schema.optionalKey(Schema.String)
+  session_ref: Schema.NonEmptyString,
+  name: Schema.Union([tagged("untitled", {}), tagged("named", { name: Schema.String })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
+  last_line: LastLineSchema,
+  summary: Schema.Union([
+    tagged("unsummarized", {}),
+    tagged("summarized", { text: Schema.String })
+  ]).pipe(Schema.toTaggedUnion("kind")),
+  last_activity: Schema.String
 })
 
 export const SpaceDetailSchema: Schema.Codec<SpaceDetail> = withExtras({
-  conversation_session_id: Schema.NullOr(Schema.NonEmptyString),
+  conversation: Schema.Union([
+    tagged("unopened", {}),
+    tagged("opened", { session_id: Schema.NonEmptyString })
+  ]).pipe(Schema.toTaggedUnion("kind")),
   inference: TaskInferencePolicySchema,
   key: Schema.NonEmptyString,
   title: Schema.String,
-  page_path: Schema.NullOr(Schema.String),
-  instructions: Schema.NullOr(Schema.String),
-  agent: Schema.NullOr(SpaceAgentStatusSchema),
+  page: SpacePageSchema,
+  instructions: SpaceInstructionsSchema,
+  agent: Schema.Union([tagged("off", {}), tagged("on", { status: SpaceAgentStatusSchema })]).pipe(
+    Schema.toTaggedUnion("kind")
+  ),
   sessions: Schema.Array(SpaceSessionSchema),
   work: SpaceSnapshotSchema
 }).check(
   Schema.makeFilter((detail) =>
-    !detail.inference.enabled === (detail.agent === null)
+    detail.inference.enabled === (detail.agent.kind === SPACE_AGENT.on)
       ? undefined
       : {
           path: ["agent"],

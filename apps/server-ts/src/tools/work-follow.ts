@@ -1,7 +1,7 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
+import { itemPage, WorkStore, type WorkStoreError } from "../persistence/work/store.js"
 import { toolFailure } from "./tool-failure.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt } from "./call-receipt.js"
@@ -36,7 +36,7 @@ const makeTaskMoveHereTool = ({ work }: { readonly work: WorkStore["Service"] })
     },
     execute: async (input, ctx, effects) => {
       const page = await Effect.runPromise(
-        work.page({ itemId: input.item_id }).pipe(Effect.mapError(failure)),
+        work.page(itemPage(input.item_id)).pipe(Effect.mapError(failure)),
         { signal: ctx.signal }
       )
       const task = page.items.find((item) => item.item_id === input.item_id)

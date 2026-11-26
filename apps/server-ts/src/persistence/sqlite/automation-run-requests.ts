@@ -7,6 +7,7 @@ import { Clock, Effect, Schema } from "effect"
 import { ChatRunErrorCodeSchema } from "@arden-hq/protocol/effect/chat"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { decodeJson } from "./json.js"
+import { askedToRun, SkippedWakeSchema } from "./automation-run-rows.js"
 import { quietRunOutcome } from "./run-outcomes.js"
 import {
   AutomationQueue,
@@ -55,11 +56,6 @@ const blockedReport = (row: ObservedChatRunRow): AutomationBlockedReport | null 
   const reason = row.blocked_reason?.trim()
   return { kind, reason: reason === undefined || reason === "" ? "No reason given." : reason }
 }
-
-const SkippedWakeSchema = Schema.Struct({
-  prompt: Schema.String,
-  ran: Schema.NullOr(Schema.Unknown)
-})
 
 const HEADLINE_BY_SOURCE: Readonly<Record<AutomationQueueSource, string>> = {
   scheduled: "Scheduled check-in",
@@ -163,7 +159,7 @@ export const makeAutomationRunRequests = ({
           const row = rows[0]
           if (row === undefined) return false
           const skip = yield* decodeJson(SkippedWakeSchema, row.skip_json)
-          if (skip.ran !== null) {
+          if (askedToRun(skip.run_with_event)) {
             return yield* storeError(
               "request_run",
               "conflict",
@@ -194,8 +190,7 @@ export const makeAutomationRunRequests = ({
           )
           yield* sql`
             UPDATE automation_runs
-            SET skip_json = json_set(skip_json, '$.ran', json_object('at', ${now}, 'run_id', NULL),
-              '$.cancelled', json('null'))
+            SET skip_json = json_set(skip_json, '$.run_with_event', json_object('kind', 'queued', 'at', ${now}))
             WHERE id = ${skippedRunId}
           `
           return true

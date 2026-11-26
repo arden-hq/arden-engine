@@ -1,5 +1,6 @@
 import { Cause, Context, Effect, Exit, Schema, Scope } from "effect"
-import { ChatMessage as ChatMessageService, type StopReason } from "./chat/message.js"
+import { ChatMessage as ChatMessageService } from "./chat/message.js"
+import type { StopReason } from "./chat/message-shape.js"
 import type { HostedServerOptions, ModelProviderOptions, ServerOptions } from "./config/options.js"
 import { ModelProviderSwitch } from "./models/provider-switch.js"
 import {

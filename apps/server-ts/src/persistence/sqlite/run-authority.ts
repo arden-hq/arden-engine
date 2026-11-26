@@ -1,6 +1,6 @@
+import { RunContextSchema, type RunContext } from "../runs/stored-context.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
-import type { RunContext } from "@arden-hq/protocol/runs"
-import type { InteractionSender } from "@arden-hq/protocol/chat"
+import type { StoredInteractionSender } from "../transcript/interaction.js"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
@@ -18,7 +18,6 @@ import { RunPolicySchema, meetCapabilities, type RunPolicy } from "../../executi
 import type { AgentSessionMetadata } from "../../sessions/agent-mode.js"
 import { runPolicyRevoked } from "./run-policy.js"
 import { executionBudgetExpired } from "./execution-budgets.js"
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import { decodeJson } from "./json.js"
 import { writeError } from "./chat-write-errors.js"
 import { readWorkOwner } from "./automation-rows.js"
@@ -153,7 +152,7 @@ export const delegateAuthority = Effect.fn("RunAuthority.delegate")(function* (
 
 export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
   sql: SqlClient.SqlClient,
-  sender: InteractionSender | undefined,
+  sender: StoredInteractionSender | undefined,
   sessionId: string
 ) {
   if (

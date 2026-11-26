@@ -1,8 +1,9 @@
+import { type TaskRecord, type WorkPageRecord } from "../work/task-record.js"
 import { WorkTaskKeySchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import type { SpaceTask, SpaceWorkPage, SpaceWorkPageOptions } from "@arden-hq/protocol/spaces/work"
-import type { TaskAddress, TaskScope, WorkStoreError } from "../work/store.js"
+import type { SpaceWorkPageOptions } from "@arden-hq/protocol/spaces/work"
+import { itemPage, type TaskAddress, type TaskScope, type WorkStoreError } from "../work/store.js"
 import { workError } from "./work-records.js"
 
 export const taskScopeSql = (sql: SqlClient.SqlClient, scope: TaskScope): Statement.Fragment => {
@@ -48,11 +49,11 @@ export const taskSpaceActiveSql = (sql: SqlClient.SqlClient): Statement.Fragment
 
 export const readTask = (
   sql: SqlClient.SqlClient,
-  page: (options: SpaceWorkPageOptions) => Effect.Effect<SpaceWorkPage, WorkStoreError>,
+  page: (options: SpaceWorkPageOptions) => Effect.Effect<WorkPageRecord, WorkStoreError>,
   address: TaskAddress
-): Effect.Effect<SpaceTask, WorkStoreError> =>
+): Effect.Effect<TaskRecord, WorkStoreError> =>
   resolveTaskItem(sql, address).pipe(
-    Effect.flatMap((itemId) => page({ itemId })),
+    Effect.flatMap((itemId) => page(itemPage(itemId))),
     Effect.flatMap((found) => {
       const task = found.items[0]
       return task === undefined

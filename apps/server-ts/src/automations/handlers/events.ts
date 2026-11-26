@@ -74,7 +74,8 @@ export const eventsHandler: SystemAutomationHandler<"events"> = {
     triggers: ITEM_EVENTS.map((event_type) => ({
       type: "event" as const,
       event_type,
-      run_only_if: DEFAULT_RULE
+      run_only_if: { kind: "sentence" as const, sentence: DEFAULT_RULE },
+      condition: { kind: "none" as const }
     })),
     enabled: true,
     cooldownMinutes: null,

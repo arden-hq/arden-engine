@@ -22,7 +22,9 @@ describe("decodeSseFrameStream", () => {
         "id: 46\r\ndata: three\r\n\r\nid: 47\r\ndata: four\r\n\r\nid: 48\r\ndata: five\r\n\r\n"
       )
     )
-    expect(frames.map((frame) => [frame.id, frame.data])).toEqual([
+    expect(
+      frames.map((frame) => [frame.id.kind === "identified" ? frame.id.id : null, frame.data])
+    ).toEqual([
       ["41", '{"a":1}'],
       ["45", "one\ntwo"],
       ["46", "three"],
@@ -35,7 +37,9 @@ describe("decodeSseFrameStream", () => {
     const frames = await collect(
       chunks("id: 45\ndata: one\ndata: two\n\n", "id: 46\ndata: three\n\n")
     )
-    expect(frames.map((frame) => [frame.id, frame.data])).toEqual([
+    expect(
+      frames.map((frame) => [frame.id.kind === "identified" ? frame.id.id : null, frame.data])
+    ).toEqual([
       ["45", "one\ntwo"],
       ["46", "three"]
     ])

@@ -40,13 +40,22 @@ export interface McpSecretPatch extends JsonRecord {
   readonly retain: ReadonlyArray<string>
 }
 
+export const MCP_TRANSPORT = { stdio: "stdio", http: "http" } as const
+
+export const MCP_FOLDER = { keep: "keep", home: "home", folder: "folder" } as const
+
+export type McpFolder =
+  | { readonly kind: typeof MCP_FOLDER.home }
+  | { readonly kind: typeof MCP_FOLDER.folder; readonly path: string }
+
+export type McpFolderInput = { readonly kind: typeof MCP_FOLDER.keep } | McpFolder
+
 export interface McpStdioTransport extends JsonRecord {
   readonly type: "stdio"
   readonly command: string
   readonly args: ReadonlyArray<string>
   readonly environmentKeys: ReadonlyArray<string>
-  /** The working folder; null is the person's home folder. */
-  readonly cwd: string | null
+  readonly cwd: McpFolder
 }
 
 export interface McpHttpTransport extends JsonRecord {
@@ -58,10 +67,16 @@ export interface McpHttpTransport extends JsonRecord {
 
 export type McpTransport = McpStdioTransport | McpHttpTransport
 
+export const MCP_TOOL_TITLE = { untitled: "untitled", titled: "titled" } as const
+
+export type McpToolTitle =
+  | { readonly kind: typeof MCP_TOOL_TITLE.untitled }
+  | { readonly kind: typeof MCP_TOOL_TITLE.titled; readonly text: string }
+
 export interface McpTool extends JsonRecord {
   readonly name: string
   readonly fullName: string
-  readonly title: string | null
+  readonly title: McpToolTitle
   readonly description: string
 }
 
@@ -77,16 +92,38 @@ export interface McpEvent extends JsonRecord {
   readonly inputSchema: JsonRecord
 }
 
+export const MCP_SERVER_PRESET = { custom: "custom", preset: "preset" } as const
+
+export type McpServerPreset =
+  | { readonly kind: typeof MCP_SERVER_PRESET.custom }
+  | { readonly kind: typeof MCP_SERVER_PRESET.preset; readonly id: McpPresetId }
+
+export const MCP_SERVER_DETAIL = { quiet: "quiet", shown: "shown" } as const
+
+export type McpServerDetail =
+  | { readonly kind: typeof MCP_SERVER_DETAIL.quiet }
+  | { readonly kind: typeof MCP_SERVER_DETAIL.shown; readonly text: string }
+
+export const MCP_DIAGNOSTICS = { clean: "clean", captured: "captured" } as const
+
+export type McpDiagnostics =
+  | { readonly kind: typeof MCP_DIAGNOSTICS.clean }
+  | { readonly kind: typeof MCP_DIAGNOSTICS.captured; readonly text: string }
+
+export const MCP_ACCOUNT = { unknown: "unknown", identified: "identified" } as const
+
+export type McpAccount =
+  | { readonly kind: typeof MCP_ACCOUNT.unknown }
+  | { readonly kind: typeof MCP_ACCOUNT.identified; readonly identity: string }
+
 export interface McpServer extends JsonRecord {
   readonly name: string
-  readonly presetId: McpPresetId | null
+  readonly preset: McpServerPreset
   readonly enabled: boolean
   readonly status: McpConnectionStatus
-  readonly detail: string | null
-  /** For a failed local server, the technical detail behind `detail`: the
-   *  error and the last lines it wrote to stderr, secrets redacted. */
-  readonly diagnostics: string | null
-  readonly accountIdentity: string | null
+  readonly detail: McpServerDetail
+  readonly diagnostics: McpDiagnostics
+  readonly account: McpAccount
   readonly transport: McpTransport
   readonly tools: ReadonlyArray<McpTool>
   /** Empty for a server that lists no events, or none Arden can receive. */
@@ -107,8 +144,7 @@ export interface McpStdioTransportInput extends JsonRecord {
   readonly command: string
   readonly args: ReadonlyArray<string>
   readonly environment: McpSecretPatch
-  /** Omitted keeps the stored folder; null is the person's home folder. */
-  readonly cwd?: string | null
+  readonly cwd: McpFolderInput
 }
 
 export interface McpHttpTransportInput extends JsonRecord {
@@ -129,20 +165,38 @@ export interface McpServerUpdate extends JsonRecord {
   readonly transport: McpTransportInput
 }
 
-export interface McpOAuthStartResponse extends JsonRecord {
-  readonly name: string
-  readonly authorizationUrl: string | null
-  readonly status: "connected" | "pending"
-}
+export const MCP_OAUTH_START = {
+  connected: "connected",
+  authorized: "authorized",
+  pending: "pending"
+} as const
+
+export type McpOAuthStartResponse =
+  | {
+      readonly name: string
+      readonly status: typeof MCP_OAUTH_START.connected | typeof MCP_OAUTH_START.authorized
+    }
+  | {
+      readonly name: string
+      readonly status: typeof MCP_OAUTH_START.pending
+      readonly authorizationUrl: string
+    }
 
 export interface McpRemoveReceipt extends JsonRecord {
   readonly status: "removed"
   readonly name: string
 }
 
+export const GITHUB_CONNECTION = { disconnected: "disconnected", connected: "connected" } as const
+
 export interface GitHubConnectionState {
-  /** The active credential source and access settings; null when disconnected. */
-  readonly connection: { readonly readOnly: boolean; readonly source: "token" | "app" } | null
+  readonly connection:
+    | { readonly kind: typeof GITHUB_CONNECTION.disconnected }
+    | {
+        readonly kind: typeof GITHUB_CONNECTION.connected
+        readonly readOnly: boolean
+        readonly source: "token" | "app"
+      }
 }
 
 export interface GitHubConnectRequest {

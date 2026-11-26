@@ -1,31 +1,63 @@
 import type { SessionPresentation } from "./presentation.js"
 import type { ContextBudgetSnapshot } from "../chat/history.js"
 import type { JsonRecord } from "../common/json.js"
-import type { RuntimeRunStatus } from "../chat/runtime.js"
+import type { LinkedAutomation } from "../common/links.js"
+import type {
+  AgentWorkspace,
+  FirstLine,
+  ParentMessage,
+  SessionActivity,
+  SessionChatModel,
+  SessionFork,
+  SessionName,
+  SessionOrigin,
+  SessionParent,
+  SessionRun,
+  SessionSpace,
+  SessionSummary,
+  SessionThreadSource
+} from "./states.js"
+export * from "./states.js"
 
-/** Semantic options accepted by `sessionRoutes.list`. */
+export const SESSION_LIST_FILTER = {
+  all: "all",
+  space: "space",
+  children: "children",
+  sessions: "sessions",
+  ref: "ref"
+} as const
+
+export const SESSION_LIST_NEXT = { end: "end", more: "more" } as const
+
+export const SESSION_LIST_PAGE = { first: "first", offset: "offset", after: "after" } as const
+
+export type SessionListFilter =
+  | { readonly kind: typeof SESSION_LIST_FILTER.all }
+  | { readonly kind: typeof SESSION_LIST_FILTER.space; readonly space_id: string }
+  | {
+      readonly kind: typeof SESSION_LIST_FILTER.children
+      readonly parent_session_ids: ReadonlyArray<string>
+    }
+  | {
+      readonly kind: typeof SESSION_LIST_FILTER.sessions
+      readonly session_ids: ReadonlyArray<string>
+    }
+  | { readonly kind: typeof SESSION_LIST_FILTER.ref; readonly session_ref: string }
+
+export type SessionListPage =
+  | { readonly kind: typeof SESSION_LIST_PAGE.first }
+  | { readonly kind: typeof SESSION_LIST_PAGE.offset; readonly offset: number }
+  | { readonly kind: typeof SESSION_LIST_PAGE.after; readonly cursor: SessionListCursor }
+
 export interface SessionListOptions {
-  readonly spaceId?: string
-  readonly scope?: SessionListScope
-  /** Only sessions whose latest run is still open. The set is bounded by
-   *  concurrency rather than history, which is what makes hydrating all of them
-   *  affordable where paging every stored agent is not. */
-  readonly live?: boolean
-  /** Only the direct children of these sessions. */
-  readonly parentSessionIds?: ReadonlyArray<string>
-  readonly limit?: number
-  readonly offset?: number
-  readonly sort?: SessionListSort
-  readonly cursor?: SessionListCursor
-  readonly sessionIds?: ReadonlyArray<string>
-  readonly sessionRef?: string
+  readonly scope: SessionListScope
+  readonly live: boolean
+  readonly limit: number
+  readonly sort: SessionListSort
+  readonly filter: SessionListFilter
+  readonly page: SessionListPage
 }
 
-/** Which session kinds a listing may return. Spawned agent sessions vastly
- *  outnumber conversations, so a page shared between them starves the rail:
- *  the caller states which population it is paging, and the filter lands in
- *  SQL before ORDER BY and the cursor. */
-/** Primary contains owner conversations only; channels and child runs use all. */
 export type SessionListScope = "primary" | "agent" | "all"
 
 export type SessionListSort = "activity" | "accessed"
@@ -35,48 +67,23 @@ export interface SessionListCursor extends JsonRecord {
   readonly session_id: string
 }
 
-/** Complete row returned by `GET /sessions`; event projections may be lighter. */
 export interface ListedSession extends SessionListItem {
-  readonly presentation: SessionPresentation
-  readonly public_ref: string | null
-  readonly last_accessed_at: string | null
-  readonly has_unread: boolean
-  readonly space_id: string | null
-  readonly chat_model: string | null
-  readonly session_type: SessionType
-  readonly origin_automation_id: string | null
-  readonly parent_session_id: string | null
-  readonly parent_tool_call_id: string | null
-  readonly parent_message_id: string | null
-  readonly parent_run_id: string | null
-  readonly active_run_id: string | null
-  readonly active_turn_id: string | null
-  readonly run_status: RuntimeRunStatus | null
-  readonly checkpoint_seq: number
-  readonly latest_event_seq: number
-  readonly is_active: boolean
-  readonly pending_approvals_count: number
-  readonly pending_connections_count: number
-  readonly run_error_code: string | null
-  readonly run_stop_reason: string | null
+  readonly summary: SessionSummary
+  readonly agent_workspace: AgentWorkspace
 }
 
 export interface SessionListResponse extends JsonRecord {
   readonly sessions: ReadonlyArray<ListedSession>
-  readonly next_cursor: SessionListCursor | null
+  readonly next:
+    | { readonly kind: typeof SESSION_LIST_NEXT.end }
+    | { readonly kind: typeof SESSION_LIST_NEXT.more; readonly cursor: SessionListCursor }
 }
 
 export interface CreateSessionRequest {
-  readonly name?: string | null
-  readonly space_id?: string | null
-  /** Pins the Session's Chat model from birth; null or absent inherits the global one. */
-  readonly chat_model?: string | null
-  /** `capture`: a screenshot handed to Arden (⇧ + both ⌘). The chat runs on the
-   *  Helper model unless `chat_model` names one, and loose-chat triage leaves it
-   *  alone: the chat itself decides where the capture goes.
-   *  `onboarding`: the first-run "Getting started" chat; Arden speaks first and
-   *  walks a new user through setup in it. */
-  readonly origin?: "capture" | "onboarding"
+  readonly name: SessionName
+  readonly space: SessionSpace
+  readonly chat_model: SessionChatModel
+  readonly origin: SessionOrigin
 }
 
 /** A screenshot handed to Arden (⇧ + both ⌘), with the user's note, for `POST /captures`. */
@@ -100,44 +107,51 @@ export type HandCaptureResponse =
       readonly line: string
       readonly client_id: string
     }
-  | { readonly kind: "kept"; readonly session_id: string; readonly line: string | null }
+  | { readonly kind: "kept"; readonly session_id: string; readonly line: CaptureLine }
+
+export const CAPTURE_LINE = { none: "none", line: "line" } as const
+
+export const keptCapture = (sessionId: string): HandCaptureResponse => ({
+  kind: "kept",
+  session_id: sessionId,
+  line: { kind: CAPTURE_LINE.none }
+})
+
+export type CaptureLine =
+  | { readonly kind: typeof CAPTURE_LINE.none }
+  | { readonly kind: typeof CAPTURE_LINE.line; readonly text: string }
 
 export interface CreateSessionResponse extends JsonRecord {
   readonly session_id: string
-  readonly name: string | null
+  readonly name: SessionName
   readonly started_at: string
   readonly last_activity: string
   readonly message_count: number
-  readonly space_id: string | null
-  readonly chat_model: string | null
-  /** The job the chat was made for, as on its list row (`SessionListItem.origin`). */
-  readonly origin: "capture" | "onboarding" | null
+  readonly space: SessionSpace
+  readonly chat_model: SessionChatModel
+  readonly origin: SessionOrigin
 }
 
-/** Stable context origin, separate from execution ownership and resource grants. */
-export interface SessionForkOrigin extends JsonRecord {
-  readonly sourceSessionId: string
-  readonly sourceSessionRef: string | null
-  readonly throughSequence: number
-  readonly sourceMessageId: string | null
-  readonly createdAt: string
-}
+export const BRANCH_REQUEST = { once: "once", keyed: "keyed" } as const
+
+export type BranchRequestKey =
+  | { readonly kind: typeof BRANCH_REQUEST.once }
+  | { readonly kind: typeof BRANCH_REQUEST.keyed; readonly request_id: string }
 
 export interface BranchSessionRequest {
-  readonly disposition?: "retained" | "disposable"
-  readonly request_id?: string
-  readonly share_resources?: boolean
-  readonly name?: string | null
-  readonly up_to_message_id?: string | null
+  readonly disposition: "retained" | "disposable"
+  readonly request: BranchRequestKey
+  readonly share_resources: boolean
+  readonly name: SessionName
+  readonly up_to: ParentMessage
 }
 
 export interface BranchSessionResponse extends JsonRecord {
-  readonly fork_origin?: SessionForkOrigin | null
   readonly session_id: string
-  readonly name: string | null
+  readonly name: SessionName
   readonly started_at: string
   readonly last_activity: string
-  readonly space_id: string | null
+  readonly space: SessionSpace
 }
 
 export interface RenameSessionRequest {
@@ -150,34 +164,29 @@ export interface RenameSessionResponse extends JsonRecord {
 }
 
 export interface UpdateSessionModelRequest {
-  readonly chat_model: string | null
+  readonly chat_model: SessionChatModel
 }
 
 export interface UpdateSessionModelResponse extends JsonRecord {
   readonly session_id: string
-  readonly chat_model: string | null
+  readonly chat_model: SessionChatModel
   readonly context_budget: ContextBudgetSnapshot
 }
 
 export interface ArchivedSession extends JsonRecord {
   readonly session_id: string
-  readonly public_ref: string | null
+  readonly public_ref: string
   readonly started_at: string
   readonly last_activity: string
-  readonly last_accessed_at: string | null
-  readonly name: string | null
+  readonly name: SessionName
   readonly archived_at: string
-  /** The opening words of the chat's first message, for a chat with no name. */
-  readonly first_line: string | null
+  readonly first_line: FirstLine
   readonly message_count: number
-  readonly space_id: string | null
-  readonly chat_model: string | null
+  readonly space: SessionSpace
+  readonly chat_model: SessionChatModel
   readonly session_type: SessionType
-  readonly origin_automation_id: string | null
-  readonly parent_session_id: string | null
-  readonly parent_tool_call_id: string | null
-  readonly parent_message_id: string | null
-  readonly parent_run_id: string | null
+  readonly origin_automation: LinkedAutomation
+  readonly parent: SessionParent
 }
 
 export interface ArchivedSessionsResponse extends JsonRecord {
@@ -205,24 +214,43 @@ export interface ChatRunningWork extends JsonRecord {
 /** The 409 of an archive or a permanent delete: the reason worded for the
  *  user, and what runs when only running work refused it. Sending the same
  *  request with `stop=true` stops that work first. */
+export const RUNNING_WORK = { none: "none", running: "running" } as const
+
+export type SessionEndRunning =
+  | { readonly kind: typeof RUNNING_WORK.none }
+  | { readonly kind: typeof RUNNING_WORK.running; readonly work: ChatRunningWork }
+
 export interface SessionEndConflict extends JsonRecord {
   readonly detail: string
-  readonly running: ChatRunningWork | null
+  readonly running: SessionEndRunning
 }
 
+export const SESSION_TARGET = { latest: "latest", session: "session" } as const
+
+export type SessionTarget =
+  | { readonly kind: typeof SESSION_TARGET.latest }
+  | { readonly kind: typeof SESSION_TARGET.session; readonly session_id: string }
+
 export interface ClearSessionRequest {
-  readonly session_id?: string | null
+  readonly target: SessionTarget
 }
+
+export const CLEARED = { none: "none", session: "session" } as const
 
 export interface ClearSessionResponse extends JsonRecord {
   readonly status: "cleared"
-  readonly session_id: string | null
+  readonly cleared:
+    | { readonly kind: typeof CLEARED.none }
+    | { readonly kind: typeof CLEARED.session; readonly session_id: string }
 }
 
+export const REVERT_TO = { turns: "turns", message: "message" } as const
+
 export interface RevertSessionRequest {
-  readonly session_id?: string | null
-  readonly turns?: number
-  readonly message_id?: string | null
+  readonly target: SessionTarget
+  readonly to:
+    | { readonly kind: typeof REVERT_TO.turns; readonly turns: number }
+    | { readonly kind: typeof REVERT_TO.message; readonly message_id: string }
 }
 
 export interface RevertSessionResponse extends JsonRecord {
@@ -231,7 +259,7 @@ export interface RevertSessionResponse extends JsonRecord {
 }
 
 export interface MoveSessionToSpaceRequest {
-  readonly space_id: string | null
+  readonly space: SessionSpace
 }
 
 export interface StartOnboardingResponse extends JsonRecord {
@@ -241,7 +269,7 @@ export interface StartOnboardingResponse extends JsonRecord {
 
 export interface MoveSessionToSpaceResponse extends JsonRecord {
   readonly session_id: string
-  readonly space_id: string | null
+  readonly space: SessionSpace
 }
 
 export type SessionExportFormat = "archive" | "markdown" | "json" | "jsonl"
@@ -287,7 +315,7 @@ export interface ChatSearchHit extends JsonRecord {
 
 interface ChatSearchChatBase extends JsonRecord {
   readonly session_id: string
-  readonly session_name: string | null
+  readonly session_name: SessionName
   /** Each match in `session_name`, as [start, end) offsets; empty when it does not match. */
   readonly name_ranges: ReadonlyArray<readonly [start: number, end: number]>
   readonly last_activity: string
@@ -303,8 +331,14 @@ export interface ChatSearchByMessage extends ChatSearchChatBase {
  * (no `ranges`), null when it has none to show. */
 export interface ChatSearchByName extends ChatSearchChatBase {
   readonly match: "name"
-  readonly preview: ChatSearchHit | null
+  readonly preview: ChatSearchPreview
 }
+
+export const SEARCH_PREVIEW = { none: "none", message: "message" } as const
+
+export type ChatSearchPreview =
+  | { readonly kind: typeof SEARCH_PREVIEW.none }
+  | { readonly kind: typeof SEARCH_PREVIEW.message; readonly hit: ChatSearchHit }
 
 /** One chat that matches a find across all chats. */
 export type ChatSearchChat = ChatSearchByMessage | ChatSearchByName
@@ -368,67 +402,34 @@ export interface SessionTriageActionRequest {
 
 export type SessionType = "chat" | "channel" | "agent"
 
-/** Where a forked agent's history came from: the parent turn it forked in, and when. */
-export interface SessionFork extends JsonRecord {
-  readonly at: string
-  readonly turn_id: string
-}
+export const SESSION_TRIAGE_STATE = { none: "none", decided: "decided" } as const
 
-/** The chat a thread's own chat was opened from. */
-export interface SessionThreadSource extends JsonRecord {
-  readonly session_id: string
-  readonly session_ref: string | null
-}
-
-export const SESSION_PARENT_STEP = { none: "none", step: "step" } as const
-
-export type SessionParentStep =
-  | { readonly kind: typeof SESSION_PARENT_STEP.none }
-  | { readonly kind: typeof SESSION_PARENT_STEP.step; readonly tool_call_id: string }
+export type SessionTriageState =
+  | { readonly kind: typeof SESSION_TRIAGE_STATE.none }
+  | { readonly kind: typeof SESSION_TRIAGE_STATE.decided; readonly decision: SessionTriageDecision }
 
 export interface SessionListItem extends JsonRecord {
-  readonly current_activity?: import("../chat/activity.js").RunActivity | null
-  readonly parent_step: SessionParentStep
-  /** Initial working directory recorded for a code agent; absent for other chats. */
-  readonly agent_workspace?: string | null
-  readonly latest_run_id?: string | null
-  readonly presentation?: SessionPresentation
   readonly session_id: string
-  readonly public_ref?: string | null
+  readonly public_ref: string
+  readonly presentation: SessionPresentation
+  readonly name: SessionName
   readonly started_at: string
   readonly last_activity: string
-  readonly last_accessed_at?: string | null
-  readonly has_unread?: boolean
-  readonly name: string | null
+  readonly has_unread: boolean
   readonly message_count: number
-  readonly space_id?: string | null
-  readonly chat_model?: string | null
-  readonly session_type?: SessionType
-  readonly origin_automation_id?: string | null
-  readonly parent_session_id?: string | null
-  readonly parent_tool_call_id?: string | null
-  readonly parent_message_id?: string | null
-  readonly parent_run_id?: string | null
-  readonly active_run_id?: string | null
-  readonly active_turn_id?: string | null
-  readonly run_status?: RuntimeRunStatus | null
-  readonly checkpoint_seq?: number
-  readonly latest_event_seq?: number
-  readonly is_active?: boolean
-  readonly pending_approvals_count?: number
-  readonly pending_connections_count?: number
-  readonly run_error_code?: string | null
-  readonly run_stop_reason?: string | null
-  /** The stored filing suggestion while it is fresh; `null` when the Chat was
-   *  never checked or has grown (or moved to a new day) since its check. */
-  readonly triage?: SessionTriageDecision | null
-  /** Set on an agent that started from its parent's conversation (spawn_agent fork_context). */
-  readonly fork?: SessionFork | null
-  readonly fork_origin?: SessionForkOrigin | null
-  /** Set on a chat opened for a thread from another chat (a Focus choice). */
-  readonly thread_source?: SessionThreadSource | null
-  /** What the chat covered, from its Chat summary; null until it has one. */
-  readonly summary?: string | null
-  /** The job the chat was made for (CreateSessionRequest.origin); null for an ordinary chat. */
-  readonly origin?: "capture" | "onboarding" | null
+  readonly space: SessionSpace
+  readonly chat_model: SessionChatModel
+  readonly session_type: SessionType
+  readonly origin_automation: LinkedAutomation
+  readonly parent: SessionParent
+  readonly run: SessionRun
+  readonly checkpoint_seq: number
+  readonly latest_event_seq: number
+  readonly pending_approvals_count: number
+  readonly pending_connections_count: number
+  readonly triage: SessionTriageState
+  readonly fork: SessionFork
+  readonly thread_source: SessionThreadSource
+  readonly origin: SessionOrigin
+  readonly current_activity: SessionActivity
 }

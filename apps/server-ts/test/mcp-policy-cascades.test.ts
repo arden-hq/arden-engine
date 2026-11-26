@@ -30,7 +30,10 @@ it("invalidates shared credential permissions atomically without restoring stale
         const store = yield* McpStore
         const permissions = yield* PermissionRules
         const spaces = yield* SpaceStore
-        const owner = yield* spaces.create({ name: "MCP permissions" })
+        const owner = yield* spaces.create({
+          name: "MCP permissions",
+          instructions: { kind: "unwritten" }
+        })
         for (const name of ["shared-a", "shared-b", "removed", "unrelated"]) {
           yield* store.create(connection(name))
         }

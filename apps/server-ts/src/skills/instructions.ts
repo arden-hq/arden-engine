@@ -1,3 +1,4 @@
+import { SKILL_VERSION } from "@arden-hq/protocol/skills"
 import { Effect } from "effect"
 import { sha256Hex } from "@arden-hq/std/hash"
 import type { SkillCatalog } from "./service.js"
@@ -40,7 +41,9 @@ export const loadSkillInstructions = Effect.fn("Skills.loadInstructions")(functi
       metadata: {
         source: loaded.builtin ? BUILT_IN_SKILL_SOURCE : LOCAL_SKILL_SOURCE,
         skill_name: loaded.name,
-        ...(loaded.version === null ? {} : { skill_version: loaded.version }),
+        ...(loaded.version.kind === SKILL_VERSION.versioned
+          ? { skill_version: loaded.version.version }
+          : {}),
         ...(resource === undefined ? {} : { skill_resource: resource }),
         source_sha256: sha256
       }

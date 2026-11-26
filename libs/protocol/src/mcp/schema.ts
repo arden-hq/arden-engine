@@ -1,14 +1,18 @@
 import { publicWebUrl, serverUrlIssue, type ServerUrlIssue } from "@arden-hq/std/url"
 import { Effect, Schema } from "effect"
 import { MCP_CONNECTION_STATUSES } from "./status.js"
-import type {
-  GitHubConnectionState,
-  McpOAuthStartResponse,
-  McpPresetInstallResponse,
-  McpPresetListResponse,
-  McpServer,
-  McpServerListResponse,
-  McpRemoveReceipt
+import {
+  GITHUB_CONNECTION,
+  MCP_OAUTH_START,
+  MCP_SERVER_PRESET,
+  type GitHubConnectionState,
+  type McpOAuthStartResponse,
+  type McpPresetInstallResponse,
+  type McpPresetListResponse,
+  type McpServer,
+  type McpServerListResponse,
+  type McpRemoveReceipt,
+  type McpTool
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
@@ -157,8 +161,11 @@ export const McpStdioTransportInputSchema = Schema.Struct({
   command: McpCommandSchema,
   args: Schema.Array(McpArgumentSchema).check(Schema.isMaxLength(128)),
   environment: McpSecretPatchSchema,
-  /** Omitted keeps the stored folder; null is the person's home folder. */
-  cwd: Schema.optionalKey(Schema.NullOr(McpFolderSchema))
+  cwd: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("keep") }),
+    Schema.Struct({ kind: Schema.Literal("home") }),
+    Schema.Struct({ kind: Schema.Literal("folder"), path: McpFolderSchema })
+  ])
 })
 
 export const McpHttpTransportInputSchema = Schema.Struct({
@@ -197,12 +204,11 @@ export const McpOfferDeclineRequestSchema = Schema.Struct({
   tool_call_id: Schema.NonEmptyString
 })
 
-/** Every connection card offered in a chat; `outcome` is null while one is open. */
 export const McpOfferListSchema = Schema.Struct({
   offers: Schema.Array(
     Schema.Struct({
       tool_call_id: Schema.NonEmptyString,
-      outcome: Schema.NullOr(Schema.Literals(["connected", "declined", "expired"] as const)),
+      outcome: Schema.Literals(["open", "connected", "declined", "expired"] as const),
       offered_at: Schema.NonEmptyString
     })
   )
@@ -228,7 +234,10 @@ export const McpStdioTransportSchema = Schema.Struct({
   command: McpCommandSchema,
   args: Schema.Array(McpArgumentSchema).check(Schema.isMaxLength(128)),
   environment_keys: SortedUniqueNamesSchema,
-  cwd: Schema.NullOr(McpFolderSchema)
+  cwd: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("home") }),
+    Schema.Struct({ kind: Schema.Literal("folder"), path: McpFolderSchema })
+  ])
 })
 
 export const McpHttpTransportSchema = Schema.Struct({
@@ -243,7 +252,13 @@ export const McpTransportSchema = Schema.Union([McpStdioTransportSchema, McpHttp
 export const McpToolSchema = Schema.Struct({
   name: McpRemoteToolNameSchema,
   full_name: McpQualifiedToolNameSchema,
-  title: Schema.NullOr(Schema.String.check(Schema.isMaxLength(512))),
+  title: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("untitled") }),
+    Schema.Struct({
+      kind: Schema.Literal("titled"),
+      text: Schema.String.check(Schema.isMaxLength(512))
+    })
+  ]),
   description: Schema.String.check(Schema.isMaxLength(32_768))
 })
 
@@ -256,14 +271,33 @@ export const McpEventSchema = Schema.Struct({
 
 export const McpServerSchema = Schema.Struct({
   name: McpServerNameSchema,
-  preset_id: Schema.NullOr(McpPresetIdSchema),
+  preset: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("custom") }),
+    Schema.Struct({ kind: Schema.Literal("preset"), id: McpPresetIdSchema })
+  ]),
   enabled: Schema.Boolean,
   status: McpConnectionStatusSchema,
-  detail: Schema.NullOr(Schema.String.check(Schema.isMaxLength(1_000))),
-  diagnostics: Schema.NullOr(Schema.String.check(Schema.isMaxLength(8_192))),
-  account_identity: Schema.NullOr(
-    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
-  ),
+  detail: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("quiet") }),
+    Schema.Struct({
+      kind: Schema.Literal("shown"),
+      text: Schema.String.check(Schema.isMaxLength(1_000))
+    })
+  ]),
+  diagnostics: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("clean") }),
+    Schema.Struct({
+      kind: Schema.Literal("captured"),
+      text: Schema.String.check(Schema.isMaxLength(8_192))
+    })
+  ]),
+  account: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("unknown") }),
+    Schema.Struct({
+      kind: Schema.Literal("identified"),
+      identity: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
+    })
+  ]),
   transport: McpTransportSchema,
   tools: Schema.Array(McpToolSchema).check(
     Schema.makeFilter((tools) => {
@@ -296,7 +330,7 @@ export const McpPresetInstallResponseSchema = Schema.Struct({
   servers: Schema.Array(McpServerSchema).check(
     Schema.isMinLength(1),
     Schema.makeFilter((servers) =>
-      servers.every((server) => server.preset_id !== null)
+      servers.every((server) => server.preset.kind === MCP_SERVER_PRESET.preset)
         ? undefined
         : { path: ["servers"], issue: "must contain preset-owned servers" }
     )
@@ -306,7 +340,10 @@ export const McpPresetInstallResponseSchema = Schema.Struct({
     const expected = [...response.servers].sort((left, right) =>
       left.name.localeCompare(right.name)
     )
-    const exactPreset = response.servers.every((server) => server.preset_id === response.preset_id)
+    const exactPreset = response.servers.every(
+      (server) =>
+        server.preset.kind === MCP_SERVER_PRESET.preset && server.preset.id === response.preset_id
+    )
     const sortedUnique =
       response.servers.every((server, index) => server.name === expected[index]?.name) &&
       new Set(response.servers.map((server) => server.name)).size === response.servers.length
@@ -316,18 +353,24 @@ export const McpPresetInstallResponseSchema = Schema.Struct({
   })
 )
 
-export const McpOAuthStartResponseSchema = Schema.Struct({
-  name: McpServerNameSchema,
-  authorization_url: Schema.NullOr(McpUrlSchema),
-  status: Schema.Literals(["connected", "pending"] as const)
-})
+export const McpOAuthStartResponseSchema = Schema.Union([
+  Schema.Struct({
+    name: McpServerNameSchema,
+    status: Schema.Literals(["connected", "authorized"] as const)
+  }),
+  Schema.Struct({
+    name: McpServerNameSchema,
+    status: Schema.Literal("pending"),
+    authorization_url: McpUrlSchema
+  })
+])
 
 export const McpRemoveReceiptSchema: Schema.Codec<McpRemoveReceipt> = Schema.Struct({
   status: Schema.Literal("removed"),
   name: McpServerNameSchema
 })
 
-const mapTool = (tool: typeof McpToolSchema.Type) => ({
+const mapTool = (tool: typeof McpToolSchema.Type): McpTool => ({
   name: tool.name,
   fullName: tool.full_name,
   title: tool.title,
@@ -368,12 +411,12 @@ const mapTransport = (transport: typeof McpTransportSchema.Type) =>
 
 export const mapServer = (server: typeof McpServerSchema.Type): McpServer => ({
   name: server.name,
-  presetId: server.preset_id,
+  preset: server.preset,
   enabled: server.enabled,
   status: server.status,
   detail: server.detail,
   diagnostics: server.diagnostics,
-  accountIdentity: server.account_identity,
+  account: server.account,
   transport: mapTransport(server.transport),
   tools: server.tools.map(mapTool),
   events: server.events.map((event) => ({
@@ -401,11 +444,10 @@ export const toMcpServerList = (
 
 export const toMcpOAuthStart = (
   response: typeof McpOAuthStartResponseSchema.Type
-): McpOAuthStartResponse => ({
-  name: response.name,
-  authorizationUrl: response.authorization_url,
-  status: response.status
-})
+): McpOAuthStartResponse =>
+  response.status === MCP_OAUTH_START.pending
+    ? { name: response.name, status: response.status, authorizationUrl: response.authorization_url }
+    : { name: response.name, status: response.status }
 
 export const encodeMcpCreateServerRequestEffect = (
   value: unknown
@@ -450,9 +492,14 @@ export const encodeMcpPresetPathEffect = (
   )
 
 export const GitHubConnectionStateSchema = Schema.Struct({
-  connection: Schema.NullOr(
-    Schema.Struct({ read_only: Schema.Boolean, source: Schema.Literals(["token", "app"]) })
-  )
+  connection: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("disconnected") }),
+    Schema.Struct({
+      kind: Schema.Literal("connected"),
+      read_only: Schema.Boolean,
+      source: Schema.Literals(["token", "app"])
+    })
+  ])
 })
 
 /** A pasted token is one opaque word: GitHub's `ghp_`/`github_pat_` tokens
@@ -471,9 +518,13 @@ export const toGitHubConnectionState = (
   response: typeof GitHubConnectionStateSchema.Type
 ): GitHubConnectionState => ({
   connection:
-    response.connection === null
-      ? null
-      : { readOnly: response.connection.read_only, source: response.connection.source }
+    response.connection.kind === GITHUB_CONNECTION.connected
+      ? {
+          kind: response.connection.kind,
+          readOnly: response.connection.read_only,
+          source: response.connection.source
+        }
+      : response.connection
 })
 
 export const encodeGitHubConnectRequestEffect = (

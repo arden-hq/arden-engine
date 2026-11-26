@@ -1,7 +1,8 @@
-import type {
-  AutomationCondition,
-  AutomationConditionOperator,
-  AutomationEventDefinition
+import {
+  CONDITION_OPERATOR,
+  type AutomationComparisonCondition,
+  type AutomationCondition,
+  type AutomationEventDefinition
 } from "@arden-hq/protocol/automations"
 import type { JsonValue } from "@arden-hq/protocol"
 
@@ -94,12 +95,14 @@ const contains = (container: JsonValue, value: JsonValue): boolean => {
 
 const compare = (
   actual: JsonValue | undefined,
-  operator: AutomationConditionOperator,
-  expected: JsonValue | undefined
+  condition: AutomationComparisonCondition
 ): boolean => {
-  if (operator === "exists") return actual !== undefined && actual !== null
-  if (actual === undefined || expected === undefined) return false
-  switch (operator) {
+  if (condition.op === CONDITION_OPERATOR.exists) return actual !== undefined && actual !== null
+  if (actual === undefined) return false
+  if (condition.op === CONDITION_OPERATOR.in)
+    return condition.value.some((candidate) => jsonEqual(actual, candidate))
+  const expected = condition.value
+  switch (condition.op) {
     case "eq":
       return jsonEqual(actual, expected)
     case "ne":
@@ -126,16 +129,13 @@ const compare = (
         typeof expected === "string" &&
         actual.toLocaleLowerCase().endsWith(expected.toLocaleLowerCase())
       )
-    case "in":
-      return Array.isArray(expected) && expected.some((candidate) => jsonEqual(actual, candidate))
   }
 }
 
 export const conditionMatches = (
-  condition: AutomationCondition | null | undefined,
+  condition: AutomationCondition,
   context: EventContext
 ): boolean => {
-  if (condition === null || condition === undefined) return true
   switch (condition.kind) {
     case "and":
       return condition.conditions.every((child) => conditionMatches(child, context))
@@ -144,6 +144,6 @@ export const conditionMatches = (
     case "not":
       return !conditionMatches(condition.condition, context)
     case "compare":
-      return compare(readField(context, condition.field), condition.op, condition.value)
+      return compare(readField(context, condition.field), condition)
   }
 }

@@ -53,7 +53,7 @@ export const haltWork = Effect.fn("AutomationHalt.haltWork")(function* (options:
   if (drops.includes("manual")) {
     const at = DateTime.formatIso(yield* DateTime.now)
     yield* sql`UPDATE automation_runs
-      SET skip_json = json_set(skip_json, '$.ran', json('null'), '$.cancelled', json_object('at', ${at}))
+      SET skip_json = json_set(skip_json, '$.run_with_event', json_object('kind', 'cancelled', 'at', ${at}))
       WHERE task_id = ${automationId}
         AND id IN (SELECT json_extract(queue.context, '$.from_skipped_run')
           FROM automation_event_queue AS queue

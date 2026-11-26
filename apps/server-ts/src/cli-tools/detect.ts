@@ -1,4 +1,8 @@
-import type { CliToolSignIn, CliToolsPathSource } from "@arden-hq/protocol/cli-tools"
+import type {
+  CliToolSignIn,
+  CliToolsPathSource,
+  CliToolVersion
+} from "@arden-hq/protocol/cli-tools"
 
 import {
   mergePath,
@@ -14,7 +18,7 @@ interface DetectedCliTool {
   readonly entry: CliToolEntry
   readonly command: string
   readonly path: string
-  readonly version: string | null
+  readonly version: CliToolVersion
   readonly signIn: CliToolSignIn
 }
 
@@ -57,10 +61,8 @@ export const detectCliTools = async ({
     found.flat().map(async ({ entry, command, path: executable }) => {
       const [version, signIn] = await Promise.all([
         entry.version === undefined
-          ? Promise.resolve(null)
-          : run(executable, entry.version, probeEnvironment).then((result) =>
-              result.kind === "exited" && result.code === 0 ? parseVersion(result.output) : null
-            ),
+          ? Promise.resolve<CliToolVersion>({ kind: "unreported" })
+          : run(executable, entry.version, probeEnvironment).then(versionOf),
         entry.signIn === undefined
           ? Promise.resolve<CliToolSignIn>("unknown")
           : run(executable, entry.signIn, probeEnvironment).then(signInState)
@@ -81,6 +83,11 @@ const locate = async (
   }
   return undefined
 }
+
+const versionOf = (result: ProbeResult): CliToolVersion =>
+  result.kind === "exited" && result.code === 0
+    ? parseVersion(result.output)
+    : { kind: "unreported" }
 
 const signInState = (result: ProbeResult): CliToolSignIn => {
   if (result.kind !== "exited") return "unknown"

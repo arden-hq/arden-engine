@@ -1,4 +1,8 @@
-import type { GoogleOAuthClient } from "@arden-hq/protocol/google"
+import {
+  GOOGLE_CLIENT_SECRET,
+  sameGoogleClient,
+  type GoogleOAuthClient
+} from "@arden-hq/protocol/google"
 import { GoogleOAuthClientSchema } from "@arden-hq/protocol/effect/google"
 import { Schema } from "effect"
 import {
@@ -8,11 +12,28 @@ import {
 } from "../credentials/vault.js"
 
 const target = { documentKey: "google:oauth-client", binding: "google:oauth-client:v1" } as const
-const documentSchema = Schema.Struct({
-  version: Schema.Literal(1),
-  client: GoogleOAuthClientSchema
-})
+const documentSchema = Schema.Union([
+  Schema.Struct({ version: Schema.Literal(2), client: GoogleOAuthClientSchema }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    client: Schema.Union([
+      Schema.Struct({ clientId: Schema.Trimmed, clientSecret: Schema.Trimmed }),
+      Schema.Struct({ clientId: Schema.Trimmed })
+    ])
+  })
+])
 const decodeDocument = Schema.decodeUnknownSync(documentSchema)
+const clientOf = (document: typeof documentSchema.Type): GoogleOAuthClient => {
+  if (document.version === 2) return document.client
+  const client = document.client
+  return {
+    clientId: client.clientId,
+    secret:
+      "clientSecret" in client
+        ? { kind: GOOGLE_CLIENT_SECRET.confidential, clientSecret: client.clientSecret }
+        : { kind: GOOGLE_CLIENT_SECRET.public }
+  }
+}
 
 export function createGoogleClientConfiguration({
   vault,
@@ -28,7 +49,7 @@ export function createGoogleClientConfiguration({
     const stored = await readSecureDocument(vault, target)
     if (stored !== null) {
       try {
-        return decodeDocument(stored, { onExcessProperty: "error" }).client
+        return clientOf(decodeDocument(stored, { onExcessProperty: "error" }))
       } catch {
         throw new Error("Google client storage is invalid")
       }
@@ -39,9 +60,9 @@ export function createGoogleClientConfiguration({
   const initialize = (): Promise<void> =>
     (initialization ??= (async () => {
       if ((await load()) !== undefined || seed === undefined) return
-      await writeSecureDocument(vault, target, { version: 1, client: seed })
+      await writeSecureDocument(vault, target, { version: 2, client: seed })
       const saved = await load()
-      if (saved?.clientId !== seed.clientId || saved?.clientSecret !== seed.clientSecret) {
+      if (saved === undefined || !sameGoogleClient(saved, seed)) {
         throw new Error("Google client seed verification failed")
       }
     })().catch((error: unknown) => {
@@ -56,7 +77,7 @@ export function createGoogleClientConfiguration({
     },
     write: async (client) => {
       await initialize()
-      await writeSecureDocument(vault, target, { version: 1, client })
+      await writeSecureDocument(vault, target, { version: 2, client })
     }
   }
 }

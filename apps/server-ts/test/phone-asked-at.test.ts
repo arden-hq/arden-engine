@@ -1,3 +1,4 @@
+import { decisionBody } from "./fixtures/chat-requests.js"
 import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Layer, ManagedRuntime } from "effect"
@@ -189,7 +190,12 @@ it("an iPhone answers a card only by naming when it was asked; other callers and
         server.fetch("/tools/result", {
           method: "POST",
           headers: { "content-type": "application/json", [LOCAL_CAPABILITY_HEADER]: secret },
-          body: JSON.stringify({ run_id: runId, tool_id: toolId, result: "", approved: true })
+          body: JSON.stringify({
+            run_id: runId,
+            tool_id: toolId,
+            result: "",
+            ...decisionBody(true, { askedAt: undefined, commandId: undefined })
+          })
         })
       expect((await post(access.capability, phoneRun, "desk")).status).toBe(200)
       expect((await post(access.cliCapability, cliRun, "cli")).status).toBe(200)

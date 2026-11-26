@@ -1,4 +1,6 @@
-import { isTaskUnfinished, taskActivityWords, type SpaceTask } from "@arden-hq/protocol/spaces/work"
+import { type TaskRecord } from "../persistence/work/task-record.js"
+import { isTaskUnfinished } from "@arden-hq/protocol/spaces/work"
+import { activityWords } from "../persistence/work/public.js"
 import { Schema } from "effect"
 import { PROMPTS } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
@@ -33,7 +35,7 @@ interface SpaceQuestionView {
 }
 
 type SpaceTaskView = Pick<
-  SpaceTask,
+  TaskRecord,
   | "item_id"
   | "stable_key"
   | "text"
@@ -41,7 +43,9 @@ type SpaceTaskView = Pick<
   | "owner"
   | "activity"
   | "waiting_on"
+  | "blocked"
   | "stop_reason"
+  | "stop_kind"
   | "next_attempt_at"
 >
 
@@ -347,11 +351,11 @@ const rankedTasks = (tasks: ReadonlyArray<SpaceTaskView>): ReadonlyArray<SpaceTa
 
 const stateWords = (task: SpaceTaskView): ReadonlyArray<string> => {
   if (!isTaskUnfinished(task.status)) return [task.status]
-  return [task.status, task.owner, activityWords(task)]
+  return [task.status, task.owner, boardActivity(task)]
 }
 
-const activityWords = (task: SpaceTaskView): string =>
-  taskActivityWords(task, (reason) => cutText(reason, 160)) ?? "idle"
+const boardActivity = (task: SpaceTaskView): string =>
+  activityWords(task, (reason) => cutText(reason, 160)) ?? "idle"
 
 const taskTitle = (task: SpaceTaskView): string => clipLine(task.text, 160)
 

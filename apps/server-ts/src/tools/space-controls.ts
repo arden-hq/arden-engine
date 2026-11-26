@@ -1,7 +1,13 @@
 import { boundary } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
 import type { ToolContext } from "@arden-hq/loop"
-import { UpdateSpaceInputSchema } from "@arden-hq/protocol/effect/spaces"
+import { SpaceInstructionsTextSchema, SpaceNameSchema } from "@arden-hq/protocol/effect/spaces"
+import {
+  SPACE_CHANGE,
+  SPACE_EXPECTED,
+  SPACE_INSTRUCTIONS_INPUT,
+  type SpaceChange
+} from "@arden-hq/protocol/spaces"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { SpaceStore, type PersistedSpace } from "../persistence/spaces/store.js"
@@ -20,19 +26,34 @@ interface Services {
   readonly work: WorkStore["Service"]
 }
 
-const patchSchema = UpdateSpaceInputSchema.mapFields((fields) => ({
-  name: fields.name.pipe(
+const patchSchema = Schema.Struct({
+  name: Schema.optionalKey(SpaceNameSchema).pipe(
     Schema.annotateEncoded({
       description: "New readable Space name; omit to keep the current name."
     })
   ),
-  instructions: fields.instructions.annotate({
+  instructions: Schema.optionalKey(Schema.NullOr(SpaceInstructionsTextSchema)).annotate({
     description:
       "Complete replacement of the Space instructions, or null to clear them. Start from the current instructions space_list shows and keep every part the user did not ask to change."
   })
-})).annotate({
+}).annotate({
   description: "Only changed settings; preserve settings the user did not ask to change."
 })
+
+const patchChanges = (patch: typeof patchSchema.Type): ReadonlyArray<SpaceChange> => [
+  ...(patch.name === undefined ? [] : [{ kind: SPACE_CHANGE.name, name: patch.name }]),
+  ...(patch.instructions === undefined
+    ? []
+    : [
+        {
+          kind: SPACE_CHANGE.instructions,
+          instructions:
+            patch.instructions === null
+              ? { kind: SPACE_INSTRUCTIONS_INPUT.cleared }
+              : { kind: SPACE_INSTRUCTIONS_INPUT.written, text: patch.instructions }
+        }
+      ])
+]
 
 const PREVIEW = "Space control not applied"
 const failure = (error: Parameters<typeof toolFailure>[0]) => toolFailure(error, PREVIEW)
@@ -119,7 +140,10 @@ const makeSpaceControlTools = (services: Services): ReadonlyArray<ServerTool> =>
           services.spaces
             .update(
               input.space_id,
-              { ...input.patch, expected_updated_at: input.expected_updated_at },
+              {
+                expected: { kind: SPACE_EXPECTED.at, updated_at: input.expected_updated_at },
+                changes: patchChanges(input.patch)
+              },
               ctx.run.runId,
               ctx.toolCallId
             )
@@ -181,7 +205,7 @@ const makeSpaceSetupTools = (
         Effect.runPromise(
           createSpaceWithPage(
             services,
-            { name: input.name },
+            { name: input.name, instructions: { kind: SPACE_INSTRUCTIONS_INPUT.unwritten } },
             {
               mutation: { runId: ctx.run.runId, toolCallId: ctx.toolCallId },
               ...(input.home === undefined ? {} : { home: input.home })

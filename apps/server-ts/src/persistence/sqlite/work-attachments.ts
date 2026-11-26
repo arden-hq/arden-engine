@@ -1,4 +1,4 @@
-import type { SpaceTaskAttachment } from "@arden-hq/protocol/spaces/work"
+import { type TaskAttachmentRecord } from "../work/task-record.js"
 import {
   CreateSpaceTaskAttachmentInputSchema,
   type CreateSpaceTaskAttachmentRequest
@@ -25,7 +25,7 @@ export const makeWorkAttachments = ({
     address: TaskAddress,
     input: CreateSpaceTaskAttachmentRequest,
     runId?: string
-  ): Effect.fn.Return<SpaceTaskAttachment, WorkStoreError> {
+  ): Effect.fn.Return<TaskAttachmentRecord, WorkStoreError> {
     const validInput = yield* Schema.decodeUnknownEffect(
       Schema.toType(CreateSpaceTaskAttachmentInputSchema)
     )(input).pipe(

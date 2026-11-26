@@ -8,6 +8,7 @@ import type { OfferOutcome, PermissionsView, OfferRequest } from "./permission-o
 import type { CodeModeHost, ScriptHost } from "../workflows/runtime/contract.js"
 import type { BrowserObservationCheckpoint, BrowserPageView } from "../browser/observation.js"
 export type { BrowserPageView } from "../browser/observation.js"
+export type { ChatSendReceipt as SentReceipt } from "../persistence/chat/send-contracts.js"
 
 /**
  * What this run has read, and at which version. A tool that must know "did

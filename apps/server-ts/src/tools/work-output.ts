@@ -1,7 +1,12 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { taskFileHref, WorkStore, type WorkStoreError } from "../persistence/work/store.js"
+import {
+  itemPage,
+  taskFileHref,
+  WorkStore,
+  type WorkStoreError
+} from "../persistence/work/store.js"
 import { toolFailure } from "./tool-failure.js"
 import { appliedReceipt } from "./call-receipt.js"
 import { sha256Hex } from "@arden-hq/std/hash"
@@ -52,7 +57,7 @@ const makeWorkOutputTool = ({ work }: { readonly work: WorkStore["Service"] }): 
           retryable: false
         })
       const page = await Effect.runPromise(
-        work.page({ itemId: input.item_id }).pipe(Effect.mapError(failure)),
+        work.page(itemPage(input.item_id)).pipe(Effect.mapError(failure)),
         { signal: ctx.signal }
       )
       const task = page.items.find((item) => item.item_id === input.item_id)

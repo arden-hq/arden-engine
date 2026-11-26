@@ -1,10 +1,14 @@
-import { isItemEventType, type AutomationTrigger } from "@arden-hq/protocol/automations"
-import type { SystemPromptEdit, SystemTriggerScope } from "./model.js"
-import type {
-  AutomationContextMode,
-  SystemAutomationSetting,
-  UpdateAutomationInput
+import {
+  isItemEventType,
+  TRIGGER_STATE,
+  TRIGGER_TYPE,
+  type AutomationTrigger,
+  type AutomationTriggerInput,
+  type AutomationTriggerSpec
 } from "@arden-hq/protocol/automations"
+import type { SystemPromptEdit, SystemTriggerScope } from "./model.js"
+import type { AutomationContextMode, SystemAutomationSetting } from "@arden-hq/protocol/automations"
+import type { AutomationPatch } from "./automation-patch.js"
 
 export interface SystemAutomationRow {
   readonly name: string
@@ -42,7 +46,7 @@ export const changedSystemSettings = (
   ...((row.enabled === 1) !== spec.enabled ? (["enabled"] as const) : [])
 ]
 
-type LockedField = Exclude<keyof UpdateAutomationInput, SystemAutomationSetting>
+type LockedField = Exclude<keyof AutomationPatch, SystemAutomationSetting>
 
 const SPEC_FIELDS = [
   "name",
@@ -54,9 +58,9 @@ const USER_FIELDS = ["chat", "history"] as const satisfies ReadonlyArray<LockedF
 
 export const lockedSystemChanges = (
   row: SystemAutomationRow,
-  input: UpdateAutomationInput,
+  input: AutomationPatch,
   spec: SystemSettableSpec
-): ReadonlyArray<keyof UpdateAutomationInput> => [
+): ReadonlyArray<keyof AutomationPatch> => [
   ...SPEC_FIELDS.filter((field) => input[field] !== undefined && input[field] !== row[field]),
   ...(!systemSettable(spec).includes("prompt") &&
   input.prompt !== undefined &&
@@ -72,7 +76,7 @@ export const lockedSystemChanges = (
 ]
 
 export const lockedSystemMessage = (
-  locked: ReadonlyArray<keyof UpdateAutomationInput>,
+  locked: ReadonlyArray<keyof AutomationPatch>,
   spec: SystemSettableSpec
 ): string =>
   `A system Automation cannot change ${locked.join(", ")}. It accepts only ${systemSettable(spec).join(", ")}.`
@@ -88,3 +92,10 @@ export const systemTakesTrigger = (
       return trigger.type === "event" && isItemEventType(trigger.event_type)
   }
 }
+
+export const hasRunOnlyIf = (trigger: AutomationTriggerSpec): boolean =>
+  trigger.type === TRIGGER_TYPE.event && trigger.run_only_if.kind === TRIGGER_STATE.sentence
+
+export const defaultTriggerInputs = (
+  triggers: ReadonlyArray<AutomationTriggerSpec>
+): ReadonlyArray<AutomationTriggerInput> => triggers.map((trigger) => ({ kind: "new", trigger }))

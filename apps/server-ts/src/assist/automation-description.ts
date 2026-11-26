@@ -29,7 +29,7 @@ export const makeAutomationDescription = (
   Effect.fn("AutomationDescription.generate")(function* (automationId: AutomationId) {
     const automation = yield* dependencies.store.get(automationId)
     if (automation === null) return undefined
-    if (automation.description_source === "manual" && automation.description !== null) {
+    if (automation.description.kind === "manual") {
       return automation
     }
     const description = yield* dependencies.completion.runText({

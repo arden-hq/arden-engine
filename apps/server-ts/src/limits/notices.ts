@@ -1,5 +1,5 @@
 import { Clock, Effect, Layer, Queue, Stream } from "effect"
-import { hasPlanCredits } from "@arden-hq/protocol/runs"
+import { hasPlanCredits } from "../models/plan-limits-shape.js"
 import { checkRetry, sleepUntil } from "../lib/wall-clock.js"
 import { nextPlanReset, planLimitNotice } from "../models/plan-limits.js"
 import { ModelProviderService, type ModelRoute } from "../models/provider.js"

@@ -1,5 +1,8 @@
+import { decision, decisionBody } from "./fixtures/chat-requests.js"
 import type { RunApproval } from "@arden-hq/protocol/runs"
 import type { ToolDisplay } from "@arden-hq/protocol/tools"
+import { RunQuestionAnswerSchema } from "@arden-hq/protocol/effect/runs"
+import { Predicate, Schema } from "effect"
 import { expect, it } from "vitest"
 import { mobileAsks } from "../src/mobile/asks.js"
 import { runCommand } from "../src/relay/commands.js"
@@ -10,30 +13,34 @@ const approval = (toolCallId: string, toolName: string): RunApproval => ({
   run_id: "run-1",
   session_id: "chat-1",
   destination_session_id: "chat-1",
-  work: null,
+  asker: { kind: "chat" },
   tool_call_id: toolCallId,
+  decision_delivery: "blocking",
   kind: "tool_approval",
-  connection: null,
+  connection: { kind: "none" },
   tool_name: toolName,
   action: "execute",
-  scope: "run",
-  preview: `Use ${toolName}`,
-  description: null,
-  detail: null,
-  subject: null,
-  reason: null,
-  presentation: null,
-  diff: null,
-  rule_places: []
+  preview: { kind: "preview", text: `Use ${toolName}` },
+  description: { kind: "none" },
+  detail: { kind: "none" },
+  subject: { kind: "none" },
+  card: { kind: "plain" },
+  diff: { kind: "no_diff" },
+  rule_places: [],
+  can_attach_folder_to_space: false,
+  grant_folder: { kind: "none" }
 })
 
 const displays: Readonly<Record<string, ToolDisplay>> = {
-  vault_pay: { card: "vault_card_pay" },
-  vault_allow_payment_frame: { card: "vault_card_frame" },
-  vault_ask_key: { card: "vault_key_ask" },
-  browser_ask_secret: { card: "site_secret" },
-  vault_use_key: { card: "vault_key_use" },
-  exec_command: { card: "command", refresh: "terminals" }
+  vault_pay: [{ fact: "card", value: "vault_card_pay" }],
+  vault_allow_payment_frame: [{ fact: "card", value: "vault_card_frame" }],
+  vault_ask_key: [{ fact: "card", value: "vault_key_ask" }],
+  browser_ask_secret: [{ fact: "card", value: "site_secret" }],
+  vault_use_key: [{ fact: "card", value: "vault_key_use" }],
+  exec_command: [
+    { fact: "card", value: "command" },
+    { fact: "refresh", value: "terminals" }
+  ]
 }
 
 it("the phone is offered no card only the Arden app can answer", () => {
@@ -89,12 +96,39 @@ it("a phone decision goes to the engine as it came, and its answer is the result
     {
       method: "POST",
       path: "/tools/result",
-      body: { run_id: "run-1", tool_id: "call-1", result: "", approved: true, command_id: "cid-1" }
+      body: {
+        run_id: "run-1",
+        tool_id: "call-1",
+        result: "",
+        ...decisionBody(true, { askedAt: undefined, commandId: "cid-1" })
+      }
     }
   ])
   const otherwise = engine({ status: 409, body: null })
   expect((await decide(otherwise.loopback, "cid-2")).state).toBe("rejected")
   const denied = engine({ status: 200, body: { status: "ok" } })
   await decide(denied.loopback, "cid-3", false)
-  expect(denied.requests[0]?.body).toMatchObject({ approved: false })
+  expect(denied.requests[0]?.body).toMatchObject({ decision: decision(false) })
+})
+
+it("a phone answer with several choices and words reaches the engine as an answer it accepts", async () => {
+  const requests: Array<unknown> = []
+  const loopback: Loopback = {
+    request: async ({ body }) => {
+      requests.push(body)
+      return { status: 200, body: { status: "ok" } }
+    },
+    events: async function* () {}
+  }
+  await runCommand(loopback, "cid-answer", {
+    kind: "answer",
+    args: { question_id: "q-1", text: " and soon ", option_ids: ["a", "b"] }
+  })
+  const [sent] = requests
+  const answer = Predicate.isObject(sent) ? sent["answer"] : undefined
+  expect(Schema.decodeUnknownSync(RunQuestionAnswerSchema)(answer)).toEqual({
+    kind: "choices",
+    choice_ids: ["a", "b"],
+    typed: { kind: "given", text: "and soon" }
+  })
 })

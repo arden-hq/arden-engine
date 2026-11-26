@@ -1,5 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { Effect, Result } from "effect"
+import { Effect, Result, Schema } from "effect"
+import { AutomationTriggerSchema } from "@arden-hq/protocol/effect/automations"
+import { triggerRecord } from "../src/persistence/automations/trigger-record.js"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
@@ -8,8 +10,15 @@ import { AutomationId } from "../src/persistence/automations/model.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { ToolExecutionStore } from "../src/persistence/tools/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { RECORDED_HISTORY_THROUGH } from "../src/persistence/history.js"
+import { changes, newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 const AT = "2026-10-15T20:06:01.931Z"
+const wholeHistory = {
+  after_version: 0,
+  limit: 50,
+  through: RECORDED_HISTORY_THROUGH.head
+} as const
 
 it("a same-text owner save preserves an agent prompt's authorship and revision", async () => {
   const revisions = await withTempDatabase(
@@ -17,14 +26,13 @@ it("a same-text owner save preserves an agent prompt's authorship and revision",
       const sql = yield* SqlClient.SqlClient
       const catalog = yield* AutomationCatalog
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           name: "Monitor",
           prompt: "Check every morning.",
           history: "fresh",
-          triggers: [{ type: "time", every: "1d" }],
-          idempotency_key: "33333333-3333-4333-8333-333333333333",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1d")],
+          idempotency_key: "33333333-3333-4333-8333-333333333333"
+        }),
         "agent"
       )
       const pointer = () => sql<{ readonly revision_id: number; readonly author: string | null }>`
@@ -33,19 +41,19 @@ it("a same-text owner save preserves an agent prompt's authorship and revision",
       const [before] = yield* pointer()
       yield* catalog.update(
         AutomationId.make(automation.task_id),
-        { prompt: "Check every morning." },
+        changes({ kind: "prompt", prompt: "Check every morning." }),
         "owner"
       )
       const [same] = yield* pointer()
       yield* catalog.update(
         AutomationId.make(automation.task_id),
-        { name: "Daily monitor" },
+        changes({ kind: "name", name: "Daily monitor" }),
         "owner"
       )
       const [renamed] = yield* pointer()
       yield* catalog.update(
         AutomationId.make(automation.task_id),
-        { prompt: "List every failure." },
+        changes({ kind: "prompt", prompt: "List every failure." }),
         "owner"
       )
       const [changed] = yield* pointer()
@@ -91,14 +99,13 @@ it("a saved instruction cannot trust an unfinished or failed source tool call", 
         changesState: true
       })
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           name: "Failure logger",
           prompt: "Record failures.",
           history: "fresh",
-          triggers: [{ type: "time", every: "1d" }],
-          idempotency_key: "44444444-4444-4444-8444-444444444444",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1d")],
+          idempotency_key: "44444444-4444-4444-8444-444444444444"
+        }),
         "agent",
         { runId: started.runId, toolCallId: "create" }
       )
@@ -129,7 +136,9 @@ it("a saved instruction cannot trust an unfinished or failed source tool call", 
             prompt: row.prompt,
             model: row.model,
             history: row.context_mode,
-            triggers: JSON.parse(row.triggers) as unknown,
+            triggers: Schema.decodeUnknownSync(Schema.Array(AutomationTriggerSchema))(
+              JSON.parse(row.triggers)
+            ).map(triggerRecord),
             chat: "own",
             chat_ref: null,
             cooldown_minutes: row.cooldown_minutes
@@ -165,24 +174,43 @@ it("configuration history resolves its original instruction after later edits an
     Effect.gen(function* () {
       const catalog = yield* AutomationCatalog
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           name: "History monitor",
           prompt: "First instruction",
           history: "fresh",
-          triggers: [{ type: "time", every: "1d" }],
-          idempotency_key: "66666666-6666-4666-8666-666666666666",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1d")],
+          idempotency_key: "66666666-6666-4666-8666-666666666666"
+        }),
         "owner"
       )
       const id = AutomationId.make(automation.task_id)
-      const first = yield* catalog.history({ id })
-      yield* catalog.update(id, { name: "Renamed monitor", prompt: "Second instruction" }, "owner")
+      const first = yield* catalog.history({ id, ...wholeHistory })
+      yield* catalog.update(
+        id,
+        changes(
+          { kind: "name", name: "Renamed monitor" },
+          { kind: "prompt", prompt: "Second instruction" }
+        ),
+        "owner"
+      )
       yield* catalog.toggle(id)
-      const current = yield* catalog.history({ id })
-      const original = yield* catalog.history({ id, through_version: first.through_version })
-      yield* catalog.update(id, { name: "Renamed monitor", prompt: "Second instruction" }, "owner")
-      const noop = yield* catalog.history({ id })
+      const current = yield* catalog.history({ id, ...wholeHistory })
+      const original = yield* catalog.history({
+        id,
+        after_version: 0,
+        limit: 50,
+        through: RECORDED_HISTORY_THROUGH.version,
+        through_version: first.through_version
+      })
+      yield* catalog.update(
+        id,
+        changes(
+          { kind: "name", name: "Renamed monitor" },
+          { kind: "prompt", prompt: "Second instruction" }
+        ),
+        "owner"
+      )
+      const noop = yield* catalog.history({ id, ...wholeHistory })
       return { first, current, original, noop }
     })
   )

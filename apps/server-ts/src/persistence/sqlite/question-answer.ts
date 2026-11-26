@@ -1,12 +1,12 @@
 import {
-  answerSaid,
-  answerWords,
-  type ResolveRunQuestionInput,
-  type RunQuestion
-} from "@arden-hq/protocol/runs"
+  storedAnswerSaid,
+  type StoredResolveAnswer,
+  type StoredRunQuestion
+} from "../runs/stored-question.js"
+import { QUESTION_TEXT, answerWords } from "@arden-hq/protocol/runs"
 
-type Answer = ResolveRunQuestionInput["answer"]
-type Asked = Pick<RunQuestion, "question_id" | "content">
+type Answer = StoredResolveAnswer
+type Asked = Pick<StoredRunQuestion, "question_id" | "content">
 
 export const answerMisfit = (content: Asked["content"], answer: Answer): string | undefined => {
   const offered = (id: string) => content.choices.some((choice) => choice.id === id)
@@ -36,11 +36,11 @@ export const questionAnswerBody = (question: Asked, answer: Answer): string | un
         "The user skipped this question. Continue without this answer within your existing authority. Do not ask it again or treat skipping as consent or permission."
     })}</question_answer>`
   if (answer.kind === "wait") return undefined
-  const said = answerSaid(question.content.choices, answer)
+  const said = storedAnswerSaid(question.content.choices, answer)
   if (said === undefined) return undefined
   const several =
     question.content.multiple === true || answer.kind === "choices" ? { chosen: said.chosen } : {}
-  const typed = said.typed === undefined ? {} : { own_answer: said.typed }
+  const typed = said.typed.kind === QUESTION_TEXT.given ? { own_answer: said.typed.text } : {}
   return `<question_answer>${JSON.stringify({
     question_id: question.question_id,
     prompt: question.content.prompt,

@@ -1,29 +1,39 @@
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, withExtras } from "../../common/schema.js"
-import type {
-  SessionTerminal,
-  SessionTerminalsResponse,
-  TerminalActionResponse,
-  TerminalInputResponse,
-  TerminalOutputResponse
+import {
+  TERMINAL_STATE,
+  type SessionTerminal,
+  type SessionTerminalsResponse,
+  type TerminalActionResponse,
+  type TerminalInputResponse,
+  type TerminalOutputResponse
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
 
-const SessionTerminalSchema: Schema.Codec<SessionTerminal> = withExtras({
+const terminalFields = {
   id: Schema.Int,
   tool_call_id: Schema.String,
   command: Schema.String,
   cwd: Schema.String,
-  access: Schema.Literals(["sandbox", "host"] as const),
+  access: Schema.Literals(["sandbox", "network", "host"] as const),
   tty: Schema.Boolean,
-  state: Schema.Literals(["running", "exited"] as const),
-  exit_code: Schema.NullOr(Schema.Int),
-  signal: Schema.NullOr(Schema.String),
   started_at: IsoDateTimeStringSchema,
-  ended_at: Schema.NullOr(IsoDateTimeStringSchema),
   cursor: Schema.Int
-})
+}
+
+const SessionTerminalSchema: Schema.Codec<SessionTerminal> = Schema.Union([
+  withExtras({ ...terminalFields, state: Schema.Literal(TERMINAL_STATE.running) }),
+  withExtras({
+    ...terminalFields,
+    state: Schema.Literal(TERMINAL_STATE.exited),
+    exit: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("code"), code: Schema.Int }),
+      Schema.Struct({ kind: Schema.Literal("signal"), signal: Schema.String })
+    ]),
+    ended_at: IsoDateTimeStringSchema
+  })
+])
 
 export const SessionTerminalsResponseSchema: Schema.Codec<SessionTerminalsResponse> = withExtras({
   terminals: Schema.Array(SessionTerminalSchema)

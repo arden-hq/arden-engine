@@ -1,6 +1,5 @@
+import { RunContextSchema, type RunContext } from "../persistence/runs/stored-context.js"
 import { ToolExecutionError } from "@arden-hq/loop"
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
-import type { RunContext } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 
 import type { MemoryAuthority, RunAuthority } from "../execution/authority.js"

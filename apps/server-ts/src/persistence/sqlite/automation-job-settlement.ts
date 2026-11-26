@@ -1,3 +1,4 @@
+import { OPERATIONAL_SESSION } from "@arden-hq/protocol/daemon"
 import {
   JobLeaseLostError,
   type JobCompleteInput,
@@ -136,7 +137,10 @@ export const makeAutomationJobSettlement = ({
       severity: "info",
       cause: input.result.reason,
       ...deferred,
-      sessionId: input.result.sessionId
+      session:
+        input.result.sessionId === null
+          ? { kind: OPERATIONAL_SESSION.none }
+          : { kind: OPERATIONAL_SESSION.session, sessionId: input.result.sessionId }
     })
   })
 

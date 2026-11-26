@@ -1,14 +1,20 @@
-import type { RunApprovalWork } from "@arden-hq/protocol/runs"
-import { storedRulePlaces, workOf } from "./run-approvals.js"
+import { resultDataEntry } from "../runs/stored-question-data.js"
+import {
+  storedCard,
+  approvalDiff,
+  approvalPreview,
+  askerOf,
+  storedRulePlaces
+} from "./run-approvals.js"
 import { refreshChangeEvidence, withNestedCallFacts, withScriptState } from "./change-evidence.js"
 import { disposableForkSql } from "../schema/fork-disposition.js"
 import { CODE_MODE_TOOL, SPAWN_AGENT_TOOL, nestedCallNesting } from "../tools/tool-roles.js"
-import { sanitizeApprovalPresentation, type RuntimeApprovalSnapshot } from "@arden-hq/protocol/chat"
+import type { RuntimeApprovalSnapshot } from "@arden-hq/protocol/chat"
 import { Effect, Option, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { PendingConnectionDecision } from "../../connections/recovery.js"
 import { JsonObjectSchema } from "../json.js"
-import { grantFolderField } from "../permissions/grant-folder.js"
+import { grantFolderOf } from "../permissions/grant-folder.js"
 import type {
   ToolHistoryQueries,
   AgentAssignment,
@@ -218,9 +224,7 @@ export const makeToolHistory = ({
             {
               isError: result.is_error === true,
               retryable: result.retryable ?? null,
-              ...(projected.data === undefined || projected.data === null
-                ? {}
-                : { data: projected.data }),
+              ...resultDataEntry(projected.data),
               ...(durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0
                 ? {}
                 : { durationMs })
@@ -290,8 +294,6 @@ export const makeToolHistory = ({
             )
           )
         )
-        const optionalString = (key: string): string | null =>
-          Predicate.isString(payload[key]) ? payload[key] : null
         const optionalBoolean = (key: string): boolean | undefined =>
           Predicate.isBoolean(payload[key]) ? payload[key] : undefined
         const rulePlaces = storedRulePlaces(payload)
@@ -299,24 +301,18 @@ export const makeToolHistory = ({
           tool_id: row.tool_call_id,
           tool_name: row.tool_name,
           source: row.source ?? "run",
-          preview: row.preview,
-          diff: row.diff,
+          preview: approvalPreview(row.preview),
+          diff: approvalDiff(row.diff),
           status: "pending",
           requested_at: row.requested_at,
           run_id: row.run_id,
           session_id: row.session_id,
           action: row.action,
-          scope: row.scope,
-          expires_at: row.expires_at,
-          description: optionalString("description"),
-          ...(rulePlaces.length === 0 ? {} : { rule_places: rulePlaces }),
-          ...(optionalBoolean("can_attach_folder_to_space") === true
-            ? { can_attach_folder_to_space: true }
-            : {}),
-          ...grantFolderField(row.tool_name, payload.approval_data),
-          parent_session_id: optionalString("parent_session_id"),
-          presentation: sanitizeApprovalPresentation(payload.presentation) ?? null,
-          ...workField(row.work_json ?? null)
+          rule_places: rulePlaces,
+          can_attach_folder_to_space: optionalBoolean("can_attach_folder_to_space") === true,
+          grant_folder: grantFolderOf(row.tool_name, payload.approval_data),
+          card: storedCard(payload.presentation),
+          asker: askerOf(row.work_json ?? null)
         } satisfies RuntimeApprovalSnapshot
       })
     )
@@ -821,9 +817,4 @@ export const makeToolHistory = ({
     pendingConnection,
     allPendingConnections
   }
-}
-
-const workField = (json: string | null): { readonly work?: RunApprovalWork } => {
-  const work = workOf(json)
-  return work === null ? {} : { work }
 }

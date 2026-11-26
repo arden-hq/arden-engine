@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect"
 import type { ConnectedServer } from "../persistence/capability-offers/match.js"
 import { CapabilityOfferStore } from "../persistence/capability-offers/store.js"
 import { McpConnections } from "./service.js"
+import { connectedServer } from "./public-server.js"
 
 export const capabilityOfferRuntime: Layer.Layer<
   never,
@@ -23,11 +24,7 @@ export const capabilityOfferRuntime: Layer.Layer<
     const servers = yield* mcp.snapshot()
     yield* Effect.forEach(
       servers.filter((server) => server.status === "connected"),
-      (server) =>
-        answer({
-          presetId: server.presetId ?? undefined,
-          url: server.transport.type === "http" ? server.transport.url : undefined
-        }),
+      (server) => answer(connectedServer(server)),
       { discard: true }
     )
   })

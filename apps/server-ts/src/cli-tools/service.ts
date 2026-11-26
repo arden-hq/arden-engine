@@ -58,8 +58,10 @@ export const cliToolsLayer = ({
             path: tool.path,
             version: tool.version,
             sign_in: tool.signIn,
-            login_command:
-              tool.entry.login === undefined ? null : [tool.command, ...tool.entry.login].join(" "),
+            login:
+              tool.entry.login === undefined
+                ? { kind: "none" }
+                : { kind: "command", command: [tool.command, ...tool.entry.login].join(" ") },
             skill: skillFor(tool.entry, installed)
           })),
           path_source: result.pathSource,

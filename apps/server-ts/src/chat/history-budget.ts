@@ -1,5 +1,13 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { HistoryResponse, TurnWorkResponse } from "@arden-hq/protocol/chat"
+import {
+  CONTEXT_LIMIT,
+  CONTEXT_MODEL,
+  PAGE_BOUNDS,
+  pageBounds,
+  type ContextBudgetSnapshot,
+  type HistoryResponse,
+  type TurnWorkResponse
+} from "@arden-hq/protocol/chat"
 import { snapshotJsonBytes as bytes } from "./snapshot-encoding.js"
 
 const ACTIVE_WORK_TAIL_BYTES = 1024 * 1024
@@ -22,12 +30,12 @@ export const boundActiveWorkTail = (
   const costByCarrier = new Map<string, number>()
   for (const carrier of carriers) {
     costByCarrier.set(carrier.message_id, bytes(carrier) + 1)
-    for (const call of carrier.tool_calls ?? []) {
+    for (const call of carrier.role === ROLE.assistant ? carrier.tool_calls : []) {
       if (call.execution !== "provider") ownerByCall.set(call.id, carrier.message_id)
     }
   }
   for (const message of work.messages) {
-    if (message.role !== ROLE.tool || message.tool_call_id === undefined) continue
+    if (message.role !== ROLE.tool) continue
     const owner = ownerByCall.get(message.tool_call_id)
     if (owner !== undefined)
       costByCarrier.set(owner, (costByCarrier.get(owner) ?? 0) + bytes(message) + 1)
@@ -36,8 +44,10 @@ export const boundActiveWorkTail = (
   let start = 0
   const pageAt = (index: number): TurnWorkResponse["page"] => ({
     ...work.page,
-    before: carriers[index]?.message_id ?? null,
-    after: index < carriers.length ? (carriers.at(-1)?.message_id ?? null) : null,
+    bounds: pageBounds(
+      carriers[index]?.message_id,
+      index < carriers.length ? carriers.at(-1)?.message_id : undefined
+    ),
     has_more_before: index > 0 || work.page.has_more_before
   })
   const removed = new Set<string>()
@@ -52,8 +62,7 @@ export const boundActiveWorkTail = (
     ...work,
     messages: work.messages.filter((message) => {
       if (message.role !== ROLE.tool) return !removed.has(message.message_id)
-      const owner =
-        message.tool_call_id === undefined ? undefined : ownerByCall.get(message.tool_call_id)
+      const owner = ownerByCall.get(message.tool_call_id)
       return owner !== undefined && !removed.has(owner)
     }),
     page: pageAt(start)
@@ -62,12 +71,13 @@ export const boundActiveWorkTail = (
 
 export const boundConversationWindow = <H extends HistoryRows>(history: H, capacity: number): H => {
   if (bytes(history) <= capacity) return history
+  const after = history.page.bounds.kind === PAGE_BOUNDS.bounded ? history.page.bounds.after : ""
   const fixedBytes =
     bytes({
       ...history,
       messages: [],
-      page: { ...history.page, before: null, has_more_before: true }
-    }) - bytes(null)
+      page: { ...history.page, bounds: pageBounds("", after), has_more_before: true }
+    }) - bytes("")
   const messageBytes = history.messages.map((message) => bytes(message) + 1)
   let payloadBytes = messageBytes.reduce((sum, size) => sum + size, 0)
   let start = 0
@@ -87,8 +97,22 @@ export const boundConversationWindow = <H extends HistoryRows>(history: H, capac
     messages,
     page: {
       ...history.page,
-      before: messages[0]?.message_id ?? null,
+      bounds: pageBounds(messages[0]?.message_id, after),
       has_more_before: true
     }
   }
 }
+
+export const unresolvedBudget = (input: {
+  readonly model: string | null
+  readonly inputTokens: number
+  readonly messageCount: number
+}): ContextBudgetSnapshot => ({
+  kind: CONTEXT_LIMIT.unresolved,
+  model:
+    input.model === null
+      ? { kind: CONTEXT_MODEL.unselected }
+      : { kind: CONTEXT_MODEL.selected, model_id: input.model },
+  input_tokens: input.inputTokens,
+  message_count: input.messageCount
+})

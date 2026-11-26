@@ -1,3 +1,4 @@
+import { WORDS_RULE_REPLACES } from "@arden-hq/protocol/permissions"
 import { homedir } from "node:os"
 import path from "node:path"
 import { DateTime, Effect, Schema } from "effect"
@@ -196,13 +197,13 @@ export const saveRuleInTransaction = Effect.fn("SqlitePermissionRules.saveInTran
 
 export const saveWordsInTransaction = Effect.fn("SqlitePermissionRules.saveWordsInTransaction")(
   function* (sql: SqlClient.SqlClient, input: WordsInput) {
-    if (input.replaces !== undefined) {
+    if (input.replaces.kind === WORDS_RULE_REPLACES.rule) {
       const replaced = yield* sql<{ readonly subject_kind: string }>`SELECT subject_kind
-        FROM permission_rules WHERE rule_id = ${input.replaces}`
+        FROM permission_rules WHERE rule_id = ${input.replaces.rule_id}`
       if (replaced[0]?.subject_kind !== "words")
         return yield* error("save", "not_found", "That rule was not found")
       yield* changeRuleInTransaction(sql, {
-        ruleId: input.replaces,
+        ruleId: input.replaces.rule_id,
         decision: "remove",
         source: input.source,
         list: input.list

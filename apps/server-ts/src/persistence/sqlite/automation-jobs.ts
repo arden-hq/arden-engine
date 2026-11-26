@@ -74,6 +74,7 @@ import { pendingDecisionCards } from "./pending-decision-cards.js"
 import { causingAutomation } from "./run-cause.js"
 import { decodeQueueContext, encodeQueueContext } from "./automation-queue-context.js"
 import { makeFencedOccurrences } from "./automation-fenced-occurrence.js"
+import { skipRan } from "./automation-run-rows.js"
 
 const nextLeaseStamp = (epochMs: number, previous: string | null): string => {
   const previousMs = previous === null ? Number.NEGATIVE_INFINITY : Date.parse(previous)
@@ -454,12 +455,7 @@ export const makeAutomationJobs = ({
                   candidate.task_id
                 )
               }
-              if (context.from_skipped_run !== undefined) {
-                yield* sql`UPDATE automation_runs
-                  SET skip_json = json_set(skip_json, '$.ran.run_id', ${automationRunId})
-                  WHERE id = ${context.from_skipped_run} AND task_id = ${candidate.task_id}
-                    AND json_type(skip_json, '$.ran') = 'object'`
-              }
+              yield* skipRan(sql, context.from_skipped_run, candidate.task_id, automationRunId)
               context = { ...context, automation_run_id: automationRunId }
               const contextJson = yield* encodeQueueContext(context, "claim", candidate.task_id)
               yield* sql`

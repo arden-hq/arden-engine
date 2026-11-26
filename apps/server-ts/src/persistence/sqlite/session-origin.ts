@@ -21,10 +21,3 @@ export const sessionParentStep = (row: ParentStepRow): SessionParentStep =>
   row.parent_step_tool_call_id === null
     ? { kind: SESSION_PARENT_STEP.none }
     : { kind: SESSION_PARENT_STEP.step, tool_call_id: row.parent_step_tool_call_id }
-
-export const sessionParentFields = (
-  row: ParentStepRow
-): { readonly parent_tool_call_id: string | null; readonly parent_step: SessionParentStep } => ({
-  parent_tool_call_id: row.parent_tool_call_id,
-  parent_step: sessionParentStep(row)
-})

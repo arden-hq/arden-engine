@@ -2,7 +2,7 @@ import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-voca
 import { timerSleep } from "../lib/timer-sleep.js"
 import { Cause, Effect, Exit, Layer } from "effect"
 import { arrivalBatches } from "./arrival-batches.js"
-import type { InteractionSender } from "@arden-hq/protocol/chat"
+import type { StoredInteractionSender } from "../persistence/transcript/interaction.js"
 import type { ChatSendInput } from "../chat/message-input.js"
 import { ChatMessage } from "../chat/message.js"
 import type { RunDelivery } from "../persistence/deliveries/model.js"
@@ -10,7 +10,7 @@ import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
 import { serializeOperationalCause } from "../runtime/operational-events.js"
 import { pollEverySecond, runOutbox, type Outbox } from "../runtime/outbox.js"
 
-const arrivalSender = (delivery: RunDelivery): InteractionSender | undefined => {
+const arrivalSender = (delivery: RunDelivery): StoredInteractionSender | undefined => {
   if (delivery.interaction !== undefined) {
     const { content, ...sender } = delivery.interaction
     return content === delivery.body || sender.preview !== undefined

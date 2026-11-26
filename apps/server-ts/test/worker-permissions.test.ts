@@ -17,6 +17,7 @@ import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { ToolHistoryQueries } from "../src/persistence/tools/history-queries.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 import { dailySummaryHandler } from "../src/automations/handlers/daily-summary.js"
+import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 type Kind = "space" | "automation" | "system"
 
@@ -58,16 +59,18 @@ const inRun = async (
             headerKeys: []
           }
         })
-        const space = yield* spaces.create({ name: "Permission owner" })
-        const userAutomation = {
+        const space = yield* spaces.create({
+          name: "Permission owner",
+          instructions: { kind: "unwritten" }
+        })
+        const userAutomation = newAutomation({
           history: "chat",
           name: "Permission owner",
           prompt: "Review",
-          triggers: [{ type: "time", every: "1h" }],
+          triggers: [everyTrigger("1h")],
           approval_mode: "allow",
-          idempotency_key: "c2cc49d0-5aa7-4c54-b922-e85c37759bdd",
-          idempotency_scope: "global"
-        } as const
+          idempotency_key: "c2cc49d0-5aa7-4c54-b922-e85c37759bdd"
+        })
         const automation = yield* Effect.gen(function* () {
           switch (kind) {
             case "space":

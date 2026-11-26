@@ -10,7 +10,7 @@ import type {
   GoogleOAuthStartResponse,
   GoogleServiceId
 } from "@arden-hq/protocol/google"
-import { GOOGLE_GRANTS } from "@arden-hq/protocol/google"
+import { GOOGLE_GRANTS, sameGoogleClient } from "@arden-hq/protocol/google"
 import { createGoogleClientConfiguration } from "./client-configuration.js"
 export type { GoogleOAuthClient } from "@arden-hq/protocol/google"
 import { Context, Effect, Layer } from "effect"
@@ -390,10 +390,7 @@ const makeGoogleConnections = (options: GoogleServiceOptions): GoogleConnections
         try: () =>
           store.serial(async (): Promise<GoogleClientConfigured> => {
             const current = await clientConfiguration.read()
-            if (
-              current?.clientId === client.clientId &&
-              current.clientSecret === client.clientSecret
-            )
+            if (current !== undefined && sameGoogleClient(current, client))
               return { status: "configured" }
             if (oauth.hasPending()) return { status: "blocked", reason: "authorization_pending" }
             if ((await store.read()).accounts.length > 0)

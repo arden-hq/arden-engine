@@ -1,5 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { loadRun, loadActiveRun, requireReceiptForRun, setCheckpoint } from "./chat-run.js"
+import { runTotals, textEnd } from "./recovery-finish.js"
 import { readableConversationSql } from "./session-presentation.js"
 import {
   MessageListSchema,
@@ -17,9 +18,9 @@ import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { settleRun } from "./run-settle.js"
 import { recordFinalRunUsage } from "./run-usage.js"
 import { rejectUncertainMutationTerminal } from "./chat-terminal-guard.js"
-import type { CancelInput } from "@arden-hq/protocol/chat"
-import { CancelInputSchema, ChatRunErrorCodeSchema } from "@arden-hq/protocol/effect/chat"
-import { RunTerminalResultSchema } from "@arden-hq/protocol/effect/runs"
+import { ChatRunErrorCodeSchema } from "@arden-hq/protocol/effect/chat"
+import { RunCancelTargetSchema, type RunCancelTarget } from "../chat/send-contracts.js"
+import { StoredRunTerminalResultSchema as RunTerminalResultSchema } from "../runs/stored-result.js"
 import { DateTime, Effect, Schema } from "effect"
 import {
   ChatWriteStore,
@@ -43,13 +44,12 @@ import { conversationMessagePredicate } from "./transcript-predicates.js"
 import { assistantTextStart } from "./assistant-text-start.js"
 
 const finishUsageSchema = Schema.Struct({
-  prompt: Schema.optionalKey(Schema.Natural),
-  completion: Schema.optionalKey(Schema.Natural),
-  total: Schema.optionalKey(Schema.Natural),
-  cache_read: Schema.optionalKey(Schema.Natural),
-  cache_write: Schema.optionalKey(Schema.Natural),
-  cost: Schema.optionalKey(Schema.Number),
-  exclusive_cost: Schema.optionalKey(Schema.Number)
+  prompt: Schema.Natural,
+  completion: Schema.Natural,
+  total: Schema.Natural,
+  cache_read: Schema.Natural,
+  cache_write: Schema.Natural,
+  cost: Schema.optionalKey(Schema.Number)
 })
 
 const finishInputSchema = Schema.Struct({
@@ -301,14 +301,11 @@ export const makeChatTerminal = ({
                     ? []
                     : [
                         {
-                          event: {
-                            type: "TEXT_MESSAGE_END",
-                            message_id: assistantMessage.message_id,
-                            session_id: run.session_id,
-                            ...(typeof assistantMessage.content === "string"
-                              ? { content: assistantMessage.content }
-                              : {})
-                          } satisfies ChatProjectionEvent,
+                          event: textEnd(
+                            assistantMessage.message_id,
+                            run.session_id,
+                            assistantMessage.content
+                          ),
                           runId: run.run_id
                         }
                       ]),
@@ -413,14 +410,11 @@ export const makeChatTerminal = ({
                   ? []
                   : [
                       {
-                        event: {
-                          type: "TEXT_MESSAGE_END",
-                          message_id: assistantMessage.message_id,
-                          session_id: run.session_id,
-                          ...(typeof assistantMessage.content === "string"
-                            ? { content: assistantMessage.content }
-                            : {})
-                        } satisfies ChatProjectionEvent,
+                        event: textEnd(
+                          assistantMessage.message_id,
+                          run.session_id,
+                          assistantMessage.content
+                        ),
                         runId: run.run_id
                       }
                     ]),
@@ -432,10 +426,7 @@ export const makeChatTerminal = ({
                     session_id: run.session_id,
                     turn_id: run.turn_id,
                     message_count: projection.length,
-                    ...(valid.usage === undefined ? {} : { usage: valid.usage }),
-                    ...(valid.lastInputTokens === undefined
-                      ? {}
-                      : { context_input_tokens: valid.lastInputTokens })
+                    ...runTotals(valid.usage, valid.lastInputTokens)
                   } satisfies ChatProjectionEvent,
                   runId: run.run_id
                 }
@@ -548,11 +539,7 @@ export const makeChatTerminal = ({
                       }
                     ]),
                 {
-                  event: {
-                    type: "TEXT_MESSAGE_END",
-                    message_id: run.assistant_message_id,
-                    session_id: run.session_id
-                  } satisfies ChatProjectionEvent,
+                  event: textEnd(run.assistant_message_id, run.session_id, undefined),
                   runId: run.run_id
                 },
                 {
@@ -622,9 +609,9 @@ export const makeChatTerminal = ({
   })
 
   const cancel = Effect.fn("SqliteChatWriteStore.cancel")(function* (
-    input: CancelInput
+    input: RunCancelTarget
   ): Effect.fn.Return<ChatWriteCancelResult, ChatWriteFailure> {
-    yield* validateInput(CancelInputSchema, input, "cancel")
+    yield* validateInput(RunCancelTargetSchema, input, "cancel")
     const target = input
     const now = yield* DateTime.now
     const timestamp = DateTime.formatIso(now)
@@ -678,11 +665,7 @@ export const makeChatTerminal = ({
                       }
                     ]),
                 {
-                  event: {
-                    type: "TEXT_MESSAGE_END",
-                    message_id: run.assistant_message_id,
-                    session_id: run.session_id
-                  } satisfies ChatProjectionEvent,
+                  event: textEnd(run.assistant_message_id, run.session_id, undefined),
                   runId: run.run_id
                 },
                 {

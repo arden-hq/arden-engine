@@ -1,9 +1,10 @@
 import { parseJsonBody } from "@arden-hq/protocol/common"
 import { after, type Timer } from "@arden-hq/std/timer"
-import type {
-  GoogleOAuthClient,
-  GoogleOAuthStartResponse,
-  GoogleServiceId
+import {
+  GOOGLE_CLIENT_SECRET,
+  type GoogleOAuthClient,
+  type GoogleOAuthStartResponse,
+  type GoogleServiceId
 } from "@arden-hq/protocol/google"
 import { Predicate, Schema } from "effect"
 import { randomBytes } from "node:crypto"
@@ -197,8 +198,8 @@ export const makeGoogleOAuth = ({
       grant_type: "authorization_code",
       redirect_uri: authorization.redirectUri
     })
-    if (client.clientSecret !== undefined && client.clientSecret !== "") {
-      form.set("client_secret", client.clientSecret)
+    if (client.secret.kind === GOOGLE_CLIENT_SECRET.confidential) {
+      form.set("client_secret", client.secret.clientSecret)
     }
     const rawToken = await requestJson(
       fetcher,
@@ -435,8 +436,8 @@ export const makeGoogleOAuth = ({
       grant_type: "refresh_token",
       refresh_token: authorization.token.refreshToken
     })
-    if (client.clientSecret !== undefined && client.clientSecret !== "") {
-      form.set("client_secret", client.clientSecret)
+    if (client.secret.kind === GOOGLE_CLIENT_SECRET.confidential) {
+      form.set("client_secret", client.secret.clientSecret)
     }
     let raw: unknown
     try {

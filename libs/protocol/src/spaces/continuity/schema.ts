@@ -13,7 +13,10 @@ const IdentifierSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMax
 export const SpaceContinuitySeenStateSchema: Schema.Codec<SpaceContinuitySeenState> = withExtras({
   state_version: NonNegativeIntSchema,
   seen_through: ContinuitySourceCursorSchema,
-  acknowledged_at: Schema.NullOr(IsoDateTimeStringSchema)
+  acknowledgement: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("never") }),
+    Schema.Struct({ kind: Schema.Literal("acknowledged"), at: IsoDateTimeStringSchema })
+  ]).pipe(Schema.toTaggedUnion("kind"))
 })
 
 export const SpaceContinuityStateResponseSchema: Schema.Codec<SpaceContinuityStateResponse> =

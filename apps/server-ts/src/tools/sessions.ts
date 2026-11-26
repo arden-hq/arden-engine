@@ -550,7 +550,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ReadParametersSchema),
     metadata: {
-      display: { row: "chat_read" },
+      display: [{ fact: "row", value: "chat_read" }],
       effect: "none",
       display_name: "Read Chat",
       kind: "tool",

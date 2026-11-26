@@ -1,3 +1,4 @@
+import type { WordsRuleReplaces } from "@arden-hq/protocol/permissions"
 import type { ToolApprovalOverride } from "@arden-hq/protocol/tools"
 import { Context, Effect, Schema } from "effect"
 import { storeErrorFields } from "../errors.js"
@@ -110,7 +111,7 @@ export interface WordsInput {
   readonly decision: RuleDecision
   readonly rules: ReadonlyArray<{ readonly subject: RuleSubject; readonly decision: RuleDecision }>
   readonly source: RuleSource
-  readonly replaces?: string
+  readonly replaces: WordsRuleReplaces
 }
 
 export type PermissionRulesOperation = "list" | "save" | "remove"

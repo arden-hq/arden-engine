@@ -1,3 +1,5 @@
+import { messageInput, receiptRunId } from "./fixtures/chat-requests.js"
+import { newChat } from "./fixtures/new-chat.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -248,7 +250,7 @@ describe("stranded Chat runs", () => {
         .fetch("/sessions", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: "Abort race" })
+          body: JSON.stringify(newChat({ name: "Abort race" }))
         })
         .then((response) => response.json())) as { readonly session_id: string }
       const receipt = chatDecoders.receipt(
@@ -256,25 +258,25 @@ describe("stranded Chat runs", () => {
           .fetch(chatRoutes.message, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: chatRequests.message({ sessionId: created.session_id, message: "Start" }).body
+            body: chatRequests.message(messageInput(created.session_id, "Start")).body
           })
           .then((response) => response.json())
       )
-      if (receipt.runId === null) throw new Error("Chat receipt did not include a run id")
+      const runId = receiptRunId(receipt)
       await started
 
       await server.fetch(chatRoutes.cancel, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: chatRequests.cancel({ runId: receipt.runId })
+        body: chatRequests.cancel({ kind: "run", runId })
       })
       await aborted
       await new Promise((resolve) => setTimeout(resolve, 1500))
       await server.stop()
 
       const database = new DatabaseSync(databasePath, { readOnly: true })
-      const run = readRun(database, receipt.runId)
-      const types = readEventTypes(database, receipt.runId)
+      const run = readRun(database, runId)
+      const types = readEventTypes(database, runId)
       database.close()
 
       expect(run).toMatchObject({ status: "cancelled", stop_reason: "cancelled" })

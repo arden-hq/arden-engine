@@ -1,24 +1,12 @@
-import { boundAuthority } from "./run-authority.js"
 import type {
-  CancelInput,
-  CancelResponse,
-  ChatAcknowledgement,
-  ChatReceipt,
-  ToolResultInput
-} from "@arden-hq/protocol/chat"
+  ChatSendReceipt,
+  RunCancelTarget,
+  ToolDecisionFields
+} from "../persistence/chat/send-contracts.js"
+import { boundAuthority } from "./run-authority.js"
+import type { CancelResponse, ChatAcknowledgement } from "@arden-hq/protocol/chat"
 import { Persistence } from "../persistence/service.js"
-import {
-  Context,
-  Effect,
-  Exit,
-  Fiber,
-  FiberMap,
-  Layer,
-  Option,
-  Scope,
-  Semaphore,
-  type Stream
-} from "effect"
+import { Context, Effect, Exit, Fiber, FiberMap, Layer, Option, Scope, Semaphore } from "effect"
 import { randomUUID } from "node:crypto"
 import { ChatEventStore } from "../persistence/events/store.js"
 import { WorkStore } from "../persistence/work/store.js"
@@ -75,38 +63,8 @@ import {
   type ChatAutomationStartInput,
   type ChatSendInput
 } from "./message-input.js"
+import type { ChatMessageShape, StopReason } from "./message-shape.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
-
-export interface ChatMessageShape {
-  readonly runnerAvailability: Stream.Stream<boolean>
-  readonly send: (input: ChatSendInput) => Effect.Effect<ChatReceipt, ChatMessageFailure>
-  readonly sendTogether: (
-    inputs: ReadonlyArray<ChatSendInput>
-  ) => Effect.Effect<ReadonlyArray<Exit.Exit<ChatReceipt, ChatMessageFailure>>>
-  readonly startAutomation: (
-    input: ChatAutomationStartInput
-  ) => Effect.Effect<ChatReceipt, ChatMessageFailure>
-  readonly cancel: (input: CancelInput) => Effect.Effect<CancelResponse, ChatMessageFailure>
-  readonly stopRuns: (runIds: ReadonlyArray<string>) => Effect.Effect<void, ChatMessageFailure>
-  readonly resolveTool: (
-    input: Omit<ToolResultInput, "alternative"> & {
-      readonly edits?: ApprovalEditsInput
-      readonly alternative?: ApprovalAlternativeInput
-    }
-  ) => Effect.Effect<ChatAcknowledgement, ChatMessageFailure>
-  readonly continueTask: (input: TaskContinuationInput) => Effect.Effect<void>
-  readonly detachedRun: (input: {
-    readonly sessionId: string
-    readonly runId: string
-  }) => Effect.Effect<ServerToolRun, ChatMessageError>
-  readonly drain: (input: {
-    readonly toolSettleMs: number
-    readonly budgetMs?: number
-    readonly reason: StopReason
-  }) => Effect.Effect<void>
-}
-
-export type StopReason = "quit" | "restart"
 
 const drainStatus = (reason: StopReason): string =>
   reason === "quit"
@@ -191,11 +149,11 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           { lifecycle }
         )
 
-        const requestCancellation = (input: CancelInput) =>
+        const requestCancellation = (input: RunCancelTarget) =>
           stopRun({ store, cancelAgent }, input, fenceAndAbort(input))
 
         const fenceAndAbort = Effect.fn("ChatMessage.fenceAndAbort")(function* (
-          input: CancelInput
+          input: RunCancelTarget
         ) {
           return yield* Effect.uninterruptible(
             lifecycle.withPermit(
@@ -304,8 +262,8 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           input: Pick<ChatSendInput, "sessionId" | "clientId" | "approvalReply">,
           assistantMessageId: string,
           started: ChatWriteReceiveResult
-        ): Effect.Effect<ChatReceipt, ChatMessageFailure> => {
-          const start = (): Effect.Effect<ChatReceipt> => {
+        ): Effect.Effect<ChatSendReceipt, ChatMessageFailure> => {
+          const start = (): Effect.Effect<ChatSendReceipt> => {
             switch (started._tag) {
               case "Stored":
                 return Effect.succeed(receipt(input, null, "accepted"))
@@ -452,7 +410,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
                 )
                 return yield* Effect.forEach(
                   admitted,
-                  (exit): Effect.Effect<Exit.Exit<ChatReceipt, ChatMessageFailure>> =>
+                  (exit): Effect.Effect<Exit.Exit<ChatSendReceipt, ChatMessageFailure>> =>
                     Exit.isFailure(exit)
                       ? Effect.succeed(Exit.failCause(exit.cause))
                       : Effect.exit(
@@ -599,7 +557,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
             )
           )
 
-        const cancel = Effect.fn("ChatMessage.cancel")(function* (input: CancelInput) {
+        const cancel = Effect.fn("ChatMessage.cancel")(function* (input: RunCancelTarget) {
           const cancelled = yield* requestCancellation(input)
           return {
             status: "cancelling",
@@ -609,7 +567,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
         })
 
         const resolveTool = Effect.fn("ChatMessage.resolveTool")(function* (
-          input: Omit<ToolResultInput, "alternative"> & {
+          input: Omit<ToolDecisionFields, "alternative"> & {
             readonly edits?: ApprovalEditsInput
             readonly alternative?: ApprovalAlternativeInput
           }

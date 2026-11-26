@@ -3,7 +3,9 @@ import {
   isAskCall,
   namedTool,
   toolKindLabel,
+  toolManyWords,
   toolMeta,
+  toolNoun,
   waitingVerb,
   type StepIconKey
 } from "./tool-words.js"
@@ -51,8 +53,8 @@ type ActivityClass = (typeof CLASS_ORDER)[number]
 interface ActivitySummaryPart {
   readonly kind: ActivityClass
   readonly count: number
-  readonly label?: { readonly one: string; readonly many: string }
-  readonly icon?: StepIconKey
+  readonly label: { readonly one: string; readonly many: string }
+  readonly icon: StepIconKey
 }
 
 const CLASS_TEXT: Record<ActivityClass, { one: string; many: string }> = {
@@ -134,7 +136,7 @@ function tailLabel(call: SummaryCall): { one: string; many: string; icon: StepIc
     const one = `Asked to ${asked.charAt(0).toLowerCase()}${asked.slice(1)}`
     return { one, many: one, icon: call.iconKey }
   }
-  const own = toolMeta(call.name)?.many
+  const own = toolManyWords(call.name)
   const many =
     own ?? (call.noun ? `${call.verb.split(" ")[0]} ${nounFor(2, call.noun)}` : call.verb)
   return { one: call.verb, many, icon: call.iconKey }
@@ -169,7 +171,7 @@ function summaryParts(calls: readonly SummaryCall[]): ActivitySummaryPart[] {
     units.set(kind, seen)
     const tools = kinds.get(kind) ?? new Set<string>()
     const name = call.name.toLowerCase()
-    tools.add(call.noun === (toolMeta(name)?.noun ?? null) ? name : `${name}:${call.noun}`)
+    tools.add(call.noun === toolNoun(name) ? name : `${name}:${call.noun}`)
     kinds.set(kind, tools)
   }
   return CLASS_ORDER.flatMap((kind): ActivitySummaryPart[] => {
@@ -178,8 +180,8 @@ function summaryParts(calls: readonly SummaryCall[]): ActivitySummaryPart[] {
     }
     const seen = units.get(kind)
     if (!seen) return []
-    const label = ownVerb(kinds.get(kind), seen.size)
-    return [label ? { kind, count: seen.size, label } : { kind, count: seen.size }]
+    const label = ownVerb(kinds.get(kind), seen.size) ?? CLASS_TEXT[kind]
+    return [{ kind, count: seen.size, label, icon: CLASS_ICON[kind] }]
   })
 }
 
@@ -188,8 +190,11 @@ function ownVerb(
   count: number
 ): { readonly one: string; readonly many: string } | undefined {
   if (tools?.size !== 1) return undefined
-  const meta = toolMeta([...tools][0])
-  if (!meta || meta.noun !== undefined || !meta.verb.includes(" ")) return undefined
+  const [name] = tools
+  const meta = toolMeta(name)
+  if (name === undefined || !meta || toolNoun(name) !== null || !meta.verb.includes(" ")) {
+    return undefined
+  }
   if (count > 1 && /\b(a|an)\b/.test(meta.verb)) return undefined
   return { one: meta.verb, many: meta.verb }
 }
@@ -197,7 +202,7 @@ function ownVerb(
 /** The glyph for a group of calls: its leading part's icon. */
 export function callsSummaryIcon(calls: readonly SummaryCall[]): StepIconKey {
   const first = summaryParts(calls)[0]
-  return first ? (first.icon ?? CLASS_ICON[first.kind]) : "dot"
+  return first ? first.icon : "dot"
 }
 
 const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1)
@@ -213,7 +218,7 @@ export function callsSummaryText(
   if (parts.length === 0) return position === "leading" ? "Done" : "done"
   return LIST_FORMAT.format(
     parts.map((part, index) => {
-      const text = (part.label ?? CLASS_TEXT[part.kind])[part.count === 1 ? "one" : "many"]
+      const text = part.label[part.count === 1 ? "one" : "many"]
       return index === 0 && position === "leading" ? text : lowerFirst(text)
     })
   )
@@ -223,7 +228,7 @@ interface TurnCallCount {
   readonly name: string
   readonly display_name: string | null
   readonly count: number
-  readonly rejected?: number | undefined
+  readonly rejected: number
 }
 
 /** What a turn did, from the turn record's per-tool counts, when its rows
@@ -235,8 +240,8 @@ export function turnCallsSummaryText(calls: readonly TurnCallCount[]): string | 
   const summary = calls
     .filter((call) => !isAskCall(call.name))
     .flatMap((call) => {
-      const rejected = Math.min(call.rejected ?? 0, call.count)
-      const tool = { name: call.name, displayName: call.display_name ?? undefined }
+      const rejected = Math.min(call.rejected, call.count)
+      const tool = { name: call.name, displayName: call.display_name }
       const kind = toolKindLabel(tool)
       const displayName = namedTool(tool)
       return Array.from({ length: call.count }, (_, index): SummaryCall => ({

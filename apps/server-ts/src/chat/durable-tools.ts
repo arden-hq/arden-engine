@@ -1,5 +1,5 @@
-import type { ChatReceipt } from "@arden-hq/protocol/chat"
-import { sanitizeApprovalPresentation } from "@arden-hq/protocol/chat"
+import type { ChatSendReceipt } from "../persistence/chat/send-contracts.js"
+import { cleanApprovalDraft } from "../persistence/tools/approval-draft.js"
 import { failedToolResult, PauseRequested, ToolExecutionError } from "@arden-hq/loop"
 import type { ToolResult } from "@arden-hq/loop"
 import { Cause, Effect, Result, Semaphore } from "effect"
@@ -33,6 +33,7 @@ import type { ChatMessageFailure } from "./message-errors.js"
 import type { HeldBackground } from "./held-background.js"
 import { RecordedToolPause } from "../execution/recorded-tool-pause.js"
 import { taskDirectionReview } from "../persistence/work/task-direction.js"
+import { toolOutputEvent, toolProgressEvent, toolWaitingEvent } from "./tool-events.js"
 
 export interface ToolHost {
   readonly lifecycle: Semaphore.Semaphore
@@ -42,7 +43,7 @@ export interface ToolHost {
   }) => Effect.Effect<void, ChatMessageFailure>
   readonly sendMessage: (
     request: ChatRunnerSendMessageRequest
-  ) => Effect.Effect<ChatReceipt, ChatMessageFailure>
+  ) => Effect.Effect<ChatSendReceipt, ChatMessageFailure>
   readonly detachedRun: (input: {
     readonly sessionId: string
     readonly runId: string
@@ -139,7 +140,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     identity: ToolExecutionIdentity,
     pause: PauseRequested
   ): Effect.Effect<ToolResult, PauseRequested> => {
-    const presentation = sanitizeApprovalPresentation(pause.presentation)
+    const presentation = cleanApprovalDraft(pause.presentation)
     const record: Effect.Effect<void, unknown> =
       pause.presentation !== undefined && presentation === undefined
         ? Effect.fail("Invalid tool approval presentation")
@@ -184,7 +185,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     if (request.changesState && mutationHalt !== undefined) {
       const held = mutationHalt
       yield* appendToolEvent({
-        event: { type: "TOOL_CALL_WAITING", tool_call_id: request.toolCallId },
+        event: toolWaitingEvent(request.toolCallId),
         runId: run.runId
       }).pipe(
         Effect.catchCause((cause) =>
@@ -433,12 +434,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     emitToolProgress: (request) =>
       runPromise(
         appendToolEvent({
-          event: {
-            type: "TOOL_CALL_PROGRESS",
-            tool_call_id: request.toolCallId,
-            message: request.message,
-            ...(request.data === undefined ? {} : { data: request.data })
-          },
+          event: toolProgressEvent(request),
           runId: run.runId,
           admission: "detached"
         })
@@ -446,12 +442,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     emitToolOutput: (request) =>
       runPromise(
         appendToolEvent({
-          event: {
-            type: "TOOL_CALL_OUTPUT_DELTA",
-            tool_call_id: request.toolCallId,
-            stream: request.stream,
-            delta: request.delta
-          },
+          event: toolOutputEvent(request),
           runId: run.runId
         })
       ),

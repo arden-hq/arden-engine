@@ -1,6 +1,7 @@
 import { clipLine } from "@arden-hq/std/text"
 import { daemonHandshake, type CliAccess, type OperationalEvent } from "@arden-hq/protocol/daemon"
 import { DaemonClientHandshakeSchema } from "@arden-hq/protocol/daemon/effect"
+import { GOOGLE_CLIENT_SECRET, type GoogleOAuthClient } from "@arden-hq/protocol/google"
 import { Schema } from "effect"
 import { randomBytes } from "node:crypto"
 import { fileURLToPath } from "node:url"
@@ -48,6 +49,19 @@ const StartMessageSchema = Schema.Struct({
   }),
   capability: Schema.String.check(Schema.isMinLength(32))
 })
+
+type StartOptions = typeof StartMessageSchema.Type.options
+
+const googleSeed = (client: StartOptions["googleOAuthClient"]): GoogleOAuthClient | undefined =>
+  client === undefined
+    ? undefined
+    : {
+        clientId: client.clientId,
+        secret:
+          client.clientSecret === undefined
+            ? { kind: GOOGLE_CLIENT_SECRET.public }
+            : { kind: GOOGLE_CLIENT_SECRET.confidential, clientSecret: client.clientSecret }
+      }
 
 const StopMessageSchema = Schema.Struct({
   type: Schema.Literal("stop"),
@@ -228,7 +242,7 @@ const start = async (input: unknown): Promise<void> => {
       ...(message.options.sharedSkillRoots === undefined
         ? {}
         : { sharedSkillRoots: message.options.sharedSkillRoots }),
-      googleOAuthClient: message.options.googleOAuthClient,
+      googleOAuthClient: googleSeed(message.options.googleOAuthClient),
       credentialVault: credentialVaultBridge.vault
     }
     const cliCapability = randomBytes(32).toString("base64url")

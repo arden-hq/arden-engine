@@ -1,8 +1,12 @@
 import { countsAsRun } from "./automation-skip-record.js"
+import { AUTOMATION_DESTINATION } from "@arden-hq/protocol/common"
 import { outcomeSql } from "./automation-run-outcome.js"
 import { runAncestors } from "./tree-walk.js"
 import { reviewSpaceIdSql } from "./automation-rows.js"
-import type { UsageAutomationOutcome, UsageAutomationRow } from "@arden-hq/protocol/runs"
+import type {
+  StoredUsageAutomationOutcome as UsageAutomationOutcome,
+  StoredUsageAutomationRow as UsageAutomationRow
+} from "../usage/report.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
@@ -228,7 +232,10 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
       else if (attempt.purpose === "space_review" && attempt.available_space !== null)
         destination = { kind: "space", space_id: attempt.available_space }
       else if (attempt.item_id === null && attempt.available_job !== null)
-        destination = { kind: "automation", task_id: attempt.available_job }
+        destination = {
+          kind: "automation",
+          target: { kind: AUTOMATION_DESTINATION.automation, task_id: attempt.available_job }
+        }
       return {
         task_id: attempt.task_id,
         item_id: attempt.item_id,

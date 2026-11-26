@@ -1,6 +1,7 @@
+import { type HomeLetterBody, type HomeLetterResponse } from "./letter-schema.js"
 import type { JobLeaseRef } from "@arden-hq/jobs"
 import { Context, type Effect } from "effect"
-import type { HomePresenceInput, HomeLetterBody, HomeLetterResponse } from "@arden-hq/protocol/runs"
+import type { HomePresenceInput } from "@arden-hq/protocol/runs"
 import type { WorkStoreError } from "../work/store.js"
 import type {
   HomeAddressBook,

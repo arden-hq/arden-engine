@@ -1,9 +1,9 @@
+import { type RunContext } from "../runs/stored-context.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { readDefaultApprovalMode } from "./default-approval-mode.js"
 import { agentResultPresentation } from "./agent-result-presentation.js"
 import { DateTime, Effect, Option, Schema } from "effect"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import type { RunContext } from "@arden-hq/protocol/runs"
 import { QuestionAnswerSchema } from "@arden-hq/protocol/effect/chat"
 import {
   ChatWriteConflictError,
@@ -15,7 +15,8 @@ import {
 import type { ModelCatalog } from "../../models/catalog.js"
 import type { IntelligenceSettingsStore, LimitSettingsStore } from "../settings/store.js"
 import type { ChatRules } from "../chat/rules.js"
-import { senderOf, startedBy } from "../transcript/interaction.js"
+import { senderOf } from "../transcript/interaction.js"
+import { runCauses } from "../transcript/run-causes.js"
 import { StoredMessageEnvelopeSchema, isWrittenByPerson } from "../transcript/model.js"
 import { dropPendingArchive } from "./pending-archive.js"
 import { chatAdmissionInputSchema } from "./chat-admission-input.js"
@@ -182,14 +183,14 @@ export const makeChatAdmission = ({
       const automationTokenLimit =
         valid.automation === undefined
           ? undefined
-          : ((yield* limits.settings().pipe(
+          : yield* limits.automationTokenCap(valid.automation.automationId).pipe(
               Effect.mapError((cause) =>
                 writeError("start", "storage", "Could not read the plan limits", {
                   sessionId: valid.sessionId,
                   cause
                 })
               )
-            )).automationLimits[valid.automation.automationId]?.maxTokensPerRun ?? undefined)
+            )
       const now = yield* DateTime.now
       const timestamp = DateTime.formatIso(now)
       const settleDelivery = (target: DeliveryTarget) => {
@@ -716,21 +717,14 @@ export const makeChatAdmission = ({
                 run_id: runId,
                 session_id: valid.sessionId,
                 turn_id: acceptedMessage.message_id,
-                ...(questionAnswer === undefined ? {} : { question_answer: questionAnswer }),
-                ...(agentResult === undefined
-                  ? {}
-                  : { is_meta_run: true, agent_result: agentResult }),
-                ...startedBy(interactionSender, acceptedMessage.content),
-                ...(delivery?.kind === "update" ? { update: delivery.update } : {}),
-                ...(automationRun === undefined
-                  ? {}
-                  : {
-                      is_meta_run: true,
-                      automation_task_id: automationRun.automationId,
-                      automation_name: automationRun.name,
-                      automation_prompt: automationRun.prompt,
-                      automation_context_mode: automationRun.contextMode
-                    })
+                causes: runCauses({
+                  questionAnswer,
+                  agentResult,
+                  sender: interactionSender,
+                  content: acceptedMessage.content,
+                  update: delivery?.kind === "update" ? delivery.update : undefined,
+                  automation: automationRun
+                })
               } satisfies ChatProjectionEvent,
               runId
             },

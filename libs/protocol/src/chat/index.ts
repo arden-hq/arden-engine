@@ -1,5 +1,12 @@
 import { ChangeEvidenceSchema } from "./change-evidence.js"
-export type { ChangeEvidence, ChangeEntry } from "./change-evidence.js"
+export type {
+  ChangeEvidence,
+  ChangeEntry,
+  ChangeEntryLink,
+  ChangeEntryPlace,
+  ChangeEntryTitle
+} from "./change-evidence.js"
+export { CHANGE_ENTRY_LINK, CHANGE_ENTRY_PLACE, CHANGE_ENTRY_TITLE } from "./change-evidence.js"
 import {
   decoderFor,
   makeEncoder,
@@ -65,17 +72,48 @@ import {
   mapReadResponse,
   mapRunsStatus
 } from "./facade-mappers.js"
-import {
-  PersistedChildAgentMetadataSchema,
-  ToolResultCostSchema,
-  ToolResultUsageSchema
-} from "./child-agent.js"
+export { historyWindow, turnWorkWindow } from "./facade-mappers.js"
+import { PersistedChildAgentMetadataSchema } from "./child-agent.js"
 import { CommunicationEnvelopeSchema } from "./communication-schema.js"
 import { ServerEventSchema } from "../events/schema.js"
 import { GmailSendReceiptSchema } from "./gmail-receipt.js"
 
 export * from "./contracts.js"
-export { INTERACTION_KINDS, INTERACTION_OUTCOMES, INTERACTION_SOURCES } from "./history.js"
+export {
+  ACTIVE_WORK,
+  ACTOR_NAME,
+  INTERACTION_PREVIEW,
+  INTERACTION_REFERENCE,
+  SENDER_ADDRESS,
+  SENDER_CAUSE,
+  INTERACTION_KINDS,
+  INTERACTION_OUTCOMES,
+  INTERACTION_SOURCES,
+  PAGE_BOUNDS,
+  pageBounds,
+  TOOL_COUNT_NAME,
+  TURN_ENDING
+} from "./history.js"
+export {
+  AGENT_RESULT_ROW,
+  AUTOMATION_ROW,
+  COMMUNICATION_ROW,
+  CONNECTION_ROW,
+  CONTEXT_TEXT,
+  FORWARDED_FROM,
+  FROM_CHAT,
+  CONTEXT_BLOCK,
+  MESSAGE_CLIENT,
+  OUTPUT_PART,
+  QUESTION_ANSWER_ROW,
+  REASONING_ROW,
+  SENT_FROM,
+  STEER_STAMP,
+  TEXT_PHASE,
+  UPDATE_ROW
+} from "./history-message.js"
+export type * from "./history-message.js"
+export { CONTEXT_LIMIT, CONTEXT_MODEL } from "./history.js"
 export type { ToolResultValueResponse } from "./schema.js"
 export * from "./runtime.js"
 export {
@@ -117,23 +155,90 @@ export {
   isRequestInvalid,
   providerSentence,
   runFailureText,
+  RUN_FAILURE_TEXT,
   type RunFailureText
 } from "./run-failure.js"
 export { RESTART_INTERRUPTION } from "./restart-words.js"
 export { MAX_TOOL_DISPLAY_TITLE_LENGTH, TOOL_DISPLAY_TITLE_ARGUMENT } from "./tool-display.js"
 export {
+  DEFAULT_TOOL_KIND,
+  GMAIL_SEND,
+  TOOL_DATA,
+  TOOL_EXECUTION,
+  TOOL_ICON,
+  TOOL_NOUN,
+  TOOL_PARENT,
+  TOOL_PRESENTATION,
+  TOOL_RETRY,
+  TOOL_SOURCE,
+  TOOL_TITLE,
+  toolRetry,
+  type GmailSend,
+  type ToolData,
+  type ToolExecution,
+  type ToolFace,
+  type ToolIcon,
+  type ToolNoun,
+  type ToolParent,
+  type ToolPresentation,
+  type ToolRetry,
+  type ToolSource,
+  type ToolTitle
+} from "./tool-face.js"
+export {
+  TOOL_CALL_RESULT,
+  TOOL_CALL_STARTED,
+  TOOL_CALL_STATUS,
+  TOOL_DURATION,
+  type ToolCallResult,
+  type ToolCallStarted,
+  type ToolCallStatus,
+  type ToolDuration
+} from "./history-tool-call.js"
+export {
   APPROVAL_PRESENTATION_LIMITS,
-  sanitizeApprovalPresentation
+  IMAGE_RING,
+  INLINE_IMAGE_PATTERN,
+  NEEDS_GRANT,
+  PRESENTATION_BODY,
+  PRESENTATION_IMAGE,
+  PRESENTATION_TEXT,
+  PREVIOUS_VALUE
 } from "./approval-presentation.js"
 export type {
+  ApprovalAttachment,
+  ApprovalEditable,
   ApprovalPresentation,
   ApprovalPresentationBody,
   ApprovalPresentationEditable,
-  ApprovalPresentationField
+  ApprovalPresentationField,
+  ApprovalPresentationGrant,
+  ApprovalPresentationImage,
+  NeedsGrant,
+  PresentationBody,
+  PresentationImage,
+  PresentationText,
+  PreviousValue
 } from "./approval-presentation.js"
 export type { CapabilityCandidate, CapabilityProposal } from "./capability-proposal.js"
 export type { ChatRunErrorCode, RunTerminalEvent, TransientRunErrorCode } from "./events/run.js"
 export { isLastingRunError, TRANSIENT_RUN_ERROR_CODES } from "./events/run.js"
+export {
+  AUTOMATION_PROMPT,
+  CONTEXT_SIZE,
+  contextSize,
+  contextUsage,
+  RUN_ACTIVITY_TARGET,
+  RUN_CAUSE,
+  RUN_USAGE,
+  SESSION_NAME,
+  type AutomationPrompt,
+  type ContextSize,
+  type RunActivityTarget,
+  type RunCause,
+  type RunUsage,
+  type SessionName
+} from "./events/run.js"
 export { endsReadingMessage, isRunTerminalEvent } from "./events/run.js"
 
 /** Plain response decoders for the current Chat boundary. */
@@ -176,8 +281,6 @@ export const chatDecoders = {
     "Invalid child-agent metadata",
     strict
   ),
-  toolResultUsage: decoderFor(ToolResultUsageSchema, "Invalid tool-result usage"),
-  toolResultCost: decoderFor(ToolResultCostSchema, "Invalid tool-result cost"),
   communication: decoderFor(CommunicationEnvelopeSchema, "Invalid communication envelope"),
   gmailSendReceipt: decoderFor(GmailSendReceiptSchema, "Invalid Gmail send receipt")
 } as const
@@ -226,7 +329,7 @@ export const chatRoutes = {
   connectionResume: "/connections/resume",
   cancel: "/cancel",
   runsStatus: "/chat/runs/status",
-  history(options: HistoryRouteOptions = {}): string {
+  history(options: HistoryRouteOptions): string {
     return runBoundary(encodeHistoryPathEffect(options), "Invalid history route", "encode")
   },
   turnWork(options: TurnWorkRouteOptions): string {
@@ -277,4 +380,13 @@ export {
   canDenyApprovalByReply,
   EDITABLE_KIND
 } from "./approval-presentation.js"
-export { STREAM_RECORD, type StreamRecord } from "./events/text.js"
+export {
+  CONTENT_START,
+  MESSAGE_CLOSURE,
+  messageEnd,
+  STREAM_RECORD,
+  type ContentStart,
+  type MessageClosure,
+  type StreamRecord
+} from "./events/text.js"
+export { TODO_EXPLANATION, type TodoExplanation } from "./events/session.js"

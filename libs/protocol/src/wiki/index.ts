@@ -1,12 +1,10 @@
 import { projectedDecoderFor, runBoundary } from "../common/boundary.js"
 import type {
-  CreateWikiPageInput,
   RenameWikiPageInput,
   WikiDiffRouteOptions,
   WikiHistoryRouteOptions,
   WikiPageGuard,
   WikiPageListOptions,
-  WikiPagePage,
   WikiRestoreSide,
   WikiVersionDiffRouteOptions
 } from "./contracts.js"
@@ -29,7 +27,6 @@ import {
   toWikiPagePage,
   toWikiRenamePlan,
   toWikiRevisionConflict,
-  encodeCreateWikiRequestEffect,
   encodeRenameWikiRequestEffect,
   encodeUpdateWikiRequestEffect,
   encodeWikiArchivePathEffect,
@@ -84,13 +81,6 @@ export const wikiDecoders = {
 
 /** Mutation bodies derive revision guards from decoded pages and snapshots. */
 export const wikiRequests = {
-  create(snapshot: Pick<WikiPagePage, "repositoryHead">, input: CreateWikiPageInput): string {
-    return runBoundary(
-      encodeCreateWikiRequestEffect({ repositoryHead: snapshot.repositoryHead, input }),
-      "Invalid create-Wiki-page request",
-      "encode"
-    )
-  },
   update(page: WikiPageGuard, content: string): string {
     return runBoundary(
       encodeUpdateWikiRequestEffect({ page: pageGuard(page), content }),
@@ -131,7 +121,7 @@ export const wikiRequests = {
 
 /** Validated paths for the complete consumer-facing Wiki HTTP surface. */
 export const wikiRoutes = {
-  pages(options: WikiPageListOptions = {}): string {
+  pages(options: WikiPageListOptions): string {
     return runBoundary(encodeWikiPagesPathEffect(options), "Invalid Wiki pages route", "encode")
   },
   page(pageId: string): string {
@@ -147,7 +137,7 @@ export const wikiRoutes = {
       "encode"
     )
   },
-  history(pageId: string, options: WikiHistoryRouteOptions = {}): string {
+  history(pageId: string, options: WikiHistoryRouteOptions): string {
     return runBoundary(
       encodeWikiHistoryPathEffect({ pageId, options }),
       "Invalid Wiki history route",
@@ -161,7 +151,7 @@ export const wikiRoutes = {
       "encode"
     )
   },
-  diff(pageId: string, options: WikiDiffRouteOptions = {}): string {
+  diff(pageId: string, options: WikiDiffRouteOptions): string {
     return runBoundary(
       encodeWikiDiffPathEffect({ pageId, options }),
       "Invalid Wiki diff route",

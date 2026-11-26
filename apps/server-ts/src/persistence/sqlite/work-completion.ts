@@ -1,4 +1,4 @@
-import type { UpdateSpaceTaskPatch } from "@arden-hq/protocol/spaces/work"
+import { type TaskPatch } from "../work/task-patch.js"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
@@ -21,7 +21,7 @@ export const verifyTaskCompletion = Effect.fn("Work.verifyCompletion")(
     readonly sql: SqlClient.SqlClient
     readonly itemId: string
     readonly runId: string | undefined
-    readonly patch: UpdateSpaceTaskPatch
+    readonly patch: TaskPatch
   }): Effect.fn.Return<string, WorkStoreError | SqlError> {
     const { sql, itemId, runId, patch } = options
     if (!patch.completion_result || !patch.completion_evidence?.length) {

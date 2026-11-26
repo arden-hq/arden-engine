@@ -1,3 +1,4 @@
+import { WORK_PAGE_SCOPE, WORK_PAGE_START } from "@arden-hq/protocol/spaces/work"
 import { DateTime, Effect } from "effect"
 
 import type { SpaceStore, PersistedSpace } from "../persistence/spaces/store.js"
@@ -92,7 +93,11 @@ export const renderOfferSpaces = (
 const makeRouterSpaces = (dependencies: Pick<RouterCandidateDependencies, "spaces" | "work">) => {
   const routerSpace = Effect.fn("Router.space")(function* (space: PersistedSpace) {
     const detail = yield* dependencies.spaces.detail(space.space_id)
-    const page = yield* dependencies.work.page({ spaceId: space.space_id, limit: 50 })
+    const page = yield* dependencies.work.page({
+      scope: { kind: WORK_PAGE_SCOPE.space, space_id: space.space_id },
+      start: { kind: WORK_PAGE_START.first },
+      limit: 50
+    })
     const tasks = page.items
       .filter((task) => task.status !== "done" && task.status !== "cancelled")
       .slice(0, MAX_TASKS_PER_SPACE)

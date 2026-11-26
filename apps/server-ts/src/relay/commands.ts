@@ -1,4 +1,20 @@
 import type { CommandAckMessage } from "@arden-hq/relay-protocol"
+import { QUESTION_TEXT } from "@arden-hq/protocol/runs"
+import {
+  ANSWER_SHAPE,
+  APPROVAL_REPLY,
+  APPROVED_AS,
+  ARGUMENT_EDITS,
+  CANCEL_TARGET,
+  CHAT_CAPTURE,
+  DECISION_ASKED,
+  FOLDER_ATTACH,
+  RELAY_COMMAND,
+  REQUESTED_MODE,
+  SENT_FROM,
+  STANDING_GRANT,
+  TOOL_DECISION
+} from "@arden-hq/protocol/chat"
 import { Predicate, type Schema } from "effect"
 import type { Loopback, LoopbackResponse } from "./ports.js"
 import type { Command } from "./routes.js"
@@ -50,18 +66,32 @@ export const failureMessage = (input: {
   }
 }
 
-const withImages = (
-  images: ReadonlyArray<{ readonly media_type: string; readonly data: string }> | undefined
-): { images?: Schema.Json } =>
-  images === undefined || images.length === 0
-    ? {}
-    : {
-        images: images.map((image) => ({
-          type: "image",
-          media_type: image.media_type,
-          data: image.data
-        }))
-      }
+const replyList = (reply: Schema.Json | undefined): Schema.Json =>
+  reply === undefined ? [] : [reply]
+
+const messageBody = (input: {
+  readonly sessionId: string
+  readonly text: string
+  readonly clientId: string
+  readonly images: ReadonlyArray<{ readonly media_type: string; readonly data: string }> | undefined
+  readonly replyTo: Schema.Json
+  readonly capture: Schema.Json
+}): Schema.Json => ({
+  session_id: input.sessionId,
+  message: input.text,
+  client_id: input.clientId,
+  images: (input.images ?? []).map((image) => ({
+    type: "image",
+    media_type: image.media_type,
+    data: image.data
+  })),
+  reply_to: input.replyTo,
+  approval_reply: { kind: APPROVAL_REPLY.none },
+  approval_mode: { kind: REQUESTED_MODE.current },
+  sent_from: { kind: SENT_FROM.typed },
+  capture: input.capture,
+  output_schema: { kind: ANSWER_SHAPE.free }
+})
 
 interface Call {
   readonly path: string
@@ -85,13 +115,17 @@ export const runCommand = async (
   switch (command.kind) {
     case "send":
       return settled(
-        await post("/chat/message", {
-          session_id: command.args.session_id,
-          message: command.args.text,
-          client_id: cid,
-          ...withImages(command.args.images),
-          ...(command.args.reply_to === undefined ? {} : { reply_to: command.args.reply_to })
-        })
+        await post(
+          "/chat/message",
+          messageBody({
+            sessionId: command.args.session_id,
+            text: command.args.text,
+            clientId: cid,
+            images: command.args.images,
+            replyTo: replyList(command.args.reply_to),
+            capture: { kind: CHAT_CAPTURE.none }
+          })
+        )
       )
     case "answer": {
       const choice = command.args.option_id
@@ -99,7 +133,14 @@ export const runCommand = async (
       const words = command.args.text.trim()
       const answer = (() => {
         if (choices !== undefined)
-          return { kind: "choices", choice_ids: choices, ...(words === "" ? {} : { text: words }) }
+          return {
+            kind: "choices",
+            choice_ids: choices,
+            typed:
+              words === ""
+                ? { kind: QUESTION_TEXT.none }
+                : { kind: QUESTION_TEXT.given, text: words }
+          }
         if (choice === undefined || choice === null)
           return { kind: "text", text: command.args.text }
         return { kind: "choice", choice_id: choice }
@@ -117,13 +158,28 @@ export const runCommand = async (
           run_id: command.args.run_id,
           tool_id: command.args.tool_id,
           result: "",
-          approved: command.args.approve,
-          command_id: cid,
-          ...(command.args.asked_at === undefined ? {} : { asked_at: command.args.asked_at })
+          decision: command.args.approve
+            ? {
+                kind: TOOL_DECISION.approved,
+                grant: { kind: STANDING_GRANT.once },
+                folder: FOLDER_ATTACH.keep,
+                edits: { kind: ARGUMENT_EDITS.asAsked },
+                as: APPROVED_AS.asAsked
+              }
+            : { kind: TOOL_DECISION.denied, grant: { kind: STANDING_GRANT.once } },
+          asked:
+            command.args.asked_at === undefined
+              ? { kind: DECISION_ASKED.unstated }
+              : { kind: DECISION_ASKED.at, at: command.args.asked_at },
+          command: { kind: RELAY_COMMAND.command, id: cid }
         })
       )
     case "stop": {
-      const call = await post("/cancel", { session_id: command.args.session_id })
+      const call = await post("/cancel", {
+        kind: CANCEL_TARGET.session,
+        session_id: command.args.session_id,
+        hold_queue: false
+      })
       if (ok(call.response)) return { state: "stopping", result: call.response.body }
       return call.response.status === 404 ? { state: "done", result: null } : refusal(call)
     }
@@ -135,13 +191,17 @@ export const runCommand = async (
           ? body.session_id
           : undefined
       if (typeof sessionId !== "string") return refusal(created)
-      const sent = await post("/chat/message", {
-        session_id: sessionId,
-        message: command.args.text,
-        client_id: cid,
-        capture: "phone",
-        ...withImages(command.args.images)
-      })
+      const sent = await post(
+        "/chat/message",
+        messageBody({
+          sessionId,
+          text: command.args.text,
+          clientId: cid,
+          images: command.args.images,
+          replyTo: [],
+          capture: { kind: CHAT_CAPTURE.capture, via: "phone" }
+        })
+      )
       return ok(sent.response)
         ? { state: "done", result: { session_id: sessionId } }
         : refusal(sent)

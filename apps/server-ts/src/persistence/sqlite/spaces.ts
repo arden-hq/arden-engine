@@ -6,7 +6,8 @@ import {
   type CreateSpaceInput,
   type SpaceKind,
   type SpaceArchiveResponse,
-  type UpdateSpaceInput
+  type UpdateSpaceInput,
+  SPACE_EXPECTED
 } from "@arden-hq/protocol/spaces"
 import { assertPersonRun } from "./person-run.js"
 import {
@@ -32,14 +33,13 @@ import { archiveSpaceChats, restoreSpaceChats } from "./space-chat-archive.js"
 import { chatHasActiveWork } from "./session-archive.js"
 import { makeSpaceReads, makeSpaceLists } from "./space-read.js"
 import { decodeRow, storeError, type SpaceRow } from "./space-row.js"
+import { applySpaceChanges, instructionsColumns } from "./space-changes.js"
 
 const strict = { onExcessProperty: "error" } as const
 const generatedInstructionsSchema = Schema.Trim.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(20_000)
 )
-
-const optionalText = (value: string | null | undefined): string | null => value?.trim() || null
 
 export const makeSpaceStore = ({
   writer,
@@ -77,8 +77,9 @@ export const makeSpaceStore = ({
     )
     const name = valid.name
     const nameKey = name.toLowerCase()
-    const instructions = optionalText(valid.instructions)
-    const instructionsSource = Object.hasOwn(valid, "instructions") ? "manual" : null
+    const { instructions, instructions_source: instructionsSource } = instructionsColumns(
+      valid.instructions
+    )
 
     return yield* writer
       .transact(
@@ -210,8 +211,8 @@ export const makeSpaceStore = ({
           if (row === undefined) return null
           const current = yield* decodeRow(row, "update")
           if (
-            valid.expected_updated_at !== undefined &&
-            valid.expected_updated_at !== current.updated_at
+            valid.expected.kind === SPACE_EXPECTED.at &&
+            valid.expected.updated_at !== current.updated_at
           ) {
             return yield* storeError(
               "update",
@@ -226,15 +227,8 @@ export const makeSpaceStore = ({
               : DateTime.formatIso(
                   DateTime.add(DateTime.makeUnsafe(current.updated_at), { milliseconds: 1 })
                 )
-          if (Object.hasOwn(valid, "page_path") && valid.page_path !== current.page_path) {
-            return yield* storeError(
-              "update",
-              "conflict",
-              "Change the Space’s Memory page from the Memory page controls.",
-              validSpaceId
-            )
-          }
-          const name = valid.name ?? current.name
+          const edit = applySpaceChanges(current, valid.changes)
+          const name = edit.name
           const nameKey = name.toLowerCase()
           const duplicate = yield* sql<{ readonly space_id: string }>`
         SELECT space_id FROM spaces
@@ -251,13 +245,9 @@ export const makeSpaceStore = ({
               validSpaceId
             )
           }
-          const instructions = Object.hasOwn(valid, "instructions")
-            ? optionalText(valid.instructions)
-            : current.instructions
-          const instructionsSource = Object.hasOwn(valid, "instructions")
-            ? "manual"
-            : current.instructions_source
-          const mark = Object.hasOwn(valid, "mark") ? (valid.mark ?? null) : current.mark
+          const instructions = edit.instructions
+          const instructionsSource = edit.instructions_source
+          const mark = edit.mark
           const updated = yield* sql<SpaceRow>`
         UPDATE spaces
         SET name = ${name}, name_key = ${nameKey},
@@ -271,7 +261,7 @@ export const makeSpaceStore = ({
           const next = updated[0]
           if (next === undefined) return null
           if (current.name !== name) yield* followSpaceName(sql, validSpaceId, current.name, name)
-          if (valid.instructions !== undefined)
+          if (edit.instructionsChanged)
             yield* spaceJobs.queueOwnerSpaceChangeWake(validSpaceId, now, runId)
           else yield* spaceJobs.syncSpace(validSpaceId, now)
           const generations = yield* sql<{ readonly policy_generation: number }>`

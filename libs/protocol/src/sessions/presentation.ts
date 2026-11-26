@@ -1,4 +1,3 @@
-/** Chat placement is independent of the latest Run's origin or authority. */
 export type SessionPresentation =
   | { readonly kind: "conversation"; readonly role: "space" | "topic" }
   | {
@@ -11,10 +10,11 @@ export type SessionPresentation =
         | "Automation"
         | "System"
       readonly title: string
-      readonly owner: SessionOwner | null
+      readonly owner: SessionOwner
     }
 
 export type SessionOwner =
+  | { readonly kind: "none" }
   | { readonly kind: "space"; readonly id: string; readonly name: string }
   | { readonly kind: "task"; readonly id: string; readonly name: string }
   | { readonly kind: "automation"; readonly id: string; readonly name: string }

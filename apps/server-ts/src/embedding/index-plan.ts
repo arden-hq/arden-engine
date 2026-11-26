@@ -1,4 +1,9 @@
-import type { EmbeddingIndexStatus } from "@arden-hq/protocol/embeddings"
+import {
+  EMBEDDING_MODEL_REF,
+  EMBEDDING_STATE,
+  type EmbeddingIndexStatus,
+  type EmbeddingModelRef
+} from "@arden-hq/protocol/embeddings"
 
 import type { WikiEmbeddingIndexRecord } from "../persistence/memory/embedding-store.js"
 import type { EmbeddingSettings } from "../persistence/settings/store.js"
@@ -167,6 +172,11 @@ export const etaSeconds = ({
   return Math.ceil((perPageMs * Math.max(0, totalPages - indexedPages)) / 1000)
 }
 
+const modelRef = (index: WikiEmbeddingIndexRecord | undefined): EmbeddingModelRef =>
+  index === undefined
+    ? { kind: EMBEDDING_MODEL_REF.none }
+    : { kind: EMBEDDING_MODEL_REF.model, modelId: index.modelId }
+
 export const indexStatus = ({
   plan,
   paused,
@@ -215,28 +225,32 @@ export const indexStatus = ({
           ? usable(indexes.find((index) => index.role === "serving"))
           : undefined
       return {
-        state: "idle",
-        keptModelId: kept?.modelId ?? null,
-        unavailableModelId: null,
+        state: EMBEDDING_STATE.off,
+        kept: modelRef(kept),
         models,
         indexes: stored
       }
     }
     case "unavailable":
       return {
-        state: "idle",
-        keptModelId: null,
-        unavailableModelId: plan.modelId,
+        state: EMBEDDING_STATE.unavailable,
+        modelId: plan.modelId,
         models,
         indexes: stored
       }
     case "steady":
       return error === undefined
-        ? { state: "done", modelId: plan.target.modelId, ...pages, models, indexes: stored }
-        : {
-            state: "failed",
+        ? {
+            state: EMBEDDING_STATE.done,
             modelId: plan.target.modelId,
-            previousModelId: null,
+            ...pages,
+            models,
+            indexes: stored
+          }
+        : {
+            state: EMBEDDING_STATE.failed,
+            modelId: plan.target.modelId,
+            previous: { kind: EMBEDDING_MODEL_REF.none },
             ...pages,
             error,
             models,
@@ -245,26 +259,24 @@ export const indexStatus = ({
     case "build": {
       const job = {
         modelId: plan.target.modelId,
-        previousModelId: usable(plan.serving)?.modelId ?? null,
+        previous: modelRef(usable(plan.serving)),
         ...pages,
         models,
         indexes: stored
       }
       if (paused)
         return {
-          state: "paused",
+          state: EMBEDDING_STATE.paused,
           ...job,
-          startedAt: building?.startedAt ?? now,
-          phase: "pages",
-          etaSeconds: null
+          startedAt: building?.startedAt ?? now
         }
-      if (error !== undefined) return { state: "failed", ...job, error }
+      if (error !== undefined) return { state: EMBEDDING_STATE.failed, ...job, error }
       return {
-        state: "indexing",
+        state: EMBEDDING_STATE.indexing,
         ...job,
         startedAt: building?.startedAt ?? now,
         phase: loading ? "loading" : "pages",
-        etaSeconds: eta ?? null
+        eta: eta === undefined ? { kind: "estimating" } : { kind: "estimated", seconds: eta }
       }
     }
   }

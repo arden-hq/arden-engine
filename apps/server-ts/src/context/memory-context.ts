@@ -1,9 +1,13 @@
 import { byteLength } from "@arden-hq/std/text"
-import type {
-  RunMemoryBudget,
-  RunMemoryComposition,
-  RunMemoryReader,
-  RunMemorySource
+import {
+  MEMORY_BUDGET_STATE,
+  MEMORY_RECALL,
+  MEMORY_REVISION,
+  MEMORY_SPACE_PAGE,
+  type RunMemoryBudget,
+  type RunMemoryComposition,
+  type RunMemoryReader,
+  type RunMemorySource
 } from "@arden-hq/protocol/runs"
 import type { Actor } from "../execution/authority.js"
 import { corePageBudget, STANDING_FACTS_PAGES } from "../memory/core-memory.js"
@@ -26,6 +30,7 @@ const MAX_UTF8_BYTES_PER_UTF16_UNIT = 3
 const STANDING_PAGE_HEADING_BYTES = 1_000
 
 const MEMORY_BUDGET = {
+  kind: MEMORY_BUDGET_STATE.recorded,
   standing_page:
     standingPageLimitChars * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
   /** The standing-facts note and section heading. */
@@ -96,8 +101,14 @@ export const assembleMemoryContext = ({
     recall: textSection("Memory recall", recall?.text, "turn"),
     record: {
       reader,
-      revision,
-      query: recall === undefined ? null : recallQuery(query),
+      revision:
+        revision === null
+          ? { kind: MEMORY_REVISION.unread }
+          : { kind: MEMORY_REVISION.read, revision },
+      recall:
+        recall === undefined
+          ? { kind: MEMORY_RECALL.none }
+          : { kind: MEMORY_RECALL.searched, query: recallQuery(query) },
       budget: MEMORY_BUDGET,
       sources: [
         ...standing.sources,
@@ -129,13 +140,15 @@ const renderSpace = (
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
-    page_id: space.page?.pageId ?? null,
-    version: space.page?.version ?? null,
+    page:
+      space.page === undefined
+        ? { kind: MEMORY_SPACE_PAGE.none }
+        : { kind: MEMORY_SPACE_PAGE.page, page_id: space.page.pageId, version: space.page.version },
     bytes: byteLength(rendered.text)
   }
   const source: RunMemorySource =
     rendered.page === undefined || rendered.page.outcome === "whole"
-      ? { ...identity, outcome: "whole", reason: null }
+      ? { ...identity, outcome: "whole" }
       : { ...identity, outcome: rendered.page.outcome, reason: "space_page_allowance" }
   return { text: rendered.text, sources: [source] }
 }
