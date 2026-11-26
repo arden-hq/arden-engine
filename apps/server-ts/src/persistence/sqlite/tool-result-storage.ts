@@ -79,10 +79,13 @@ const StoredToolResultSchema = Schema.Struct({
 
 type StoredToolResult = (typeof StoredToolResultSchema)["Type"]
 
+export const STORED_TOOL_RESULT_ERROR_TAG = "StoredToolResultError"
+export const STORED_TOOL_RESULT_REASON = { corrupt: "corrupt", unavailable: "unavailable" } as const
+
 export class StoredToolResultError extends Schema.TaggedError<StoredToolResultError>()(
-  "StoredToolResultError",
+  STORED_TOOL_RESULT_ERROR_TAG,
   {
-    reason: Schema.Literals(["corrupt", "unavailable"]),
+    reason: Schema.Literals(Object.values(STORED_TOOL_RESULT_REASON)),
     message: Schema.String,
     cause: Schema.optionalKey(Schema.Defect())
   }
@@ -118,7 +121,7 @@ export const publishLargeToolResult = Effect.fn("ToolResultStorage.publish")(fun
     try: () => store.publish({ ...call, text: object.text }),
     catch: (cause) =>
       new StoredToolResultError({
-        reason: "unavailable",
+        reason: STORED_TOOL_RESULT_REASON.unavailable,
         message: "Could not save the whole tool result",
         cause
       })
@@ -140,7 +143,7 @@ export const storedResultJson = (
     Effect.mapError(
       (cause) =>
         new StoredToolResultError({
-          reason: "corrupt",
+          reason: STORED_TOOL_RESULT_REASON.corrupt,
           message: "Tool result must be JSON-safe",
           cause
         })
@@ -220,19 +223,19 @@ export const loadFullResult = Effect.fn("ToolResultStorage.loadFull")(function* 
   const store = yield* ToolResultObjects
   if (store === undefined)
     return yield* new StoredToolResultError({
-      reason: "unavailable",
+      reason: STORED_TOOL_RESULT_REASON.unavailable,
       message: "The whole tool result is saved outside the database, which is not open"
     })
   if (managedObjectRefParts(marker.ref)?.digest !== marker.sha256)
     return yield* new StoredToolResultError({
-      reason: "corrupt",
+      reason: STORED_TOOL_RESULT_REASON.corrupt,
       message: "Stored tool result names an object that does not match its digest"
     })
   const text = yield* Effect.tryPromise({
     try: () => store.read(marker.ref),
     catch: (cause) =>
       new StoredToolResultError({
-        reason: "unavailable",
+        reason: STORED_TOOL_RESULT_REASON.unavailable,
         message: "Could not read the whole tool result",
         cause
       })
@@ -241,7 +244,7 @@ export const loadFullResult = Effect.fn("ToolResultStorage.loadFull")(function* 
     Effect.mapError(
       (cause) =>
         new StoredToolResultError({
-          reason: "corrupt",
+          reason: STORED_TOOL_RESULT_REASON.corrupt,
           message: "Saved tool result is corrupt",
           cause
         })
@@ -306,7 +309,7 @@ const decodeStoredRow = (json: string): Effect.Effect<StoredToolResult, StoredTo
     Effect.mapError(
       (cause) =>
         new StoredToolResultError({
-          reason: "corrupt",
+          reason: STORED_TOOL_RESULT_REASON.corrupt,
           message: "Stored tool result is corrupt",
           cause
         })

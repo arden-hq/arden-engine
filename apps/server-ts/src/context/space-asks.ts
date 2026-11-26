@@ -1,3 +1,4 @@
+import { RUN_QUESTION_STATUS } from "@arden-hq/protocol/runs"
 import { storedAnswerSaid, type StoredRunQuestion } from "../persistence/runs/stored-question.js"
 import { RUN_PAGE, RUN_QUESTION_FILTER, RUN_QUESTION_STATE } from "@arden-hq/protocol/runs"
 import { answerWords } from "@arden-hq/protocol/runs"
@@ -44,7 +45,7 @@ const askedLine = (
   includeOpen: boolean
 ): ReadonlyArray<string> => {
   const prompt = `"${clipLine(question.content.prompt, 200)}"`
-  if (question.status === "open")
+  if (question.status === RUN_QUESTION_STATUS.open)
     return includeOpen && Date.parse(question.created_at) >= since
       ? [`- ${prompt}: open since ${question.created_at.slice(0, 10)}.`]
       : []

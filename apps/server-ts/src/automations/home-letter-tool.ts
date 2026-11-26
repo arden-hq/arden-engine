@@ -1,3 +1,4 @@
+import { MARKDOWN_NODE } from "../wiki/markdown-node.js"
 import { type HomeLetterBody } from "../persistence/home/letter-schema.js"
 import { createTool, createToolset, ToolExecutionError, type Toolset } from "@arden-hq/loop"
 import { Schema } from "effect"
@@ -70,16 +71,21 @@ export const withHomeLetterTool = (base: Toolset): Toolset =>
 type Segment = HomeLetterBody["paragraphs"][number][number]
 
 const plainText = (node: MarkdownNode): string => {
-  if (node.type === "text" || node.type === "inlineCode") return node.value ?? ""
-  if (node.type === "break") return " "
-  if (node.type === "emphasis" || node.type === "strong" || node.type === "delete") {
+  if (node.type === MARKDOWN_NODE.text || node.type === MARKDOWN_NODE.inlineCode)
+    return node.value ?? ""
+  if (node.type === MARKDOWN_NODE.break) return " "
+  if (
+    node.type === MARKDOWN_NODE.emphasis ||
+    node.type === MARKDOWN_NODE.strong ||
+    node.type === MARKDOWN_NODE.delete
+  ) {
     return (node.children ?? []).map(plainText).join("")
   }
   throw new Error("Only plain text and inline Markdown links with plain-text labels are allowed")
 }
 
 const toSegment = (node: MarkdownNode): Segment => {
-  if (node.type !== "link") return { text: plainText(node), source_id: null }
+  if (node.type !== MARKDOWN_NODE.link) return { text: plainText(node), source_id: null }
   if (node.url === undefined || node.url.length === 0 || node.title !== null) {
     throw new Error("Links need an evidence ID destination and no title")
   }
@@ -100,7 +106,10 @@ const mergePlainSegments = (segments: ReadonlyArray<Segment>): Array<Segment> =>
 const parseHomeLetterMarkdown = (markdown: string): HomeLetterBody => {
   const root: MarkdownNode = fromMarkdown(markdown)
   if (root.children === undefined || root.children.length === 0) return { paragraphs: [] }
-  if (root.children.length > 2 || root.children.some((node) => node.type !== "paragraph")) {
+  if (
+    root.children.length > 2 ||
+    root.children.some((node) => node.type !== MARKDOWN_NODE.paragraph)
+  ) {
     throw new Error(
       "Use at most two plain paragraphs; headings, lists, code, and HTML are not allowed"
     )

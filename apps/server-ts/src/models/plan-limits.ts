@@ -69,13 +69,26 @@ export const currentPlanReading = async (
   }
 }
 
-export type QuotaClass = "interactive" | "background"
+export const QUOTA_CLASS = { interactive: "interactive", background: "background" } as const
+export type QuotaClass = (typeof QUOTA_CLASS)[keyof typeof QUOTA_CLASS]
 
-export type QuotaPauseReason = "plan_used_up" | "arden_limit" | "background_limit" | "item_limit"
+const QUOTA_PAUSE_REASON = {
+  planUsedUp: "plan_used_up",
+  ardenLimit: "arden_limit",
+  backgroundLimit: "background_limit",
+  itemLimit: "item_limit"
+} as const
+export type QuotaPauseReason = (typeof QUOTA_PAUSE_REASON)[keyof typeof QUOTA_PAUSE_REASON]
+
+export const QUOTA_DECISION = { admit: "admit", pause: "pause" } as const
 
 export type QuotaDecision =
-  | { readonly kind: "admit" }
-  | { readonly kind: "pause"; readonly reason: QuotaPauseReason; readonly until: number }
+  | { readonly kind: typeof QUOTA_DECISION.admit }
+  | {
+      readonly kind: typeof QUOTA_DECISION.pause
+      readonly reason: QuotaPauseReason
+      readonly until: number
+    }
 
 export interface QuotaLimits {
   readonly ardenLimitPercent: number | undefined
@@ -91,13 +104,13 @@ export const quotaDecision = (input: {
   readonly now: number
 }): QuotaDecision => {
   const { reading, limits, quotaClass, itemLimitPercent, now } = input
-  if (reading === undefined) return { kind: "admit" }
+  if (reading === undefined) return { kind: QUOTA_DECISION.admit }
   const keepGoing = limits.keepGoingUntil !== undefined && limits.keepGoingUntil > now
   const threshold = (): {
     readonly percent: number | undefined
     readonly reason: QuotaPauseReason
   } => {
-    if (quotaClass === "interactive")
+    if (quotaClass === QUOTA_CLASS.interactive)
       return { percent: keepGoing ? undefined : limits.ardenLimitPercent, reason: "arden_limit" }
     return [
       { percent: limits.ardenLimitPercent, reason: "arden_limit" as const },
@@ -119,10 +132,14 @@ export const quotaDecision = (input: {
       ? [{ reason, until: window.resetsAt }]
       : []
   })
-  if (blocking.length === 0) return { kind: "admit" }
+  if (blocking.length === 0) return { kind: QUOTA_DECISION.admit }
   const last = blocking.reduce((a, b) => (b.until > a.until ? b : a))
-  const usedUp = blocking.some((block) => block.reason === "plan_used_up")
-  return { kind: "pause", reason: usedUp ? "plan_used_up" : last.reason, until: last.until }
+  const usedUp = blocking.some((block) => block.reason === QUOTA_PAUSE_REASON.planUsedUp)
+  return {
+    kind: QUOTA_DECISION.pause,
+    reason: usedUp ? "plan_used_up" : last.reason,
+    until: last.until
+  }
 }
 
 export const quotaLimits = (settings: LimitSettings): QuotaLimits => ({

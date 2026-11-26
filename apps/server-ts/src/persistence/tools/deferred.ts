@@ -15,10 +15,16 @@ export interface DeferredToolCall {
   readonly grantStanding?: true
 }
 
+export const DEFERRED_STORE_DECISION = {
+  not_deferred: "not_deferred",
+  approved: "approved",
+  settled: "settled"
+} as const
+
 export type DeferredDecision =
-  | { readonly kind: "not_deferred" }
-  | { readonly kind: "approved"; readonly call: DeferredToolCall }
-  | { readonly kind: "settled" }
+  | { readonly kind: typeof DEFERRED_STORE_DECISION.not_deferred }
+  | { readonly kind: typeof DEFERRED_STORE_DECISION.approved; readonly call: DeferredToolCall }
+  | { readonly kind: typeof DEFERRED_STORE_DECISION.settled }
 
 export type DeferredDecisionInput = Omit<ToolDecisionFields, "toolId"> & {
   readonly toolCallId: string

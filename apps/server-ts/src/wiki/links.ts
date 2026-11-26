@@ -1,3 +1,4 @@
+import { MARKDOWN_NODE } from "./markdown-node.js"
 import { fromMarkdown } from "mdast-util-from-markdown"
 
 import { WikiPageFormatError } from "./errors.js"
@@ -29,9 +30,27 @@ export interface WikiLinkToken {
   readonly raw: string
 }
 
+const LINK_SYNTAX = { open: "[[", close: "]]", escape: "\\", embed: "!" } as const
+
+const RESERVED_CHARACTER = {
+  bracketOpen: "[",
+  bracketClose: "]",
+  pipe: "|",
+  hash: "#"
+} as const
+
+type ReservedCharacter = (typeof RESERVED_CHARACTER)[keyof typeof RESERVED_CHARACTER]
+const RESERVED_CHARACTERS: ReadonlySet<string> = new Set<ReservedCharacter>(
+  Object.values(RESERVED_CHARACTER)
+)
+
+type PairSyntax = typeof LINK_SYNTAX.open | typeof LINK_SYNTAX.close
+const isPair = (pair: string, syntax: PairSyntax): boolean => pair === syntax
+
 const escaped = (source: string, index: number): boolean => {
   let slashes = 0
-  for (let cursor = index - 1; cursor >= 0 && source[cursor] === "\\"; cursor -= 1) slashes += 1
+  for (let cursor = index - 1; cursor >= 0 && source[cursor] === LINK_SYNTAX.escape; cursor -= 1)
+    slashes += 1
   return slashes % 2 === 1
 }
 
@@ -50,8 +69,8 @@ const firstUnescaped = (
 const closingBrackets = (source: string, start: number, end: number): number | null => {
   for (let index = start; index + 1 < end; index += 1) {
     const pair = source.slice(index, index + 2)
-    if (pair === "[[" && !escaped(source, index)) return null
-    if (pair === "]]" && !escaped(source, index)) return index
+    if (isPair(pair, LINK_SYNTAX.open) && !escaped(source, index)) return null
+    if (isPair(pair, LINK_SYNTAX.close) && !escaped(source, index)) return index
   }
   return null
 }
@@ -67,7 +86,7 @@ const trimmedSpan = (source: string, start: number, end: number): readonly [numb
 const scanText = (source: string, start: number, end: number, output: WikiLinkToken[]): void => {
   let cursor = start
   while (cursor + 1 < end) {
-    if (source.slice(cursor, cursor + 2) !== "[[" || escaped(source, cursor)) {
+    if (source.slice(cursor, cursor + 2) !== LINK_SYNTAX.open || escaped(source, cursor)) {
       cursor += 1
       continue
     }
@@ -83,7 +102,8 @@ const scanText = (source: string, start: number, end: number, output: WikiLinkTo
     const pageLimit = fragmentSeparator ?? targetEnd
     const [pageStart, pageEnd] = trimmedSpan(source, contentStart, pageLimit)
     const hasPage = pageStart < pageEnd
-    const embed = cursor > start && source[cursor - 1] === "!" && !escaped(source, cursor - 1)
+    const embed =
+      cursor > start && source[cursor - 1] === LINK_SYNTAX.embed && !escaped(source, cursor - 1)
     const tokenStart = embed ? cursor - 1 : cursor
     output.push(
       Object.freeze({
@@ -105,7 +125,7 @@ const scanText = (source: string, start: number, end: number, output: WikiLinkTo
 }
 
 const collectTextRanges = (node: MarkdownNode, output: Array<readonly [number, number]>): void => {
-  if (node.type === "text") {
+  if (node.type === MARKDOWN_NODE.text) {
     const start = node.position?.start.offset
     const end = node.position?.end.offset
     if (start !== undefined && end !== undefined) output.push([start, end])
@@ -145,13 +165,7 @@ const validateReplacement = (replacement: string): void => {
   }
   for (const character of replacement) {
     const code = character.codePointAt(0) ?? 0
-    if (
-      code < 32 ||
-      character === "[" ||
-      character === "]" ||
-      character === "|" ||
-      character === "#"
-    ) {
+    if (code < 32 || RESERVED_CHARACTERS.has(character)) {
       throw new WikiPageFormatError({ message: "wikilink replacement contains reserved syntax" })
     }
   }

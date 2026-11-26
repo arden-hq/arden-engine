@@ -1,3 +1,4 @@
+import { CLI_OUTPUT_FORMAT } from "./cli-words.js"
 import { createCliClient, resolveServer, type CliDependencies } from "./command.js"
 import { failureOf } from "./run.js"
 
@@ -16,7 +17,7 @@ export const modelsCommand = async (
       await resolveServer(options.urlArgument, dependencies)
     )
     const catalog = await client.listModels()
-    if (options.output === "json") {
+    if (options.output === CLI_OUTPUT_FORMAT.json) {
       dependencies.writeStdout(
         `${JSON.stringify({ version: 1, type: "model_list", providers: catalog.providers })}\n`
       )

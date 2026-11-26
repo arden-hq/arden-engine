@@ -2,7 +2,12 @@ import { countOf, formatBytes } from "@arden-hq/std/count"
 import { Option, Schema } from "effect"
 import type { ToolContext } from "@arden-hq/loop"
 import type { ServerRunContext } from "./run-context.js"
-import { FileRefSchema, type FileRef, type SharedFileAccess } from "./shared-files.js"
+import {
+  FileRefSchema,
+  PREPARED_FILE,
+  type FileRef,
+  type SharedFileAccess
+} from "./shared-files.js"
 import {
   gmailFilesCard,
   gmailFilesForExecution,
@@ -10,7 +15,7 @@ import {
 } from "./google-gmail-files.js"
 
 import { jsonArguments } from "./automation-create-card.js"
-import { mailEditLines } from "./google-gmail-edits.js"
+import { MAIL_EDIT_FIELD, mailEditLines } from "./google-gmail-edits.js"
 import type { ApprovalEditLine, ServerApprovalEdits } from "./approval-edits.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import type { GoogleToolConnections } from "./google-accounts.js"
@@ -53,7 +58,9 @@ const FORWARD_APPROVAL_EDITS: ServerApprovalEdits<Pick<ForwardInput, "note" | "o
       mailEditLines(
         { ...requested, body: requested.note ?? "" },
         { ...edited, body: edited.note ?? "" }
-      ).map((line) => (line.field === "body" ? { ...line, field: "note", label: "Note" } : line))
+      ).map((line) =>
+        line.field === MAIL_EDIT_FIELD.body ? { ...line, field: "note", label: "Note" } : line
+      )
   }
 
 const recipients = (
@@ -142,7 +149,7 @@ export const gmailForwardTool = ({
         bytes,
         mediaType: part.mimeType
       })
-      if (saved.kind !== "snapshot")
+      if (saved.kind !== PREPARED_FILE.snapshot)
         throw toolRefusal(
           "The forwarded attachment could not be saved safely.",
           "Attachment unavailable"

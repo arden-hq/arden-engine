@@ -1,3 +1,4 @@
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { cutText } from "@arden-hq/std/text"
 import { Predicate } from "effect"
@@ -7,7 +8,9 @@ const typedText = (content: unknown): string => {
   if (!Array.isArray(content)) return ""
   return content
     .flatMap((part: unknown) =>
-      Predicate.isObject(part) && part.type === "text" && Predicate.isString(part.text)
+      Predicate.isObject(part) &&
+      part.type === CONTENT_BLOCK_TYPE.text &&
+      Predicate.isString(part.text)
         ? [part.text]
         : []
     )

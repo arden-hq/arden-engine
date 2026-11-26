@@ -1,5 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import {
+  MODEL_STREAM_ITEM_TAG,
+  PROVIDER_ERROR_CODE,
   providerErrorCode,
   ToolChoice,
   type ModelProvider,
@@ -7,15 +9,19 @@ import {
 } from "@arden-hq/loop"
 import {
   CHAT_ENDPOINT_MIN_WINDOW,
+  CHAT_ENDPOINT_SERVICE,
+  MODEL_ENDPOINT_RESULT,
   type ChatEndpointCheckFailure,
   type ChatEndpointService,
   type ChatEndpointSkip
 } from "@arden-hq/protocol/model-endpoints"
 import { errorMessage } from "@arden-hq/std/errors"
-import { baseUrlIssue } from "@arden-hq/std/url"
+import { BASE_URL_ISSUE, baseUrlIssue } from "@arden-hq/std/url"
 import {
   discoverOpenRouter,
+  DISCOVERY_FAILURE,
   DiscoveryError,
+  LLAMA_LISTING,
   listLlamaCpp,
   UnreachableError,
   type ChatCompletionsServer,
@@ -57,7 +63,9 @@ export const chatGroups = (
   const named = servers.map((server) => {
     const host = new URL(server.baseUrl).host
     const name =
-      server.service === "custom" ? host : CHAT_COMPLETIONS_HOSTS[SERVER_OF[server.service]].name
+      server.service === CHAT_ENDPOINT_SERVICE.custom
+        ? host
+        : CHAT_COMPLETIONS_HOSTS[SERVER_OF[server.service]].name
     return { id: server.id, host, name }
   })
   const shared = (name: string) => named.filter((server) => server.name === name).length > 1
@@ -111,23 +119,23 @@ export const discoverChatEndpoint = async (
   const input = discoveryInput(connection, AbortSignal.timeout(DISCOVERY_TIMEOUT_MS))
   try {
     switch (target.service) {
-      case "llama.cpp": {
+      case CHAT_ENDPOINT_SERVICE.llamaCpp: {
         const listed = await listLlamaCpp(input)
         return offered(
           listed.map((entry) =>
-            entry.kind === "usable"
+            entry.kind === LLAMA_LISTING.usable
               ? judged(entry.model, taken)
-              : { kind: "skipped", skip: skipOf(entry.id, entry.failure) }
+              : { kind: JUDGED.skipped, skip: skipOf(entry.id, entry.failure) }
           ),
           { named: false, taken }
         )
       }
-      case "openrouter":
+      case CHAT_ENDPOINT_SERVICE.openrouter:
         return offered(
           (await discoverOpenRouter(input, target.models)).map((model) => judged(model, taken)),
           { named: true, taken }
         )
-      case "custom":
+      case CHAT_ENDPOINT_SERVICE.custom:
         return offered(
           target.models.map((id) =>
             judged(
@@ -163,7 +171,7 @@ export const checkChatEndpoint = async (
 ): Promise<ChatCheck> => {
   const started = now()
   const discovered = await discoverChatEndpoint(target, taken)
-  if (discovered.result !== "works") return discovered
+  if (discovered.result !== MODEL_ENDPOINT_RESULT.works) return discovered
   const [first] = discovered.models
   if (first === undefined) throw new Error("A working discovery offers a model")
   const answered = await askOnce({
@@ -173,7 +181,7 @@ export const checkChatEndpoint = async (
       models: [discoveredOf(first)]
     }),
     model: first,
-    declareTool: target.service === "custom"
+    declareTool: target.service === CHAT_ENDPOINT_SERVICE.custom
   })
   if (answered !== undefined) return answered
   return { ...discovered, ms: Math.round(now() - started) }
@@ -212,19 +220,21 @@ export const serverModels = (input: {
   }
 }
 
+const JUDGED = { offered: "offered", skipped: "skipped" } as const
+
 type Judged =
-  | { readonly kind: "offered"; readonly model: StoredChatModel }
-  | { readonly kind: "skipped"; readonly skip: ChatEndpointSkip }
+  | { readonly kind: typeof JUDGED.offered; readonly model: StoredChatModel }
+  | { readonly kind: typeof JUDGED.skipped; readonly skip: ChatEndpointSkip }
 
 const judged = (model: DiscoveredModel, taken: TakenModels): Judged => {
-  const skip = (detail: ChatEndpointSkip): Judged => ({ kind: "skipped", skip: detail })
+  const skip = (detail: ChatEndpointSkip): Judged => ({ kind: JUDGED.skipped, skip: detail })
   if (isTaken(model.id, taken)) return skip({ id: model.id, reason: "model_taken" })
   const window = model.contextLimit
   if (window === undefined) return skip({ id: model.id, reason: "window_unknown" })
   if (window < CHAT_ENDPOINT_MIN_WINDOW)
     return skip({ id: model.id, reason: "window_too_small", window })
   return {
-    kind: "offered",
+    kind: JUDGED.offered,
     model: {
       id: model.id,
       window,
@@ -250,8 +260,8 @@ const offered = (
   entries: ReadonlyArray<Judged>,
   rules: { readonly named: boolean; readonly taken: TakenModels }
 ): ChatDiscovery => {
-  const models = entries.flatMap((entry) => (entry.kind === "offered" ? [entry.model] : []))
-  const skipped = entries.flatMap((entry) => (entry.kind === "skipped" ? [entry.skip] : []))
+  const models = entries.flatMap((entry) => (entry.kind === JUDGED.offered ? [entry.model] : []))
+  const skipped = entries.flatMap((entry) => (entry.kind === JUDGED.skipped ? [entry.skip] : []))
   const [first] = skipped
   if (models.length > 0 && (first === undefined || !rules.named))
     return { result: "works", models, skipped }
@@ -281,13 +291,13 @@ const NO_MODEL = "The server lists no model"
 
 const skipFailure = (skip: ChatEndpointSkip, taken: TakenModels): ChatEndpointCheckFailure => {
   switch (skip.reason) {
-    case "no_tool_calls":
+    case MODEL_ENDPOINT_RESULT.noToolCalls:
       return {
         result: "no_tool_calls",
         model: skip.id,
         message: `${skip.id} cannot call tools, and every Arden request declares tools`
       }
-    case "window_too_small":
+    case MODEL_ENDPOINT_RESULT.windowTooSmall:
       return {
         result: "window_too_small",
         model: skip.id,
@@ -295,13 +305,13 @@ const skipFailure = (skip: ChatEndpointSkip, taken: TakenModels): ChatEndpointCh
         needed: CHAT_ENDPOINT_MIN_WINDOW,
         message: `${skip.id} has a ${skip.window}-token window; Arden needs ${CHAT_ENDPOINT_MIN_WINDOW}`
       }
-    case "window_unknown":
+    case MODEL_ENDPOINT_RESULT.windowUnknown:
       return {
         result: "window_unknown",
         model: skip.id,
         message: `The server does not report the window of ${skip.id}; load the model, then Check`
       }
-    case "model_taken": {
+    case MODEL_ENDPOINT_RESULT.modelTaken: {
       const owner = taken.get(skip.id)
       return {
         result: "model_taken",
@@ -312,7 +322,7 @@ const skipFailure = (skip: ChatEndpointSkip, taken: TakenModels): ChatEndpointCh
             : `${skip.id} is offered by another model server (${owner})`
       }
     }
-    case "wrong_format":
+    case MODEL_ENDPOINT_RESULT.wrongFormat:
       return {
         result: "wrong_format",
         message: `The server did not describe ${skip.id} as llama.cpp does`
@@ -321,37 +331,37 @@ const skipFailure = (skip: ChatEndpointSkip, taken: TakenModels): ChatEndpointCh
 }
 
 const skipOf = (id: string, failure: DiscoveryFailure): ChatEndpointSkip =>
-  failure.reason === "no_tool_calls"
+  failure.reason === DISCOVERY_FAILURE.noToolCalls
     ? { id, reason: "no_tool_calls" }
     : { id, reason: "wrong_format" }
 
 const discoveryFailure = (failure: DiscoveryFailure, message: string): ChatEndpointCheckFailure => {
   switch (failure.reason) {
-    case "not_llama_cpp":
-    case "no_model_list":
+    case DISCOVERY_FAILURE.notLlamaCpp:
+    case DISCOVERY_FAILURE.noModelList:
       return { result: failureForStatus(failure.status), message }
-    case "no_model":
+    case DISCOVERY_FAILURE.noModel:
       return { result: "no_model", message: NO_MODEL }
-    case "model_missing":
+    case DISCOVERY_FAILURE.modelMissing:
       return { result: "model_missing", model: failure.model, message }
-    case "no_tool_calls":
+    case DISCOVERY_FAILURE.noToolCalls:
       return skipFailure({ id: failure.model, reason: "no_tool_calls" }, new Map())
-    case "several_models":
-    case "model_props_failed":
+    case DISCOVERY_FAILURE.severalModels:
+    case DISCOVERY_FAILURE.modelPropsFailed:
       return { result: "wrong_format", message }
   }
 }
 
 const addressMessage = (issue: NonNullable<ReturnType<typeof baseUrlIssue>>): string => {
   switch (issue) {
-    case "insecure":
+    case BASE_URL_ISSUE.insecure:
       return "A key goes only over HTTPS, or plain HTTP to this Mac"
-    case "invalid":
+    case BASE_URL_ISSUE.invalid:
       return "The address is not a URL"
-    case "credentials":
+    case BASE_URL_ISSUE.credentials:
       return "The address must not contain a user name or password"
-    case "fragment":
-    case "query":
+    case BASE_URL_ISSUE.fragment:
+    case BASE_URL_ISSUE.query:
       return "The address must not contain ? or #: request paths are appended to it"
   }
 }
@@ -390,7 +400,7 @@ const askOnce = async (input: {
       },
       signal: AbortSignal.timeout(CHECK_CHAT_TIMEOUT_WITH_MODEL_LOAD_MS)
     }))
-      if (item._tag === "Completed") return undefined
+      if (item._tag === MODEL_STREAM_ITEM_TAG.completed) return undefined
     return { result: "wrong_format", message: "The answer ended without a completed response" }
   } catch (cause) {
     return requestFailure(providerErrorCode(cause), model.id, errorMessage(cause))
@@ -403,16 +413,16 @@ const requestFailure = (
   message: string
 ): ChatEndpointCheckFailure => {
   switch (code) {
-    case "provider_auth":
+    case PROVIDER_ERROR_CODE.providerAuth:
       return { result: "key_refused", message }
-    case "provider_unavailable":
-    case "rate_limited":
+    case PROVIDER_ERROR_CODE.providerUnavailable:
+    case PROVIDER_ERROR_CODE.rateLimited:
       return { result: "unreachable", message }
-    case "model_unavailable":
+    case PROVIDER_ERROR_CODE.modelUnavailable:
       return { result: "model_missing", model, message }
-    case "context_length_exceeded":
-    case "request_invalid":
-    case "provider_error":
+    case PROVIDER_ERROR_CODE.contextLengthExceeded:
+    case PROVIDER_ERROR_CODE.requestInvalid:
+    case PROVIDER_ERROR_CODE.providerError:
     case undefined:
       return { result: "wrong_format", message }
   }
@@ -420,15 +430,15 @@ const requestFailure = (
 
 const healthFailure = (code: ProviderErrorCode | undefined): EndpointFailureReason | undefined => {
   switch (code) {
-    case "provider_auth":
+    case PROVIDER_ERROR_CODE.providerAuth:
       return "key_refused"
-    case "provider_unavailable":
+    case PROVIDER_ERROR_CODE.providerUnavailable:
       return "unreachable"
-    case "rate_limited":
-    case "model_unavailable":
-    case "context_length_exceeded":
-    case "request_invalid":
-    case "provider_error":
+    case PROVIDER_ERROR_CODE.rateLimited:
+    case PROVIDER_ERROR_CODE.modelUnavailable:
+    case PROVIDER_ERROR_CODE.contextLengthExceeded:
+    case PROVIDER_ERROR_CODE.requestInvalid:
+    case PROVIDER_ERROR_CODE.providerError:
     case undefined:
       return undefined
   }
@@ -442,7 +452,7 @@ const observed = (
   async *stream(request) {
     try {
       for await (const item of await provider.stream(request)) {
-        if (item._tag === "Completed") report(undefined)
+        if (item._tag === MODEL_STREAM_ITEM_TAG.completed) report(undefined)
         yield item
       }
     } catch (cause) {

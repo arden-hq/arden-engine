@@ -1,6 +1,8 @@
 import { listOptions, targetSessionId } from "./list-query.js"
+import { QUERY_BOOLEAN } from "@arden-hq/protocol/common"
 import {
   BRANCH_REQUEST,
+  CHAT_SEARCH_MATCH,
   CLEARED,
   PARENT_MESSAGE,
   REVERT_TO,
@@ -26,9 +28,15 @@ import {
 import { SpaceStore } from "../../persistence/spaces/store.js"
 import { ModelStore, ModelStoreError } from "../../persistence/models/store.js"
 import { SessionQueries } from "../../persistence/sessions/queries.js"
+import { SessionStore, SessionStoreError } from "../../persistence/sessions/store.js"
+import { STORE_REASON } from "../../persistence/errors.js"
+import { CHAT_MESSAGE_FAILURE } from "../../chat/message-errors.js"
 import { SessionReadState } from "../../persistence/sessions/read-state.js"
-import { SessionStore } from "../../persistence/sessions/store.js"
-import { TranscriptQueries, type ChatSearchHit } from "../../persistence/transcript/queries.js"
+import {
+  TranscriptQueries,
+  TranscriptSearchError,
+  type ChatSearchHit
+} from "../../persistence/transcript/queries.js"
 import {
   makeSessionExportModel,
   readSessionExportTranscript,
@@ -48,7 +56,7 @@ import {
   StoreConflict,
   storeErrorToHttp
 } from "../errors.js"
-import { LocalCaller } from "../middleware/local-only.js"
+import { LOCAL_CALLER, LocalCaller } from "../middleware/local-only.js"
 import {
   archivedSessionToWire,
   branchedSessionToWire,
@@ -59,7 +67,7 @@ import { RunQueries } from "../../persistence/runs/queries.js"
 import { ConversationArtifacts } from "../../artifacts/conversation.js"
 import { HttpApiSchema } from "effect/unstable/httpapi"
 import { SessionFileCleanup } from "../../storage/session-file-cleanup.js"
-import { ChatStop, type ChatEnd } from "../../chat/chat-stop.js"
+import { END_RESULT, ChatStop, type ChatEnd } from "../../chat/chat-stop.js"
 import { makeForkPreparation } from "../../chat/session-fork.js"
 import { Memory } from "../../memory/service.js"
 import { Wiki } from "../../wiki/service.js"
@@ -118,21 +126,21 @@ export const SessionHandlers = HttpApiBuilder.group(
       stop: boolean | "true" | "false"
     ) {
       const ended = yield* chatStop
-        .end({ sessionId, action, stop: stop === true || stop === "true" })
+        .end({ sessionId, action, stop: stop === true || stop === QUERY_BOOLEAN.true })
         .pipe(
           Effect.tapError((error) =>
-            error._tag === "SessionStoreError"
+            error instanceof SessionStoreError
               ? Effect.void
               : Effect.logWarning("Could not stop a chat's work", { sessionId, action, error })
           ),
           Effect.mapError(endRefusal)
         )
       switch (ended.kind) {
-        case "ended":
+        case END_RESULT.ended:
           return
-        case "not_found":
+        case END_RESULT.not_found:
           return yield* new HttpApiError.NotFound({})
-        case "running":
+        case END_RESULT.running:
           return yield* Effect.fail({
             detail: "The chat still has work running",
             running: { kind: RUNNING_WORK.running, work: ended.running }
@@ -211,11 +219,11 @@ export const SessionHandlers = HttpApiBuilder.group(
               spaceId: spaceIdOf(payload.space) ?? undefined,
               chatModel: modelIdOf(payload.chat_model) ?? undefined,
               origin: payload.origin === SESSION_ORIGIN.ordinary ? undefined : payload.origin,
-              ...(caller === "cli" ? { commandLine: true as const } : {})
+              ...(caller === LOCAL_CALLER.cli ? { commandLine: true as const } : {})
             })
           ),
           Effect.tap((created) =>
-            payload.origin === "onboarding" ? kickoff(created.sessionId) : Effect.void
+            payload.origin === SESSION_ORIGIN.onboarding ? kickoff(created.sessionId) : Effect.void
           ),
           Effect.map(createdSessionToWire),
           Effect.catchTags({
@@ -347,7 +355,7 @@ export const SessionHandlers = HttpApiBuilder.group(
                 ranges: hit.ranges,
                 created_at: hit.createdAt
               })
-              return chat.match === "message"
+              return chat.match === CHAT_SEARCH_MATCH.message
                 ? { ...base, match: "message" as const, hit: line(chat.hit) }
                 : {
                     ...base,
@@ -361,7 +369,7 @@ export const SessionHandlers = HttpApiBuilder.group(
             has_more: page.hasMore
           })),
           Effect.mapError((error) =>
-            error._tag === "TranscriptSearchError" && error.reason === "invalid"
+            error instanceof TranscriptSearchError && error.reason === STORE_REASON.invalid
               ? new HttpApiError.BadRequest({})
               : new HttpApiError.InternalServerError({})
           )
@@ -454,7 +462,7 @@ export const SessionHandlers = HttpApiBuilder.group(
             ChatMessageConflictError: (error) =>
               Effect.fail(new StoreConflict({ detail: error.message })),
             ChatMessageError: (error) =>
-              error.reason === "not_found"
+              error.reason === CHAT_MESSAGE_FAILURE.not_found
                 ? Effect.fail(new HttpApiError.NotFound({}))
                 : failInternal("Sessions")(error)
           })

@@ -1,3 +1,4 @@
+import { MODEL_STREAM_ITEM_TAG } from "@arden-hq/loop"
 import type { CompletionResponse, ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
 import { currentMillis } from "../runtime/clock.js"
 
@@ -18,7 +19,7 @@ export const observeModelRequests =
       const startedAt = currentMillis()
       const snapshot = { ...request, messages: [...request.messages] }
       for await (const item of await stream(request)) {
-        if (item._tag === "Completed")
+        if (item._tag === MODEL_STREAM_ITEM_TAG.completed)
           onComplete?.({
             sessionId,
             request: snapshot,

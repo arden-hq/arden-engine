@@ -6,6 +6,14 @@ import { Predicate, Schema } from "effect"
 import { errorMessage } from "@arden-hq/std/errors"
 import { currentMillis } from "../../runtime/clock.js"
 import { isJsonObject } from "../../persistence/json.js"
+import {
+  CODE_MODE_FAILURE,
+  CODE_MODE_STATUS,
+  type CodeModeFailure,
+  type CodeModeOutcome
+} from "./code-mode-outcome.js"
+
+export type { CodeModeOutcome } from "./code-mode-outcome.js"
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_CALLS = 12
@@ -32,18 +40,17 @@ interface CodeModeCall {
   readonly signal: AbortSignal
 }
 
-export type CodeModeOutcome =
-  | {
-      readonly status: "completed"
-      readonly value: Schema.Json
-      readonly calls: ReadonlyArray<string>
-    }
-  | {
-      readonly status: "failed"
-      readonly error: string
-      readonly reason: "cancelled" | "timed_out" | "runtime"
-      readonly calls: ReadonlyArray<string>
-    }
+export const CODE_MODE_RUNTIME_NAME = "Code Mode"
+
+const CODE_MODE_INTERRUPT = { aborted: "aborted", timedOut: "timed_out" } as const
+type CodeModeInterrupt = (typeof CODE_MODE_INTERRUPT)[keyof typeof CODE_MODE_INTERRUPT]
+
+const GUEST_SETTLED = "settled"
+
+const failureReason = (interrupted: CodeModeInterrupt | undefined): CodeModeFailure =>
+  interrupted === CODE_MODE_INTERRUPT.aborted
+    ? CODE_MODE_FAILURE.cancelled
+    : (interrupted ?? CODE_MODE_FAILURE.runtime)
 
 export interface CodeModeOptions {
   readonly code: string
@@ -54,12 +61,6 @@ export interface CodeModeOptions {
   readonly maxConcurrency?: number
   readonly maxOutputBytes?: number
   readonly runtimeName?: string
-}
-
-interface GuestEnvelope {
-  readonly ok: boolean
-  readonly value?: Schema.Json
-  readonly error?: { readonly message?: string }
 }
 
 interface HostEnvelope {
@@ -127,22 +128,23 @@ const GuestEnvelopeSchema = Schema.Union([
 const isGuestEnvelope = Schema.is(GuestEnvelopeSchema)
 
 const interruptedMessage = (
-  interrupted: "aborted" | "timed_out" | undefined,
+  interrupted: CodeModeInterrupt | undefined,
   fallback: string,
   timeoutMs: number
 ): string => {
-  if (interrupted === "aborted") return "Code Mode was cancelled"
-  if (interrupted === "timed_out") return `Code Mode timed out after ${timeoutMs}ms`
+  if (interrupted === CODE_MODE_INTERRUPT.aborted) return "Code Mode was cancelled"
+  if (interrupted === CODE_MODE_INTERRUPT.timedOut)
+    return `Code Mode timed out after ${timeoutMs}ms`
   return fallback
 }
 
 const terminalInterrupt = (
   signal: AbortSignal,
   deadline: number,
-  interrupted: "aborted" | "timed_out" | undefined
-): "aborted" | "timed_out" | undefined => {
-  if (signal.aborted) return "aborted"
-  if (currentMillis() >= deadline) return "timed_out"
+  interrupted: CodeModeInterrupt | undefined
+): CodeModeInterrupt | undefined => {
+  if (signal.aborted) return CODE_MODE_INTERRUPT.aborted
+  if (currentMillis() >= deadline) return CODE_MODE_INTERRUPT.timedOut
   return interrupted
 }
 
@@ -171,7 +173,7 @@ export const CODE_MODE_FRAME_LINES =
   guestProgram("\u0001").split("\u0001")[0]?.match(/\n/g)?.length ?? 0
 
 export async function executeCodeMode(options: CodeModeOptions): Promise<CodeModeOutcome> {
-  const runtimeName = options.runtimeName ?? "Code Mode"
+  const runtimeName = options.runtimeName ?? CODE_MODE_RUNTIME_NAME
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const maxCalls = options.maxCalls ?? DEFAULT_MAX_CALLS
   const maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY
@@ -184,8 +186,13 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
   let finished = false
   const failed = (
     error: string,
-    reason: "cancelled" | "timed_out" | "runtime" = "runtime"
-  ): CodeModeOutcome => ({ status: "failed", error: readableRuntimeError(error), reason, calls })
+    reason: CodeModeFailure = CODE_MODE_FAILURE.runtime
+  ): CodeModeOutcome => ({
+    status: CODE_MODE_STATUS.failed,
+    error: readableRuntimeError(error),
+    reason,
+    calls
+  })
 
   const hostCall = async (name: string, argsJson: string): Promise<string> => {
     const index = callIndex
@@ -195,7 +202,7 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
         ok: false,
         error: {
           message:
-            runtimeName === "Code Mode"
+            runtimeName === CODE_MODE_RUNTIME_NAME
               ? `Code Mode allows at most ${maxCalls} tool calls`
               : `${runtimeName} allows at most ${maxCalls} calls`
         }
@@ -278,14 +285,14 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
     liveRuntimes -= 1
   }
 
-  let interrupted: "aborted" | "timed_out" | undefined
+  let interrupted: CodeModeInterrupt | undefined
   runtime.setInterruptHandler(() => {
     if (options.signal.aborted) {
-      interrupted = "aborted"
+      interrupted = CODE_MODE_INTERRUPT.aborted
       return true
     }
     if (currentMillis() >= deadline) {
-      interrupted = "timed_out"
+      interrupted = CODE_MODE_INTERRUPT.timedOut
       return true
     }
     return false
@@ -456,7 +463,7 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
         timeoutMs
       )
       evaluated.error.dispose()
-      return failed(message, interrupted === "aborted" ? "cancelled" : (interrupted ?? "runtime"))
+      return failed(message, failureReason(interrupted))
     }
 
     const guestPromise = context.resolvePromise(evaluated.value)
@@ -466,26 +473,28 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
     })
     pumpJobs()
 
-    const timeout = new Promise<"timed_out">((resolve) => {
-      timer = after(Math.max(0, deadline - currentMillis()), () => resolve("timed_out"))
+    const timeout = new Promise<typeof CODE_MODE_INTERRUPT.timedOut>((resolve) => {
+      timer = after(Math.max(0, deadline - currentMillis()), () =>
+        resolve(CODE_MODE_INTERRUPT.timedOut)
+      )
     })
-    const aborted = new Promise<"aborted">((resolve) => {
+    const aborted = new Promise<typeof CODE_MODE_INTERRUPT.aborted>((resolve) => {
       if (options.signal.aborted) {
-        resolve("aborted")
+        resolve(CODE_MODE_INTERRUPT.aborted)
         return
       }
-      abortListener = () => resolve("aborted")
+      abortListener = () => resolve(CODE_MODE_INTERRUPT.aborted)
       options.signal.addEventListener("abort", abortListener, { once: true })
     })
     const outcome = await Promise.race([
-      guestPromise.then((result) => ({ status: "settled" as const, result })),
+      guestPromise.then((result) => ({ status: GUEST_SETTLED, result }) as const),
       timeout.then((status) => ({ status, result: undefined })),
       aborted.then((status) => ({ status, result: undefined }))
     ])
-    if (outcome.status !== "settled") {
+    if (outcome.status !== GUEST_SETTLED) {
       return failed(
         interruptedMessage(outcome.status, "Code Mode failed", timeoutMs),
-        outcome.status === "aborted" ? "cancelled" : "timed_out"
+        failureReason(outcome.status)
       )
     }
 
@@ -493,27 +502,23 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
     if (outcome.result.error !== undefined) {
       const message = guestErrorMessage(context.dump(outcome.result.error))
       outcome.result.error.dispose()
-      return failed(
-        interruptedMessage(interrupted, message, timeoutMs),
-        interrupted === "aborted" ? "cancelled" : (interrupted ?? "runtime")
-      )
+      return failed(interruptedMessage(interrupted, message, timeoutMs), failureReason(interrupted))
     }
-    const decoded = parseJsonText(context.getString(outcome.result.value))
+    const envelope = parseJsonText(context.getString(outcome.result.value))
     outcome.result.value.dispose()
-    if (!isGuestEnvelope(decoded)) return failed("Code Mode returned an invalid result")
-    const envelope: GuestEnvelope = decoded
+    if (!isGuestEnvelope(envelope)) return failed("Code Mode returned an invalid result")
     if (!envelope.ok) {
       const terminal = terminalInterrupt(options.signal, deadline, interrupted)
       return failed(
         interruptedMessage(terminal, envelope.error?.message ?? "Code Mode failed", timeoutMs),
-        terminal === "aborted" ? "cancelled" : (terminal ?? "runtime")
+        failureReason(terminal)
       )
     }
     const resultJson = safeJson(envelope.value ?? null)
     if (byteLength(resultJson) > maxOutputBytes) {
       return failed(`Code Mode result exceeded ${maxOutputBytes} bytes`)
     }
-    return { status: "completed", value: envelope.value ?? null, calls }
+    return { status: CODE_MODE_STATUS.completed, value: envelope.value ?? null, calls }
   } finally {
     timer?.cancel()
     if (abortListener !== undefined) options.signal.removeEventListener("abort", abortListener)

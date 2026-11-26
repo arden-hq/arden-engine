@@ -1,11 +1,5 @@
 import { Effect, Schema, type SchemaAST } from "effect"
 
-export const VAULT_ERROR_REASON = {
-  unavailable: "unavailable",
-  invalid: "invalid",
-  operation: "operation"
-} as const
-
 export interface SecureDocumentTarget {
   readonly documentKey: string
   readonly binding: string
@@ -16,6 +10,12 @@ export interface CredentialVault {
   readonly writeDocument: (target: SecureDocumentTarget, value: unknown) => Promise<void>
   readonly clearDocument: (target: SecureDocumentTarget) => Promise<void>
 }
+
+export const VAULT_ERROR_REASON = {
+  unavailable: "unavailable",
+  invalid: "invalid",
+  operation: "operation"
+} as const
 
 export class VaultError extends Error {
   readonly reason: (typeof VAULT_ERROR_REASON)[keyof typeof VAULT_ERROR_REASON]

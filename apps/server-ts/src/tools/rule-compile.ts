@@ -1,4 +1,9 @@
-import type { NewPermissionRule } from "@arden-hq/protocol/permissions"
+import {
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_SUBJECT,
+  type NewPermissionRule
+} from "@arden-hq/protocol/permissions"
+import { STORE_REASON } from "../persistence/errors.js"
 import { isWithin } from "@arden-hq/std/paths"
 import { homedir } from "node:os"
 import { Effect, Schema } from "effect"
@@ -50,19 +55,20 @@ type Output = typeof OutputSchema.Type
 
 const wireOf = (rule: Output["rules"][number]): CompiledSubject | string => {
   switch (rule.kind) {
-    case "tool":
+    case PERMISSION_RULE_SUBJECT.tool:
       return rule.tool === null ? "a tool rule named no tool" : { kind: "tool", tool: rule.tool }
-    case "connector":
+    case PERMISSION_RULE_SUBJECT.connector:
       return rule.server === null
         ? "a connector rule named no connector"
         : { kind: "connector", server: rule.server }
-    case "command":
+    case PERMISSION_RULE_SUBJECT.command:
       return rule.command === null
         ? "a command rule named no command"
         : { kind: "command", command: rule.command }
-    case "path":
+    case PERMISSION_RULE_SUBJECT.path:
       if (rule.path === null || rule.access === null) return "a folder rule named no folder"
-      if (rule.decision === "ask") return `a folder rule allows or never: ${rule.path}`
+      if (rule.decision === PERMISSION_RULE_DECISION.ask)
+        return `a folder rule allows or never: ${rule.path}`
       return { kind: "path", path: rule.path, access: rule.access }
   }
 }
@@ -84,20 +90,23 @@ export const checkCompiled = Effect.fn("RuleCompile.check")(function* (
       dropped.push(wire)
       continue
     }
-    if (wire.kind === "path" && rule.decision === "ask") {
+    if (
+      wire.kind === PERMISSION_RULE_SUBJECT.path &&
+      rule.decision === PERMISSION_RULE_DECISION.ask
+    ) {
       dropped.push(`a folder rule allows or never: ${wire.path}`)
       continue
     }
     const checked = yield* subjects(wire).pipe(
       Effect.map((found) => ({ found, error: undefined })),
       Effect.catchIf(
-        (cause) => cause.reason === "invalid",
+        (cause) => cause.reason === STORE_REASON.invalid,
         (cause) => Effect.succeed({ found: [], error: cause.message })
       )
     )
     if (checked.error !== undefined) dropped.push(checked.error)
     for (const subject of checked.found) {
-      if (subject.kind === "path" && isWithin(subject.path, homedir())) {
+      if (subject.kind === PERMISSION_RULE_SUBJECT.path && isWithin(subject.path, homedir())) {
         dropped.push(`a folder rule too wide for words: ${subject.path}`)
         continue
       }

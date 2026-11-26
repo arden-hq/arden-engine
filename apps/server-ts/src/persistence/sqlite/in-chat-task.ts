@@ -1,3 +1,4 @@
+import { SPACE_TASK_RUNS_IN, type SpaceTaskRunsIn } from "@arden-hq/protocol/spaces/work"
 import { DateTime, Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import {
@@ -126,13 +127,13 @@ const workingOnTaskSql = (
   sql: SqlClient.SqlClient,
   item: Statement.Fragment,
   home: Statement.Fragment,
-  where: "chat" | "background"
+  where: SpaceTaskRunsIn
 ): Statement.Fragment => {
   const inChat = sql`COALESCE(json_extract(working.metadata_json, '$.run_context.origin.kind') = 'chat'
     AND json_extract(working.metadata_json, '$.run_context.origin.session_id') = ${home}, 0)`
   return sql`json_extract(working.metadata_json, '$.run_context.task.item_id') = ${item}
     AND working.status IN ${activeRunStatusList}
-    AND ${inChat} = ${where === "chat" ? 1 : 0}`
+    AND ${inChat} = ${where === SPACE_TASK_RUNS_IN.chat ? 1 : 0}`
 }
 
 const activeTaskRunsSql = (sql: SqlClient.SqlClient, itemId: string) => sql`
@@ -146,7 +147,7 @@ const runnableInChatSql = (sql: SqlClient.SqlClient, now: string): Statement.Fra
   AND NOT ${hasPendingTaskQuestion(sql, sql`item.item_id`)}
   AND NOT ${stoppedSinceMovedSql(sql, sql`item.item_id`)}
   AND NOT EXISTS (SELECT 1 FROM chat_runs AS working
-    WHERE ${workingOnTaskSql(sql, sql`item.item_id`, sql`item.home_session_id`, "background")})
+    WHERE ${workingOnTaskSql(sql, sql`item.item_id`, sql`item.home_session_id`, SPACE_TASK_RUNS_IN.background)})
   AND (item.next_attempt_at IS NULL OR item.next_attempt_at <= ${now})
   AND NOT EXISTS (SELECT 1 FROM execution_budgets AS budget
     WHERE budget.task_item_id = item.item_id AND budget.token_limit IS NOT NULL

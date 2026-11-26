@@ -1,4 +1,7 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { BROWSER_SCOPE } from "@arden-hq/protocol/browser-scope"
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
+import { JOB_PURPOSE } from "../job-classification.js"
+import { isImageMediaType, ROLE } from "@arden-hq/std/message-vocabulary"
 import { journalHeadSequenceSql } from "@arden-hq/journal/effect"
 import { isWrittenByPerson } from "../transcript/model.js"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
@@ -154,7 +157,7 @@ export const makeSessionQueries = ({
       row.origin_automation_id === null
         ? undefined
         : yield* readWorkOwner(sql, row.origin_automation_id).pipe(
-            Effect.map((owner) => (owner?.kind === "space_review" ? owner : undefined)),
+            Effect.map((owner) => (owner?.kind === JOB_PURPOSE.spaceReview ? owner : undefined)),
             Effect.mapError((cause) =>
               corruption(row.session_id, "Session job classification is unavailable", cause)
             )
@@ -308,12 +311,14 @@ export const makeSessionQueries = ({
         ? content
         : blocks
             .flatMap((block) =>
-              block.type === "text" && typeof block.text === "string" ? [block.text] : []
+              block.type === CONTENT_BLOCK_TYPE.text && typeof block.text === "string"
+                ? [block.text]
+                : []
             )
             .join("\n")
     const images = blocks.flatMap((block): ReadonlyArray<SessionNameImage> =>
-      block.type === "image" &&
-      (block.media_type === "image/png" || block.media_type === "image/jpeg") &&
+      block.type === CONTENT_BLOCK_TYPE.image &&
+      isImageMediaType(block.media_type) &&
       typeof block.data === "string" &&
       block.data.length > 0
         ? [{ mediaType: block.media_type, data: block.data }]
@@ -398,17 +403,19 @@ export const makeSessionQueries = ({
     return yield* snapshot(
       Effect.gen(function* () {
         let scope: BrowserScope
-        if (input.kind === "session") {
+        if (input.kind === BROWSER_SCOPE.session) {
           const rows = yield* sql<{ readonly space_id: string | null }>`
           SELECT space_id FROM sessions WHERE session_id = ${input.sessionId}
         `
           const row = rows[0]
           if (row === undefined) return undefined
           scope =
-            row.space_id === null ? { kind: "home" } : { kind: "space", spaceId: row.space_id }
+            row.space_id === null
+              ? { kind: BROWSER_SCOPE.home }
+              : { kind: BROWSER_SCOPE.space, spaceId: row.space_id }
         } else {
           scope = input
-          if (scope.kind === "space") {
+          if (scope.kind === BROWSER_SCOPE.space) {
             const spaces = yield* sql<{
               readonly space_id: string
             }>`SELECT space_id FROM spaces WHERE space_id = ${scope.spaceId}`
@@ -416,7 +423,7 @@ export const makeSessionQueries = ({
           }
         }
         const rows =
-          scope.kind === "home"
+          scope.kind === BROWSER_SCOPE.home
             ? yield* sql<{
                 readonly session_id: string
               }>`SELECT session_id FROM sessions WHERE space_id IS NULL ORDER BY session_id`

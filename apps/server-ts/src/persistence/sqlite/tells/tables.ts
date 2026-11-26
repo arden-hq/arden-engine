@@ -1,5 +1,8 @@
 import type { databaseSchema } from "../../schema/database.js"
 
+export const TASK_COMMENT_TABLE = "space_task_comments"
+export const TASK_ATTACHMENT_TABLE = "space_task_attachments"
+
 type SchemaTable = (typeof databaseSchema.tables)[number]
 
 export type TellKind =
@@ -194,8 +197,8 @@ export const tableTells = {
   run_questions: { silent: ask },
   run_question_timers: { silent: ask },
   space_task_events: { tell: "task", id: "{row}.item_id", scope: "{row}.space_id" },
-  space_task_comments: { tell: "task", id: "{row}.item_id", scope: "{row}.space_id" },
-  space_task_attachments: { tell: "task", id: "{row}.item_id", scope: "{row}.space_id" },
+  [TASK_COMMENT_TABLE]: { tell: "task", id: "{row}.item_id", scope: "{row}.space_id" },
+  [TASK_ATTACHMENT_TABLE]: { tell: "task", id: "{row}.item_id", scope: "{row}.space_id" },
   home_presence: { silent: "Home reads it when it opens and on its own refresh." },
   home_letter: { silent: "Home reads it when it opens and on its own refresh." },
   home_letters: { silent: "Home reads it when it opens and on its own refresh." },

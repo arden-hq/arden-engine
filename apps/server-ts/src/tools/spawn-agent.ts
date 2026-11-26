@@ -2,7 +2,7 @@ import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { isWithin } from "@arden-hq/std/paths"
 import { PermissionRules } from "../persistence/permissions/rules.js"
 import { ToolExecutionError, type ToolApprovalContext, type ToolResult } from "@arden-hq/loop"
-import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
+import { AGENT_MODE, type ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { AgentModeSchema, PersistedChildAgentMetadataSchema } from "@arden-hq/protocol/effect/chat"
 import { Effect, Schema } from "effect"
 
@@ -83,7 +83,7 @@ const ParametersSchema = Schema.Struct({
   )
 }).check(
   Schema.makeFilter((input) => {
-    if (input.mode !== "code" && input.working_directory !== undefined) {
+    if (input.mode !== AGENT_MODE.code && input.working_directory !== undefined) {
       return { path: ["working_directory"], issue: "is available only when mode is code" }
     }
     if (input.reasoning_effort !== undefined && input.model === undefined) {
@@ -168,7 +168,7 @@ const resolveWorkspace = async (
   input: SpawnAgentInput,
   ctx: { readonly run: ServerRunContext; readonly signal: AbortSignal }
 ): Promise<ResolvedWorkspace | null> => {
-  if (input.mode !== "code") return null
+  if (input.mode !== AGENT_MODE.code) return null
   const context = { sessionId: ctx.run.sessionId, runId: ctx.run.runId, signal: ctx.signal }
   const policy = await sessionPathPolicy(services, context)
   if (input.working_directory === undefined)
@@ -319,7 +319,10 @@ const makeSpawnAgentTool = (
     approvalPrompt: async (input, ctx) => {
       const resolved = await resolveWorkspace(services, input, ctx)
       return resolved === null
-        ? { preview: input.mode === "work" ? "Start this worker?" : "Start this research agent?" }
+        ? {
+            preview:
+              input.mode === AGENT_MODE.work ? "Start this worker?" : "Start this research agent?"
+          }
         : approvalPrompt(resolved)
     },
     execute: async (input, ctx) => {
@@ -339,7 +342,9 @@ const makeSpawnAgentTool = (
       const resolved = await resolveWorkspace(services, input, ctx)
       if (resolved !== null) verifyApproval(resolved, ctx.approval, ctx.run.approvalMode)
       const background =
-        input.mode === "research" && input.model === undefined && input.fork_context !== true
+        input.mode === AGENT_MODE.research &&
+        input.model === undefined &&
+        input.fork_context !== true
           ? (await Effect.runPromise(services.modelSettings.snapshot(), { signal: ctx.signal }))
               .effective.roles.background
           : undefined
@@ -349,7 +354,7 @@ const makeSpawnAgentTool = (
           : { model: background.modelId, reasoningEffort: background.reasoningEffort }
       let raw: ToolResult
       try {
-        if (input.mode !== "code") {
+        if (input.mode !== AGENT_MODE.code) {
           raw = await ctx.run.spawnAgent({
             toolCallId: ctx.toolCallId,
             arguments: input,

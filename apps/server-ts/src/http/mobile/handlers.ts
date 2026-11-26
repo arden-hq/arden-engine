@@ -1,3 +1,5 @@
+import { SESSION_ORIGIN, SESSION_PRESENTATION } from "@arden-hq/protocol/sessions"
+import { SPACE_KIND } from "@arden-hq/protocol/spaces"
 import { HISTORY_PAGE_LIMIT, HISTORY_WINDOW, RUNTIME_RUN } from "@arden-hq/protocol/chat"
 import { type TaskRecord } from "../../persistence/work/task-record.js"
 import { nameText, runIsActive, spaceIdOf } from "../../sessions/session-states.js"
@@ -109,7 +111,7 @@ export const MobileHandlers = HttpApiBuilder.group(
             name: nameText(session.name) ?? undefined,
             spaceId: spaceIdOf(session.space) ?? undefined,
             home: isSpaceHome(session),
-            onboarding: session.origin === "onboarding"
+            onboarding: session.origin === SESSION_ORIGIN.onboarding
           }
         ])
       )
@@ -176,7 +178,7 @@ export const MobileHandlers = HttpApiBuilder.group(
         })
       })
       const rows = yield* Effect.forEach(overview.spaces, spaceRow)
-      const main = overview.spaces.find((space) => space.kind === "main")
+      const main = overview.spaces.find((space) => space.kind === SPACE_KIND.main)
       return {
         spaces: rows,
         loose:
@@ -245,7 +247,7 @@ export const MobileHandlers = HttpApiBuilder.group(
           .filter(
             (chat: SessionListItem) =>
               chat.session_id !== sessionId &&
-              chat.presentation.kind === "conversation" &&
+              chat.presentation.kind === SESSION_PRESENTATION.conversation &&
               !isSpaceHome(chat)
           )
           .map((chat) => ({

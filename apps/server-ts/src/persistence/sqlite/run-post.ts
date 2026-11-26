@@ -1,3 +1,4 @@
+import { STORE_REASON } from "../errors.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { sha256Hex } from "@arden-hq/std/hash"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
@@ -158,7 +159,8 @@ export const makePostStore = ({
         : yield* ensureSpaceConversationInTransaction({ sql, sessionEvents, spaceId }).pipe(
             Effect.map((sessionId) => ({ sessionId })),
             Effect.catchIf(
-              (error) => error instanceof SessionStoreError && error.reason === "not_found",
+              (error) =>
+                error instanceof SessionStoreError && error.reason === STORE_REASON.not_found,
               () => Effect.succeed(undefined)
             )
           )

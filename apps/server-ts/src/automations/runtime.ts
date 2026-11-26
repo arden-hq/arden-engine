@@ -1,3 +1,7 @@
+import { JOURNAL_DELIVERY } from "@arden-hq/journal/effect"
+import { JOB_PURPOSE } from "../persistence/job-classification.js"
+import { QUOTA_CLASS, QUOTA_DECISION } from "../models/plan-limits.js"
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { backoffDelayMs } from "@arden-hq/std/retry"
 import { HomeStore } from "../persistence/home/store.js"
 import { HomeLetterInputs } from "../persistence/automations/home-letter-inputs.js"
@@ -36,6 +40,8 @@ import type { SystemHandlerServices } from "./system-handler.js"
 import { AutomationQueue } from "../persistence/automations/queue.js"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import {
+  AUTOMATION_EVENT_SCREEN_KIND,
+  AUTOMATION_JOB_STATUS,
   AutomationStoreError,
   type AutomationJobDeferral,
   type AutomationJobLease,
@@ -44,7 +50,11 @@ import {
   type ClaimedAutomationJobLease,
   type AutomationJobResult
 } from "../persistence/automations/store.js"
-import { AutomationTriggers, type TriggerFeedRecord } from "../persistence/automations/triggers.js"
+import {
+  AutomationTriggers,
+  TRIGGER_FEED_KIND,
+  type TriggerFeedRecord
+} from "../persistence/automations/triggers.js"
 import {
   SessionLifecycleEvents,
   type SessionLifecycleDelivery
@@ -52,7 +62,7 @@ import {
 import { ReaderPositions } from "../persistence/reader-position.js"
 import { Wiki } from "../wiki/service.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
-import type { AutomationId } from "../persistence/automations/model.js"
+import { SYSTEM_HANDLER, type AutomationId } from "../persistence/automations/model.js"
 import { iso } from "../runtime/clock.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 
@@ -135,14 +145,14 @@ export class AutomationRuntime extends Context.Service<
       })
       const decisions = yield* Decisions
       const ownerProfile = (job: AutomationJobLeaseRef) =>
-        job.payload.handler !== "events"
+        job.payload.handler !== SYSTEM_HANDLER.events
           ? Effect.succeed(undefined)
           : wiki.snapshot().pipe(
               Effect.map((snapshot) =>
                 snapshot.pages
                   .filter(
                     (page) =>
-                      page.page.lifecycle === "active" &&
+                      page.page.lifecycle === WIKI_PAGE_LIFECYCLE.active &&
                       isStandingFactsPage({ path: page.resource.path, pageId: page.page.pageId })
                   )
                   .map((page) => page.page.body)
@@ -219,8 +229,8 @@ export class AutomationRuntime extends Context.Service<
         return jobResult.withoutRun("no_change", "Arden works on it in its chat.")
       })
       const run = (job: AutomationJobLease) => {
-        if (job.payload.purpose === "space_review") return executeReview(job)
-        if (job.payload.purpose === "task_execution") return executeTask(job)
+        if (job.payload.purpose === JOB_PURPOSE.spaceReview) return executeReview(job)
+        if (job.payload.purpose === JOB_PURPOSE.taskExecution) return executeTask(job)
         return executeChat(job)
       }
       const planLimitDeferral = (
@@ -250,25 +260,31 @@ export class AutomationRuntime extends Context.Service<
         const decision = quotaDecision({
           reading,
           limits: quotaLimits(limits),
-          quotaClass: job.payload.purpose === "task_execution" ? "interactive" : "background",
+          quotaClass:
+            job.payload.purpose === JOB_PURPOSE.taskExecution
+              ? QUOTA_CLASS.interactive
+              : QUOTA_CLASS.background,
           itemLimitPercent: automationLimitPercent(limits, job.payload.automationId),
           now: yield* Clock.currentTimeMillis
         })
-        return decision.kind === "pause" ? decision.until : undefined
+        return decision.kind === QUOTA_DECISION.pause ? decision.until : undefined
       })
       const screened = Effect.fn("AutomationRuntime.screened")(function* (
         job: ClaimedAutomationJobLease
       ) {
         const screen = yield* screenWake(job)
-        if (screen === undefined) return { kind: "run" as const, job }
+        if (screen === undefined) return { kind: AUTOMATION_EVENT_SCREEN_KIND.run, job } as const
         const outcome = yield* queue.recordEventScreen({
           lease: job,
           screen,
           now: yield* Clock.currentTimeMillis
         })
-        return outcome.kind === "skip"
+        return outcome.kind === AUTOMATION_EVENT_SCREEN_KIND.skip
           ? outcome
-          : { kind: "run" as const, job: withScreenedEvents(job, outcome) }
+          : ({
+              kind: AUTOMATION_EVENT_SCREEN_KIND.run,
+              job: withScreenedEvents(job, outcome)
+            } as const)
       })
       const execute = (
         claimed: ClaimedAutomationJobLease
@@ -277,7 +293,8 @@ export class AutomationRuntime extends Context.Service<
           const until = yield* planLimitHold(claimed)
           if (until !== undefined) return planLimitDeferral(claimed.payload.sessionId, until)
           const wake = yield* screened(claimed)
-          if (wake.kind === "skip") return { status: "skipped" as const, skip: wake.skip }
+          if (wake.kind === AUTOMATION_EVENT_SCREEN_KIND.skip)
+            return { status: AUTOMATION_JOB_STATUS.skipped, skip: wake.skip }
           return yield* run(renderAutomationJob(wake.job))
         }).pipe(
           Effect.catch((cause) => {
@@ -341,11 +358,11 @@ export class AutomationRuntime extends Context.Service<
           const toRecord = Effect.fn("AutomationRuntime.toRecord")(function* (
             delivery: SessionLifecycleDelivery
           ): Effect.fn.Return<TriggerFeedRecord> {
-            if (delivery.kind !== "reset") return triggerFeedRecord(delivery)
+            if (delivery.kind !== JOURNAL_DELIVERY.reset) return triggerFeedRecord(delivery)
             return {
               sequence: delivery.cursor,
               atMs: yield* Clock.currentTimeMillis,
-              kind: "other",
+              kind: TRIGGER_FEED_KIND.other,
               sessionId: null,
               journal: undefined
             }

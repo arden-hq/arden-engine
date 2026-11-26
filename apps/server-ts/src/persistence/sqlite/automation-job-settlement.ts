@@ -7,6 +7,7 @@ import {
 } from "@arden-hq/jobs"
 import { Effect } from "effect"
 import {
+  AUTOMATION_JOB_STATUS,
   AutomationStoreError,
   type AutomationJobDeferral,
   type AutomationJobResult,
@@ -147,10 +148,10 @@ export const makeAutomationJobSettlement = ({
   const completeEffect = (input: JobCompleteInput<AutomationJobSettlement>) => {
     const result = input.result
     switch (result.status) {
-      case "deferred":
+      case AUTOMATION_JOB_STATUS.deferred:
         return deferEffect({ ...input, result })
-      case "skipped":
-      case "ended":
+      case AUTOMATION_JOB_STATUS.skipped:
+      case AUTOMATION_JOB_STATUS.ended:
         return settle(input, input.completedAt, "complete", result)
     }
   }

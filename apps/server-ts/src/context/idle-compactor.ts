@@ -2,7 +2,12 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Clock, Effect, Exit } from "effect"
 import { ModelCatalog } from "../models/catalog.js"
 import { ModelProviderService } from "../models/provider.js"
-import { quotaDecision, quotaLimits, currentPlanReading } from "../models/plan-limits.js"
+import {
+  QUOTA_DECISION,
+  quotaDecision,
+  quotaLimits,
+  currentPlanReading
+} from "../models/plan-limits.js"
 import { meteredModelCall } from "../models/call-usage.js"
 import { ModelStore } from "../persistence/models/store.js"
 import {
@@ -61,7 +66,7 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
         itemLimitPercent: undefined,
         now: checkedAt
       })
-      if (quota.kind !== "admit") return skip(`quota paused: ${quota.reason}`)
+      if (quota.kind !== QUOTA_DECISION.admit) return skip(`quota paused: ${quota.reason}`)
       const snapshot = yield* store.snapshot({ sessionId: candidate.sessionId, purpose: "idle" })
       const selection = yield* models.selection(candidate.sessionId)
       if (selection.modelId === null) return skip("chat has no model")

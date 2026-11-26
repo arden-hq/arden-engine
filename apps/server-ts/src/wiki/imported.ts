@@ -1,3 +1,4 @@
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { PATH_SEGMENT } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
@@ -11,7 +12,7 @@ import { createPage, updatePage } from "./commit.js"
 import { type WikiWrite } from "./commit-write-types.js"
 import { type WikiCommitIdentity } from "./origin.js"
 import { directoryContract, directoryTitle } from "./directories.js"
-import { type WikiError, wikiError } from "./errors.js"
+import { type WikiError, WIKI_ERROR_REASON, wikiError } from "./errors.js"
 import { writerOf, type WikiChanges } from "./page-change.js"
 import { formatWikiPage, namesTakenAt, normal, takesName } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
@@ -79,7 +80,7 @@ export const makeWikiImportMethods = (changes: WikiChanges): WikiImportMethods =
     yield* requireImportable(input)
     return yield* attempt(input).pipe(
       Effect.retry({
-        while: (error) => error.reason === "conflict",
+        while: (error) => error.reason === WIKI_ERROR_REASON.conflict,
         times: HEAD_CONFLICT_RETRIES
       })
     )
@@ -89,7 +90,7 @@ export const makeWikiImportMethods = (changes: WikiChanges): WikiImportMethods =
 }
 
 const requireImportable = Effect.fn("Wiki.requireImportable")(function* (input: WikiImportInput) {
-  if (input.authority._tag !== "Global") {
+  if (input.authority._tag !== GLOBAL_WIKI_LOCATION_AUTHORITY._tag) {
     return yield* wikiError("create", "blocked", "Only a chat outside Spaces imports notes")
   }
   const paths = [

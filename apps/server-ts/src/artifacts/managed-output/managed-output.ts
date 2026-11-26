@@ -105,6 +105,9 @@ const SOURCE_REF_FIELDS = [
   "bytes"
 ] as const
 
+const LOCATOR_FIELDS: ReadonlySet<string> = new Set(["ref", "path", "url", "uri"])
+const TITLE_FIELD = "title"
+
 const compactSourceRef = (value: unknown): JsonValue | null => {
   if (!Predicate.isObject(value)) return null
   const compact: Record<string, JsonValue> = {}
@@ -112,10 +115,10 @@ const compactSourceRef = (value: unknown): JsonValue | null => {
     if (!(field in value)) continue
     const next = value[field]
     if (typeof next === "string") {
-      const locator = field === "ref" || field === "path" || field === "url" || field === "uri"
+      const locator = LOCATOR_FIELDS.has(field)
       let limit = 256
       if (locator) limit = 8192
-      else if (field === "title") limit = 512
+      else if (field === TITLE_FIELD) limit = 512
       compact[field] = next.slice(0, limit)
     } else if (typeof next === "number" && Number.isFinite(next)) compact[field] = next
     else if (typeof next === "boolean" || next === null) compact[field] = next

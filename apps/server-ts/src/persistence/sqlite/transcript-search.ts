@@ -36,6 +36,7 @@ import {
   searchError
 } from "./transcript-search-text.js"
 import type { TranscriptQueries } from "../transcript/queries.js"
+import { STORE_REASON } from "../errors.js"
 
 interface SearchScopeRow {
   readonly space_id: string | null
@@ -114,7 +115,7 @@ const searchIn = Effect.fn("SqliteTranscriptQueries.search")(function* (
   const found = yield* ranked(query.query).pipe(
     Effect.map((rows) => ({ rows, match: query.query })),
     Effect.catchIf(
-      (error) => error.reason === "invalid",
+      (error) => error.reason === STORE_REASON.invalid,
       (error) => {
         const words = ftsQueryForWords(query.query)
         return words === undefined

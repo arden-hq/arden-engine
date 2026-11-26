@@ -11,7 +11,7 @@ import {
   type ToolResultOutput
 } from "@arden-hq/loop"
 import type { ApprovalPresentationDraft } from "../persistence/tools/approval-draft.js"
-import { ToolKindSchema } from "@arden-hq/protocol/chat"
+import { TOOL_APPROVAL_ALTERNATIVE, ToolKindSchema } from "@arden-hq/protocol/chat"
 import { ToolDisplaySchema } from "@arden-hq/protocol/effect/tools"
 import { Effect, Option, Predicate, Schema } from "effect"
 
@@ -28,12 +28,15 @@ import type { CallImpact } from "../execution/impact.js"
 import {
   makeCallEffectLedger,
   MAX_CALL_TARGETS,
+  TOOL_EFFECT,
   ToolEffectSchema,
   type CallEffectLedger,
   type CallEffects,
   type EffectTarget
 } from "../execution/tool-effect.js"
 import { mutationReceiptHost, readMutationReceipt } from "../persistence/tools/mutation-receipt.js"
+
+export const TOOL_REQUIREMENT = { boundary: "boundary" } as const
 
 const ServerToolMetadataInputSchema = Schema.Struct({
   display_name: Schema.String,
@@ -72,7 +75,7 @@ const ServerToolMetadataInputSchema = Schema.Struct({
     ])
   ),
   approval_bypass: Schema.optionalKey(Schema.Boolean),
-  requirement: Schema.optionalKey(Schema.Literal("boundary")),
+  requirement: Schema.optionalKey(Schema.Literal(TOOL_REQUIREMENT.boundary)),
   always_ask: Schema.optionalKey(Schema.Boolean),
   refuse_unattended: Schema.optionalKey(Schema.Boolean),
   standing: Schema.optionalKey(Schema.Literals(["always", "requirement"])),
@@ -80,7 +83,7 @@ const ServerToolMetadataInputSchema = Schema.Struct({
 }).check(
   Schema.makeFilter((metadata) =>
     metadata.invocation_only === true &&
-    (!metadata.internal_catalog || metadata.changes_state || metadata.effect !== "none")
+    (!metadata.internal_catalog || metadata.changes_state || metadata.effect !== TOOL_EFFECT.none)
       ? [
           {
             path: ["invocation_only"],
@@ -168,12 +171,14 @@ export const siteOf = (definition: object): SiteOf | undefined => SITES.get(defi
 export const summaryOf = (definition: object): string | undefined =>
   "summary" in definition && typeof definition.summary === "string" ? definition.summary : undefined
 
-export type ToolDiscovery = "always_loaded" | { readonly group: string }
+export const ALWAYS_LOADED = "always_loaded"
+
+export type ToolDiscovery = typeof ALWAYS_LOADED | { readonly group: string }
 
 const GROUP_NAME = /^(?!browser$)(?!mcp_)[a-z][a-z0-9_]*$/
 
 const validDiscovery = (value: unknown): value is ToolDiscovery =>
-  value === "always_loaded" ||
+  value === ALWAYS_LOADED ||
   (Predicate.isObject(value) &&
     Object.keys(value).length === 1 &&
     "group" in value &&
@@ -207,10 +212,10 @@ export const defineServerTool = <S extends StandardSchemaV1>(
   if (metadata.always_ask === true && definition.approvalPrompt === undefined) {
     throw new Error(`Tool ${definition.name} always asks but has no approvalPrompt`)
   }
-  if (metadata.outcome === true && metadata.effect !== "run_record") {
+  if (metadata.outcome === true && metadata.effect !== TOOL_EFFECT.runRecord) {
     throw new Error(`Outcome tool ${definition.name} must declare effect "run_record"`)
   }
-  if (metadata.changes_state && metadata.effect === "none") {
+  if (metadata.changes_state && metadata.effect === TOOL_EFFECT.none) {
     throw new Error(`Tool ${definition.name} changes state but declares no effect`)
   }
   if (metadata.changes_state && metadata.target === undefined) {
@@ -263,7 +268,7 @@ export const defineServerTool = <S extends StandardSchemaV1>(
         runInput: StandardSchemaV1.InferOutput<S>,
         runCtx: ToolContext<ServerRunContext>
       ) => {
-        if (runCtx.approval?.alternative !== "draft") {
+        if (runCtx.approval?.alternative !== TOOL_APPROVAL_ALTERNATIVE.draft) {
           return definition.execute(runInput, runCtx, ledger)
         }
         if (draft === undefined) {

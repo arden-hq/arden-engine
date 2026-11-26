@@ -1,10 +1,18 @@
 import { openRunSince } from "./automation-running.js"
 import { DateTime, Effect } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
-import type { SessionLifecycleEvents } from "../sessions/events.js"
+import type { SqlClient, SqlError } from "effect/unstable/sql"
+import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sessions/events.js"
+import type { UnitOfWork } from "../unit-of-work.js"
 import { revokeAutomationWork } from "./automation-authority.js"
 import { userAutomationSql } from "./authority-sql.js"
 import type { Statement } from "effect/unstable/sql/Statement"
+
+export const CHAT_AUTOMATION_REMOVAL = { running: "running", deleted: "deleted" } as const
+
+export interface ChatAutomationRemoval {
+  readonly kind: (typeof CHAT_AUTOMATION_REMOVAL)[keyof typeof CHAT_AUTOMATION_REMOVAL]
+  readonly names: Array<string>
+}
 
 export const deleteAutomationRow = Effect.fn("AutomationRemoval.delete")(function* (options: {
   readonly sql: SqlClient.SqlClient
@@ -46,12 +54,22 @@ export const deleteAutomationsOfChat = Effect.fn("AutomationRemoval.ofChat")(fun
   readonly sql: SqlClient.SqlClient
   readonly sessionEvents: SessionLifecycleEvents["Service"]
   readonly sessionId: string
-}) {
+}): Effect.fn.Return<
+  ChatAutomationRemoval,
+  SqlError.SqlError | SessionLifecycleEventError,
+  UnitOfWork
+> {
   const automations = yield* automationsOfChat(options.sql, options.sessionId)
   const running = automations.filter((automation) => automation.running !== 0)
   if (running.length > 0)
-    return { kind: "running", names: running.map((automation) => automation.name) } as const
+    return {
+      kind: CHAT_AUTOMATION_REMOVAL.running,
+      names: running.map((automation) => automation.name)
+    }
   for (const automation of automations)
     yield* deleteAutomationRow({ ...options, automationId: automation.task_id })
-  return { kind: "deleted", names: automations.map((automation) => automation.name) } as const
+  return {
+    kind: CHAT_AUTOMATION_REMOVAL.deleted,
+    names: automations.map((automation) => automation.name)
+  }
 })

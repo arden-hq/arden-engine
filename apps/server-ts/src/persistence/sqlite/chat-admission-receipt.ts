@@ -1,7 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { ChatReceiptStatus } from "@arden-hq/protocol/chat"
+import { CHAT_RECEIPT_STATUS, type ChatReceiptStatus } from "@arden-hq/protocol/chat"
 import { ChatReceiptStatusSchema } from "@arden-hq/protocol/effect/chat"
 import { ChatWriteConflictError, REQUEST_HASH_VERSION, type ChatWriteError } from "../chat/store.js"
 import { StoredMessageEnvelopeSchema, type StoredMessageEnvelope } from "../transcript/model.js"
@@ -103,7 +103,7 @@ export const loadReceipt = Effect.fn("SqliteChatWriteStore.loadReceipt")(functio
     }
   }
   const runId = receipt.run_id
-  if ((runId === null && receipt.status !== "accepted") || runId === "") {
+  if ((runId === null && receipt.status !== CHAT_RECEIPT_STATUS.accepted) || runId === "") {
     return yield* writeError("start", "corrupt", "Idempotency receipt has no run id", { sessionId })
   }
   const status = yield* Schema.decodeUnknownEffect(ChatReceiptStatusSchema)(receipt.status).pipe(

@@ -1,5 +1,10 @@
 import { Effect, Schema } from "effect"
-import { ensurePrivateDir, PrivateFileError, readRegularFile } from "../fs/private-store.js"
+import {
+  ensurePrivateDir,
+  PRIVATE_FILE_VIOLATION,
+  PrivateFileError,
+  readRegularFile
+} from "../fs/private-store.js"
 import { ResearchStateSchema, type ResearchState } from "./model.js"
 
 export class ResearchWorkspaceError extends Schema.TaggedError<ResearchWorkspaceError>()(
@@ -58,12 +63,12 @@ export const readPlainFile = (
     Effect.catch((failure) => {
       if (!(failure.cause instanceof PrivateFileError)) return Effect.fail(failure)
       switch (failure.cause.reason) {
-        case "not_regular":
-        case "not_directory":
+        case PRIVATE_FILE_VIOLATION.notRegular:
+        case PRIVATE_FILE_VIOLATION.notDirectory:
           return Effect.fail(
             researchError("corrupt", "Research workspace contains an invalid file", workspaceId)
           )
-        case "too_large":
+        case PRIVATE_FILE_VIOLATION.tooLarge:
           return Effect.fail(
             researchError("quota", "Research workspace file exceeds its size limit", workspaceId)
           )

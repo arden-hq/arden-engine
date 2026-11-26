@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import { isJsonObject } from "../json.js"
 
@@ -24,11 +24,11 @@ export const sessionForkOriginFromMetadata = (
   const current = Schema.decodeUnknownOption(SessionForkOriginSchema)(
     isJsonObject(metadata) ? metadata.fork_origin : undefined
   )
-  if (current._tag === "Some") return current.value
+  if (Option.isSome(current)) return current.value
   const legacy = Schema.decodeUnknownOption(LegacyForkSchema)(
     isJsonObject(metadata) ? metadata.fork_of : undefined
   )
-  if (legacy._tag === "None") return undefined
+  if (Option.isNone(legacy)) return undefined
   const origin = Schema.decodeUnknownOption(SessionForkOriginSchema)({
     sourceSessionId: legacy.value.source_session_id,
     sourceSessionRef: null,
@@ -36,5 +36,5 @@ export const sessionForkOriginFromMetadata = (
     sourceMessageId: null,
     createdAt: startedAt
   })
-  return origin._tag === "Some" ? origin.value : undefined
+  return Option.getOrUndefined(origin)
 }

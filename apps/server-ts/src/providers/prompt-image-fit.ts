@@ -1,7 +1,8 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { IMAGE_MEDIA_TYPE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { createHash } from "node:crypto"
 
 import {
+  CONTENT_BLOCK_TYPE,
   resolveModelCapabilities,
   type ChatMessage,
   type ImageInputLimits,
@@ -154,10 +155,11 @@ const oversized = (
   block: Metadata | ContentBlock,
   limits: ImageInputLimits
 ): { readonly data: string; readonly mediaType: string; readonly size: ImageSize } | undefined => {
-  if (block.type !== "image" || !("data" in block) || !("media_type" in block)) return undefined
+  if (block.type !== CONTENT_BLOCK_TYPE.image || !("data" in block) || !("media_type" in block))
+    return undefined
   const { data, media_type: mediaType } = block
   if (typeof data !== "string" || typeof mediaType !== "string") return undefined
-  const bytes = Buffer.from(mediaType === "image/png" ? data.slice(0, 44) : data, "base64")
+  const bytes = Buffer.from(mediaType === IMAGE_MEDIA_TYPE.png ? data.slice(0, 44) : data, "base64")
   const size = imageSize(bytes, mediaType)
   if (size === undefined) return undefined
   return fitsLimits(
@@ -180,7 +182,7 @@ const fitBlock = async (input: {
   readonly signal?: AbortSignal | undefined
 }): Promise<ReadonlyArray<FittedBlock>> => {
   const resized =
-    input.mediaType === "image/png"
+    input.mediaType === IMAGE_MEDIA_TYPE.png
       ? await input.resize({ data: input.data, limits: input.limits, signal: input.signal })
       : undefined
   const dimensions = `${input.size.width}x${input.size.height}`
@@ -216,7 +218,10 @@ const remember = (cache: ImageCache, digest: string, blocks: ReadonlyArray<Fitte
     [...cache.values()].reduce(
       (total, entries) =>
         total +
-        entries.reduce((sum, entry) => sum + (entry.type === "image" ? entry.data.length : 0), 0),
+        entries.reduce(
+          (sum, entry) => sum + (entry.type === CONTENT_BLOCK_TYPE.image ? entry.data.length : 0),
+          0
+        ),
       0
     )
   while (cache.size > CACHE_ENTRIES || bytes() > CACHE_ENCODED_BYTES) {

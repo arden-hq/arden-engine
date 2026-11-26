@@ -1,4 +1,4 @@
-import { canDenyApprovalByReply } from "@arden-hq/protocol/chat"
+import { DECISION_ROUTE_SOURCE, canDenyApprovalByReply } from "@arden-hq/protocol/chat"
 import { isWrittenByPerson } from "../transcript/model.js"
 import { ChatWriteConflictError } from "../chat/store.js"
 import { makeToolApprovalResolveInTransaction } from "./tool-approval-resolve.js"
@@ -10,6 +10,7 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import type { PersistenceDeps } from "./deps.js"
 import { settleTypedHereInTransaction } from "./focus-thread-events.js"
 import { answerChatTaskQuestionByTypingInTransaction } from "./task-typed-answer.js"
+import { TOOL_APPROVAL_KIND } from "./tool-rows.js"
 
 interface TypedInput {
   readonly approvalReply?: { readonly runId: string; readonly toolId: string }
@@ -72,7 +73,11 @@ const denyApprovalReplyInTransaction = Effect.fn("Chat.denyApprovalReplyInTransa
   WHERE card.run_id = ${address.runId} AND card.tool_call_id = ${address.toolId}
 `
     const card = visible[0]
-    if (card === undefined || card.kind !== "tool_approval" || !canDenyApprovalByReply(card))
+    if (
+      card === undefined ||
+      card.kind !== TOOL_APPROVAL_KIND.approval ||
+      !canDenyApprovalByReply(card)
+    )
       return yield* conflict("The approval shown in this chat is no longer pending")
     if (
       typeof input.message.content !== "string" ||
@@ -80,7 +85,7 @@ const denyApprovalReplyInTransaction = Effect.fn("Chat.denyApprovalReplyInTransa
       !isTypedReply(input)
     )
       return yield* conflict("An approval reply requires the person's typed message")
-    if (card.source === "deferred") {
+    if (card.source === DECISION_ROUTE_SOURCE.deferred) {
       yield* decideDeferred({
         runId: address.runId,
         toolCallId: address.toolId,

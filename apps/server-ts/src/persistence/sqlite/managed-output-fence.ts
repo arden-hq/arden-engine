@@ -1,5 +1,6 @@
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
 import { randomUUID } from "node:crypto"
-import { Effect, Predicate } from "effect"
+import { Effect } from "effect"
 import type { Writer } from "./deps.js"
 
 const active = new Set<string>()
@@ -10,7 +11,7 @@ const ownerAlive = (pid: number): boolean => {
     process.kill(pid, 0)
     return true
   } catch (cause) {
-    return !Predicate.hasProperty(cause, "code") || cause.code !== "ESRCH"
+    return !isErrnoCode(cause, ERRNO.ESRCH)
   }
 }
 

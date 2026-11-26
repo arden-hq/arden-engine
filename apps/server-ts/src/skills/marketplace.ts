@@ -1,10 +1,13 @@
 import type { MarketplaceSkill, SkillInstallReceipt } from "@arden-hq/protocol/skills"
 import { readMarketplaceSkillId } from "@arden-hq/protocol/effect/skills"
-import { Effect, Predicate } from "effect"
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
+import { Effect } from "effect"
+import { type Stats } from "node:fs"
 import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 import { type SkillError, skillError } from "./errors.js"
+import { SKILL_FILE_NAME } from "./names.js"
 import {
   downloadRemoteSkillFile,
   listPopularMarketplace,
@@ -43,19 +46,21 @@ interface DownloadedFile {
   readonly executable: boolean
 }
 
+const PATH_STATUS = { present: "present", missing: "missing" } as const
+
+type PathState =
+  | { readonly kind: typeof PATH_STATUS.present; readonly status: Stats }
+  | { readonly kind: typeof PATH_STATUS.missing }
+
 const pathStatus = Effect.fn("SkillMarketplace.pathStatus")(function* (path: string) {
   return yield* Effect.tryPromise({
     try: () => lstat(path),
     catch: (cause) => cause
   }).pipe(
-    Effect.map((status) => ({ kind: "present" as const, status })),
+    Effect.map((status): PathState => ({ kind: PATH_STATUS.present, status })),
     Effect.catch((cause) => {
-      if (
-        Predicate.hasProperty(cause, "code") &&
-        Predicate.isString(cause.code) &&
-        cause.code === "ENOENT"
-      ) {
-        return Effect.succeed({ kind: "missing" as const })
+      if (isErrnoCode(cause, ERRNO.ENOENT)) {
+        return Effect.succeed<PathState>({ kind: PATH_STATUS.missing })
       }
       return Effect.fail(skillError("install", "storage", "Skill storage is unavailable", cause))
     })
@@ -73,7 +78,7 @@ const install = Effect.fn("SkillMarketplace.install")(function* (
   const skill = yield* resolveRemoteSkill(fetcher, address)
   const target = join(root, skill.name)
   const status = yield* pathStatus(target)
-  if (status.kind === "present") {
+  if (status.kind === PATH_STATUS.present) {
     return yield* skillError("install", "invalid", `Skill ${skill.name} is already installed`)
   }
 
@@ -99,7 +104,7 @@ const install = Effect.fn("SkillMarketplace.install")(function* (
         ),
       { concurrency: 8 }
     )
-    const skillFile = downloaded.find((file) => file.path === "SKILL.md")
+    const skillFile = downloaded.find((file) => file.path === SKILL_FILE_NAME.skill)
     if (skillFile === undefined) {
       return yield* skillError("install", "invalid", "Marketplace skill has no SKILL.md")
     }

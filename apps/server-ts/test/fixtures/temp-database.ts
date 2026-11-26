@@ -20,25 +20,34 @@ export const sqlitePersistenceLayer = (
 ): Layer.Layer<SqlitePersistence, StorageStartupError, PersistenceWriteQueue> =>
   sqliteStoresLayer(options).pipe(Layer.provide(Layer.merge(automationRulesLayer, chatRulesLayer)))
 
-export const withTempDatabase = async <A, E>(
-  body: Effect.Effect<A, E, SqlitePersistence | SqlClient.SqlClient>
+export const withTempDatabaseFile = async <A>(
+  use: (filename: string) => Promise<A>
 ): Promise<A> => {
   const directory = await mkdtemp(join(tmpdir(), "arden-test-db-"))
-  const filename = join(directory, "arden.db")
   try {
-    return await Effect.runPromise(
-      body.pipe(
-        Effect.provide(
-          Layer.merge(
-            sqlitePersistenceLayer({ dataDir: null, filename }).pipe(
-              Layer.provide(PersistenceWriteQueue.layer)
-            ),
-            SqliteClient.layer({ filename })
-          )
-        )
-      )
-    )
+    return await use(join(directory, "arden.db"))
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
 }
+
+export const runTestDatabase = <A, E>(
+  filename: string,
+  body: Effect.Effect<A, E, SqlitePersistence | SqlClient.SqlClient>
+): Promise<A> =>
+  Effect.runPromise(
+    body.pipe(
+      Effect.provide(
+        Layer.merge(
+          sqlitePersistenceLayer({ dataDir: null, filename }).pipe(
+            Layer.provide(PersistenceWriteQueue.layer)
+          ),
+          SqliteClient.layer({ filename })
+        )
+      )
+    )
+  )
+
+export const withTempDatabase = <A, E>(
+  body: Effect.Effect<A, E, SqlitePersistence | SqlClient.SqlClient>
+): Promise<A> => withTempDatabaseFile((filename) => runTestDatabase(filename, body))

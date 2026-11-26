@@ -1,7 +1,9 @@
 import { Clock, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { JobLeaseRef } from "@arden-hq/jobs"
-import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import { isActiveRunStatus, RUN_STATUS } from "@arden-hq/protocol/runs"
+import { AUTOMATION_BLOCKED_KIND } from "../automations/queue.js"
+import { HANDLER_ITEM_KIND, HANDLER_ITEM_PHASE } from "../automations/handler-item.js"
 import { AutomationStoreError } from "../automations/store.js"
 import { AutomationHandlerItems } from "../automations/handler-items.js"
 import {
@@ -67,10 +69,13 @@ const save = Effect.fn("HandlerItem.save")(function* (
   return item
 })
 
+const HANDLER_TRANSITION = { settle: "settle", retry: "retry" } as const
+type HandlerTransition = (typeof HANDLER_TRANSITION)[keyof typeof HANDLER_TRANSITION]
+
 const streakItem = (data: HandlerItemData): string =>
-  data.kind === "memory"
+  data.kind === HANDLER_ITEM_KIND.memory
     ? JSON.stringify([data.batch.identity.sessionId, data.batch.identity.start])
-    : String(data.kind === "daily" ? data.date : data.processedHead)
+    : String(data.kind === HANDLER_ITEM_KIND.daily ? data.date : data.processedHead)
 
 export const makeHandlerItems = ({
   writer,
@@ -92,7 +97,8 @@ export const makeHandlerItems = ({
           const current = yield* load(sql, lease)
           if (current.handler !== rules.itemOwner(valid.data.kind))
             return yield* failure("The handler does not own this item kind")
-          if (current.context.handler_item?.phase === "pending") return current.context.handler_item
+          if (current.context.handler_item?.phase === HANDLER_ITEM_PHASE.pending)
+            return current.context.handler_item
           return yield* save(sql, current, {
             id: yield* nextId,
             attempt: 1,
@@ -116,7 +122,7 @@ export const makeHandlerItems = ({
     )
   )
 
-  const transition = (kind: "settle" | "retry") =>
+  const transition = (kind: HandlerTransition) =>
     Effect.fn("HandlerItem.transition")(
       function* (lease: JobLeaseRef, ref: HandlerItemRef) {
         const valid = yield* Schema.decodeUnknownEffect(HandlerItemRefSchema)(ref)
@@ -125,11 +131,13 @@ export const makeHandlerItems = ({
             const current = yield* load(sql, lease)
             const item = current.context.handler_item
             if (!item || item.id !== valid.id) return yield* failure("The handler item changed")
-            if (kind === "retry" && item.attempt === valid.attempt + 1) return item
+            if (kind === HANDLER_TRANSITION.retry && item.attempt === valid.attempt + 1) return item
             if (item.attempt !== valid.attempt || item.runId === null)
               return yield* failure("The handler execution changed")
-            if (kind === "settle" && item.phase === "settled") return item
-            if (item.phase !== "pending") return yield* failure("The handler item already settled")
+            if (kind === HANDLER_TRANSITION.settle && item.phase === HANDLER_ITEM_PHASE.settled)
+              return item
+            if (item.phase !== HANDLER_ITEM_PHASE.pending)
+              return yield* failure("The handler item already settled")
             const observed = yield* sql<{
               readonly status: string
               readonly blocked_kind: string | null
@@ -142,23 +150,28 @@ export const makeHandlerItems = ({
             const run = observed[0]
             if (!run || isActiveRunStatus(run.status))
               return yield* failure("The handler Run has not finished")
-            if (run.status === "cancelled")
+            if (run.status === RUN_STATUS.cancelled)
               return yield* failure("Cancelled handler work cannot retry or consume evidence")
-            if (kind === "settle")
+            if (kind === HANDLER_TRANSITION.settle)
               return yield* save(sql, current, {
                 ...item,
                 phase: "settled",
                 runId: item.runId,
                 reviewed:
-                  item.reviewed + (run.status === "completed" && run.blocked_kind === null ? 1 : 0),
+                  item.reviewed +
+                  (run.status === RUN_STATUS.completed && run.blocked_kind === null ? 1 : 0),
                 skipped:
-                  item.skipped + (run.status === "completed" && run.blocked_kind === null ? 0 : 1),
+                  item.skipped +
+                  (run.status === RUN_STATUS.completed && run.blocked_kind === null ? 0 : 1),
                 failure:
-                  run.status === "completed" && run.blocked_kind === null
+                  run.status === RUN_STATUS.completed && run.blocked_kind === null
                     ? null
                     : (run.detail ?? `Handler Run ${run.status}`)
               })
-            if (run.status === "completed" && run.blocked_kind !== "transient")
+            if (
+              run.status === RUN_STATUS.completed &&
+              run.blocked_kind !== AUTOMATION_BLOCKED_KIND.transient
+            )
               return yield* failure("Completed handler work cannot be retried")
             if (item.attempt >= MAX_HANDLER_ITEM_ATTEMPTS)
               return yield* failure("Handler execution attempts are exhausted")
@@ -239,7 +252,7 @@ export const bindHandlerItem = Effect.fn("HandlerItem.bind")(function* (
   if (
     !item ||
     options.item === undefined ||
-    item.phase !== "pending" ||
+    item.phase !== HANDLER_ITEM_PHASE.pending ||
     item.runId !== null ||
     item.id !== options.item.id ||
     item.attempt !== options.item.attempt ||
@@ -255,7 +268,7 @@ export const bindHandlerItem = Effect.fn("HandlerItem.bind")(function* (
     runId: options.runId
   })
   yield* save(sql, current, bound)
-  if (bound.input.data.kind === "memory") {
+  if (bound.input.data.kind === HANDLER_ITEM_KIND.memory) {
     const identity = JSON.stringify(bound.input.data.batch.identity)
     yield* sql`UPDATE chat_runs
       SET metadata_json = json_set(metadata_json, '$.memory_capture_batch', json(${identity}))

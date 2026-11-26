@@ -1,5 +1,6 @@
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { after } from "@arden-hq/std/timer"
+import { PLATFORM } from "@arden-hq/std/process"
 import { cutText } from "@arden-hq/std/text"
 import { spawn } from "node:child_process"
 import { access } from "node:fs/promises"
@@ -21,8 +22,20 @@ interface RipgrepRun<A> {
   readonly outputBytes: number
 }
 
+export const FIND_ALL_PATTERN = "*"
+
+const RIPGREP_MATCH_MESSAGE = "match"
+
+export const RIPGREP_REASON = {
+  output_limit: "output_limit",
+  record_limit: "record_limit",
+  timeout: "timeout"
+} as const
+
+type RipgrepReason = (typeof RIPGREP_REASON)[keyof typeof RIPGREP_REASON]
+
 export class RipgrepSearchError extends Error {
-  readonly reason: "output_limit" | "record_limit" | "timeout"
+  readonly reason: RipgrepReason
 
   constructor(reason: RipgrepSearchError["reason"], message: string) {
     super(message)
@@ -45,7 +58,7 @@ export interface RipgrepCountMatch {
 }
 
 const require = createRequire(import.meta.url)
-const binaryName = process.platform === "win32" ? "rg.exe" : "rg"
+const binaryName = process.platform === PLATFORM.windows ? "rg.exe" : "rg"
 const stagedPath = fileURLToPath(new URL(`./bin/${binaryName}`, import.meta.url))
 
 let ripgrepPath: Promise<string> | undefined
@@ -118,7 +131,7 @@ const runRipgrep = async <A>(input: {
         child.kill("SIGKILL")
         fail(
           new RipgrepSearchError(
-            "record_limit",
+            RIPGREP_REASON.record_limit,
             "A ripgrep result record exceeded the safe size limit"
           )
         )
@@ -144,7 +157,7 @@ const runRipgrep = async <A>(input: {
     }
     const timer = after(SEARCH_TIMEOUT_MS, () => {
       child.kill("SIGKILL")
-      fail(new RipgrepSearchError("timeout", "ripgrep timed out after 20 seconds"))
+      fail(new RipgrepSearchError(RIPGREP_REASON.timeout, "ripgrep timed out after 20 seconds"))
     })
 
     if (input.signal.aborted) {
@@ -156,7 +169,12 @@ const runRipgrep = async <A>(input: {
       outputBytes += chunk.byteLength
       if (outputBytes > MAX_OUTPUT_BYTES) {
         child.kill("SIGKILL")
-        fail(new RipgrepSearchError("output_limit", "ripgrep output exceeded the safe size limit"))
+        fail(
+          new RipgrepSearchError(
+            RIPGREP_REASON.output_limit,
+            "ripgrep output exceeded the safe size limit"
+          )
+        )
         return
       }
       pending = Buffer.concat([pending, chunk])
@@ -221,7 +239,7 @@ export const ripgrepFind = (input: {
       "--sort",
       "path",
       ...(input.includeHidden ? ["--hidden"] : []),
-      ...(input.pattern === "*" ? [] : ["--glob", input.pattern]),
+      ...(input.pattern === FIND_ALL_PATTERN ? [] : ["--glob", input.pattern]),
       ...excludeArgs(input.skip),
       "."
     ],
@@ -328,7 +346,7 @@ export const ripgrepSearchContent = (input: {
         value === null ||
         typeof value !== "object" ||
         !("type" in value) ||
-        value.type !== "match"
+        value.type !== RIPGREP_MATCH_MESSAGE
       ) {
         return undefined
       }

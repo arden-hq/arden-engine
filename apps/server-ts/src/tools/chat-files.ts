@@ -2,8 +2,14 @@ import { formatBytes } from "@arden-hq/std/count"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
-import { createSharedFileAccess, fileOwnerSessions, sharedFileServices } from "./shared-files.js"
-import { transcriptFiles, type TranscriptFile } from "./shared-file-sources.js"
+import {
+  createSharedFileAccess,
+  fileOwnerSessions,
+  PREPARED_FILE,
+  sharedFileServices
+} from "./shared-files.js"
+import { TRANSCRIPT_FILE, transcriptFiles, type TranscriptFile } from "./shared-file-sources.js"
+import { VISUALIZATION_KIND } from "@arden-hq/protocol/visualizations"
 import type { SharedFileServices } from "./shared-file-types.js"
 import { toolFailure } from "./tool-failure.js"
 
@@ -16,9 +22,11 @@ type ListedFile = {
   readonly attachment?: number
   readonly sha256?: string
 }
+const CHAT_FILE_ENTRY = { attached: "attached", artifact: "artifact" } as const
+
 type Entry =
-  | { readonly kind: "attached"; readonly source: TranscriptFile }
-  | { readonly kind: "artifact"; readonly file: ListedFile }
+  | { readonly kind: typeof CHAT_FILE_ENTRY.attached; readonly source: TranscriptFile }
+  | { readonly kind: typeof CHAT_FILE_ENTRY.artifact; readonly file: ListedFile }
 
 const makeChatFilesListTool = (services: SharedFileServices): ServerTool => {
   const files = createSharedFileAccess(services)
@@ -73,7 +81,7 @@ const makeChatFilesListTool = (services: SharedFileServices): ServerTool => {
           { signal: ctx.signal }
         )
         for (const artifact of artifacts) {
-          if (seen.has(artifact.ref) || artifact.kind === "html") continue
+          if (seen.has(artifact.ref) || artifact.kind === VISUALIZATION_KIND.html) continue
           seen.add(artifact.ref)
           if (owner === ctx.run.sessionId && attachmentKeys.has(artifact.operation_key ?? ""))
             continue
@@ -91,12 +99,12 @@ const makeChatFilesListTool = (services: SharedFileServices): ServerTool => {
       }
       const page: ListedFile[] = []
       for (const entry of entries.slice(input.offset, input.offset + input.limit)) {
-        if (entry.kind === "artifact") {
+        if (entry.kind === CHAT_FILE_ENTRY.artifact) {
           page.push(entry.file)
           continue
         }
         const source = entry.source
-        if (source.kind === "path") {
+        if (source.kind === TRANSCRIPT_FILE.path) {
           page.push({ name: source.name, path: source.path })
           continue
         }
@@ -107,7 +115,7 @@ const makeChatFilesListTool = (services: SharedFileServices): ServerTool => {
           bytes: Buffer.from(source.data, "base64"),
           mediaType: source.mediaType
         })
-        if (file.kind === "snapshot")
+        if (file.kind === PREPARED_FILE.snapshot)
           page.push({
             name: file.name,
             size: file.size,

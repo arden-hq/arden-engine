@@ -106,4 +106,5 @@ export {
 } from "./retention.js"
 
 export type { StorageFile, StorageFiles } from "./files.js"
+export { STORAGE_FILE_KIND } from "./files.js"
 export type { StorageBackfill, StorageBackfills } from "./backfills.js"

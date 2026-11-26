@@ -1,6 +1,7 @@
 import {
   type Automation,
   type AutomationChange,
+  SYSTEM_AUTOMATION_SETTING,
   type SystemAutomationSetting
 } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
@@ -55,13 +56,13 @@ export const makeAutomationCatalogEdits = ({
         validAutomationId
       )
     switch (setting) {
-      case "triggers":
+      case SYSTEM_AUTOMATION_SETTING.triggers:
         return yield* resetTo({ kind: "triggers", triggers: defaultTriggerInputs(spec.triggers) })
-      case "model":
+      case SYSTEM_AUTOMATION_SETTING.model:
         return yield* resetTo({ kind: "model", model: { kind: "inherited" } })
-      case "prompt":
+      case SYSTEM_AUTOMATION_SETTING.prompt:
         return yield* resetTo({ kind: "prompt", prompt: spec.prompt })
-      case "enabled":
+      case SYSTEM_AUTOMATION_SETTING.enabled:
         return yield* resetTo({ kind: "enabled", enabled: spec.enabled })
     }
   })

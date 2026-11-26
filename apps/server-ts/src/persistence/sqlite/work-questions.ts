@@ -1,3 +1,6 @@
+import { RUN_QUESTION_ANSWER, RUN_QUESTION_STATUS } from "@arden-hq/protocol/runs"
+import { FOCUS_CHOICE_DECISION } from "@arden-hq/protocol/sessions/focus-choices"
+import { STORE_REASON } from "../errors.js"
 import {
   StoredResolveInputSchema,
   StoredRunQuestionContentSchema,
@@ -44,7 +47,9 @@ const focusChoices = [
 
 const namedFocusChoices = (target: FocusChoiceTarget) =>
   focusChoices.map((choice) =>
-    choice.id === "open_target" ? { ...choice, label: focusOpenLabel(target) } : choice
+    choice.id === FOCUS_CHOICE_DECISION.openTarget
+      ? { ...choice, label: focusOpenLabel(target) }
+      : choice
   )
 
 const sameAsked = (
@@ -121,7 +126,7 @@ export const makeWorkQuestionSql = (options: {
     yield* ensureSpaceConversation(spaceId).pipe(
       Effect.mapError((cause) =>
         workError(
-          cause.reason === "not_found" ? "invalid" : "storage",
+          cause.reason === STORE_REASON.not_found ? STORE_REASON.invalid : STORE_REASON.storage,
           "Could not prepare the Space question destination",
           cause
         )
@@ -276,7 +281,7 @@ export const makeWorkQuestionSql = (options: {
           }
           yield* journalQuestionChange(questionId)
           const question = yield* get(questionId)
-          if (question.status !== "open")
+          if (question.status !== RUN_QUESTION_STATUS.open)
             return yield* workError("conflict", "This Task attempt no longer has authority to ask")
           return question
         })
@@ -314,10 +319,10 @@ export const makeWorkQuestionSql = (options: {
             }
             return yield* workError("conflict", "This question already has an answer")
           }
-          if (question.status !== "open")
+          if (question.status !== RUN_QUESTION_STATUS.open)
             return yield* workError("conflict", "This question is no longer actionable")
           const answer = input.answer
-          if (answer.kind === "wait") {
+          if (answer.kind === RUN_QUESTION_ANSWER.wait) {
             if (question.timer === undefined || question.permission_offer !== null)
               return yield* workError("invalid", "This question has no timer to stop")
             yield* sql`UPDATE run_question_timers SET status = 'cancelled' WHERE question_id = ${request.questionId} AND status = 'pending'`
@@ -340,7 +345,8 @@ export const makeWorkQuestionSql = (options: {
             answer,
             now
           })
-          if (answer.kind === "hold") yield* holdQuestionTask({ sql, sessionEvents, question, now })
+          if (answer.kind === RUN_QUESTION_ANSWER.hold)
+            yield* holdQuestionTask({ sql, sessionEvents, question, now })
           if (body !== undefined) {
             yield* enqueueRunDelivery({
               sql,
@@ -390,7 +396,7 @@ export const makeWorkQuestionSql = (options: {
             const question = yield* get(row.question_id)
             const timer = question.timer
             if (timer === undefined) continue
-            if (question.status !== "open" || row.stopped === 1) {
+            if (question.status !== RUN_QUESTION_STATUS.open || row.stopped === 1) {
               yield* sql`UPDATE run_question_timers SET status = 'cancelled' WHERE question_id = ${row.question_id}`
               yield* journalQuestionChange(row.question_id)
               continue

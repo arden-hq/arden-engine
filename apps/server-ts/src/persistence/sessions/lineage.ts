@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 import type { SessionHistoryHeader } from "./model.js"
 import { SessionQueryError, type SessionQueries, type SessionQueryFailure } from "./queries.js"
@@ -28,7 +29,7 @@ export const sessionLineage = Effect.fn("Sessions.lineage")(function* (
       })
     }
     lineage.push(header)
-    next = header.sessionType === "agent" ? header.parentSessionId : null
+    next = header.sessionType === SESSION_TYPE.agent ? header.parentSessionId : null
   }
   return lineage
 })

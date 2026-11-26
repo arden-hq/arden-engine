@@ -5,6 +5,7 @@ import { makeCodexApprovalReview } from "./approval-review.js"
 import type { ApprovalReviewSource, TranscriptionSource } from "../../models/provider.js"
 import { NodeHttpClient } from "@effect/platform-node"
 import {
+  REASONING_EFFORT,
   resolveModelCapabilities,
   type ModelProvider,
   MODEL_PROVIDER_PROTOCOL
@@ -29,6 +30,11 @@ import {
   type OpenAiCredentialSnapshot,
   type OpenAiCredentialSource
 } from "../openai-responses/index.js"
+
+const CATALOG_VISIBILITY = { list: "list" } as const
+type CatalogVisibility = (typeof CATALOG_VISIBILITY)[keyof typeof CATALOG_VISIBILITY]
+const isListed = (visibility: unknown): visibility is CatalogVisibility =>
+  visibility === CATALOG_VISIBILITY.list
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 
@@ -105,7 +111,7 @@ const decodeCatalog = (payload: unknown): ReadonlyArray<CatalogModel> => {
 
   for (const raw of payload.models) {
     if (!Predicate.isObject(raw)) throw new Error("Invalid Codex model catalog entry")
-    if (raw.visibility !== "list") continue
+    if (!isListed(raw.visibility)) continue
     let contextWindow: number | null = null
     if (positiveInt(raw.context_window)) contextWindow = raw.context_window
     else if (positiveInt(raw.max_context_window)) contextWindow = raw.max_context_window
@@ -122,7 +128,9 @@ const decodeCatalog = (payload: unknown): ReadonlyArray<CatalogModel> => {
       .flatMap((level) =>
         Predicate.isObject(level) && nonEmpty(level.effort) ? [level.effort] : []
       )
-      .filter((effort, index, all) => all.indexOf(effort) === index && effort !== "ultra")
+      .filter(
+        (effort, index, all) => all.indexOf(effort) === index && effort !== REASONING_EFFORT.ultra
+      )
     const advertisedDefault =
       nonEmpty(raw.default_reasoning_level) && efforts.includes(raw.default_reasoning_level)
         ? raw.default_reasoning_level

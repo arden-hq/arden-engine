@@ -26,13 +26,15 @@ export interface QueueWriter {
   readonly sessionEvents: SessionLifecycleEvents["Service"]
 }
 
+const QUEUE_PENDING = { add: "add", replace: "replace", merge: "merge" } as const
+
 export interface QueueEntry {
   readonly automationId: string
   readonly source: AutomationQueueSource
   readonly key: string
   readonly context: QueueContext
   readonly dueAt?: number
-  readonly pending: "add" | "replace" | "merge"
+  readonly pending: (typeof QUEUE_PENDING)[keyof typeof QUEUE_PENDING]
   readonly once?: string
 }
 
@@ -136,7 +138,8 @@ export const enqueue = Effect.fn("AutomationQueue.enqueue")(function* (
   const asked = entry.dueAt ?? nowMs
   const dueMs = Math.max(asked, cooldown ?? asked, batchedUntil ?? asked)
   const due = dueMs > nowMs || entry.dueAt !== undefined ? iso(dueMs) : null
-  const written = entry.pending === "add" ? undefined : yield* replacePending(sql, entry, due)
+  const written =
+    entry.pending === QUEUE_PENDING.add ? undefined : yield* replacePending(sql, entry, due)
   if (written === undefined) {
     const context = yield* encodeJson(QueueContextSchema, entry.context)
     yield* sql`
@@ -243,7 +246,7 @@ const replacePending = Effect.fn("AutomationQueue.replacePending")(function* (
   const row = pending[0]
   if (row === undefined) return undefined
   const context =
-    entry.pending === "merge"
+    entry.pending === QUEUE_PENDING.merge
       ? mergedContext(entry, yield* decodeJson(QueueContextSchema, row.context), row.created_at)
       : entry.context
   yield* sql`UPDATE automation_event_queue

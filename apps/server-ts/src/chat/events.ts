@@ -1,3 +1,5 @@
+import { JOURNAL_DELIVERY } from "@arden-hq/journal/effect"
+import { ACTIVE_PROJECTION } from "../persistence/events/active-projection.js"
 import type { SnapshotProjectionEvent } from "@arden-hq/protocol"
 import { HISTORY_WINDOW } from "@arden-hq/protocol/chat"
 import { randomUUID } from "node:crypto"
@@ -131,24 +133,26 @@ interface OpenResumeStreamInput {
   readonly resumeId: string | undefined
 }
 
+const RESUME_READ_KIND = { complete: "complete", overflow: "overflow" } as const
+
 type ResumeProjection =
   | {
-      readonly kind: "complete"
+      readonly kind: typeof RESUME_READ_KIND.complete
       readonly appliedSequence: number
       readonly snapshotData: string
     }
   | {
-      readonly kind: "overflow"
+      readonly kind: typeof RESUME_READ_KIND.overflow
       readonly safeCursor: number
     }
 
 type DurableResumeRange =
   | {
-      readonly kind: "complete"
+      readonly kind: typeof RESUME_READ_KIND.complete
       readonly records: ReadonlyArray<SessionEventRecord>
     }
   | {
-      readonly kind: "overflow"
+      readonly kind: typeof RESUME_READ_KIND.overflow
     }
 
 interface ResumeSnapshotBudget {
@@ -159,14 +163,14 @@ interface ResumeSnapshotBudget {
 
 type ResumeRead =
   | {
-      readonly kind: "overflow"
+      readonly kind: typeof RESUME_READ_KIND.overflow
       readonly result: "active_overflow" | "initial_budget_overflow" | "durable_overflow"
       readonly checkpointSequence: number
       readonly activeEventCount: number
       readonly initialSnapshotBytes: number | undefined
     }
   | {
-      readonly kind: "complete"
+      readonly kind: typeof RESUME_READ_KIND.complete
       readonly history: HistoryRead
       readonly appliedSequence: number
       readonly checkpointSequence: number
@@ -174,7 +178,17 @@ type ResumeRead =
       readonly durable: ReadonlyArray<SessionEventRecord>
     }
 
-type ResumeCoverage = "checked" | "trusted"
+const COVERAGE = { checked: "checked", trusted: "trusted" } as const
+
+const STREAM_DELIVERY = { Event: "Event", Keepalive: "Keepalive" } as const
+
+type StreamTag = (typeof STREAM_DELIVERY)[keyof typeof STREAM_DELIVERY]
+const isKeepalive = <D extends { readonly _tag: StreamTag }>(
+  delivery: D
+): delivery is Extract<D, { readonly _tag: typeof STREAM_DELIVERY.Keepalive }> =>
+  delivery._tag === STREAM_DELIVERY.Keepalive
+
+type ResumeCoverage = (typeof COVERAGE)[keyof typeof COVERAGE]
 
 class ResumeSnapshotStale extends Schema.TaggedError<ResumeSnapshotStale>()("ResumeSnapshotStale", {
   appliedSequence: Schema.Int,
@@ -230,7 +244,7 @@ const openResumeStream = Effect.fn("ChatEventStream.openResume")(function* (
     })
   }
 
-  if (projection.kind === "overflow") {
+  if (projection.kind === ACTIVE_PROJECTION.overflow) {
     return Stream.make(
       overflowEvent(options.input.sessionId, projection.safeCursor, "active_projection")
     )
@@ -277,12 +291,12 @@ const captureResumeProjection = Effect.fn("ChatEventStream.captureResumeProjecti
           totalMs: timer.total(),
           result
         })
-  if (captured.kind === "overflow") {
+  if (captured.kind === RESUME_READ_KIND.overflow) {
     yield* report(captured.result, {
       activeEventCount: captured.activeEventCount,
       initialSnapshotBytes: captured.initialSnapshotBytes
     })
-    return { kind: "overflow", safeCursor: captured.checkpointSequence }
+    return { kind: RESUME_READ_KIND.overflow, safeCursor: captured.checkpointSequence }
   }
 
   const history = yield* input.history.withBudget(captured.history)
@@ -300,14 +314,18 @@ const captureResumeProjection = Effect.fn("ChatEventStream.captureResumeProjecti
     encoded.bytes > RESUME_SNAPSHOT_CAPACITY_BYTES
   ) {
     yield* report("final_budget_overflow", { activeEventCount: activeEvents.length })
-    return { kind: "overflow", safeCursor: captured.checkpointSequence }
+    return { kind: RESUME_READ_KIND.overflow, safeCursor: captured.checkpointSequence }
   }
   yield* report("complete", {
     finalProjectionMs: timer?.mark("resume_final_projection"),
     activeEventCount: activeEvents.length,
     finalSnapshotBytes: encoded.bytes
   })
-  return { kind: "complete", appliedSequence: captured.appliedSequence, snapshotData: encoded.data }
+  return {
+    kind: RESUME_READ_KIND.complete,
+    appliedSequence: captured.appliedSequence,
+    snapshotData: encoded.data
+  }
 })
 
 const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
@@ -334,7 +352,7 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
   })
   timer?.mark("resume_active_projection")
   if (
-    input.coverage === "checked" &&
+    input.coverage === COVERAGE.checked &&
     !projectionCoversSnapshot(active, { appliedSequence, checkpointSequence })
   ) {
     return yield* new ResumeSnapshotStale({
@@ -344,9 +362,9 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
       trimFloor: active.trimFloor
     })
   }
-  if (active.kind === "overflow") {
+  if (active.kind === ACTIVE_PROJECTION.overflow) {
     return {
-      kind: "overflow",
+      kind: RESUME_READ_KIND.overflow,
       result: "active_overflow",
       checkpointSequence,
       activeEventCount: 0,
@@ -362,7 +380,7 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
     initialBytes > RESUME_SNAPSHOT_CAPACITY_BYTES
   ) {
     return {
-      kind: "overflow",
+      kind: RESUME_READ_KIND.overflow,
       result: "initial_budget_overflow",
       checkpointSequence,
       activeEventCount: active.records.length,
@@ -382,9 +400,9 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
     }
   })
   timer?.mark("resume_durable_range")
-  if (durable.kind === "overflow") {
+  if (durable.kind === RESUME_READ_KIND.overflow) {
     return {
-      kind: "overflow",
+      kind: RESUME_READ_KIND.overflow,
       result: "durable_overflow",
       checkpointSequence,
       activeEventCount: active.records.length,
@@ -392,7 +410,7 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
     }
   }
   return {
-    kind: "complete",
+    kind: RESUME_READ_KIND.complete,
     history: { history, budget: loaded.budget },
     appliedSequence,
     checkpointSequence,
@@ -422,7 +440,7 @@ const readDurableRange = Effect.fn("ChatEventStream.readDurableRange")(function*
         capacityBytes: RESUME_SNAPSHOT_CAPACITY_BYTES - bytes
       })
       .pipe(Effect.catchTag("ChatEventPageOverflow", () => Effect.succeed(undefined)))
-    if (page === undefined) return { kind: "overflow" }
+    if (page === undefined) return { kind: RESUME_READ_KIND.overflow }
     for (const record of page.records) {
       if (input.budget.occupiedSequences.has(record.sequence)) continue
       const projected = eventRecordToProjectionEvent(record)
@@ -431,7 +449,7 @@ const readDurableRange = Effect.fn("ChatEventStream.readDurableRange")(function*
         eventCount + 1 > RESUME_SNAPSHOT_CAPACITY_EVENTS ||
         nextBytes > RESUME_SNAPSHOT_CAPACITY_BYTES
       ) {
-        return { kind: "overflow" }
+        return { kind: RESUME_READ_KIND.overflow }
       }
       records.push(record)
       bytes = nextBytes
@@ -444,7 +462,7 @@ const readDurableRange = Effect.fn("ChatEventStream.readDurableRange")(function*
     }
     cursor = next
   }
-  return { kind: "complete", records }
+  return { kind: RESUME_READ_KIND.complete, records }
 })
 
 const eventRecordToProjectionEvent = (record: SessionEventRecord): SnapshotProjectionEvent => ({
@@ -458,7 +476,7 @@ const resumeDeliveryToSse = (
   sessionId: string,
   appliedSequence: number
 ): Result.Result<SseEvent, void> => {
-  if (delivery.kind === "record") {
+  if (delivery.kind === JOURNAL_DELIVERY.record) {
     return delivery.record.sequence <= appliedSequence
       ? Result.fail(undefined)
       : Result.succeed(eventRecordToSse(delivery.record, delivery.replayed))
@@ -482,14 +500,14 @@ export const withKeepalives = <E>(
     Ref.make(initialSequence).pipe(
       Effect.map((lastSequence) =>
         Stream.merge(
-          source.pipe(Stream.map((event) => ({ _tag: "Event" as const, event }))),
+          source.pipe(Stream.map((event) => ({ _tag: STREAM_DELIVERY.Event, event }))),
           Stream.fromSchedule(Schedule.spaced(interval)).pipe(
-            Stream.map(() => ({ _tag: "Keepalive" as const }))
+            Stream.map(() => ({ _tag: STREAM_DELIVERY.Keepalive }))
           ),
           { haltStrategy: "left" }
         ).pipe(
           Stream.mapEffect((delivery) => {
-            if (delivery._tag === "Keepalive") {
+            if (isKeepalive(delivery)) {
               return Ref.get(lastSequence).pipe(
                 Effect.map((sequence) => keepaliveEvent(sessionId, sequence))
               )

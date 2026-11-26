@@ -1,3 +1,4 @@
+import { RUN_STATUS } from "@arden-hq/protocol/runs"
 import { RETENTION } from "@arden-hq/protocol/storage"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect } from "effect"
@@ -55,7 +56,7 @@ const loadResult = Effect.fn("SqliteAgentRetention.loadResult")(function* (
   sql: SqlClient.SqlClient,
   row: RetainedRunRow
 ) {
-  if (row.status !== "completed") return null
+  if (row.status !== RUN_STATUS.completed) return null
   const messages = yield* sql<ResultMessageRow>`
     SELECT seq, message_json
     FROM session_messages

@@ -1,3 +1,4 @@
+import { AUTOMATION_RUN_SKIP_REASON } from "@arden-hq/protocol/automations"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { StoredAutomationRunSkip } from "../automations/store.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
@@ -9,7 +10,7 @@ export const skipEnd = (
   readonly result: "Run only if said no to this event; no run started."
 } => {
   switch (skip.reason) {
-    case "prefilter":
+    case AUTOMATION_RUN_SKIP_REASON.prefilter:
       return {
         outcome: "skipped:prefilter",
         result: "Run only if said no to this event; no run started."

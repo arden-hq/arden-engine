@@ -1,5 +1,5 @@
 import { after } from "@arden-hq/std/timer"
-import { makeToolOutputStream, type ToolOutputFrame } from "./output-stream.js"
+import { makeToolOutputStream, OUTPUT_STREAM, type ToolOutputFrame } from "./output-stream.js"
 import { BoundedCapture } from "./bash-capture.js"
 import {
   sandboxDenialNote,
@@ -11,7 +11,12 @@ import {
 } from "./shell-invocation.js"
 import { BUBBLEWRAP_PATH, bubblewrapFailure } from "../runtime/command-sandbox.js"
 import type { LocalPathPolicy } from "../storage/local-paths.js"
-import { spawnLiveProcess, type LiveProcess, type ProcessInput } from "../terminals/live-process.js"
+import {
+  PROCESS_EXIT,
+  spawnLiveProcess,
+  type LiveProcess,
+  type ProcessInput
+} from "../terminals/live-process.js"
 import { toolFault, toolRefusal } from "./tool-failure.js"
 
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
@@ -27,8 +32,10 @@ export class CommandInterrupted extends Error {
   }
 }
 
+export const COMMAND_STATE = { exited: "exited", running: "running" } as const
+
 export interface CommandExited {
-  readonly state: "exited"
+  readonly state: typeof COMMAND_STATE.exited
   readonly output: string
   readonly exitCode: number
   readonly stdoutBytes: number
@@ -38,7 +45,7 @@ export interface CommandExited {
 }
 
 export interface CommandRunning {
-  readonly state: "running"
+  readonly state: typeof COMMAND_STATE.running
   readonly output: string
 }
 
@@ -102,12 +109,12 @@ export const runCommandUntil = (
     const onAbort = (): void =>
       uncertain("The command was cancelled after it started; its side effects may have landed.")
     const timer = after(options.yieldMs, () =>
-      finish(() => resolve({ state: "running", output: formatOutput(stdout, stderr) }))
+      finish(() => resolve({ state: COMMAND_STATE.running, output: formatOutput(stdout, stderr) }))
     )
 
     signal.addEventListener("abort", onAbort, { once: true })
     const stopData = child.onData((stream, chunk) => {
-      ;(stream === "stdout" ? stdout : stderr).append(chunk)
+      ;(stream === OUTPUT_STREAM.stdout ? stdout : stderr).append(chunk)
       if (options.captureFullOutput) full.append(chunk)
       live?.write(stream, chunk)
     })
@@ -123,7 +130,7 @@ export const runCommandUntil = (
     )
     const stopExit = child.onExit((exit) =>
       finish(() => {
-        if (exit.kind === "signal") {
+        if (exit.kind === PROCESS_EXIT.signal) {
           reject(new Error(`The shell stopped unexpectedly (${exit.signal}).`))
           return
         }
@@ -146,7 +153,7 @@ export const runCommandUntil = (
           return
         }
         resolve({
-          state: "exited",
+          state: COMMAND_STATE.exited,
           output: output || "(no output)",
           exitCode: exit.code,
           stdoutBytes: stdout.totalBytes,

@@ -6,12 +6,14 @@ import { revokeAutomationWork } from "./automation-authority.js"
 import { dropMeasuredRows } from "./automation-trigger-arming.js"
 import { freshRow } from "./automation-enqueue.js"
 
-export type AutomationHalt = "pause" | "hold" | "stop"
+const AUTOMATION_HALT = { pause: "pause", hold: "hold", stop: "stop" } as const
+
+export type AutomationHalt = (typeof AUTOMATION_HALT)[keyof typeof AUTOMATION_HALT]
 
 const DROPS: Readonly<Record<AutomationHalt, ReadonlyArray<AutomationQueueSource>>> = {
-  pause: ["scheduled", "wake"],
-  hold: [],
-  stop: ["scheduled", "wake", "event", "idle", "count", "manual"]
+  [AUTOMATION_HALT.pause]: ["scheduled", "wake"],
+  [AUTOMATION_HALT.hold]: [],
+  [AUTOMATION_HALT.stop]: ["scheduled", "wake", "event", "idle", "count", "manual"]
 }
 
 export const haltAutomation = Effect.fn("AutomationHalt.halt")(function* (options: {
@@ -23,7 +25,7 @@ export const haltAutomation = Effect.fn("AutomationHalt.halt")(function* (option
 }) {
   const { sql, automationId, halt } = options
   const pausedAt =
-    halt === "pause"
+    halt === AUTOMATION_HALT.pause
       ? sql`COALESCE(paused_at, ${DateTime.formatIso(yield* DateTime.now)})`
       : sql`NULL`
   yield* sql`UPDATE scheduled_tasks
@@ -40,7 +42,7 @@ export const haltWork = Effect.fn("AutomationHalt.haltWork")(function* (options:
   readonly settlingRunId?: string | undefined
 }) {
   const { sql, automationId, halt } = options
-  if (halt !== "hold")
+  if (halt !== AUTOMATION_HALT.hold)
     yield* revokeAutomationWork({
       sql,
       sessionEvents: options.sessionEvents,
@@ -48,7 +50,7 @@ export const haltWork = Effect.fn("AutomationHalt.haltWork")(function* (options:
       settlingRunId: options.settlingRunId
     })
   const drops = DROPS[halt]
-  if (halt === "pause") yield* dropMeasuredRows(sql, automationId)
+  if (halt === AUTOMATION_HALT.pause) yield* dropMeasuredRows(sql, automationId)
   if (drops.length === 0) return
   if (drops.includes("manual")) {
     const at = DateTime.formatIso(yield* DateTime.now)

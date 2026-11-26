@@ -8,6 +8,7 @@ import type {
   SpaceStoreError
 } from "../persistence/spaces/store.js"
 import {
+  PAGE_KIND,
   DIRECTORY_CONTRACT_HEADINGS,
   directorySections,
   pageKind,
@@ -20,6 +21,7 @@ import type { WikiChangeWriter, WikiChanges, WikiPlan } from "./page-change.js"
 import { formatWikiPage, namesTakenAt, parseWikiPage, takesName } from "./page.js"
 import { nameTakenBy, type Snapshot } from "./snapshot.js"
 import {
+  SPACE_PAGE_PLAN,
   activeSpaceBindings,
   bindingOwnsPath,
   freeSpacePage,
@@ -31,15 +33,22 @@ import type { CreateSpaceInput } from "@arden-hq/protocol/spaces"
 import type { MutationOperationIdentity } from "../persistence/tools/mutation-receipt.js"
 import type { WikiMutationMethods } from "./mutations.js"
 
+const SPACE_PAGE_HOME = { projects: "projects", areas: "areas" } as const
+
 export interface WikiSpacePageInput {
   readonly spaceId: string
-  readonly home?: "projects" | "areas"
+  readonly home?: (typeof SPACE_PAGE_HOME)[keyof typeof SPACE_PAGE_HOME]
 }
 
+export const SPACE_PAGE_ENSURED = { kept: "kept", rebound: "rebound", created: "created" } as const
+
 export type SpacePageEnsured =
-  | { readonly kind: "kept" | "rebound"; readonly space: PersistedSpace }
   | {
-      readonly kind: "created"
+      readonly kind: typeof SPACE_PAGE_ENSURED.kept | typeof SPACE_PAGE_ENSURED.rebound
+      readonly space: PersistedSpace
+    }
+  | {
+      readonly kind: typeof SPACE_PAGE_ENSURED.created
       readonly space: PersistedSpace
       readonly created: { readonly pageId: string; readonly path: string }
     }
@@ -67,30 +76,33 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
   const { value: plan } = yield* changes.change(
     spacePageWriter(space.space_id, "create"),
     Effect.fn("Wiki.planSpacePage")(function* (current): Effect.fn.Return<
-      WikiPlan<{ readonly kind: "create" | "keep" | "rebind"; readonly page: FreeSpacePage }>,
+      WikiPlan<{
+        readonly kind: (typeof SPACE_PAGE_PLAN)[keyof typeof SPACE_PAGE_PLAN]
+        readonly page: FreeSpacePage
+      }>,
       WikiError
     > {
       const others = (yield* activeSpaceBindings(spaces).pipe(
         Effect.mapError(storageError("Could not read the Spaces' Memory pages"))
       )).filter((binding) => binding.space_id !== space.space_id)
       const plan = planSpacePage(current.pages, space, others)
-      return plan.kind === "create"
+      return plan.kind === SPACE_PAGE_PLAN.create
         ? yield* createSpacePage(current, others, {
             title: space.name,
-            home: input.home ?? "areas"
+            home: input.home ?? SPACE_PAGE_HOME.areas
           })
         : { writes: [], value: plan }
     })
   )
-  if (plan.kind === "keep") return { kind: "kept", space }
+  if (plan.kind === SPACE_PAGE_PLAN.keep) return { kind: SPACE_PAGE_ENSURED.kept, space }
   const bound = yield* spaces
     .bindPage(space.space_id, plan.page)
     .pipe(Effect.mapError(storageError("Could not bind the Space's page")))
   if (bound === null) return undefined
-  return plan.kind === "rebind"
+  return plan.kind === SPACE_PAGE_PLAN.rebind
     ? { kind: "rebound", space: bound }
     : {
-        kind: "created",
+        kind: SPACE_PAGE_ENSURED.created,
         space: bound,
         created: { pageId: plan.page.pageId, path: plan.page.pagePath }
       }
@@ -122,11 +134,17 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   const plan = yield* changes.preview(spacePageWriter(spaceId, "restore"), (current) =>
     Effect.succeed({ writes: [], value: planSpacePage(current.pages, space, bindings) })
   )
-  if (plan.kind !== "create") {
+  if (plan.kind !== SPACE_PAGE_PLAN.create) {
     const restored = yield* spaces.restore(spaceId, plan.page)
     return restored === null
       ? null
-      : { kind: plan.kind === "keep" ? "kept" : "rebound", space: restored }
+      : {
+          kind:
+            plan.kind === SPACE_PAGE_PLAN.keep
+              ? SPACE_PAGE_ENSURED.kept
+              : SPACE_PAGE_ENSURED.rebound,
+          space: restored
+        }
   }
   const restored = yield* spaces.restore(spaceId, null)
   if (restored === null) return null
@@ -143,7 +161,10 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
 const createSpacePage = Effect.fn("Wiki.createSpacePage")(function* (
   current: Snapshot,
   others: ReadonlyArray<SpaceBinding>,
-  input: { readonly title: string; readonly home: "projects" | "areas" }
+  input: {
+    readonly title: string
+    readonly home: (typeof SPACE_PAGE_HOME)[keyof typeof SPACE_PAGE_HOME]
+  }
 ): Effect.fn.Return<
   WikiPlan<{ readonly kind: "create"; readonly page: FreeSpacePage }>,
   WikiError
@@ -164,7 +185,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePage")(function* (
   if (
     conflictingDirectory ||
     spaceOwned ||
-    pageKind(recordFolders(current.wholeSet), directoryPath).kind !== "knowledge" ||
+    pageKind(recordFolders(current.wholeSet), directoryPath).kind !== PAGE_KIND.knowledge ||
     (directory !== undefined &&
       (directory.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active ||
         DIRECTORY_CONTRACT_HEADINGS.some((heading) => !sections?.get(heading))))
@@ -189,16 +210,16 @@ const createSpacePage = Effect.fn("Wiki.createSpacePage")(function* (
   const directoryId = randomUUID()
   const directoryContent = formatWikiPage({
     pageId: directoryId,
-    title: home === "areas" ? "Areas" : "Projects",
+    title: home === SPACE_PAGE_HOME.areas ? "Areas" : "Projects",
     aliases: [],
     lifecycle: "active",
     redirectTo: null,
     metadata: {},
-    body: `# ${home === "areas" ? "Areas" : "Projects"}
+    body: `# ${home === SPACE_PAGE_HOME.areas ? "Areas" : "Projects"}
 
 ## Purpose
 
-${home === "areas" ? "Ongoing responsibilities, practices and Space context." : "Finite outcomes and their specific context, decisions and state."}
+${home === SPACE_PAGE_HOME.areas ? "Ongoing responsibilities, practices and Space context." : "Finite outcomes and their specific context, decisions and state."}
 
 ## Producers
 

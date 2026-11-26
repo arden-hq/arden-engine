@@ -1,3 +1,4 @@
+import { OBSERVED_RUN } from "../../persistence/automations/queue.js"
 import { Effect } from "effect"
 import type { ChatMessage } from "../../chat/message.js"
 import { AutomationId } from "../../persistence/automations/model.js"
@@ -51,7 +52,7 @@ const makeChatSummariesRunner = (services: {
     })
     const runId = observed.runId
     const run = { chatRunId: runId, chatSessionId: sessionId }
-    if (observed.status !== "completed")
+    if (observed.status !== OBSERVED_RUN.completed)
       return jobResult.failed(observed.error, observed.result, run)
     const saved = yield* services.summaries.chat(fork.sourceSessionId)
     if (saved?.runId !== runId) {

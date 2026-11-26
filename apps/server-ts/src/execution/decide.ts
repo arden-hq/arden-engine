@@ -82,7 +82,7 @@ const TARGET = {
 const SPACE_WORK_OP = { create: "create", change: "change" } as const
 type SpaceWorkOp = (typeof SPACE_WORK_OP)[keyof typeof SPACE_WORK_OP]
 
-const CHAT_BROWSE_SCOPE = { space: "space", allSpaces: "all_spaces" } as const
+export const CHAT_BROWSE_SCOPE = { space: "space", allSpaces: "all_spaces" } as const
 type ChatBrowseScope = (typeof CHAT_BROWSE_SCOPE)[keyof typeof CHAT_BROWSE_SCOPE]
 
 const CHAT_VERB = { message: "message", change: "change", open: "open" } as const
@@ -116,23 +116,43 @@ export type Path =
 const ASK_USER: Path = { kind: PATH.askUser }
 const REPORT: Path = { kind: PATH.report }
 
-export type DenyRule =
-  | "revoked"
-  | "settling"
-  | "user_deny"
-  | "floor"
-  | "reach"
-  | "boundary"
-  | "read_only"
+const DENY_RULE = {
+  revoked: "revoked",
+  settling: "settling",
+  userDeny: "user_deny",
+  floor: "floor",
+  reach: "reach",
+  boundary: "boundary",
+  readOnly: "read_only"
+} as const
 
-export type AskReason =
-  | "always_ask"
-  | "standing"
-  | "boundary"
-  | "override"
-  | "requirement"
-  | "locked"
-  | "default"
+export type DenyRule = (typeof DENY_RULE)[keyof typeof DENY_RULE]
+
+export const ASK_REASON = {
+  alwaysAsk: "always_ask",
+  standing: "standing",
+  boundary: "boundary",
+  override: "override",
+  requirement: "requirement",
+  locked: "locked",
+  default: "default"
+} as const
+
+export type AskReason = (typeof ASK_REASON)[keyof typeof ASK_REASON]
+
+export const ASK_DELIVERY = { pause: "pause", chat: "chat", refuse: "refuse" } as const
+
+type AskDelivery = (typeof ASK_DELIVERY)[keyof typeof ASK_DELIVERY]
+
+export const ALLOW_BY = {
+  rule: "rule",
+  mode: "mode",
+  grant: "grant",
+  user: "user",
+  default: "default"
+} as const
+
+type AllowBy = (typeof ALLOW_BY)[keyof typeof ALLOW_BY]
 
 export const VERDICT = { allow: "allow", ask: "ask", deny: "deny" } as const
 export type Verdict = (typeof VERDICT)[keyof typeof VERDICT]
@@ -140,14 +160,14 @@ export type Verdict = (typeof VERDICT)[keyof typeof VERDICT]
 export type Decision =
   | {
       readonly kind: typeof VERDICT.allow
-      readonly by: "rule" | "mode" | "grant" | "user" | "default"
+      readonly by: AllowBy
     }
   | {
       readonly kind: typeof VERDICT.ask
       readonly reason: AskReason
       readonly presentation: {
         readonly helper: boolean
-        readonly delivery: "pause" | "chat" | "refuse"
+        readonly delivery: AskDelivery
       }
     }
   | {
@@ -343,9 +363,12 @@ export const decide = (authority: RunAuthority, live: LiveSettings, call: CallFa
   }
 }
 
-const delivery = (authority: RunAuthority, call: CallFacts): "pause" | "chat" | "refuse" => {
-  if (authority.unattended) return call.tool.refuse_unattended ? "refuse" : "chat"
-  return authority.actor.kind === ACTOR.agent && !call.tool.refuse_unattended ? "chat" : "pause"
+const delivery = (authority: RunAuthority, call: CallFacts): AskDelivery => {
+  if (authority.unattended)
+    return call.tool.refuse_unattended ? ASK_DELIVERY.refuse : ASK_DELIVERY.chat
+  return authority.actor.kind === ACTOR.agent && !call.tool.refuse_unattended
+    ? ASK_DELIVERY.chat
+    : ASK_DELIVERY.pause
 }
 
 const settledByImpact = (mode: ApprovalMode, impact: CallImpact): boolean =>
@@ -359,11 +382,13 @@ export const waivesRequirement = (
   tool: { readonly approval_bypass?: boolean; readonly always_ask?: boolean }
 ): boolean => skipsCards(mode) && tool.approval_bypass === true && tool.always_ask !== true
 
-export type PersonCardOutcome = "ask" | "never_ask" | "read_only"
+export const PERSON_CARD = { ask: "ask", neverAsk: "never_ask", readOnly: "read_only" } as const
+
+type PersonCardOutcome = (typeof PERSON_CARD)[keyof typeof PERSON_CARD]
 
 export const personCard = (mode: ApprovalMode): PersonCardOutcome => {
-  if (mode === APPROVAL_MODE.readOnly) return "read_only"
-  return skipsCards(mode) ? "never_ask" : "ask"
+  if (mode === APPROVAL_MODE.readOnly) return PERSON_CARD.readOnly
+  return skipsCards(mode) ? PERSON_CARD.neverAsk : PERSON_CARD.ask
 }
 
 export const boundaryReach = (
@@ -405,7 +430,9 @@ export const refusalPath = (actor: Actor): ReadonlyArray<Path> => {
   }
 }
 
-type WorkReach = "full" | "job" | "delegate"
+export const WORK_REACH = { full: "full", job: "job", delegate: "delegate" } as const
+
+type WorkReach = (typeof WORK_REACH)[keyof typeof WORK_REACH]
 
 export type BoundaryVerdict =
   | { readonly kind: typeof VERDICT.allow; readonly reach: WorkReach | undefined }
@@ -438,7 +465,7 @@ const namesAnotherSpace = (input: BoundaryInput<typeof TARGET.spaceWork>): boole
 const personReachesEverySpace: BoundaryRule<typeof TARGET.spaceWork> = {
   name: "person_reaches_every_space",
   answer: ({ authority }) =>
-    actsAsPerson(authority.actor) ? { kind: VERDICT.allow, reach: "full" } : undefined
+    actsAsPerson(authority.actor) ? { kind: VERDICT.allow, reach: WORK_REACH.full } : undefined
 }
 
 const unrecordedOnlyReports: BoundaryRule<typeof TARGET.spaceWork> = {
@@ -459,7 +486,7 @@ const personsAgentKeepsGrantedSpace: BoundaryRule<typeof TARGET.spaceWork> = {
     if (rootOf(input.authority.actor) !== ACTOR.person) return undefined
     return namesAnotherSpace(input)
       ? deniedTo([REPORT])
-      : { kind: VERDICT.allow, reach: "delegate" }
+      : { kind: VERDICT.allow, reach: WORK_REACH.delegate }
   }
 }
 
@@ -479,7 +506,7 @@ const SPACE_WORK_RULES: ReadonlyArray<BoundaryRule<typeof TARGET.spaceWork>> = [
   jobKeepsToOwnSpace
 ]
 
-const JOB_REACH: BoundaryVerdict = { kind: VERDICT.allow, reach: "job" }
+const JOB_REACH: BoundaryVerdict = { kind: VERDICT.allow, reach: WORK_REACH.job }
 
 const personOnlyControl = (authority: RunAuthority): BoundaryVerdict =>
   actsAsPerson(authority.actor) ? ALLOW : deniedTo([ASK_USER])

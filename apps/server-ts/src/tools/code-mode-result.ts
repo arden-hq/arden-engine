@@ -9,12 +9,16 @@ export const bodyFields = (
   return json === undefined ? { text } : { text, json }
 }
 
+const JSON_OBJECT_START = "{"
+const JSON_ARRAY_START = "["
+
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 const parseJsonBody = (text: string, declaredJson: boolean): Schema.Json | undefined => {
   const trimmed = text.trim()
   if (trimmed === "") return undefined
-  if (!declaredJson && trimmed[0] !== "{" && trimmed[0] !== "[") return undefined
+  if (!declaredJson && trimmed[0] !== JSON_OBJECT_START && trimmed[0] !== JSON_ARRAY_START)
+    return undefined
   return Option.getOrUndefined(decodeJson(trimmed))
 }
 

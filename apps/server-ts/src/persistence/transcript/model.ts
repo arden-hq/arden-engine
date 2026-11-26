@@ -5,6 +5,11 @@ import { JsonObjectSchema } from "../json.js"
 
 export const TRANSCRIPT_RESULT_PREVIEW_CHARS = 240
 
+export const COMPACTION_KIND = { sessionHandoff: "session_handoff" } as const
+
+export const isSessionHandoff = (kind: unknown): kind is typeof COMPACTION_KIND.sessionHandoff =>
+  kind === COMPACTION_KIND.sessionHandoff
+
 export const SESSION_HANDOFF_MARKER = "[Session State Handoff]"
 
 const UniqueNonEmptyStringsSchema = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique())
@@ -49,28 +54,38 @@ export const StoredMessageEnvelopeSchema = Schema.StructWithRest(
 
 export type StoredMessageEnvelope = (typeof StoredMessageEnvelopeSchema)["Type"]
 
-export type MessageAuthor = "owner" | "answer" | "copy" | "automation" | "agent" | "app" | "unknown"
+export const MESSAGE_AUTHOR = {
+  owner: "owner",
+  answer: "answer",
+  copy: "copy",
+  automation: "automation",
+  agent: "agent",
+  app: "app",
+  unknown: "unknown"
+} as const
+
+export type MessageAuthor = (typeof MESSAGE_AUTHOR)[keyof typeof MESSAGE_AUTHOR]
 
 export const messageAuthor = (message: Readonly<Record<string, unknown>>): MessageAuthor | null => {
   if (message.role !== ROLE.user && message.role !== ROLE.interaction) return null
-  if (message.forked_from !== undefined) return "copy"
+  if (message.forked_from !== undefined) return MESSAGE_AUTHOR.copy
   if (message.role === ROLE.user) {
-    if (message.sent_from !== undefined) return "agent"
-    return message.question_answer === undefined ? "owner" : "answer"
+    if (message.sent_from !== undefined) return MESSAGE_AUTHOR.agent
+    return message.question_answer === undefined ? MESSAGE_AUTHOR.owner : MESSAGE_AUTHOR.answer
   }
   const from = message.from
-  if (!isRecord(from)) return "unknown"
+  if (!isRecord(from)) return MESSAGE_AUTHOR.unknown
   switch (from.source) {
     case INTERACTION_SOURCE.automation:
-      return "automation"
+      return MESSAGE_AUTHOR.automation
     case INTERACTION_SOURCE.harness:
-      return "app"
+      return MESSAGE_AUTHOR.app
     case INTERACTION_SOURCE.agent:
     case INTERACTION_SOURCE.workflow:
     case INTERACTION_SOURCE.tool:
-      return "agent"
+      return MESSAGE_AUTHOR.agent
     default:
-      return "unknown"
+      return MESSAGE_AUTHOR.unknown
   }
 }
 
@@ -194,7 +209,7 @@ export const TranscriptMessageDraftSchema = TranscriptMessageDraftFields.check(
           issues.push({ path: ["envelope", "compaction"], issue: "must match the receipt" })
         }
       }
-    } else if (encodedReceipt?.kind === "session_handoff") {
+    } else if (isSessionHandoff(encodedReceipt?.kind)) {
       issues.push({ path: ["compaction"], issue: "is required for a session handoff" })
     }
     return issues

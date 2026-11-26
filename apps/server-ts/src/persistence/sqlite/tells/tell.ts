@@ -1,3 +1,4 @@
+import { TASK_PROPOSAL_STATUS } from "@arden-hq/protocol/proposals"
 import { SESSION_NAME } from "@arden-hq/protocol/chat"
 import type { ChatProjectionEvent, EntityKind } from "@arden-hq/protocol"
 import { entityTarget, taskSpace } from "../event-links.js"
@@ -9,7 +10,7 @@ import { toldKey, UnitOfWork } from "../../unit-of-work.js"
 import { makeShownAsks } from "../shown-asks.js"
 import { drainTouches, scopedSource, scopeKind, type Touch } from "./capture.js"
 import { tellInOwnSavepoint } from "./savepoint.js"
-import type { TellKind } from "./tables.js"
+import { TASK_ATTACHMENT_TABLE, TASK_COMMENT_TABLE, type TellKind } from "./tables.js"
 
 interface TellContext {
   readonly sql: SqlClient.SqlClient
@@ -93,7 +94,7 @@ const tellTask = Effect.fn("Tells.task")(function* (context: TellContext, row: T
   const [current, ...left] = task === undefined ? [...row.scopes] : [task.space_id, ...row.scopes]
   if (current === undefined) return
   const comment = [...row.sources].every(
-    (source) => source === "space_task_comments" || source === "space_task_attachments"
+    (source) => source === TASK_COMMENT_TABLE || source === TASK_ATTACHMENT_TABLE
   )
   yield* context.sessionEvents.appendEventInTransaction({
     type: "work_changed",
@@ -118,7 +119,8 @@ const tellProposal = Effect.fn("Tells.proposal")(function* (context: TellContext
     space_id: proposal.space_id,
     proposal_id: id,
     revision: proposal.revision,
-    status: proposal.status === "held" ? "offered" : proposal.status
+    status:
+      proposal.status === TASK_PROPOSAL_STATUS.held ? TASK_PROPOSAL_STATUS.offered : proposal.status
   })
 })
 

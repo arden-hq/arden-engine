@@ -17,7 +17,13 @@ import {
   type MacCalendarRecord,
   type MacEventRecord
 } from "./mac-apps-records.js"
-import type { EventCreateSchema, EventDeleteSchema, EventEditSchema } from "./mac-apps-schemas.js"
+import {
+  MAC_SPAN,
+  type EventCreateSchema,
+  type EventDeleteSchema,
+  type EventEditSchema,
+  type MacSpan
+} from "./mac-apps-schemas.js"
 import { toolRefusal } from "./tool-failure.js"
 
 type Field = { readonly label: string; readonly value: string; readonly from?: string }
@@ -29,7 +35,9 @@ export const readEvent = async (
 ): Promise<MacEventRecord> =>
   record(EventRecordSchema, await helper.run(["calendar", "get", eventRef], { signal }))
 
-type Place = "calendar" | "list"
+const MAC_PLACE = { calendar: "calendar", list: "list" } as const
+
+type Place = (typeof MAC_PLACE)[keyof typeof MAC_PLACE]
 const LISTING = { calendar: "mac_calendar_list_calendars", list: "mac_reminders_list_lists" }
 
 const places = async (
@@ -39,7 +47,7 @@ const places = async (
 ): Promise<ReadonlyArray<MacCalendarRecord>> =>
   record(
     CalendarListSchema,
-    await helper.run(kind === "calendar" ? ["calendar", "list"] : ["reminders", "lists"], {
+    await helper.run(kind === MAC_PLACE.calendar ? ["calendar", "list"] : ["reminders", "lists"], {
       signal
     })
   )
@@ -193,27 +201,29 @@ export const editedEventTimes = (
   }
 }
 
+const EVENT_ADDRESS_FIELDS: ReadonlySet<string> = new Set(["event_ref", "scope"])
+
 export const eventChanges = (input: typeof EventEditSchema.Type): void => {
   const changed = Object.entries(input).some(
-    ([key, value]) => key !== "event_ref" && key !== "scope" && value !== undefined
+    ([key, value]) => !EVENT_ADDRESS_FIELDS.has(key) && value !== undefined
   )
   if (!changed) throw toolRefusal("Provide at least one event change.", "No event changes")
 }
 
 export const eventSpan = (
   current: MacEventRecord,
-  scope: "this" | "future" | undefined
-): "this" | "future" | undefined =>
-  current.repeats === undefined && !current.id.includes("|") ? undefined : (scope ?? "this")
+  scope: MacSpan | undefined
+): MacSpan | undefined =>
+  current.repeats === undefined && !current.id.includes("|") ? undefined : (scope ?? MAC_SPAN.this)
 
-const scopeFields = (
-  current: MacEventRecord,
-  scope: "this" | "future" | undefined
-): ReadonlyArray<Field> => {
+const scopeFields = (current: MacEventRecord, scope: MacSpan | undefined): ReadonlyArray<Field> => {
   const span = eventSpan(current, scope)
   if (span === undefined) return []
   return [
-    { label: "Applies to", value: span === "future" ? "This and later events" : "This event only" }
+    {
+      label: "Applies to",
+      value: span === MAC_SPAN.future ? "This and later events" : "This event only"
+    }
   ]
 }
 

@@ -1,5 +1,8 @@
 import {
+  AUTOMATION_CONDITION,
+  AUTOMATION_EVENT_TYPE,
   AUTOMATION_EVENTS,
+  CONDITION_OPERATOR,
   TRIGGER_STATE,
   TRIGGER_TYPE,
   type AutomationComparisonCondition,
@@ -45,16 +48,16 @@ export const skippedEventOf = (
   }
   const fallback = AUTOMATION_EVENTS[eventType].name
   switch (eventType) {
-    case "space.proposal_review_requested":
+    case AUTOMATION_EVENT_TYPE.space_proposal_review_requested:
       return {
         event_type: eventType,
         title: text("proposal_id") ?? fallback,
         link: NO_LINK
       }
-    case "event_approaching":
-    case "event_ended":
+    case AUTOMATION_EVENT_TYPE.event_approaching:
+    case AUTOMATION_EVENT_TYPE.event_ended:
       return { event_type: eventType, title: text("event.summary") ?? fallback, link: NO_LINK }
-    case "wiki.changed": {
+    case AUTOMATION_EVENT_TYPE.wiki_changed: {
       const value = readField(context, "change.paths")
       const paths = Array.isArray(value)
         ? value.filter((path): path is string => typeof path === "string" && path !== "")
@@ -67,7 +70,7 @@ export const skippedEventOf = (
         link: { kind: "memory_page", path: first }
       }
     }
-    case "chat.quiet": {
+    case AUTOMATION_EVENT_TYPE.chat_quiet: {
       const sessionId = text("chat.session_id")
       const sessionRef = text("chat.session_ref")
       return {
@@ -79,8 +82,8 @@ export const skippedEventOf = (
             : { kind: "chat", session_id: sessionId, session_ref: sessionRef }
       }
     }
-    case "email.received":
-    case "github.received": {
+    case AUTOMATION_EVENT_TYPE.email_received:
+    case AUTOMATION_EVENT_TYPE.github_received: {
       const itemId = text("item.item_id")
       return {
         event_type: eventType,
@@ -88,7 +91,7 @@ export const skippedEventOf = (
         link: itemId === undefined ? NO_LINK : connectionItemLink(itemId, text("item.url"))
       }
     }
-    case "task.changed": {
+    case AUTOMATION_EVENT_TYPE.task_changed: {
       const itemId = text("task.item_id")
       return {
         event_type: eventType,
@@ -96,9 +99,9 @@ export const skippedEventOf = (
         link: itemId === undefined ? NO_LINK : { kind: "task", item_id: itemId }
       }
     }
-    case "calendar.changed":
+    case AUTOMATION_EVENT_TYPE.calendar_changed:
       return { event_type: eventType, title: text("event.summary") ?? fallback, link: NO_LINK }
-    case "mcp.event": {
+    case AUTOMATION_EVENT_TYPE.mcp_event: {
       const server = text("app.server")
       const event = text("app.event")
       return {
@@ -107,22 +110,24 @@ export const skippedEventOf = (
         link: NO_LINK
       }
     }
-    case "ask.waiting":
-    case "capture.arrived": {
-      const prefix = eventType === "ask.waiting" ? "ask" : "capture"
+    case AUTOMATION_EVENT_TYPE.ask_waiting:
+    case AUTOMATION_EVENT_TYPE.capture_arrived: {
+      const prefix = eventType === AUTOMATION_EVENT_TYPE.ask_waiting ? "ask" : "capture"
       const sessionId = text(`${prefix}.session_id`)
       const sessionRef = text(`${prefix}.session_ref`)
       return {
         event_type: eventType,
-        title: text(eventType === "ask.waiting" ? "ask.text" : "capture.note") ?? fallback,
+        title:
+          text(eventType === AUTOMATION_EVENT_TYPE.ask_waiting ? "ask.text" : "capture.note") ??
+          fallback,
         link:
           sessionId === undefined || sessionRef === undefined
             ? NO_LINK
             : { kind: "chat", session_id: sessionId, session_ref: sessionRef }
       }
     }
-    case "automation.run_ended":
-    case "automation.system_run_ended": {
+    case AUTOMATION_EVENT_TYPE.automation_run_ended:
+    case AUTOMATION_EVENT_TYPE.automation_system_run_ended: {
       const sessionId = text("run.session_id")
       const sessionRef = text("run.session_ref")
       return {
@@ -225,15 +230,15 @@ const compareWords = (
 ): Words => {
   const known = fieldWords(eventType, condition.field)
   const field = known ?? { subject: `"${condition.field}"` }
-  if (condition.op === "exists")
+  if (condition.op === CONDITION_OPERATOR.exists)
     return { text: `${field.subject} is set`, readable: known !== undefined }
   if (field.flag !== undefined && typeof condition.value === "boolean") {
-    const holds = (condition.op === "eq") === condition.value
-    if (condition.op === "eq" || condition.op === "ne")
+    const holds = (condition.op === CONDITION_OPERATOR.eq) === condition.value
+    if (condition.op === CONDITION_OPERATOR.eq || condition.op === CONDITION_OPERATOR.ne)
       return { text: holds ? field.flag[0] : field.flag[1], readable: known !== undefined }
   }
   const value = valueWords(condition.value, field)
-  const verb = condition.op === "in" ? "is one of" : OPERATOR_WORDS[condition.op]
+  const verb = condition.op === CONDITION_OPERATOR.in ? "is one of" : OPERATOR_WORDS[condition.op]
   return {
     text: `${field.subject} ${verb} ${value.text}`,
     readable: known !== undefined && value.readable
@@ -246,18 +251,18 @@ const clauseWords = (
   nested: boolean
 ): Words => {
   switch (condition.kind) {
-    case "compare":
+    case AUTOMATION_CONDITION.compare:
       return compareWords(eventType, condition)
-    case "not": {
+    case AUTOMATION_CONDITION.not: {
       const inner = clauseWords(eventType, condition.condition, false)
       return { text: `not (${inner.text})`, readable: inner.readable }
     }
-    case "and":
-    case "or": {
+    case AUTOMATION_CONDITION.and:
+    case AUTOMATION_CONDITION.or: {
       const parts = condition.conditions.map((child) => clauseWords(eventType, child, true))
       const joined = parts
         .map((part) => part.text)
-        .join(condition.kind === "and" ? " and " : " or ")
+        .join(condition.kind === AUTOMATION_CONDITION.and ? " and " : " or ")
       return {
         text: nested && condition.conditions.length > 1 ? `(${joined})` : joined,
         readable: parts.every((part) => part.readable)

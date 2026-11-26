@@ -1,3 +1,5 @@
+import { AUTOMATION_WRITE_TOOL } from "../automations/tool-names.js"
+import { TOOL_STATUS } from "./status-sets.js"
 import { JOB_SUBJECT_KIND } from "../space-job-id.js"
 import { parseJsonText } from "@arden-hq/protocol/common"
 import { haltAutomation } from "./automation-halt.js"
@@ -181,9 +183,13 @@ export const makeAutomationCatalog = ({
             }>`SELECT tool_name, status, arguments_json, result_json FROM tool_calls
           WHERE run_id = ${row.source_run_id} AND tool_call_id = ${row.source_tool_call_id} LIMIT 1`
             const validName =
-              receipt?.tool_name === "automation_create" ||
-              receipt?.tool_name === "automation_update"
-            if (!validName || receipt.status !== "completed" || receipt.result_json === null)
+              receipt?.tool_name === AUTOMATION_WRITE_TOOL.create ||
+              receipt?.tool_name === AUTOMATION_WRITE_TOOL.update
+            if (
+              !validName ||
+              receipt.status !== TOOL_STATUS.completed ||
+              receipt.result_json === null
+            )
               return yield* storeError(
                 "get",
                 "corrupt",

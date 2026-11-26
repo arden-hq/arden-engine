@@ -1,5 +1,5 @@
 import type { JsonObject } from "../persistence/json.js"
-import type { ApprovalReviewVerdict } from "./approval-review.js"
+import type { ApprovalReviewVerdict } from "./approval-review-verdict.js"
 
 interface ReviewPlan {
   readonly name: string

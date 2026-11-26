@@ -1,16 +1,21 @@
+import { OBSERVED_RUN } from "../persistence/automations/queue.js"
 import { Effect } from "effect"
 import type { ChatMessage } from "../chat/message.js"
 import type { TerminalAutomationChatRun } from "../persistence/automations/queue.js"
 import type { AutomationJobLease } from "../persistence/automations/store.js"
 import type { AutomationHandlerItems } from "../persistence/automations/handler-items.js"
-import { handlerItemClientId, type HandlerItem } from "../persistence/automations/handler-item.js"
+import {
+  HANDLER_OUTCOME,
+  handlerItemClientId,
+  type HandlerItem
+} from "../persistence/automations/handler-item.js"
 import { handlerItemPrompt } from "./system.js"
 import { retried } from "./job-run.js"
 import { startAutomationRun, type AwaitAutomationRun } from "./runner.js"
 
 interface HandlerItemOutcome {
   readonly item: HandlerItem & { readonly runId: string }
-  readonly state: "done" | "nothing_to_do" | "blocked" | "failed" | "cancelled"
+  readonly state: (typeof HANDLER_OUTCOME)[keyof typeof HANDLER_OUTCOME]
   readonly detail: string | null
   readonly result: string | null
 }
@@ -62,8 +67,14 @@ export const makeHandlerItemRunner = (services: {
 const describeOutcome = (
   observed: TerminalAutomationChatRun
 ): Pick<HandlerItemOutcome, "state" | "detail"> => {
-  if (observed.status === "cancelled") return { state: "cancelled", detail: observed.error }
-  if (observed.status === "failed") return { state: "failed", detail: observed.error }
-  if (observed.blocked !== null) return { state: "blocked", detail: observed.blocked.reason }
-  return { state: observed.wrote ? "done" : "nothing_to_do", detail: null }
+  if (observed.status === OBSERVED_RUN.cancelled)
+    return { state: HANDLER_OUTCOME.cancelled, detail: observed.error }
+  if (observed.status === OBSERVED_RUN.failed)
+    return { state: HANDLER_OUTCOME.failed, detail: observed.error }
+  if (observed.blocked !== null)
+    return { state: HANDLER_OUTCOME.blocked, detail: observed.blocked.reason }
+  return {
+    state: observed.wrote ? HANDLER_OUTCOME.done : HANDLER_OUTCOME.nothingToDo,
+    detail: null
+  }
 }

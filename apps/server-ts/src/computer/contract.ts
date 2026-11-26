@@ -1,6 +1,24 @@
 import type { NativeVisual } from "./feedback.js"
 import { Schema } from "effect"
 
+export const NATIVE_DELIVERY = { background: "background", foreground: "foreground" } as const
+
+export type NativeDelivery = (typeof NATIVE_DELIVERY)[keyof typeof NATIVE_DELIVERY]
+
+export const NATIVE_DRIVER_TOOL = {
+  listApps: "list_apps",
+  bringToFront: "bring_to_front",
+  setValue: "set_value",
+  invokeMenu: "invoke_menu",
+  click: "click",
+  typeText: "type_text",
+  pressKey: "press_key",
+  scroll: "scroll",
+  drag: "drag"
+} as const
+
+type NativeDriverTool = (typeof NATIVE_DRIVER_TOOL)[keyof typeof NATIVE_DRIVER_TOOL]
+
 export const NATIVE_BUTTON = { left: "left", right: "right", middle: "middle" } as const
 
 const Id = Schema.Int.check(Schema.isGreaterThan(0))
@@ -16,7 +34,7 @@ const ActionFields = {
     description:
       "Observation ref from the latest computer_read state of this window. This call consumes it, even if the call fails."
   }),
-  delivery: Schema.Literals(["background", "foreground"]).annotate({
+  delivery: Schema.Literals(Object.values(NATIVE_DELIVERY)).annotate({
     description:
       "background leaves the user's mouse and keyboard free. foreground visibly takes control and needs the user's grant for this chat unless foreground_allowed is true. activate, menu and drag take foreground only; set_value takes background only. A left pixel_click always runs as foreground."
   })
@@ -66,7 +84,7 @@ export const NativeActionSchema = Schema.Union([
   Schema.Struct({
     ...ActionFields,
     action: Schema.Literal(NATIVE_ACTION.set_value),
-    delivery: Schema.Literal("background"),
+    delivery: Schema.Literal(NATIVE_DELIVERY.background),
     element: Token.annotate({
       description: "element_token from the observation's elements."
     }),
@@ -78,7 +96,7 @@ export const NativeActionSchema = Schema.Union([
   Schema.Struct({
     ...ActionFields,
     action: Schema.Literal(NATIVE_ACTION.activate),
-    delivery: Schema.Literal("foreground")
+    delivery: Schema.Literal(NATIVE_DELIVERY.foreground)
   }),
   Schema.Struct({
     ...ActionFields,
@@ -97,7 +115,7 @@ export const NativeActionSchema = Schema.Union([
   Schema.Struct({
     ...ActionFields,
     action: Schema.Literal(NATIVE_ACTION.menu),
-    delivery: Schema.Literal("foreground"),
+    delivery: Schema.Literal(NATIVE_DELIVERY.foreground),
     path: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)))
       .check(Schema.isMinLength(1), Schema.isMaxLength(16))
       .annotate({
@@ -180,7 +198,7 @@ export const NativeActionSchema = Schema.Union([
     ...ActionFields,
     ...PointerFields,
     action: Schema.Literal(NATIVE_ACTION.drag),
-    delivery: Schema.Literal("foreground"),
+    delivery: Schema.Literal(NATIVE_DELIVERY.foreground),
     capture: Token.annotate({
       description:
         "capture_id from the same observation. Read it with screenshot=true so you see the image the coordinates refer to. Used by pixel_click and drag."
@@ -259,8 +277,9 @@ export class NativeObservations {
       throw new Error("Fresh observation of this exact window is required")
     }
     this.#entries.delete(action.observation)
-    if (action.action === "activate" || action.action === "menu") return observation
-    if (action.action === "pixel_click" || action.action === "drag") {
+    if (action.action === NATIVE_ACTION.activate || action.action === NATIVE_ACTION.menu)
+      return observation
+    if (action.action === NATIVE_ACTION.pixel_click || action.action === NATIVE_ACTION.drag) {
       if (observation.capture === undefined || observation.capture !== action.capture) {
         throw new Error("Pixel input requires the capture returned by this observation")
       }
@@ -279,23 +298,26 @@ export class NativeObservations {
 export const nativeDriverAction = (
   action: NativeAction
 ): {
-  readonly name: string
+  readonly name: NativeDriverTool
   readonly args: Readonly<Record<string, Schema.Json>>
 } => {
   const args = { ...action.target, delivery_mode: action.delivery }
   switch (action.action) {
-    case "activate":
-      return { name: "bring_to_front", args: { ...action.target } }
-    case "set_value":
+    case NATIVE_ACTION.activate:
+      return { name: NATIVE_DRIVER_TOOL.bringToFront, args: { ...action.target } }
+    case NATIVE_ACTION.set_value:
       return {
-        name: "set_value",
+        name: NATIVE_DRIVER_TOOL.setValue,
         args: { ...action.target, element_token: action.element, value: action.value }
       }
-    case "menu":
-      return { name: "invoke_menu", args: { ...action.target, path: [...action.path] } }
-    case "click":
+    case NATIVE_ACTION.menu:
       return {
-        name: "click",
+        name: NATIVE_DRIVER_TOOL.invokeMenu,
+        args: { ...action.target, path: [...action.path] }
+      }
+    case NATIVE_ACTION.click:
+      return {
+        name: NATIVE_DRIVER_TOOL.click,
         args: {
           ...args,
           element_token: action.element,
@@ -304,18 +326,18 @@ export const nativeDriverAction = (
           ...(action.modifiers === undefined ? {} : { modifier: [...action.modifiers] })
         }
       }
-    case "type":
+    case NATIVE_ACTION.type:
       return {
-        name: "type_text",
+        name: NATIVE_DRIVER_TOOL.typeText,
         args: {
           ...args,
           ...(action.element === undefined ? {} : { element_token: action.element }),
           text: action.text
         }
       }
-    case "key":
+    case NATIVE_ACTION.key:
       return {
-        name: "press_key",
+        name: NATIVE_DRIVER_TOOL.pressKey,
         args: {
           ...args,
           ...(action.element === undefined ? {} : { element_token: action.element }),
@@ -323,9 +345,9 @@ export const nativeDriverAction = (
           modifiers: action.modifiers ?? []
         }
       }
-    case "scroll":
+    case NATIVE_ACTION.scroll:
       return {
-        name: "scroll",
+        name: NATIVE_DRIVER_TOOL.scroll,
         args: {
           ...args,
           element_token: action.element,
@@ -334,9 +356,9 @@ export const nativeDriverAction = (
           by: action.by
         }
       }
-    case "pixel_click":
+    case NATIVE_ACTION.pixel_click:
       return {
-        name: "click",
+        name: NATIVE_DRIVER_TOOL.click,
         args: {
           ...args,
           capture_id: action.capture,
@@ -348,9 +370,9 @@ export const nativeDriverAction = (
           ...(action.modifiers === undefined ? {} : { modifier: [...action.modifiers] })
         }
       }
-    case "drag":
+    case NATIVE_ACTION.drag:
       return {
-        name: "drag",
+        name: NATIVE_DRIVER_TOOL.drag,
         args: {
           ...args,
           scope: "window",
@@ -401,7 +423,11 @@ export const requireForegroundWindow = (target: NativeTarget, listing: unknown):
   }
 }
 
-export function nativeDelivery(action: NativeAction): "background" | "foreground" {
-  if (action.action === "pixel_click" && (action.button ?? "left") === "left") return "foreground"
+export function nativeDelivery(action: NativeAction): NativeDelivery {
+  if (
+    action.action === NATIVE_ACTION.pixel_click &&
+    (action.button ?? NATIVE_BUTTON.left) === NATIVE_BUTTON.left
+  )
+    return NATIVE_DELIVERY.foreground
   return action.delivery
 }

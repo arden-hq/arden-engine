@@ -1,3 +1,4 @@
+import { MODEL_ENDPOINT_INPUT } from "@arden-hq/protocol/model-endpoints"
 import { Schema } from "effect"
 
 const Sha256Schema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
@@ -9,8 +10,14 @@ const PINNED_HUGGING_FACE_URL =
 const PINNED_HUGGING_FACE_PAGE =
   /^https:\/\/huggingface\.co\/[^\s/]+\/[^\s/]+\/blob\/[0-9a-f]{40}\/\S+$/u
 
+export const MODEL_FILE_ROLE = {
+  weights: "weights",
+  projector: "projector",
+  license: "license"
+} as const
+
 const ModelFileSchema = Schema.Struct({
-  role: Schema.Literals(["weights", "projector", "license"]),
+  role: Schema.Literals(Object.values(MODEL_FILE_ROLE)),
   path: Schema.String.check(Schema.isPattern(SAFE_RELATIVE_PATH)),
   url: Schema.String.check(Schema.isPattern(PINNED_HUGGING_FACE_URL)),
   bytes: PositiveIntSchema,
@@ -56,15 +63,16 @@ const ModelManifestUnionSchema = Schema.Union([
 const fileIssue = (manifest: (typeof ModelManifestUnionSchema)["Type"]): string | undefined => {
   const roles = manifest.files.map((file) => file.role)
   const paths = manifest.files.map((file) => file.path)
-  const projectors = roles.filter((role) => role === "projector").length
-  if (roles.filter((role) => role === "weights").length !== 1)
+  const projectors = roles.filter((role) => role === MODEL_FILE_ROLE.projector).length
+  if (roles.filter((role) => role === MODEL_FILE_ROLE.weights).length !== 1)
     return "needs exactly one weights file"
-  if (roles.filter((role) => role === "license").length > 1) return "at most one license file"
+  if (roles.filter((role) => role === MODEL_FILE_ROLE.license).length > 1)
+    return "at most one license file"
   if (new Set(paths).size !== paths.length) return "file paths must be distinct"
-  if (manifest.input === "text+image" && projectors !== 1) {
+  if (manifest.input === MODEL_ENDPOINT_INPUT.textImage && projectors !== 1) {
     return "text+image input needs exactly one projector file"
   }
-  if (manifest.input === "text" && projectors !== 0)
+  if (manifest.input === MODEL_ENDPOINT_INPUT.text && projectors !== 0)
     return "a projector file needs text+image input"
   return undefined
 }

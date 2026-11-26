@@ -1,3 +1,4 @@
+import { CLI_OUTPUT_FORMAT } from "./cli-words.js"
 import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 
 import { timeoutMilliseconds, UsageError, valueAfter, type CliDependencies } from "./command.js"
@@ -31,16 +32,38 @@ export type {
   DeclinedRequest
 } from "./run-receipt.js"
 
+const CLI_COMMAND = {
+  help: "help",
+  run: "run",
+  wait: "wait",
+  sessions: "sessions",
+  models: "models",
+  serve: "serve",
+  exec: "exec",
+  prompt: "prompt",
+  login: "login",
+  logout: "logout"
+} as const
+
+const CLI_FLAG = {
+  help: "-h",
+  helpLong: "--help",
+  rest: "--",
+  output: "--output",
+  url: "--url",
+  detach: "--detach"
+} as const
+
 type ParsedCommand =
-  | { readonly kind: "help" }
-  | { readonly kind: "run"; readonly options: RunOptions }
-  | { readonly kind: "wait"; readonly options: WaitOptions }
-  | { readonly kind: "sessions"; readonly options: SessionsOptions }
-  | { readonly kind: "models"; readonly options: ModelsOptions }
-  | { readonly kind: "serve"; readonly options: ServeOptions }
-  | { readonly kind: "exec"; readonly options: ExecOptions }
-  | { readonly kind: "prompt"; readonly options: RunOptions }
-  | { readonly kind: "login"; readonly action: LoginAction }
+  | { readonly kind: typeof CLI_COMMAND.help }
+  | { readonly kind: typeof CLI_COMMAND.run; readonly options: RunOptions }
+  | { readonly kind: typeof CLI_COMMAND.wait; readonly options: WaitOptions }
+  | { readonly kind: typeof CLI_COMMAND.sessions; readonly options: SessionsOptions }
+  | { readonly kind: typeof CLI_COMMAND.models; readonly options: ModelsOptions }
+  | { readonly kind: typeof CLI_COMMAND.serve; readonly options: ServeOptions }
+  | { readonly kind: typeof CLI_COMMAND.exec; readonly options: ExecOptions }
+  | { readonly kind: typeof CLI_COMMAND.prompt; readonly options: RunOptions }
+  | { readonly kind: typeof CLI_COMMAND.login; readonly action: LoginAction }
 
 const MODE_BY_NAME = {
   "read-only": "read_only",
@@ -151,8 +174,13 @@ Exit status:
   json/jsonl print one command_receipt; its status is completed, submitted,
   failed, cancelled, interrupted, or timed_out.`
 
+const isOutputFormat = (value: string): value is CliOutputFormat =>
+  value === CLI_OUTPUT_FORMAT.text ||
+  value === CLI_OUTPUT_FORMAT.json ||
+  value === CLI_OUTPUT_FORMAT.jsonl
+
 const outputFormat = (value: string): CliOutputFormat => {
-  if (value === "text" || value === "json" || value === "jsonl") return value
+  if (isOutputFormat(value)) return value
   throw new UsageError("--output must be text, json, or jsonl")
 }
 
@@ -194,8 +222,8 @@ const splitArgs = (
   for (let index = 0; ; index += 1) {
     const argument = args[index]
     if (argument === undefined) break
-    if (argument === "-h" || argument === "--help") return undefined
-    if (argument === "--") {
+    if (isHelpFlag(argument)) return undefined
+    if (argument === CLI_FLAG.rest) {
       positionals.push(...args.slice(index + 1))
       break
     }
@@ -312,7 +340,7 @@ const parseServe = (args: ReadonlyArray<string>): ParsedCommand => {
 }
 
 const EXEC_OPTIONS: ReadonlySet<string> = new Set([
-  ...[...RUN_OPTIONS].filter((name) => name !== "--url" && name !== "--detach"),
+  ...[...RUN_OPTIONS].filter((name) => name !== CLI_FLAG.url && name !== CLI_FLAG.detach),
   "--config",
   "--server-log"
 ])
@@ -358,7 +386,8 @@ const parseWait = (args: ReadonlyArray<string>): ParsedCommand => {
 
 const listOutput = (parsed: ParsedArgs): "text" | "json" => {
   const output = single(parsed, "--output") ?? "text"
-  if (output !== "text" && output !== "json") throw new UsageError("--output must be text or json")
+  if (output !== CLI_OUTPUT_FORMAT.text && output !== CLI_OUTPUT_FORMAT.json)
+    throw new UsageError("--output must be text or json")
   return output
 }
 
@@ -422,29 +451,34 @@ const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
   const [command, ...rest] = args
   switch (command) {
     case undefined:
-    case "-h":
-    case "--help":
+    case CLI_FLAG.help:
+    case CLI_FLAG.helpLong:
       return { kind: "help" }
-    case "run":
+    case CLI_COMMAND.run:
       return parseRun(rest)
-    case "wait":
+    case CLI_COMMAND.wait:
       return parseWait(rest)
-    case "sessions":
+    case CLI_COMMAND.sessions:
       return parseSessions(rest)
-    case "models":
+    case CLI_COMMAND.models:
       return parseModels(rest)
-    case "serve":
+    case CLI_COMMAND.serve:
       return parseServe(rest)
-    case "exec":
+    case CLI_COMMAND.exec:
       return parseExec(rest)
-    case "login":
+    case CLI_COMMAND.login:
       return parseLogin(rest)
-    case "logout":
+    case CLI_COMMAND.logout:
       return parseLogout(rest)
     default:
       return parsePrompt(args)
   }
 }
+
+type HelpFlag = typeof CLI_FLAG.help | typeof CLI_FLAG.helpLong
+
+const isHelpFlag = (argument: string): argument is HelpFlag =>
+  argument === CLI_FLAG.help || argument === CLI_FLAG.helpLong
 
 const COMMANDS: ReadonlySet<string> = new Set([
   "run",
@@ -458,8 +492,8 @@ const COMMANDS: ReadonlySet<string> = new Set([
 ])
 
 const receiptCommand = (first: string | undefined): "run" | "wait" | undefined => {
-  if (first === "wait") return "wait"
-  if (first === "run" || first === "exec") return "run"
+  if (first === CLI_COMMAND.wait) return "wait"
+  if (first === CLI_COMMAND.run || first === CLI_COMMAND.exec) return "run"
   return first !== undefined && COMMANDS.has(first) ? undefined : "run"
 }
 
@@ -471,11 +505,13 @@ const machineOutputFromArgs = (
   let output: string | undefined
   for (let index = 0; ; index += 1) {
     const argument = args[index]
-    if (argument === undefined || argument === "--") break
-    if (argument === "--output") output = args[index + 1]
+    if (argument === undefined || argument === CLI_FLAG.rest) break
+    if (argument === CLI_FLAG.output) output = args[index + 1]
     else if (argument.startsWith("--output=")) output = argument.slice("--output=".length)
   }
-  return output === "json" || output === "jsonl" ? { command, output } : undefined
+  return output === CLI_OUTPUT_FORMAT.json || output === CLI_OUTPUT_FORMAT.jsonl
+    ? { command, output }
+    : undefined
 }
 
 export const runCli = async (
@@ -496,24 +532,24 @@ export const runCli = async (
     return 2
   }
   switch (command.kind) {
-    case "help":
+    case CLI_COMMAND.help:
       dependencies.writeStdout(HELP)
       return 0
-    case "run":
+    case CLI_COMMAND.run:
       return runCommand(command.options, dependencies)
-    case "wait":
+    case CLI_COMMAND.wait:
       return waitCommand(command.options, dependencies)
-    case "sessions":
+    case CLI_COMMAND.sessions:
       return sessionsCommand(command.options, dependencies)
-    case "models":
+    case CLI_COMMAND.models:
       return modelsCommand(command.options, dependencies)
-    case "serve":
+    case CLI_COMMAND.serve:
       return serveCommand(command.options, dependencies)
-    case "exec":
+    case CLI_COMMAND.exec:
       return execCommand(command.options, dependencies)
-    case "prompt":
+    case CLI_COMMAND.prompt:
       return promptCommand(command.options, dependencies)
-    case "login":
+    case CLI_COMMAND.login:
       return loginCommand(command.action, dependencies)
   }
 }

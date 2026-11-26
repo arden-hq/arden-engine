@@ -1,7 +1,8 @@
+import { AUTOMATION_CHAT_CHOICE, AUTOMATION_CONTEXT_MODE } from "@arden-hq/protocol/automations"
 import { JOB_SUBJECT_KIND } from "../space-job-id.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
 import { Effect, Schema } from "effect"
-import { SystemHandlerIdSchema } from "../automations/model.js"
+import { SYSTEM_HANDLER, SystemHandlerIdSchema } from "../automations/model.js"
 import type {
   AutomationJobHandler,
   AutomationJobPayload,
@@ -90,20 +91,20 @@ export const jobHandler = (
       return context.space_review_input === undefined
         ? { handler: id }
         : { handler: id, spaceReviewInput: context.space_review_input }
-    case "home_letter":
+    case SYSTEM_HANDLER.homeLetter:
       return context.home_letter_input === undefined
         ? { handler: id }
         : { handler: id, homeLetterInput: context.home_letter_input }
-    case "memory_capture":
-    case "daily_summary":
-    case "wiki_maintenance":
+    case SYSTEM_HANDLER.memoryCapture:
+    case SYSTEM_HANDLER.dailySummary:
+    case SYSTEM_HANDLER.wikiMaintenance:
       return context.handler_item === undefined
         ? { handler: id }
         : { handler: id, handlerItem: context.handler_item }
-    case "managed_history_collection":
-    case "chat_summaries":
+    case SYSTEM_HANDLER.managedHistoryCollection:
+    case SYSTEM_HANDLER.chatSummaries:
       return { handler: id }
-    case "events":
+    case SYSTEM_HANDLER.events:
       return { handler: id, itemIds: eventItemIds(eventBatchOf(context)) }
   }
 }
@@ -170,7 +171,8 @@ const workOf = (owner: WorkOwner): Omit<ClaimedWork, "jobOwner"> => {
         handler: authored.handler,
         ref: authored.ref,
         contextMode:
-          chatKind === "yours" && authored.contextMode === "continue"
+          chatKind === AUTOMATION_CHAT_CHOICE.yours &&
+          authored.contextMode === AUTOMATION_CONTEXT_MODE.continue
             ? "fork"
             : authored.contextMode,
         cooldownMinutes: authored.cooldownMinutes,

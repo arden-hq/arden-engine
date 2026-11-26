@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import type { BrowserOutput } from "../service.js"
 import type { BrowserProcedures } from "./service.js"
 
@@ -12,7 +12,7 @@ export const withBrowserProcedures = async (
   value: BrowserOutput
 ): Promise<BrowserOutput> => {
   const scope = Schema.decodeUnknownOption(PageScope)(value.data)
-  if (scope._tag === "None") return value
+  if (Option.isNone(scope)) return value
   const url = scope.value.tab.url
   const origin =
     scope.value.origin ?? (url !== undefined && URL.canParse(url) ? new URL(url).origin : undefined)

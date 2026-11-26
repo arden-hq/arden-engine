@@ -4,9 +4,10 @@ import { Schema } from "effect"
 import { defineGoogleTool, type GoogleGrantDescription } from "./google-tool-grant.js"
 import { parseFileRef } from "./google-drive-support.js"
 import { readDriveFileMetadata } from "./google-drive-metadata.js"
+import { GOOGLE_MIME } from "./google-drive-mime.js"
 import { googleCall } from "./google-request.js"
 import type { GoogleToolConnections } from "./google-accounts.js"
-import type { SharedFileAccess } from "./shared-files.js"
+import { PREPARED_FILE, type SharedFileAccess } from "./shared-files.js"
 import type { ServerTool } from "./define.js"
 import { toolRefusal } from "./tool-failure.js"
 
@@ -144,7 +145,7 @@ export const makeDriveDownloadTools = ({
             "Google Drive does not allow this account to download this file. Ask its owner for download access.",
             "Download permission denied"
           )
-        if (file.mimeType === "application/vnd.google-apps.folder")
+        if (file.mimeType === GOOGLE_MIME.folder)
           throw toolRefusal(
             "A Drive folder cannot be downloaded as one file with this tool. Search for and download its files individually.",
             "Choose a file"
@@ -200,7 +201,7 @@ export const makeDriveDownloadTools = ({
           bytes: Buffer.from(response.value),
           mediaType
         })
-        if (saved.kind !== "snapshot")
+        if (saved.kind !== PREPARED_FILE.snapshot)
           throw toolRefusal("The downloaded file could not be saved.", "Download unavailable")
         effects.applied()
         return {

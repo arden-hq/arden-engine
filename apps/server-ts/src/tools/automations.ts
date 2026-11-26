@@ -2,6 +2,7 @@ import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { randomUUID } from "node:crypto"
 import { Effect, Schema } from "effect"
+import { AUTOMATION_WRITE_TOOL } from "../persistence/automations/tool-names.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { assertAppEvents } from "./automation-app-events.js"
 import { McpConnections } from "../mcp/service.js"
@@ -59,7 +60,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
   const createCard = createCardOf({ models: services.models })
   return [
     defineServerTool({
-      name: "automation_create",
+      name: AUTOMATION_WRITE_TOOL.create,
       summary: "Sets up a new automation.",
       discovery: { group: "automations" },
       description: [

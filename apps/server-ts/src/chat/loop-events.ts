@@ -1,6 +1,6 @@
 import { messageEnd } from "@arden-hq/protocol/chat"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { AgentEvent, StopReason } from "@arden-hq/loop"
+import { AGENT_EVENT_TAG, StopReason, type AgentEvent } from "@arden-hq/loop"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { isEphemeralChatEvent, STREAM_RECORD } from "@arden-hq/protocol/chat"
 import { toolProgressEvent, toolResultEvent, toolStartEvents } from "./tool-events.js"
@@ -127,11 +127,11 @@ export const makeLoopEventMapper = (
 
   const map = (event: AgentEvent): ReadonlyArray<ChatEventBatch> => {
     switch (event._tag) {
-      case "TextStarted": {
+      case AGENT_EVENT_TAG.textStarted: {
         const start = textStart(textId(event.message_id), event.record_id)
         return start === null ? [] : [[start]]
       }
-      case "TextEnded": {
+      case AGENT_EVENT_TAG.textEnded: {
         const messageId = textId(event.message_id)
         if (event.content.length === 0 && (currentText.get(messageId) ?? "").length === 0) return []
         if (!endedTextIds.has(messageId)) endedTextOrder.push(messageId)
@@ -147,7 +147,7 @@ export const makeLoopEventMapper = (
           ]
         ]
       }
-      case "TextPhaseResolved":
+      case AGENT_EVENT_TAG.textPhaseResolved:
         return [
           [
             {
@@ -157,9 +157,9 @@ export const makeLoopEventMapper = (
             }
           ]
         ]
-      case "TextDelta":
+      case AGENT_EVENT_TAG.textDelta:
         return textContent(textId(event.message_id), event.content)
-      case "ReasoningStarted":
+      case AGENT_EVENT_TAG.reasoningStarted:
         return [
           [
             {
@@ -170,7 +170,7 @@ export const makeLoopEventMapper = (
             }
           ]
         ]
-      case "ReasoningDelta": {
+      case AGENT_EVENT_TAG.reasoningDelta: {
         if (event.content.length === 0) return []
         currentReasoning.set(
           event.message_id,
@@ -186,7 +186,7 @@ export const makeLoopEventMapper = (
           ]
         ]
       }
-      case "ReasoningEnded": {
+      case AGENT_EVENT_TAG.reasoningEnded: {
         const content = currentReasoning.get(event.message_id)
         currentReasoning.delete(event.message_id)
         return [
@@ -199,9 +199,9 @@ export const makeLoopEventMapper = (
           ]
         ]
       }
-      case "InputTaken":
+      case AGENT_EVENT_TAG.inputTaken:
         return [[{ type: "input_taken", run_id: runId }]]
-      case "ModelStreamRetry":
+      case AGENT_EVENT_TAG.modelStreamRetry:
         return [
           [
             {
@@ -212,7 +212,7 @@ export const makeLoopEventMapper = (
             }
           ]
         ]
-      case "ModelResponseReset": {
+      case AGENT_EVENT_TAG.modelResponseReset: {
         for (const sourceId of event.message_ids) {
           startedTextIds.delete(sourceId)
           endedTextIds.delete(sourceId)
@@ -231,7 +231,7 @@ export const makeLoopEventMapper = (
           ]
         ]
       }
-      case "FinalTextSuperseded":
+      case AGENT_EVENT_TAG.finalTextSuperseded:
         supersededIds.push(...event.message_ids, event.correction_message_id)
         return [
           [
@@ -243,17 +243,17 @@ export const makeLoopEventMapper = (
             }
           ]
         ]
-      case "ToolInputStarted":
-      case "ToolInputDelta":
-      case "ToolInputEnded":
+      case AGENT_EVENT_TAG.toolInputStarted:
+      case AGENT_EVENT_TAG.toolInputDelta:
+      case AGENT_EVENT_TAG.toolInputEnded:
         return []
-      case "ToolStarted":
+      case AGENT_EVENT_TAG.toolStarted:
         return toolStartEvents(event)
-      case "ToolCompleted":
+      case AGENT_EVENT_TAG.toolCompleted:
         return [[toolResultEvent(event)]]
-      case "ToolPaused":
+      case AGENT_EVENT_TAG.toolPaused:
         return []
-      case "ToolProgress":
+      case AGENT_EVENT_TAG.toolProgress:
         return [
           [
             toolProgressEvent({
@@ -311,7 +311,7 @@ export const makeLoopEventMapper = (
     superseded: (finish) => {
       const ids = new Set(supersededIds)
       const fixStands =
-        finish.stopReason === "end_turn" &&
+        finish.stopReason === StopReason.END_TURN &&
         finish.text.trim().length > 0 &&
         finish.terminalTextId !== null &&
         !ids.has(finish.terminalTextId)

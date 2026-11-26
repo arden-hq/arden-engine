@@ -23,9 +23,16 @@ import { approvalPermissionContext } from "./permissions.js"
 import { keepCommandResult } from "./tool-approval-resolve.js"
 import { saveCardRule } from "./tool-approval-rules.js"
 import { followUpRecordableStatusList } from "./status-sets.js"
-import { readCallPlan } from "./task-direction.js"
+import { CALL_PLAN, needsReview, readCallPlan } from "./task-direction.js"
+import { APPROVAL_STATUS } from "./tool-rows.js"
+
+const DEFERRED_DECISION = {
+  notDeferred: "not_deferred",
+  settled: "settled",
+  approved: "approved"
+} as const
 import type { SqlError } from "effect/unstable/sql/SqlError"
-import type { ToolExecutionStoreError } from "../tools/store.js"
+import { ToolExecutionStoreError } from "../tools/store.js"
 import type { SessionLifecycleEventError } from "../sessions/events.js"
 import type { UnitOfWork } from "../unit-of-work.js"
 
@@ -123,8 +130,7 @@ export const makeDeferredToolCalls = ({
     return yield* writer
       .transact(
         Effect.gen(function* () {
-          if ((yield* readCallPlan(sql, identity)) === "needs_review")
-            return "needs_review" as const
+          if (needsReview(yield* readCallPlan(sql, identity))) return CALL_PLAN.needsReview
           const inserted = yield* sql`INSERT INTO deferred_tool_calls (run_id, session_id,
             tool_call_id, tool_name, action, scope, preview, diff, payload_json, arguments_json,
             changes_state, status, requested_at)
@@ -163,13 +169,15 @@ export const makeDeferredToolCalls = ({
       .transact(
         decideInTransaction(input).pipe(
           Effect.tap((decision) =>
-            decision.kind === "not_deferred" ? Effect.void : keepCommandResult(sql, input)
+            decision.kind === DEFERRED_DECISION.notDeferred
+              ? Effect.void
+              : keepCommandResult(sql, input)
           )
         )
       )
       .pipe(
         Effect.mapError((cause) =>
-          cause._tag === "ToolExecutionStoreError"
+          cause instanceof ToolExecutionStoreError
             ? cause
             : toolError(
                 "resolve",
@@ -286,9 +294,9 @@ export const makeDeferredDecisionInTransaction = ({
 }): ((
   input: DeferredDecisionInput
 ) => Effect.Effect<
-  | { kind: "not_deferred"; call?: never }
-  | { kind: "settled"; call?: never }
-  | { kind: "approved"; call: DeferredToolCall },
+  | { kind: typeof DEFERRED_DECISION.notDeferred; call?: never }
+  | { kind: typeof DEFERRED_DECISION.settled; call?: never }
+  | { kind: typeof DEFERRED_DECISION.approved; call: DeferredToolCall },
   SqlError | ToolExecutionStoreError | SessionLifecycleEventError,
   UnitOfWork
 >) =>
@@ -301,7 +309,7 @@ export const makeDeferredDecisionInTransaction = ({
 FROM deferred_tool_calls
 WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}`
     const row = rows[0]
-    if (row === undefined) return { kind: "not_deferred" } satisfies DeferredDecision
+    if (row === undefined) return { kind: DEFERRED_DECISION.notDeferred } satisfies DeferredDecision
     if (input.askedAt !== undefined && input.askedAt !== row.requested_at)
       return yield* toolError(
         "resolve",
@@ -348,8 +356,8 @@ WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}`
         "This deferred card cannot deliver feedback to its completed run; it is still pending",
         identity
       )
-    if (row.status !== "pending") {
-      const same = (row.status === "rejected") === !input.approved
+    if (row.status !== APPROVAL_STATUS.pending) {
+      const same = (row.status === APPROVAL_STATUS.rejected) === !input.approved
       if (!same)
         return yield* toolError(
           "resolve",
@@ -357,7 +365,7 @@ WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}`
           "This card was already decided the other way",
           identity
         )
-      return { kind: "settled" } satisfies DeferredDecision
+      return { kind: DEFERRED_DECISION.settled } satisfies DeferredDecision
     }
     if (input.approved && (yield* noApprovalForRun(sql, row.run_id))) {
       return yield* toolError(
@@ -386,11 +394,11 @@ WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}`
     yield* sql`UPDATE sessions SET last_activity = ${at}
   WHERE session_id = ${row.session_id}`
     yield* sessionEvents.appendInTransaction("session_activity", row.session_id)
-    if (!input.approved) return { kind: "settled" } satisfies DeferredDecision
+    if (!input.approved) return { kind: DEFERRED_DECISION.settled } satisfies DeferredDecision
     const call = deferredCall(
       input.grantStanding === true ? yield* keepCardRule(sql, row, input.grantList) : row
     )
     if (call === undefined)
       return yield* toolError("resolve", "corrupt", "The deferred call is unreadable", identity)
-    return { kind: "approved", call } satisfies DeferredDecision
+    return { kind: DEFERRED_DECISION.approved, call } satisfies DeferredDecision
   })

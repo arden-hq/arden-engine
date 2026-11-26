@@ -60,7 +60,7 @@ const MessageRoleSchema = Schema.Literals([
   "tool"
 ] as const)
 
-const READ_VIEW = { transcript: "transcript", actions: "actions" } as const
+export const READ_VIEW = { transcript: "transcript", actions: "actions" } as const
 
 export const ReadParametersSchema = Schema.Struct({
   session_ref: SessionRefSchema,

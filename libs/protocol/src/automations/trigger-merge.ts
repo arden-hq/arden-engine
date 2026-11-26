@@ -22,9 +22,22 @@ export interface StoredTriggers {
   readonly lastId: number
 }
 
+export const DROPPED_TRIGGER_FIELD = {
+  condition: "condition",
+  run_only_if: "run_only_if"
+} as const
+
 export type DroppedTriggerField =
-  | { readonly id: string; readonly field: "condition"; readonly value: AutomationCondition }
-  | { readonly id: string; readonly field: "run_only_if"; readonly value: string }
+  | {
+      readonly id: string
+      readonly field: typeof DROPPED_TRIGGER_FIELD.condition
+      readonly value: AutomationCondition
+    }
+  | {
+      readonly id: string
+      readonly field: typeof DROPPED_TRIGGER_FIELD.run_only_if
+      readonly value: string
+    }
 
 export const TRIGGER_MERGE = {
   ok: "ok",
@@ -180,12 +193,20 @@ const droppedFields = (
     const kept = same?.type === TRIGGER_TYPE.event ? same : undefined
     const dropped: Array<DroppedTriggerField> = []
     if (trigger.condition.kind === TRIGGER_STATE.old && kept?.condition.kind !== TRIGGER_STATE.old)
-      dropped.push({ id: trigger.id, field: "condition", value: trigger.condition.condition })
+      dropped.push({
+        id: trigger.id,
+        field: DROPPED_TRIGGER_FIELD.condition,
+        value: trigger.condition.condition
+      })
     if (
       trigger.run_only_if.kind === TRIGGER_STATE.sentence &&
       kept?.run_only_if.kind !== TRIGGER_STATE.sentence
     )
-      dropped.push({ id: trigger.id, field: "run_only_if", value: trigger.run_only_if.sentence })
+      dropped.push({
+        id: trigger.id,
+        field: DROPPED_TRIGGER_FIELD.run_only_if,
+        value: trigger.run_only_if.sentence
+      })
     return dropped
   })
 }

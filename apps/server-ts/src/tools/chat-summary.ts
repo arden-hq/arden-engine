@@ -15,8 +15,10 @@ const MAX_SUMMARY_CHARS = 280
 
 const words = (text: string) => text.trim().split(/\s+/u).filter(Boolean).length
 
+const SUMMARY_OUTCOME = { summary: "summary", nothing_to_recall: "nothing_to_recall" } as const
+
 const ParametersSchema = Schema.Struct({
-  outcome: Schema.Literals(["summary", "nothing_to_recall"]).annotate({
+  outcome: Schema.Literals(Object.values(SUMMARY_OUTCOME)).annotate({
     description:
       '"summary" saves the fields below. "nothing_to_recall" means the chat holds nothing worth coming back to (a quick one-off question, a greeting, a test); nothing is saved and any earlier summary stays.'
   }),
@@ -96,7 +98,7 @@ const makeSetChatSummaryTool = (services: {
           }
         )
       }
-      if (input.outcome === "nothing_to_recall") {
+      if (input.outcome === SUMMARY_OUTCOME.nothing_to_recall) {
         return { result: "Nothing saved.", preview: "Nothing to recall" }
       }
       if (input.title === undefined || input.summary === undefined) {

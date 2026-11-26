@@ -2,10 +2,14 @@ import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { Effect, Predicate } from "effect"
 
 import type { DecisionManifest } from "./catalog.js"
-import { LlamaServer, type LlamaServerError } from "./llama-server.js"
+import { LLAMA_SERVER_FAILURE, LlamaServer, type LlamaServerError } from "./llama-server.js"
 import type { DecisionEndpoint } from "../models/decisions/endpoint.js"
 
 const LOCAL_DECISION_TIMEOUT_MS = 30_000
+
+const SYSTEMONE_PATH = "/v1/systemone"
+const SYSTEMONE_METHOD = "POST"
+const ROUTER_REQUEST = { ok: "ok", refused: "refused" } as const
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
@@ -14,12 +18,12 @@ const routerRequest = (
   text: string,
   modelId: string
 ):
-  | { readonly kind: "ok"; readonly body: Readonly<Record<string, unknown>> }
-  | { readonly kind: "refused"; readonly message: string } => {
+  | { readonly kind: typeof ROUTER_REQUEST.ok; readonly body: Readonly<Record<string, unknown>> }
+  | { readonly kind: typeof ROUTER_REQUEST.refused; readonly message: string } => {
   const body = parseJsonTextOrUndefined(text)
-  if (body === undefined) return { kind: "refused", message: "The body is not JSON" }
+  if (body === undefined) return { kind: ROUTER_REQUEST.refused, message: "The body is not JSON" }
   if (!Predicate.isObject(body) || Array.isArray(body)) {
-    return { kind: "refused", message: "Expected { model, state, questions }" }
+    return { kind: ROUTER_REQUEST.refused, message: "Expected { model, state, questions }" }
   }
   return { kind: "ok", body: { ...body, model: modelId } }
 }
@@ -41,11 +45,11 @@ const localDecisionEndpoint = (
 ): DecisionEndpoint => {
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input))
-    if (url.pathname !== "/v1/systemone" || init?.method !== "POST") {
+    if (url.pathname !== SYSTEMONE_PATH || init?.method !== SYSTEMONE_METHOD) {
       return json(404, { error: "Only POST /v1/systemone is served here" })
     }
     const request = routerRequest(typeof init.body === "string" ? init.body : "", manifest.id)
-    if (request.kind === "refused") return json(400, { error: request.message })
+    if (request.kind === ROUTER_REQUEST.refused) return json(400, { error: request.message })
     const signal = init.signal ?? undefined
     const prefix = statePrefixPrompt(manifest.readout.statePrompt, request.body)
     const readPrefix =
@@ -59,10 +63,14 @@ const localDecisionEndpoint = (
           )
     return Effect.runPromise(
       readPrefix.pipe(
-        Effect.andThen(llama.request("/v1/systemone", { body: request.body, signal })),
+        Effect.andThen(llama.request(SYSTEMONE_PATH, { body: request.body, signal })),
         Effect.map((response) => json(response.status, response.body)),
         Effect.catchTag("LlamaServerError", (error: LlamaServerError) =>
-          Effect.succeed(json(error.reason === "request" ? 502 : 503, { error: error.message }))
+          Effect.succeed(
+            json(error.reason === LLAMA_SERVER_FAILURE.request ? 502 : 503, {
+              error: error.message
+            })
+          )
         )
       ),
       signal === undefined ? undefined : { signal }

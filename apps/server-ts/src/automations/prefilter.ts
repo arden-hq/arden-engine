@@ -1,5 +1,6 @@
+import { AUTOMATION_OCCURRENCE, AUTOMATION_RUN_SKIP_REASON } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
-import type { Decisions } from "../models/decisions/service.js"
+import { DECIDED_BY, type Decisions } from "../models/decisions/service.js"
 import type {
   AutomationEventScreen,
   AutomationJobLeaseRef,
@@ -16,7 +17,11 @@ export const screenEventWake = (
 ): ((job: AutomationJobLeaseRef) => Effect.Effect<AutomationEventScreen | undefined>) =>
   Effect.fn("Automation.screenEventWake")(function* (job: AutomationJobLeaseRef) {
     const prefilter = job.payload.prefilter
-    if (prefilter === null || job.payload.occurrence !== "event" || job.payload.chatRun !== null)
+    if (
+      prefilter === null ||
+      job.payload.occurrence !== AUTOMATION_OCCURRENCE.event ||
+      job.payload.chatRun !== null
+    )
       return undefined
     const owner = yield* ownerOf(job)
     const verdicts = yield* Effect.forEach(
@@ -55,13 +60,13 @@ const judgeEvent = Effect.fn("Automation.judgeEvent")(function* (
     })
   const [head, ...tail] = event.sentences
   const first = yield* ask(head)
-  if (first.by === "default" || first.value) return undefined
+  if (first.by === DECIDED_BY.default || first.value) return undefined
   for (const sentence of tail) {
     const decided = yield* ask(sentence)
-    if (decided.by === "default" || decided.value) return undefined
+    if (decided.by === DECIDED_BY.default || decided.value) return undefined
   }
   return {
-    reason: "prefilter",
+    reason: AUTOMATION_RUN_SKIP_REASON.prefilter,
     backend: first.backend,
     event: event.event,
     asked: event.sentences,

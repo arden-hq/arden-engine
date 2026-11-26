@@ -2,7 +2,7 @@ import type { ToolApprovalDecision } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { authorityScopes, type RunAuthority } from "../execution/authority.js"
 import type { CallFacts } from "../execution/decide.js"
-import type { ApprovalMode } from "@arden-hq/protocol/permissions"
+import { PERMISSION_RULE_DECISION, type ApprovalMode } from "@arden-hq/protocol/permissions"
 import type { ToolScopeKey, RunCapability } from "../execution/policy.js"
 import type {
   ApprovalPolicyStore,
@@ -130,7 +130,10 @@ export const makeToolApprovalPolicy = (services: {
     for (const tool of input.tools) {
       const name = tool.definition.name
       const { available } = reachOf({ ...input, live: read, tool })
-      result[name] = available && toolRule(read, tool.definition) !== "never" ? "approve" : "deny"
+      result[name] =
+        available && toolRule(read, tool.definition) !== PERMISSION_RULE_DECISION.never
+          ? "approve"
+          : "deny"
     }
     return result
   })

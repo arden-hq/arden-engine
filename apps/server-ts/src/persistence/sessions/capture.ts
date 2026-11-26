@@ -1,3 +1,4 @@
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { Option, Schema } from "effect"
 import { isWrittenByPerson } from "../transcript/model.js"
 import type { StoredMessageEnvelope } from "../transcript/model.js"
@@ -24,11 +25,14 @@ export const readCapture = (
   Option.getOrUndefined(Schema.decodeUnknownOption(StoredCaptureSchema)(metadata["capture"]))
 
 const ImagePartSchema = Schema.Struct({
-  type: Schema.Literal("image"),
+  type: Schema.Literal(CONTENT_BLOCK_TYPE.image),
   media_type: Schema.Literals(["image/png", "image/jpeg"] as const),
   data: Schema.NonEmptyString
 })
-const TextPartSchema = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String })
+const TextPartSchema = Schema.Struct({
+  type: Schema.Literal(CONTENT_BLOCK_TYPE.text),
+  text: Schema.String
+})
 const HandedContentSchema = Schema.Union([
   Schema.String,
   Schema.Array(Schema.Union([ImagePartSchema, TextPartSchema]))
@@ -52,9 +56,13 @@ export const handedCapture = (
   if (typeof content.value === "string") return { note: content.value, images: [] }
   const parts = content.value
   return {
-    note: parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n"),
+    note: parts
+      .flatMap((part) => (part.type === CONTENT_BLOCK_TYPE.text ? [part.text] : []))
+      .join("\n"),
     images: parts.flatMap((part) =>
-      part.type === "image" ? [{ mediaType: part.media_type, data: part.data }] : []
+      part.type === CONTENT_BLOCK_TYPE.image
+        ? [{ mediaType: part.media_type, data: part.data }]
+        : []
     )
   }
 }

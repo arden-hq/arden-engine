@@ -1,8 +1,8 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { BrowserProcedures } from "../browser/procedures/service.js"
 import { BrowserProcedureStore } from "../persistence/browser-procedures/store.js"
-import { BrowserClient } from "../browser/service.js"
+import { BROWSER_TOOL, BrowserClient } from "../browser/service.js"
 import { defineServerTool } from "./define.js"
 import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { runBrowserForRun, webUrl } from "./browser-support.js"
@@ -59,10 +59,9 @@ export const browserProcedureTools = Effect.gen(function* () {
             )
           })
         )(tabs.data)
-        const tab =
-          listed._tag === "Some"
-            ? listed.value.tabs.find((t) => t.tab_ref === input.tab_ref)
-            : undefined
+        const tab = Option.isSome(listed)
+          ? listed.value.tabs.find((t) => t.tab_ref === input.tab_ref)
+          : undefined
         const origin = tab === undefined ? undefined : webUrl(tab.url)?.origin
         if (tab === undefined || origin === undefined)
           throw new ToolExecutionError("The procedure's browser tab is unavailable.", {
@@ -102,7 +101,7 @@ export const browserProcedureTools = Effect.gen(function* () {
       }
     }),
     defineServerTool({
-      name: "browser_procedure_verify",
+      name: BROWSER_TOOL.procedureVerify,
       description:
         "Internal checkpoint in a saved browser procedure. After it, the rest of this procedure run may only read, to check the result. Only a recorded procedure can call it.",
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),

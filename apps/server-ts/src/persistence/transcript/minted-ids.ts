@@ -1,4 +1,4 @@
-type MintedKind = "text" | "reasoning"
+import { ASSISTANT_OUTPUT_PART_TYPE, type MessageIdMinter } from "@arden-hq/loop"
 
 interface MintedPosition {
   readonly fragment: number
@@ -10,11 +10,11 @@ export const mintedTurnRoot = (assistantMessageId: string, turn: number): string
 
 export const mintedMessageId = (
   turnRoot: string,
-  kind: MintedKind,
+  kind: Parameters<MessageIdMinter>[0],
   position: MintedPosition
 ): string => {
   const record = position.fragment === 0 ? turnRoot : `${turnRoot}-item-${position.fragment}`
-  if (kind === "reasoning") {
+  if (kind === ASSISTANT_OUTPUT_PART_TYPE.reasoning) {
     return position.index === 0
       ? `${record}-reasoning`
       : `${record}-reasoning-${position.index + 1}`

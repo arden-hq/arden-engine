@@ -1,3 +1,4 @@
+import { DECISION_DELIVERY, RUN_ORIGIN } from "@arden-hq/protocol/runs"
 import { RunOriginSchema } from "../runs/stored-context.js"
 import {
   APPROVAL_ASKER,
@@ -47,6 +48,8 @@ export interface ApprovalRow {
   readonly payload_json: string | null
 }
 
+const LEGACY_SUBAGENT_RESULT = "subagent_result"
+
 const text = (payload: Readonly<Record<string, unknown>>, field: string): string | null =>
   typeof payload[field] === "string" ? payload[field] : null
 
@@ -61,7 +64,7 @@ export const decodeRunApproval = Effect.fn("decodeRunApproval")(function* (row: 
       ).snapshot
     : null
   const kind = connection ? "integration_connection" : row.kind
-  const subject = kind === "subagent_result" ? text(payload, "task") : null
+  const subject = kind === LEGACY_SUBAGENT_RESULT ? text(payload, "task") : null
   const presentation = storedApprovalPresentation(payload.presentation)
   return {
     at: row.requested_at,
@@ -70,7 +73,10 @@ export const decodeRunApproval = Effect.fn("decodeRunApproval")(function* (row: 
     destination_session_id: row.destination_session_id,
     asker: askerOf(row.work_json),
     tool_call_id: row.tool_call_id,
-    decision_delivery: row.source === "deferred" ? "deferred" : "blocking",
+    decision_delivery:
+      row.source === DECISION_DELIVERY.deferred
+        ? DECISION_DELIVERY.deferred
+        : DECISION_DELIVERY.blocking,
     kind,
     connection:
       connection === null
@@ -103,14 +109,14 @@ export const workOf = (json: string | null): RunApprovalWork | null => {
     Schema.decodeUnknownOption(Schema.fromJsonString(RunOriginSchema))(json)
   )
   switch (origin?.kind) {
-    case "task":
+    case RUN_ORIGIN.task:
       return { kind: "task", item_id: origin.item_id }
-    case "automation":
+    case RUN_ORIGIN.automation:
       return { kind: "automation", automation_id: origin.automation_id }
     case undefined:
-    case "chat":
-    case "space":
-    case "unrecorded":
+    case RUN_ORIGIN.chat:
+    case RUN_ORIGIN.space:
+    case RUN_ORIGIN.unrecorded:
       return null
   }
 }

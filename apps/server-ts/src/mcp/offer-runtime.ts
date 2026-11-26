@@ -1,3 +1,4 @@
+import { MCP_CONNECTION_STATUS } from "@arden-hq/protocol/mcp"
 import { Effect, Layer } from "effect"
 import type { ConnectedServer } from "../persistence/capability-offers/match.js"
 import { CapabilityOfferStore } from "../persistence/capability-offers/store.js"
@@ -23,7 +24,7 @@ export const capabilityOfferRuntime: Layer.Layer<
     yield* Effect.addFinalizer(() => Effect.sync(stop))
     const servers = yield* mcp.snapshot()
     yield* Effect.forEach(
-      servers.filter((server) => server.status === "connected"),
+      servers.filter((server) => server.status === MCP_CONNECTION_STATUS.connected),
       (server) => answer(connectedServer(server)),
       { discard: true }
     )

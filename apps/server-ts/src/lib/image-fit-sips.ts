@@ -1,4 +1,5 @@
 import type { ImageInputLimits } from "@arden-hq/loop"
+import { PLATFORM } from "@arden-hq/std/process"
 import { execFile } from "node:child_process"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -7,7 +8,16 @@ import { promisify } from "node:util"
 
 import { fitDimensions, type ImageSize } from "./prompt-image.js"
 
-export type SipsImageFormat = "png" | "jpeg" | "gif" | "webp" | "heic"
+const SIPS_IMAGE_FORMAT = {
+  png: "png",
+  jpeg: "jpeg",
+  gif: "gif",
+  webp: "webp",
+  heic: "heic"
+} as const
+export type SipsImageFormat = (typeof SIPS_IMAGE_FORMAT)[keyof typeof SIPS_IMAGE_FORMAT]
+
+const SIPS_SOURCE = { file: "file", bytes: "bytes" } as const
 
 export interface SipsFittedImage {
   readonly mediaType: "image/png" | "image/jpeg"
@@ -32,22 +42,22 @@ const sourceSize = async (
 
 export const fitImageWithSips = async (input: {
   readonly source:
-    | { readonly kind: "file"; readonly file: string }
-    | { readonly kind: "bytes"; readonly bytes: Uint8Array }
+    | { readonly kind: typeof SIPS_SOURCE.file; readonly file: string }
+    | { readonly kind: typeof SIPS_SOURCE.bytes; readonly bytes: Uint8Array }
   readonly format: SipsImageFormat
   readonly limits: Pick<ImageInputLimits, "patchSize" | "fitSide" | "fitPatches"> | undefined
   readonly signal?: AbortSignal | undefined
 }): Promise<SipsFittedImage | undefined> => {
-  if (process.platform !== "darwin") return undefined
+  if (process.platform !== PLATFORM.darwin) return undefined
   const directory = await mkdtemp(path.join(tmpdir(), "arden-fit-image-"))
   const file =
-    input.source.kind === "file"
+    input.source.kind === SIPS_SOURCE.file
       ? input.source.file
       : path.join(directory, `source.${input.format}`)
-  const photo = input.format === "jpeg" || input.format === "heic"
+  const photo = input.format === SIPS_IMAGE_FORMAT.jpeg || input.format === SIPS_IMAGE_FORMAT.heic
   const output = path.join(directory, photo ? "image.jpg" : "image.png")
   try {
-    if (input.source.kind === "bytes") await writeFile(file, input.source.bytes)
+    if (input.source.kind === SIPS_SOURCE.bytes) await writeFile(file, input.source.bytes)
     const source = await sourceSize(file, input.signal)
     if (source === undefined) return undefined
     const limits = input.limits

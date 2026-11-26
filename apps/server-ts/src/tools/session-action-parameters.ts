@@ -2,6 +2,8 @@ import { Schema } from "effect"
 
 import { SessionRefSchema, ToolDestinationSchema } from "./app-destination.js"
 
+export const APP_OPEN_MODE = { offer: "offer", open: "open" } as const
+
 export const RenameParametersSchema = Schema.Struct({
   session_ref: SessionRefSchema,
   name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(120)).pipe(
@@ -42,7 +44,7 @@ export const AppOpenParametersSchema = Schema.Struct({
     })
   ),
   mode: Schema.optionalKey(
-    Schema.Literals(["offer", "open"] as const).pipe(
+    Schema.Literals(Object.values(APP_OPEN_MODE)).pipe(
       Schema.annotateEncoded({
         description:
           "offer (default): a card in chat the user may open. open: move the user there now; only when they asked to be taken there."

@@ -11,6 +11,9 @@ import {
   type ToolResultObjectStore
 } from "../managed-output/tool-result-objects.js"
 
+export const SQLITE_MEMORY_FILENAME = ":memory:"
+export const SQLITE_SEARCH_FILENAME = "search.sqlite"
+
 export const IdGenerator = Context.Reference<{ readonly next: () => string }>(
   "@arden-hq/server/persistence/IdGenerator",
   { defaultValue: () => ({ next: randomUUID }) }

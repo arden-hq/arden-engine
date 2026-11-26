@@ -8,6 +8,7 @@ import { RunQueries } from "../persistence/runs/queries.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { ConversationArtifacts } from "../artifacts/conversation.js"
+import { ARTIFACT_SOURCE } from "../artifacts/conversation-model.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
 import {
   policyPathOptions,
@@ -141,7 +142,7 @@ const makeArtifactSaveTool = (
               title: input.title,
               summary: input.summary,
               mediaType: fileMediaTypeForName(
-                source.kind === "path" ? source.path : source.filename
+                source.kind === ARTIFACT_SOURCE.path ? source.path : source.filename
               ),
               role: "output"
             })

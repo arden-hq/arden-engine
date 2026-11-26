@@ -1,8 +1,7 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
 import { formatBytes } from "@arden-hq/std/count"
 import { randomUUID } from "node:crypto"
-import { VISUALIZATION_RUNTIME_VERSION } from "@arden-hq/protocol"
-import { VISUALIZATION_KIND } from "@arden-hq/protocol/visualizations"
+import { VISUALIZATION_KIND, VISUALIZATION_RUNTIME_VERSION } from "@arden-hq/protocol"
 import { VisualizationRefSchema } from "@arden-hq/protocol/effect/visualizations"
 import { chmod, cp, lstat, mkdir, readdir, rename, rm } from "node:fs/promises"
 import { basename, isAbsolute, join } from "node:path"
@@ -20,6 +19,7 @@ import {
   type CreateImageArtifactInput,
   type CreateFileArtifactInput,
   type ConversationArtifact,
+  ARTIFACT_SOURCE,
   isHtmlArtifact,
   ConversationArtifactError
 } from "./conversation-model.js"
@@ -62,11 +62,11 @@ const make = Effect.fn("ConversationArtifacts.make")(function* (root: string) {
     input: CreateImageArtifactInput
   ) {
     const sessionId = yield* validateSessionId(input.sessionId)
-    if (input.source.kind === "path" && !isAbsolute(input.source.path)) {
+    if (input.source.kind === ARTIFACT_SOURCE.path && !isAbsolute(input.source.path)) {
       return yield* artifactError("invalid", "Visualization image path must be absolute")
     }
     const bytes =
-      input.source.kind === "path"
+      input.source.kind === ARTIFACT_SOURCE.path
         ? yield* readArtifactFile(input.source.path, MAX_IMAGE_BYTES)
         : Uint8Array.from(input.source.bytes)
     if (bytes.byteLength > MAX_IMAGE_BYTES) {
@@ -107,18 +107,20 @@ const make = Effect.fn("ConversationArtifacts.make")(function* (root: string) {
     input: CreateFileArtifactInput
   ) {
     const sessionId = yield* validateSessionId(input.sessionId)
-    if (input.source.kind === "path" && !isAbsolute(input.source.path)) {
+    if (input.source.kind === ARTIFACT_SOURCE.path && !isAbsolute(input.source.path)) {
       return yield* artifactError("invalid", "Artifact source path must be absolute")
     }
     const bytes =
-      input.source.kind === "path"
+      input.source.kind === ARTIFACT_SOURCE.path
         ? yield* readArtifactFile(input.source.path, MAX_FILE_BYTES)
         : Uint8Array.from(input.source.bytes)
     if (bytes.byteLength > MAX_FILE_BYTES) {
       return yield* artifactError("quota", `Artifact file exceeds ${formatBytes(MAX_FILE_BYTES)}`)
     }
     const sourceName =
-      input.source.kind === "path" ? basename(input.source.path) : input.source.filename
+      input.source.kind === ARTIFACT_SOURCE.path
+        ? basename(input.source.path)
+        : input.source.filename
     if (
       sourceName.length === 0 ||
       sourceName.length > 255 ||
@@ -168,9 +170,10 @@ const make = Effect.fn("ConversationArtifacts.make")(function* (root: string) {
       return yield* artifactError("corrupt", "Visualization manifest does not match its reference")
     }
     const expectedHtml = manifest.kind === VISUALIZATION_KIND.html && isHtmlArtifact(manifest)
-    const expectedImage = manifest.kind === "image" && manifest.filename.startsWith("image.")
+    const expectedImage =
+      manifest.kind === VISUALIZATION_KIND.image && manifest.filename.startsWith("image.")
     const expectedFile =
-      manifest.kind === "file" &&
+      manifest.kind === VISUALIZATION_KIND.file &&
       manifest.producer_run_id !== undefined &&
       manifest.operation_key !== undefined
     if (!expectedHtml && !expectedImage && !expectedFile) {
@@ -221,7 +224,7 @@ const make = Effect.fn("ConversationArtifacts.make")(function* (root: string) {
     if (bytes.byteLength !== manifest.byte_length || sha256Hex(bytes) !== manifest.sha256) {
       return yield* artifactError("corrupt", "Visualization content does not match its manifest")
     }
-    if (manifest.kind === "image") {
+    if (manifest.kind === VISUALIZATION_KIND.image) {
       const detected = detectImage(bytes)
       if (detected?.filename !== manifest.filename || detected.mediaType !== manifest.media_type) {
         return yield* artifactError(

@@ -25,9 +25,15 @@ export interface ScriptResultDelivery {
   readonly payload: ScriptResultPayload
 }
 
+export const SCRIPT_DELIVERY_DEFERRAL = { retrying: "retrying", abandoned: "abandoned" } as const
+
 export type ScriptResultDeferral =
-  | { readonly kind: "retrying"; readonly attempts: number; readonly nextAttemptAt: string }
-  | { readonly kind: "abandoned"; readonly attempts: number }
+  | {
+      readonly kind: typeof SCRIPT_DELIVERY_DEFERRAL.retrying
+      readonly attempts: number
+      readonly nextAttemptAt: string
+    }
+  | { readonly kind: typeof SCRIPT_DELIVERY_DEFERRAL.abandoned; readonly attempts: number }
 
 export class ScriptResultError extends Schema.TaggedError<ScriptResultError>()(
   "ScriptResultError",

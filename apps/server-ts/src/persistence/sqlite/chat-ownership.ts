@@ -13,22 +13,24 @@ export const userChatSql = (alias?: string): Statement.Fragment => {
   ])
 }
 
+const CHAT_SCOPE = { space: "space", within: "within" } as const
+
 type ChatScope =
-  | { readonly kind: "space"; readonly spaceId: string }
-  | { readonly kind: "within"; readonly sessionId: string }
+  | { readonly kind: typeof CHAT_SCOPE.space; readonly spaceId: string }
+  | { readonly kind: typeof CHAT_SCOPE.within; readonly sessionId: string }
 
 const rootChats = (sql: SqlClient.SqlClient, scope: ChatScope) => {
   switch (scope.kind) {
-    case "space":
+    case CHAT_SCOPE.space:
       return sql`space_id = ${scope.spaceId}`
-    case "within":
+    case CHAT_SCOPE.within:
       return sql`session_id IN (SELECT session_id FROM up)`
   }
 }
 
 const ownedSessions = (sql: SqlClient.SqlClient, scope: ChatScope) => sql`
     ${
-      scope.kind === "within"
+      scope.kind === CHAT_SCOPE.within
         ? sql`${sessionAncestors(sql, {
             name: "up",
             from: sql`SELECT session_id FROM sessions WHERE session_id = ${scope.sessionId}`
@@ -51,7 +53,8 @@ export const isUserChatSession = Effect.fn("Chat.isUserSession")(function* (
   sql: SqlClient.SqlClient,
   sessionId: string
 ) {
-  const rows = yield* sql`WITH RECURSIVE ${ownedSessions(sql, { kind: "within", sessionId })}
+  const rows =
+    yield* sql`WITH RECURSIVE ${ownedSessions(sql, { kind: CHAT_SCOPE.within, sessionId })}
     SELECT 1 FROM owned WHERE session_id = ${sessionId} LIMIT 1`
   return rows.length > 0
 })
@@ -85,7 +88,7 @@ export const readChatSettled = (
   }[],
   SqlError,
   never
-> => chatSettled(sql, { kind: "space", spaceId })
+> => chatSettled(sql, { kind: CHAT_SCOPE.space, spaceId })
 
 const chatSettled = Effect.fn("Chat.settled")(function* (
   sql: SqlClient.SqlClient,

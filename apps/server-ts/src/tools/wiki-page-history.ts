@@ -6,6 +6,8 @@ import { RunQueries } from "../persistence/runs/queries.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
 import type { Wiki } from "../wiki/service.js"
+import { WIKI_LINE_ORIGIN } from "../wiki/history.js"
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { boundedDiff } from "./bounded-diff.js"
 import { chatLinkOf } from "./call-receipt.js"
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -47,17 +49,17 @@ const lineOriginOutput = async (
     { signal }
   )
   switch (origin.kind) {
-    case "absent":
+    case WIKI_LINE_ORIGIN.absent:
       throw new ToolExecutionError(
         `That text is not on ${record.resource.path} now. Read the page and copy part of one line.`,
         { preview: "Line not found", retryable: false }
       )
-    case "ambiguous":
+    case WIKI_LINE_ORIGIN.ambiguous:
       throw new ToolExecutionError(
         `That text is on ${origin.lines} lines of ${record.resource.path}. Give more of the one line you mean.`,
         { preview: "Line not unique", retryable: false }
       )
-    case "older":
+    case WIKI_LINE_ORIGIN.older:
       return {
         result: `That line has been on ${record.resource.path} since before its newest ${origin.searched} saved changes, which is as far back as a line is traced. Its origin was not searched further.`,
         preview: "Line older than the search",
@@ -69,7 +71,7 @@ const lineOriginOutput = async (
           found: false
         }
       }
-    case "added": {
+    case WIKI_LINE_ORIGIN.added: {
       const chat = await chatPhrase(sessions, wikiOriginChat(origin.origin), signal)
       const source = wikiOriginSource(origin.origin)
       return {
@@ -124,10 +126,12 @@ const RestoreParametersSchema = Schema.Struct({
 const pageStoredAt = (snapshot: Snapshot, path: string): PageRecord | null =>
   snapshot.pages.find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
 
-type MergedPage = PageRecord & { readonly page: { readonly lifecycle: "redirect" } }
+type MergedPage = PageRecord & {
+  readonly page: { readonly lifecycle: typeof WIKI_PAGE_LIFECYCLE.redirect }
+}
 
 const isMergedPage = (record: PageRecord): record is MergedPage =>
-  record.page.lifecycle === "redirect"
+  record.page.lifecycle === WIKI_PAGE_LIFECYCLE.redirect
 
 const restoreSource = async (
   wiki: Wiki["Service"],

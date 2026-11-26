@@ -1,23 +1,25 @@
-import { Schema } from "effect"
+import { Match, Schema } from "effect"
 
 import type { WikiCommitError } from "./commit-write-types.js"
 
-const WikiOperationSchema = Schema.Literals([
-  "open",
-  "observe",
-  "create",
-  "list",
-  "read",
-  "update",
-  "archive",
-  "merge",
-  "history",
-  "restore",
-  "diff",
-  "links",
-  "rename",
-  "forget"
-] as const)
+export const WIKI_OPERATION = {
+  open: "open",
+  observe: "observe",
+  create: "create",
+  list: "list",
+  read: "read",
+  update: "update",
+  archive: "archive",
+  merge: "merge",
+  history: "history",
+  restore: "restore",
+  diff: "diff",
+  links: "links",
+  rename: "rename",
+  forget: "forget"
+} as const
+
+const WikiOperationSchema = Schema.Literals(Object.values(WIKI_OPERATION))
 
 export type WikiOperation = typeof WikiOperationSchema.Type
 
@@ -73,22 +75,22 @@ export const wikiError = (
     ...(options?.cause === undefined ? {} : { cause: options.cause })
   })
 
-const ruleReason = (
-  rule: Extract<WikiCommitError, { readonly _tag: "WikiCommitRuleError" }>["rule"]
-): "invalid" | "blocked" | "conflict" => {
-  switch (rule) {
-    case "names":
-      return "conflict"
-    case "aliases":
-    case "size":
-    case "retraction":
-      return "invalid"
-    case "records":
-    case "retire":
-    case "code_owned":
-    case "space":
-      return "blocked"
-  }
+const RULE_REASON: Readonly<
+  Record<
+    Extract<WikiCommitError, { readonly _tag: "WikiCommitRuleError" }>["rule"],
+    | typeof WIKI_ERROR_REASON.invalid
+    | typeof WIKI_ERROR_REASON.blocked
+    | typeof WIKI_ERROR_REASON.conflict
+  >
+> = {
+  names: WIKI_ERROR_REASON.conflict,
+  aliases: WIKI_ERROR_REASON.invalid,
+  size: WIKI_ERROR_REASON.invalid,
+  retraction: WIKI_ERROR_REASON.invalid,
+  records: WIKI_ERROR_REASON.blocked,
+  retire: WIKI_ERROR_REASON.blocked,
+  code_owned: WIKI_ERROR_REASON.blocked,
+  space: WIKI_ERROR_REASON.blocked
 }
 
 export const mapRevisionError =
@@ -98,34 +100,39 @@ export const mapRevisionError =
       ...(pageId === undefined ? {} : { pageId }),
       cause
     }
-    switch (cause._tag) {
-      case "WikiError":
-        return new WikiError({ ...cause, message: cause.message, operation })
-      case "RevisionConflictError":
-        return wikiError(operation, "conflict", cause.message, options)
-      case "WorkingFileChangedError":
-        return wikiError(
+    const invalid = (found: { readonly message: string }): WikiError =>
+      wikiError(operation, WIKI_ERROR_REASON.invalid, found.message, options)
+    return Match.valueTags(cause, {
+      WikiError: (found) => new WikiError({ ...found, message: found.message, operation }),
+      RevisionConflictError: (found) =>
+        wikiError(operation, WIKI_ERROR_REASON.conflict, found.message, options),
+      WorkingFileChangedError: (found) =>
+        wikiError(
           operation,
-          "blocked",
-          `${cause.path} was changed outside Arden and Memory has not taken that change in. Nothing was saved.`,
+          WIKI_ERROR_REASON.blocked,
+          `${found.path} was changed outside Arden and Memory has not taken that change in. Nothing was saved.`,
           options
-        )
-      case "CorruptRepositoryError":
-        return wikiError(operation, "corrupt", cause.message, options)
-      case "WikiCommitRuleError":
-        return wikiError(operation, ruleReason(cause.rule), cause.message, options)
-      case "InvalidRevisionInputError":
-      case "NoChangesError":
-      case "RevisionContentLimitError":
-      case "UnsafePathError":
-        return wikiError(operation, "invalid", cause.message, options)
-      case "RepositoryClosedError":
-        return wikiError(operation, "closed", cause.message, options)
-      case "RevisionStorageError":
-        return wikiError(operation, "storage", cause.message, options)
-      case "SpaceStoreError":
-        return wikiError(operation, "storage", "Could not check which pages Spaces own", options)
-      case "IdempotencyConflictError":
-        return wikiError(operation, "storage", "internal write identity conflict", options)
-    }
+        ),
+      CorruptRepositoryError: (found) =>
+        wikiError(operation, WIKI_ERROR_REASON.corrupt, found.message, options),
+      WikiCommitRuleError: (found) =>
+        wikiError(operation, RULE_REASON[found.rule], found.message, options),
+      InvalidRevisionInputError: invalid,
+      NoChangesError: invalid,
+      RevisionContentLimitError: invalid,
+      UnsafePathError: invalid,
+      RepositoryClosedError: (found) =>
+        wikiError(operation, WIKI_ERROR_REASON.closed, found.message, options),
+      RevisionStorageError: (found) =>
+        wikiError(operation, WIKI_ERROR_REASON.storage, found.message, options),
+      SpaceStoreError: () =>
+        wikiError(
+          operation,
+          WIKI_ERROR_REASON.storage,
+          "Could not check which pages Spaces own",
+          options
+        ),
+      IdempotencyConflictError: () =>
+        wikiError(operation, WIKI_ERROR_REASON.storage, "internal write identity conflict", options)
+    })
   }

@@ -5,7 +5,11 @@ import { ManagedOutputs } from "../../artifacts/managed-output/managed-output.js
 import { ChatMessage } from "../../chat/message.js"
 import { ScriptJournal } from "../../persistence/scripts/journal.js"
 import { ScriptResults } from "../../persistence/scripts/results.js"
-import { ScriptStore, ScriptStoreError } from "../../persistence/scripts/store.js"
+import {
+  SCRIPT_STORE_REASON,
+  ScriptStore,
+  ScriptStoreError
+} from "../../persistence/scripts/store.js"
 import { SessionQueries } from "../../persistence/sessions/queries.js"
 import {
   ScriptAccessError,
@@ -26,7 +30,7 @@ type ScriptHttpError =
   | HttpApiError.InternalServerError
 
 const storeError = (error: ScriptStoreError): ScriptHttpError => {
-  if (error.reason === "unsafe_retry") return new StoreInvalid({})
+  if (error.reason === SCRIPT_STORE_REASON.unsafe_retry) return new StoreInvalid({})
   return storeErrorToHttp({ reason: error.reason, message: error.message })
 }
 

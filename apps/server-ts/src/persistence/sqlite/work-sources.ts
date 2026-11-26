@@ -1,3 +1,4 @@
+import { SOURCE_KIND } from "@arden-hq/protocol/spaces/work"
 import { TaskSourceRecordSchema } from "../work/task-record.js"
 import { type TaskSourceRecord } from "../work/task-record.js"
 import { Effect, Schema } from "effect"
@@ -7,15 +8,15 @@ import { decodeJson } from "./json.js"
 
 const taskSourceKey = (source: TaskSourceRecord): string => {
   switch (source.kind) {
-    case "chat":
+    case SOURCE_KIND.chat:
       return JSON.stringify([source.kind, source.session_id, source.turn_id, source.revision])
-    case "memory":
+    case SOURCE_KIND.memory:
       return JSON.stringify([source.kind, source.page_ref, source.revision])
-    case "task":
+    case SOURCE_KIND.task:
       return JSON.stringify([source.kind, source.item_id, source.revision])
-    case "space":
+    case SOURCE_KIND.space:
       return JSON.stringify([source.kind, source.space_id, source.revision])
-    case "connection_item":
+    case SOURCE_KIND.connection_item:
       return JSON.stringify([source.kind, source.item_id, source.revision])
   }
 }

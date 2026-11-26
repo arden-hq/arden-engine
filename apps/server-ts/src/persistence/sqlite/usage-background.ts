@@ -1,3 +1,5 @@
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
+import { JOB_PURPOSE } from "../job-classification.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { AUTOMATION_DESTINATION } from "@arden-hq/protocol/common"
 import { outcomeSql } from "./automation-run-outcome.js"
@@ -229,7 +231,7 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
       let destination: UsageAutomationRow["destination"] = null
       if (attempt.available_task !== null)
         destination = { kind: "task", item_id: attempt.available_task }
-      else if (attempt.purpose === "space_review" && attempt.available_space !== null)
+      else if (attempt.purpose === JOB_PURPOSE.spaceReview && attempt.available_space !== null)
         destination = { kind: "space", space_id: attempt.available_space }
       else if (attempt.item_id === null && attempt.available_job !== null)
         destination = {
@@ -257,7 +259,7 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
 
 const unrecordedSource = (run: RunRow | undefined): UsageSource | null => {
   if (run === undefined) return null
-  if (run.kind === "task" && run.entity !== null)
+  if (run.kind === RUN_ORIGIN.task && run.entity !== null)
     return {
       task_id: null,
       item_id: run.entity,
@@ -270,7 +272,7 @@ const unrecordedSource = (run: RunRow | undefined): UsageSource | null => {
       available_space: run.available_space,
       available_job: null
     }
-  const automationId = run.automation_id ?? (run.kind === "automation" ? run.entity : null)
+  const automationId = run.automation_id ?? (run.kind === RUN_ORIGIN.automation ? run.entity : null)
   return automationId === null
     ? null
     : {

@@ -1,3 +1,4 @@
+import { AUTOMATION_DESCRIPTION } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 
 import type { StructuredCompletion } from "../models/structured-completion.js"
@@ -29,7 +30,7 @@ export const makeAutomationDescription = (
   Effect.fn("AutomationDescription.generate")(function* (automationId: AutomationId) {
     const automation = yield* dependencies.store.get(automationId)
     if (automation === null) return undefined
-    if (automation.description.kind === "manual") {
+    if (automation.description.kind === AUTOMATION_DESCRIPTION.manual) {
       return automation
     }
     const description = yield* dependencies.completion.runText({

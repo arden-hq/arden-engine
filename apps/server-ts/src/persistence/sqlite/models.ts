@@ -1,3 +1,4 @@
+import { AUTOMATION_CONTEXT_MODE } from "@arden-hq/protocol/automations"
 import type { ModelContextBudget } from "../models/store.js"
 import type {
   ModelAssignment,
@@ -178,7 +179,8 @@ export const readRequestedModel = Effect.fn("SqliteModelStore.readRequestedModel
 export const runInheritsChatModel = (
   contextMode: "fresh" | "continue" | "fork" | undefined,
   chatModel: string | null
-): boolean => contextMode !== undefined && contextMode !== "fresh" && chatModel !== null
+): boolean =>
+  contextMode !== undefined && contextMode !== AUTOMATION_CONTEXT_MODE.fresh && chatModel !== null
 
 export const readModelSelection = Effect.fn("SqliteModelStore.readSelection")(function* (
   sql: SqlClient.SqlClient,

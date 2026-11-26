@@ -4,6 +4,7 @@ import { SqlClient } from "effect/unstable/sql"
 
 import { workflowDeliveryClientId } from "../chat/workflow-delivery.js"
 import {
+  SCRIPT_DELIVERY_DEFERRAL,
   MAX_SCRIPT_RESULT_ATTEMPTS,
   ScriptResultError,
   ScriptResultPayloadSchema,
@@ -142,14 +143,14 @@ export const makeScriptResults = ({
           const attempts = (rows[0]?.attempt_count ?? 0) + 1
           const deferral: ScriptResultDeferral =
             attempts >= MAX_SCRIPT_RESULT_ATTEMPTS
-              ? { kind: "abandoned", attempts }
+              ? { kind: SCRIPT_DELIVERY_DEFERRAL.abandoned, attempts }
               : {
-                  kind: "retrying",
+                  kind: SCRIPT_DELIVERY_DEFERRAL.retrying,
                   attempts,
                   nextAttemptAt: nextOutboxAttemptAt(Date.parse(now), attempts)
                 }
           yield* sql`UPDATE automation_deliveries SET attempt_count = ${attempts},
-              next_attempt_at = ${deferral.kind === "retrying" ? deferral.nextAttemptAt : null},
+              next_attempt_at = ${deferral.kind === SCRIPT_DELIVERY_DEFERRAL.retrying ? deferral.nextAttemptAt : null},
               last_error = ${input.error.slice(0, MAX_ERROR_LENGTH)}
             WHERE delivery_id = ${input.deliveryId} AND status = 'pending'`
           return deferral

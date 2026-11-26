@@ -12,7 +12,13 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import { scriptReference } from "../workflows/identity.js"
 import type { ScriptAgentObserver, ScriptAgentRequest } from "../workflows/runtime/contract.js"
 import { executeScript } from "../workflows/runtime/script-runtime.js"
-import type { ScriptOutcome, ScriptProgress } from "../workflows/runtime/script-outcome.js"
+import {
+  SCRIPT_OUTCOME_STATUS,
+  type ScriptOutcome,
+  type ScriptProgress
+} from "../workflows/runtime/script-outcome.js"
+import { SCRIPT_PROGRESS_STATUS } from "../workflows/runtime/nested-trace.js"
+import { WORKFLOW_STATUS } from "@arden-hq/protocol/workflows"
 import type { AdoptedScript } from "../workflows/script-attempt.js"
 import {
   ScriptRunner,
@@ -95,9 +101,17 @@ const ParametersSchema = Schema.Struct({
 
 type Agent = (request: ScriptAgentRequest, observer: ScriptAgentObserver) => Promise<Schema.Json>
 
+const SETTLED = { settled: "settled", detach: "detach" } as const
+
+const DETACH_REASON = { agent: "agent", budget: "budget" } as const
+
+type DetachReason = (typeof DETACH_REASON)[keyof typeof DETACH_REASON]
+
+const CODE_LIFECYCLE = { caller: "caller" } as const
+
 type Settled =
-  | { readonly kind: "settled"; readonly outcome: ScriptOutcome }
-  | { readonly kind: "detach"; readonly reason: "agent" | "budget" }
+  | { readonly kind: typeof SETTLED.settled; readonly outcome: ScriptOutcome }
+  | { readonly kind: typeof SETTLED.detach; readonly reason: DetachReason }
 
 const makeCodeModeTool = (services: CodeModeServices): ServerTool =>
   defineServerTool({
@@ -146,7 +160,7 @@ export const executeCodeMode = async (
   input: typeof ParametersSchema.Type,
   ctx: ToolContext<ServerRunContext>,
   services: CodeModeServices,
-  options: { readonly lifecycle?: "caller" } = {}
+  options: { readonly lifecycle?: typeof CODE_LIFECYCLE.caller } = {}
 ): Promise<{ readonly result: string; readonly preview: string; readonly data: JsonObject }> => {
   const args = input.args ?? {}
   const maxAgents = input.max_agents ?? DEFAULT_MAX_AGENTS
@@ -156,8 +170,8 @@ export const executeCodeMode = async (
   else ctx.signal.addEventListener("abort", stopWithTurn, { once: true })
 
   let detached = false
-  let requestDetach: (reason: "agent" | "budget") => void = () => undefined
-  const detach = new Promise<"agent" | "budget">((resolve) => {
+  let requestDetach: (reason: DetachReason) => void = () => undefined
+  const detach = new Promise<DetachReason>((resolve) => {
     requestDetach = resolve
   })
   let attachAgent: (agent: Agent) => void = () => undefined
@@ -198,7 +212,7 @@ export const executeCodeMode = async (
         ...(ctx.beforeExecute === undefined ? {} : { beforeExecute: ctx.beforeExecute })
       }),
     agent: async (request, observer) => {
-      if (options.lifecycle === "caller")
+      if (options.lifecycle === CODE_LIFECYCLE.caller)
         throw new ToolExecutionError("This script cannot start agents", {
           preview: "Agent unavailable",
           retryable: false
@@ -213,7 +227,7 @@ export const executeCodeMode = async (
       )
     }
   })
-  if (options.lifecycle === "caller") {
+  if (options.lifecycle === CODE_LIFECYCLE.caller) {
     try {
       return inlineResult(await outcome)
     } finally {
@@ -224,8 +238,8 @@ export const executeCodeMode = async (
   let first: Settled
   try {
     first = await Promise.race([
-      outcome.then((settled): Settled => ({ kind: "settled", outcome: settled })),
-      detach.then((reason): Settled => ({ kind: "detach", reason }))
+      outcome.then((settled): Settled => ({ kind: SETTLED.settled, outcome: settled })),
+      detach.then((reason): Settled => ({ kind: SETTLED.detach, reason }))
     ])
   } catch (cause) {
     ctx.signal.removeEventListener("abort", stopWithTurn)
@@ -234,7 +248,7 @@ export const executeCodeMode = async (
     budget.cancel()
   }
 
-  if (first.kind === "settled") {
+  if (first.kind === SETTLED.settled) {
     ctx.signal.removeEventListener("abort", stopWithTurn)
     return inlineResult(first.outcome)
   }
@@ -258,10 +272,12 @@ export const executeCodeMode = async (
     throw cause
   }
   const reason =
-    first.reason === "agent" ? "its first agent started" : "it passed 10 seconds of work"
+    first.reason === DETACH_REASON.agent
+      ? "its first agent started"
+      : "it passed 10 seconds of work"
   return {
     result:
-      record.status === "running"
+      record.status === WORKFLOW_STATUS.running
         ? `The script moved to the background because ${reason}. It keeps running as Workflow ${record.ref}; its result arrives here automatically. Do not poll or wait for it.`
         : `The script moved to the background as Workflow ${record.ref}, which is already ${record.status}; its result arrives here automatically.`,
     preview: "Moved to the background",
@@ -284,7 +300,7 @@ const withoutCallFacts = ({
 }: ScriptProgress["tools"][number]): StoredTraceEntry => tool
 
 const inlineResult = (outcome: ScriptOutcome) => {
-  if (outcome.status === "failed") {
+  if (outcome.status === SCRIPT_OUTCOME_STATUS.failed) {
     throw new ToolExecutionError(outcome.error.message, {
       preview: "Code Mode failed",
       retryable: false
@@ -309,7 +325,9 @@ const inlineResult = (outcome: ScriptOutcome) => {
 const progressMessage = (progress: ScriptProgress): string => {
   const phase = progress.phases.at(-1)
   if (phase !== undefined) return phase
-  const done = progress.tools.filter((tool) => tool.status !== "running").length
+  const done = progress.tools.filter(
+    (tool) => tool.status !== SCRIPT_PROGRESS_STATUS.running
+  ).length
   return `${done}/${progress.tools.length} calls done`
 }
 

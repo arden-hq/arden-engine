@@ -2,7 +2,7 @@ import { publicServer } from "./public-server.js"
 import { after } from "@arden-hq/std/timer"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js"
-import { type McpServer as PublicMcpServer } from "@arden-hq/protocol/mcp"
+import { MCP_TRANSPORT, type McpServer as PublicMcpServer } from "@arden-hq/protocol/mcp"
 import { Effect } from "effect"
 
 import { errorMessage } from "@arden-hq/std/errors"
@@ -37,6 +37,7 @@ import {
   type RuntimeEntry,
   type RuntimeStatus,
   classifyConnectFailure,
+  MCP_CONNECT_FAILURE,
   httpStatusCode,
   notifyIgnoringListenerFailures,
   publicFailure,
@@ -141,7 +142,7 @@ export const makeMcpRuntime = ({
 
   const refreshAccountIdentity = async (config: McpStoredServer): Promise<void> => {
     if (usesPresetToken(config)) return
-    if (config.transport.type !== "http" || config.transport.auth !== "oauth") {
+    if (!usesOAuth(config)) {
       accountIdentities.set(config.name, null)
       return
     }
@@ -343,7 +344,7 @@ export const makeMcpRuntime = ({
     } catch (cause) {
       const stdio = closable.transport instanceof McpStdioTransport ? closable.transport : undefined
       const local =
-        config.transport.type === "stdio"
+        config.transport.type === MCP_TRANSPORT.stdio
           ? classifyMcpStartFailure({
               cause,
               executable: stdio?.executable,
@@ -363,13 +364,14 @@ export const makeMcpRuntime = ({
       }
       const failure = classifyConnectFailure(cause, config, local)
       if (!shouldRetry(failure)) {
-        if (failure.kind === "credential_unavailable") accountIdentities.set(config.name, null)
+        if (failure.kind === MCP_CONNECT_FAILURE.credentialUnavailable)
+          accountIdentities.set(config.name, null)
         return publish({
           config,
           generation,
           status: "failed",
           detail: failure.detail,
-          ...(failure.kind === "unrunnable_program" ? failureDiagnostics : {}),
+          ...(failure.kind === MCP_CONNECT_FAILURE.unrunnableProgram ? failureDiagnostics : {}),
           tools: [],
           events: [],
           retryAttempt
@@ -453,7 +455,7 @@ export const makeMcpRuntime = ({
     get: (name: string): RuntimeEntry | undefined => runtimes.get(name),
     liveEvents: (name: string): McpLiveEvents | undefined => {
       const entry = runtimes.get(name)
-      if (entry?.status !== "connected" || entry.client === undefined) return undefined
+      if (!isConnected(entry) || entry.client === undefined) return undefined
       if (entry.channel === undefined) return undefined
       const channel = entry.channel
       return { client: entry.client, channel, events: entry.events }
@@ -468,13 +470,11 @@ export const makeMcpRuntime = ({
         .sort((left, right) => left.config.name.localeCompare(right.config.name))
         .map(snapshotOne),
     bindings: (): ReadonlyArray<McpToolBinding> =>
-      [...runtimes.values()]
-        .filter((entry) => entry.status === "connected")
-        .flatMap((entry) => entry.tools),
+      [...runtimes.values()].filter(isConnected).flatMap((entry) => entry.tools),
     runBindings: (): ReadonlyArray<McpToolBinding> =>
       [...runtimes.values()].flatMap((entry) => {
-        if (entry.status === "connected") return entry.tools
-        if (entry.status === "reconnecting") return lastConnectedTools.get(entry.config.name) ?? []
+        if (isConnected(entry)) return entry.tools
+        if (isReconnecting(entry)) return lastConnectedTools.get(entry.config.name) ?? []
         return []
       }),
     reset,

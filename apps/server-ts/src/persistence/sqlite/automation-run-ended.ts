@@ -1,3 +1,4 @@
+import { AUTOMATION_RUN_OUTCOME } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
@@ -36,7 +37,10 @@ export const raiseRunEnded = Effect.fn("AutomationSettlement.raiseRunEnded")(fun
     automationRef: row.automation_ref,
     name: row.name,
     purpose: input.purpose,
-    outcome: input.outcome === "blocked" ? "finished" : input.outcome,
+    outcome:
+      input.outcome === AUTOMATION_RUN_OUTCOME.blocked
+        ? AUTOMATION_RUN_OUTCOME.finished
+        : input.outcome,
     text: input.text,
     chat:
       input.sessionId === null || row.public_ref === null

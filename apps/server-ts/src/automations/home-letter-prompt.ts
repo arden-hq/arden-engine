@@ -1,3 +1,4 @@
+import { HOME_EVIDENCE } from "../persistence/home/letter-schema.js"
 import { HOME_HEADLINES, type HomeEvidence } from "../persistence/home/letter-schema.js"
 import { cutText } from "@arden-hq/std/text"
 import type {
@@ -18,17 +19,17 @@ const prose = (text: string): string => cutText(text, 2_000)
 
 function normalizeHomeEvidence(entry: HomeEvidence): HomeEvidence {
   switch (entry.kind) {
-    case "task":
+    case HOME_EVIDENCE.task:
       return { ...entry, title: prose(entry.title), summary: prose(entry.summary) }
-    case "run":
+    case HOME_EVIDENCE.run:
       return {
         ...entry,
         text: prose(entry.text),
         error: entry.error === null ? null : prose(entry.error)
       }
-    case "approval":
+    case HOME_EVIDENCE.approval:
       return { ...entry, preview: entry.preview === null ? null : prose(entry.preview) }
-    case "question":
+    case HOME_EVIDENCE.question:
       return {
         ...entry,
         question: {
@@ -41,7 +42,7 @@ function normalizeHomeEvidence(entry: HomeEvidence): HomeEvidence {
           }
         }
       }
-    case "offer":
+    case HOME_EVIDENCE.offer:
       return entry
   }
 }
@@ -49,8 +50,8 @@ function normalizeHomeEvidence(entry: HomeEvidence): HomeEvidence {
 function selectHomeEvidence(entries: readonly HomeEvidence[]): HomeEvidence[] {
   const ranked = [...entries].sort(
     (a, b) =>
-      Number(b.kind === "question" || b.kind === "approval") -
-        Number(a.kind === "question" || a.kind === "approval") ||
+      Number(b.kind === HOME_EVIDENCE.question || b.kind === HOME_EVIDENCE.approval) -
+        Number(a.kind === HOME_EVIDENCE.question || a.kind === HOME_EVIDENCE.approval) ||
       b.at.localeCompare(a.at) ||
       b.id.localeCompare(a.id)
   )
@@ -59,8 +60,8 @@ function selectHomeEvidence(entries: readonly HomeEvidence[]): HomeEvidence[] {
   let size = 2
   for (const source of ranked) {
     if (selected.length >= MAX_ENTRIES) break
-    if (source.kind === "task" && seenTasks.has(source.item_id)) continue
-    if (source.kind === "task") seenTasks.add(source.item_id)
+    if (source.kind === HOME_EVIDENCE.task && seenTasks.has(source.item_id)) continue
+    if (source.kind === HOME_EVIDENCE.task) seenTasks.add(source.item_id)
     const entry = normalizeHomeEvidence(source)
     const length = markdownValue([entry]).length + (selected.length === 0 ? 0 : 1)
     if (size + length > MAX_CHARACTERS) continue

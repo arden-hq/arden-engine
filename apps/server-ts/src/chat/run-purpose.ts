@@ -1,4 +1,4 @@
-import { RUN_ACTIVITY_TARGET } from "@arden-hq/protocol/chat"
+import { RUN_ACTIVITY_TARGET, RUN_STATUS } from "@arden-hq/protocol/chat"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import type { ToolCall } from "@arden-hq/loop"
@@ -47,7 +47,10 @@ export const makeRunPurpose = (input: {
       )
         return false
       const run = yield* input.runs.get(request.run.runId)
-      return run?.status === "running" && !(yield* input.store.peekPendingInput(request.run.runId))
+      return (
+        run?.status === RUN_STATUS.running &&
+        !(yield* input.store.peekPendingInput(request.run.runId))
+      )
     })
     if (!(yield* whileRunActive(input, request.run, admissible()))) return
     const inputs = yield* input.transcript.turnInputs({

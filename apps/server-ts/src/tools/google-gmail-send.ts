@@ -14,8 +14,7 @@ import type { SharedFileAccess } from "./shared-files.js"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { jsonArguments } from "./automation-create-card.js"
-import type { GoogleToolConnections } from "./google-accounts.js"
-import { requiredAccountRefDescription } from "./google-accounts.js"
+import { requiredAccountRefDescription, type GoogleToolConnections } from "./google-accounts.js"
 import {
   bodyProblem,
   REPLY_APPROVAL_EDITS,

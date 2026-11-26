@@ -2,7 +2,7 @@ import type { ChatEventStore } from "../events/store.js"
 import { Effect } from "effect"
 import type { QueueWriter } from "./automation-enqueue.js"
 import { recordEnding } from "./run-ending.js"
-import type { RunTerminal } from "./run-ending-said.js"
+import { RUN_TERMINAL, type RunTerminal } from "./run-ending-said.js"
 import { applySpaceMoveAtRunEnd } from "./session-space-move.js"
 import { announceNotice } from "./notices.js"
 import { settleTaskRun } from "./task-next-move.js"
@@ -25,7 +25,7 @@ export const settleRun = Effect.fn("RunSettle.settle")(function* (
     now,
     ...(input.occurredAt === undefined ? {} : { occurredAt: input.occurredAt })
   })
-  if (terminal.status === "completed") yield* recordTaskReport(writer, runId)
+  if (terminal.status === RUN_TERMINAL.completed) yield* recordTaskReport(writer, runId)
   yield* settleTaskRun(writer, runId, now)
   const lateMove = yield* applySpaceMoveAtRunEnd({
     sql: writer.sql,

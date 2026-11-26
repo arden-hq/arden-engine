@@ -9,6 +9,8 @@ import { parseDocument } from "yaml"
 
 import { skillError, type SkillOperation } from "./errors.js"
 
+const FRONT_MATTER_FENCE = "---"
+
 export const declaredVersion = (version: string | undefined): SkillVersion =>
   version === undefined
     ? { kind: SKILL_VERSION.unversioned }
@@ -64,11 +66,11 @@ export const parseSkillMetadata = Effect.fn("Skills.parseMetadata")(function* (
   operation: SkillOperation
 ) {
   const lines = source.split("\n").map((line) => line.replace(/\r$/, ""))
-  if (lines[0] !== "---") {
+  if (lines[0] !== FRONT_MATTER_FENCE) {
     return yield* skillError(operation, "invalid", "Skill metadata is missing")
   }
 
-  const closing = lines.findIndex((line, index) => index > 0 && line === "---")
+  const closing = lines.findIndex((line, index) => index > 0 && line === FRONT_MATTER_FENCE)
   if (closing < 0) return yield* skillError(operation, "invalid", "Skill metadata is incomplete")
 
   const value = yield* Effect.try({

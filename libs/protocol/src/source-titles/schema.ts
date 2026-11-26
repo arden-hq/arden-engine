@@ -15,6 +15,22 @@ export const SOURCE_UNAVAILABLE = {
   unnamed: "unnamed"
 } as const
 export type SourceUnavailable = (typeof SOURCE_UNAVAILABLE)[keyof typeof SOURCE_UNAVAILABLE]
+export const SOURCE_PROVIDER = {
+  gmail: "gmail",
+  web: "web",
+  arden: "arden",
+  google_drive: "google_drive",
+  drive: "drive",
+  unknown: "unknown"
+} as const
+export type SourceProvider = (typeof SOURCE_PROVIDER)[keyof typeof SOURCE_PROVIDER]
+export const SOURCE_PLACE_KIND = {
+  automation: "automation",
+  run: "run",
+  web_page: "web_page",
+  reference: "reference"
+} as const
+export type SourcePlaceKind = (typeof SOURCE_PLACE_KIND)[keyof typeof SOURCE_PLACE_KIND]
 
 const SourceLinkSchema = Schema.Union([
   Schema.Struct({

@@ -2,7 +2,8 @@ import { type TaskRecord } from "../persistence/work/task-record.js"
 import { Effect } from "effect"
 
 import type { StructuredCompletion } from "../models/structured-completion.js"
-import type { SpaceStore } from "../persistence/spaces/store.js"
+import { INSTRUCTIONS_SOURCE, type SpaceStore } from "../persistence/spaces/store.js"
+import { TASK_STATUS } from "@arden-hq/protocol/spaces/work"
 import { PROMPTS } from "../prompts/catalog.js"
 import type { Wiki } from "../wiki/service.js"
 import type { PersistedSpace, SpaceStoreError } from "../persistence/spaces/store.js"
@@ -29,7 +30,8 @@ export const makeSpaceInstructions = (
   Effect.fn("SpaceInstructions.generate")(function* (spaceId: string) {
     const space = yield* dependencies.store.get(spaceId)
     if (space === null) return undefined
-    if (space.instructions_source === "manual" && space.instructions !== null) return space
+    if (space.instructions_source === INSTRUCTIONS_SOURCE.manual && space.instructions !== null)
+      return space
     const page =
       space.page_id === null
         ? null
@@ -59,7 +61,7 @@ const spaceBrief = (
   pageContent: string | null,
   tasks: ReadonlyArray<TaskRecord>
 ): string => {
-  const live = tasks.filter((task) => task.status === "open")
+  const live = tasks.filter((task) => task.status === TASK_STATUS.open)
   return JSON.stringify({
     space_name: name,
     memory_page: pagePath,

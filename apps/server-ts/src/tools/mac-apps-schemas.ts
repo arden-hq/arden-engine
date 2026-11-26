@@ -40,8 +40,12 @@ const limit = (most: number, fallback: number) =>
     }).check(Schema.isBetween({ minimum: 1, maximum: most }))
   )
 const query = (description: string) => optional(description, 1_024)
+export const MAC_SPAN = { this: "this", future: "future" } as const
+
+export type MacSpan = (typeof MAC_SPAN)[keyof typeof MAC_SPAN]
+
 const scope = Schema.optionalKey(
-  Schema.Literals(["this", "future"]).annotate({
+  Schema.Literals(Object.values(MAC_SPAN)).annotate({
     description:
       'For a repeating event: "this" (default) changes only the occurrence event_ref names; "future" changes it and every later one. Ignored for a single event.'
   })
@@ -52,8 +56,10 @@ const repeat = (what: string) =>
       description: `Makes the ${what} repeat: daily, weekly, monthly or yearly.`
     })
   )
+export const MAC_PRIORITY = { none: "none", low: "low", medium: "medium", high: "high" } as const
+
 const priority = Schema.optionalKey(
-  Schema.Literals(["none", "low", "medium", "high"]).annotate({
+  Schema.Literals(Object.values(MAC_PRIORITY)).annotate({
     description: "Priority: none, low, medium or high."
   })
 )

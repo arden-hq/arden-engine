@@ -127,10 +127,12 @@ export const importAgentKnowledge = async ({
     files.map(async (file) => ({ file, content: await readKnowledge(file.path) }))
   )
   const skipped = read.flatMap(({ file, content }) =>
-    content.kind === "skipped" ? [{ path: file.display, reason: content.reason }] : []
+    content.kind === KNOWLEDGE_CONTENT.skipped
+      ? [{ path: file.display, reason: content.reason }]
+      : []
   )
   const pages = read.flatMap(({ file, content }) => {
-    if (content.kind === "skipped") return []
+    if (content.kind === KNOWLEDGE_CONTENT.skipped) return []
     const label = APPS[file.app].label
     const sha256 = sha256Hex(content.text)
     const body = [
@@ -185,7 +187,7 @@ export const digestAgentKnowledge = async ({
   for (const entry of entries) {
     const display = `~${entry.path.slice(home.length)}`
     const content = await readKnowledge(entry.path)
-    if (content.kind === "skipped") {
+    if (content.kind === KNOWLEDGE_CONTENT.skipped) {
       const line = `## ${display}\n(skipped: ${SKIP_WORDS[content.reason]})`
       if (line.length <= left) {
         sections.push(line)
@@ -231,9 +233,11 @@ export const SKIP_WORDS: Record<SkipReason, string> = {
   unreadable: "could not be read"
 }
 
+const KNOWLEDGE_CONTENT = { text: "text", skipped: "skipped" } as const
+
 type KnowledgeContent =
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "skipped"; readonly reason: SkipReason }
+  | { readonly kind: typeof KNOWLEDGE_CONTENT.text; readonly text: string }
+  | { readonly kind: typeof KNOWLEDGE_CONTENT.skipped; readonly reason: SkipReason }
 
 const readKnowledge = async (path: string): Promise<KnowledgeContent> => {
   const text = await readFile(path, "utf8").catch(() => undefined)

@@ -1,4 +1,4 @@
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Option } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { JsonObjectSchema } from "../json.js"
 import {
@@ -15,6 +15,8 @@ import { decodeJson, encodeJson } from "./json.js"
 import type { RuleSavedIn } from "@arden-hq/protocol/runs"
 import type { PersistenceDeps } from "./deps.js"
 import {
+  APPROVAL_STATUS,
+  TOOL_APPROVAL_KIND,
   type ToolCallRow,
   type ChatRunRow,
   type UpdatedToolRow,
@@ -29,12 +31,14 @@ import {
   attachFolderToSpaceInTransaction,
   type ApprovalFolderResolutions
 } from "./tool-approval-folders.js"
-import { isTerminalRunStatus } from "@arden-hq/protocol/runs"
+import { isTerminalRunStatus, RUN_STATUS } from "@arden-hq/protocol/runs"
+import { TOOL_STATUS } from "./status-sets.js"
+import { BROWSER_PERMISSION_TOOL } from "../tools/tool-roles.js"
 import { announceRunAskChange } from "./ask-changes.js"
 import { recordCommandResult } from "./relay.js"
 import { noApprovalForRun } from "./approval-policy.js"
 import { detachedWorkflowCalls, requireLiveWorkflowOwner } from "./detached-workflow-calls.js"
-import { readRunAuthority } from "./run-context.js"
+import { readRunAuthority, RUN_AUTHORITY_STATE } from "./run-context.js"
 import { decodeResolveInput, type ToolApprovalResolveInput } from "./tool-approval-input.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { SessionLifecycleEventError } from "../sessions/events.js"
@@ -57,7 +61,7 @@ const resolveApprovalFolders = Effect.fn("SqliteToolExecutionStore.resolveApprov
     const approval = yield* loadApprovalRow(sql, decision.runId, decision.toolCallId, "resolve")
     if (approval === null) return new Map()
     const payload = yield* decodeJson(JsonObjectSchema, approval.payload_json).pipe(Effect.option)
-    if (payload._tag === "None") return new Map()
+    if (Option.isNone(payload)) return new Map()
     const data = payload.value["approval_data"]
     const folders = [spaceFolderGrantOf(approval.tool_name, data)?.local_folder].filter(
       (folder) => folder !== undefined
@@ -176,7 +180,7 @@ export const makeToolApprovalResolveInTransaction = ({
         decision
       )
     }
-    if (approval.status !== "pending") {
+    if (approval.status !== APPROVAL_STATUS.pending) {
       const previous =
         approval.resolution_json === null
           ? null
@@ -222,7 +226,10 @@ export const makeToolApprovalResolveInTransaction = ({
         ready: ready[0]?.count === 0 && resumable[0]?.count === 1
       } satisfies ResolveToolApprovalResult
     }
-    if (approval.kind !== "tool_approval" && approval.kind !== "tool_outcome") {
+    if (
+      approval.kind !== TOOL_APPROVAL_KIND.approval &&
+      approval.kind !== TOOL_APPROVAL_KIND.outcome
+    ) {
       return yield* toolError(
         "resolve",
         "corrupt",
@@ -230,14 +237,15 @@ export const makeToolApprovalResolveInTransaction = ({
         decision
       )
     }
-    if (approval.kind === "tool_approval") yield* requireLiveWorkflowOwner(sql, decision, "resolve")
-    if (approval.kind === "tool_approval" && decision.approved) {
+    if (approval.kind === TOOL_APPROVAL_KIND.approval)
+      yield* requireLiveWorkflowOwner(sql, decision, "resolve")
+    if (approval.kind === TOOL_APPROVAL_KIND.approval && decision.approved) {
       const run = yield* readRunAuthority(sql, decision.runId).pipe(
         Effect.mapError((cause) =>
           toolError("resolve", "storage", "Could not read the run's authority", decision, cause)
         )
       )
-      if (run !== undefined && run.authority !== "active")
+      if (run !== undefined && run.authority !== RUN_AUTHORITY_STATE.active)
         return yield* toolError(
           "resolve",
           "conflict",
@@ -246,7 +254,7 @@ export const makeToolApprovalResolveInTransaction = ({
         )
     }
     if (
-      approval.kind === "tool_approval" &&
+      approval.kind === TOOL_APPROVAL_KIND.approval &&
       decision.approved &&
       (yield* noApprovalForRun(sql, decision.runId))
     ) {
@@ -268,13 +276,19 @@ LIMIT 1
     )
     const runStatus = runs[0]?.status
     const terminalOutcome =
-      approval.kind === "tool_outcome" && runStatus !== undefined && isTerminalRunStatus(runStatus)
+      approval.kind === TOOL_APPROVAL_KIND.outcome &&
+      runStatus !== undefined &&
+      isTerminalRunStatus(runStatus)
     const detached = yield* detachedWorkflowCalls(sql, decision.runId, [decision.toolCallId]).pipe(
       Effect.mapError((cause) =>
         toolError("resolve", "storage", "Could not read the detached script owner", decision, cause)
       )
     )
-    if (runStatus !== "pending" && !terminalOutcome && !detached.has(decision.toolCallId)) {
+    if (
+      runStatus !== RUN_STATUS.pending &&
+      !terminalOutcome &&
+      !detached.has(decision.toolCallId)
+    ) {
       return yield* toolError(
         "resolve",
         "conflict",
@@ -323,7 +337,8 @@ LIMIT 1
     const editedArguments = yield* approvedEdits(tool, approval, decision)
     if (
       decision.alternative !== null &&
-      (approval.kind !== "tool_approval" || !decision.alternative.offeredBy(approval.tool_name))
+      (approval.kind !== TOOL_APPROVAL_KIND.approval ||
+        !decision.alternative.offeredBy(approval.tool_name))
     ) {
       return yield* toolError(
         "resolve",
@@ -336,7 +351,7 @@ LIMIT 1
     let saved: RuleSavedIn | null = null
     let standingSkipped = false
     if (decision.grantStanding) {
-      if (approval.kind !== "tool_approval") {
+      if (approval.kind !== TOOL_APPROVAL_KIND.approval) {
         return yield* toolError(
           "resolve",
           "invalid",
@@ -344,7 +359,7 @@ LIMIT 1
           decision
         )
       }
-      if (approval.tool_name === "browser_permission") {
+      if (approval.tool_name === BROWSER_PERMISSION_TOOL) {
       } else {
         saved = yield* saveCardRule(sql, { approval, payload: storedApproval, decision })
         standingSkipped = saved === null
@@ -353,8 +368,8 @@ LIMIT 1
 
     let resultJson: string | null = null
     let nextToolStatus: "ready" | "completed"
-    if (approval.kind === "tool_approval" && decision.approved) {
-      if (tool.status !== "paused" || tool.result_json !== null) {
+    if (approval.kind === TOOL_APPROVAL_KIND.approval && decision.approved) {
+      if (tool.status !== TOOL_STATUS.paused || tool.result_json !== null) {
         return yield* toolError(
           "resolve",
           "conflict",
@@ -364,7 +379,8 @@ LIMIT 1
       }
       nextToolStatus = "ready"
     } else {
-      const expectedStatus = approval.kind === "tool_approval" ? "paused" : "uncertain"
+      const expectedStatus =
+        approval.kind === TOOL_APPROVAL_KIND.approval ? TOOL_STATUS.paused : TOOL_STATUS.uncertain
       if (tool.status !== expectedStatus) {
         return yield* toolError(
           "resolve",
@@ -374,7 +390,7 @@ LIMIT 1
         )
       }
       const synthetic =
-        approval.kind === "tool_approval"
+        approval.kind === TOOL_APPROVAL_KIND.approval
           ? rejectedToolResult(decision, decision.feedback)
           : confirmedToolOutcomeResult(decision, decision.approved, decision.feedback)
       const result = yield* decodeResult(synthetic, "resolve", decision)
@@ -397,7 +413,7 @@ LIMIT 1
     }
 
     const toolUpdated =
-      nextToolStatus === "ready"
+      nextToolStatus === TOOL_STATUS.ready
         ? yield* sql<UpdatedToolRow>`
     UPDATE tool_calls
     SET status = 'ready', result_json = NULL, ended_at = NULL
@@ -409,7 +425,7 @@ LIMIT 1
     UPDATE tool_calls
     SET status = 'completed', result_json = ${resultJson}, ended_at = ${timestamp}
     WHERE run_id = ${decision.runId} AND tool_call_id = ${decision.toolCallId}
-      AND status = ${approval.kind === "tool_approval" ? "paused" : "uncertain"}
+      AND status = ${approval.kind === TOOL_APPROVAL_KIND.approval ? TOOL_STATUS.paused : TOOL_STATUS.uncertain}
     RETURNING status
   `
     if (toolUpdated.length !== 1) {

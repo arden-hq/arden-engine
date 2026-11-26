@@ -1,4 +1,5 @@
 import type { ChatCompletionsCompat } from "@arden-hq/loop/providers/chat-completions"
+import { REASONING_EFFORT } from "@arden-hq/loop"
 import { unreachableMessage } from "@arden-hq/loop/provider-kit"
 import { Option, Schema } from "effect"
 
@@ -19,27 +20,56 @@ export interface DiscoveredModel {
   readonly compat: Partial<ChatCompletionsCompat>
 }
 
+export const DISCOVERY_FAILURE = {
+  notLlamaCpp: "not_llama_cpp",
+  noModelList: "no_model_list",
+  noModel: "no_model",
+  severalModels: "several_models",
+  modelMissing: "model_missing",
+  modelPropsFailed: "model_props_failed",
+  noToolCalls: "no_tool_calls"
+} as const
+
+const LLAMA_ROLE = { router: "router" } as const
+const isRouter = (role: string | undefined): role is typeof LLAMA_ROLE.router =>
+  role === LLAMA_ROLE.router
+
 export type DiscoveryFailure =
-  | { readonly reason: "not_llama_cpp"; readonly url: string; readonly status: number }
-  | { readonly reason: "no_model_list"; readonly url: string; readonly status: number }
-  | { readonly reason: "no_model" }
-  | { readonly reason: "several_models"; readonly listed: ReadonlyArray<string> }
   | {
-      readonly reason: "model_missing"
-      readonly server: "llama.cpp" | "openrouter"
+      readonly reason: typeof DISCOVERY_FAILURE.notLlamaCpp
+      readonly url: string
+      readonly status: number
+    }
+  | {
+      readonly reason: typeof DISCOVERY_FAILURE.noModelList
+      readonly url: string
+      readonly status: number
+    }
+  | { readonly reason: typeof DISCOVERY_FAILURE.noModel }
+  | {
+      readonly reason: typeof DISCOVERY_FAILURE.severalModels
+      readonly listed: ReadonlyArray<string>
+    }
+  | {
+      readonly reason: typeof DISCOVERY_FAILURE.modelMissing
+      readonly server:
+        | typeof CHAT_COMPLETIONS_SERVER.llamaCpp
+        | typeof CHAT_COMPLETIONS_SERVER.openrouter
       readonly model: string
       readonly listed: ReadonlyArray<string>
     }
   | {
-      readonly reason: "model_props_failed"
+      readonly reason: typeof DISCOVERY_FAILURE.modelPropsFailed
       readonly model: string
       readonly url: string
       readonly status: number
       readonly message: string | undefined
     }
   | {
-      readonly reason: "no_tool_calls"
-      readonly server: "llama.cpp" | "openrouter"
+      readonly reason: typeof DISCOVERY_FAILURE.noToolCalls
+      readonly server:
+        | typeof CHAT_COMPLETIONS_SERVER.llamaCpp
+        | typeof CHAT_COMPLETIONS_SERVER.openrouter
       readonly model: string
     }
 
@@ -55,22 +85,22 @@ export class DiscoveryError extends Error {
 
 const settingsMessage = (failure: DiscoveryFailure): string => {
   switch (failure.reason) {
-    case "not_llama_cpp":
+    case DISCOVERY_FAILURE.notLlamaCpp:
       return `${failure.url} did not answer as llama.cpp (HTTP ${failure.status}); set \`server\``
-    case "no_model_list":
+    case DISCOVERY_FAILURE.noModelList:
       return `${failure.url} did not list models (HTTP ${failure.status})`
-    case "no_model":
+    case DISCOVERY_FAILURE.noModel:
       return "The llama.cpp server lists no model"
-    case "several_models":
+    case DISCOVERY_FAILURE.severalModels:
       return `The llama.cpp server lists several models; set \`model\` to one of: ${failure.listed.join(", ")}`
-    case "model_missing":
-      return failure.server === "openrouter"
+    case DISCOVERY_FAILURE.modelMissing:
+      return failure.server === CHAT_COMPLETIONS_SERVER.openrouter
         ? `Model is not on OpenRouter: ${failure.model}`
         : `Model is not on the llama.cpp server: ${failure.model} (it lists: ${failure.listed.join(", ")})`
-    case "model_props_failed":
+    case DISCOVERY_FAILURE.modelPropsFailed:
       return `${failure.url} for ${failure.model} answered HTTP ${failure.status}${failure.message === undefined ? "" : `: ${failure.message}`}`
-    case "no_tool_calls":
-      return failure.server === "openrouter"
+    case DISCOVERY_FAILURE.noToolCalls:
+      return failure.server === CHAT_COMPLETIONS_SERVER.openrouter
         ? `OpenRouter lists no tool calls for ${failure.model}, and every Arden request declares tools`
         : `The chat template of ${failure.model} has no tool calls, and every Arden request declares tools`
   }
@@ -91,7 +121,7 @@ export interface DiscoveryInput {
 }
 
 export const detectServer = async (input: DiscoveryInput): Promise<ChatCompletionsServer> => {
-  if (new URL(input.baseUrl).hostname === "openrouter.ai") return "openrouter"
+  if (new URL(input.baseUrl).hostname === OPENROUTER_HOST) return CHAT_COMPLETIONS_SERVER.openrouter
   const props = await getJson(input, `${serverRoot(input.baseUrl)}/props`)
   return props.status === 200 && Option.isSome(decodeFingerprint(props.body))
     ? "llama.cpp"
@@ -111,19 +141,30 @@ export const discoverLlamaCpp = async (
   return Promise.all((wanted ?? ids).map((id) => llamaEntry(input, server, id)))
 }
 
+export const LLAMA_LISTING = { usable: "usable", refused: "refused" } as const
+
 export type LlamaListing =
-  | { readonly id: string; readonly kind: "usable"; readonly model: DiscoveredModel }
-  | { readonly id: string; readonly kind: "refused"; readonly failure: DiscoveryFailure }
+  | {
+      readonly id: string
+      readonly kind: typeof LLAMA_LISTING.usable
+      readonly model: DiscoveredModel
+    }
+  | {
+      readonly id: string
+      readonly kind: typeof LLAMA_LISTING.refused
+      readonly failure: DiscoveryFailure
+    }
 
 export const listLlamaCpp = async (input: DiscoveryInput): Promise<ReadonlyArray<LlamaListing>> => {
   const server = await llamaServer(input)
-  if (server.models.length === 0) throw new DiscoveryError({ reason: "no_model" })
+  if (server.models.length === 0) throw new DiscoveryError({ reason: DISCOVERY_FAILURE.noModel })
   return Promise.all(
     server.models.map(async ({ id }): Promise<LlamaListing> => {
       try {
-        return { id, kind: "usable", model: await llamaEntry(input, server, id) }
+        return { id, kind: LLAMA_LISTING.usable, model: await llamaEntry(input, server, id) }
       } catch (cause) {
-        if (cause instanceof DiscoveryError) return { id, kind: "refused", failure: cause.failure }
+        if (cause instanceof DiscoveryError)
+          return { id, kind: LLAMA_LISTING.refused, failure: cause.failure }
         throw cause
       }
     })
@@ -171,7 +212,7 @@ const llamaEntry = async (
       model: id,
       listed: server.models.map((model) => model.id)
     })
-  if (server.props.role !== "router") return llamaModel(id, server.props, undefined)
+  if (!isRouter(server.props.role)) return llamaModel(id, server.props, undefined)
   const own = await getJson(input, `${root}/props?model=${encodeURIComponent(id)}&autoload=false`)
   const loaded = decodeProps(own.body)
   if (own.status === 200 && Option.isSome(loaded)) return llamaModel(id, loaded.value, undefined)
@@ -229,7 +270,10 @@ const llamaModel = (
   const contextLimit = positive(props?.default_generation_settings?.n_ctx) ?? positive(ctxSize)
   const levels =
     caps?.supports_reasoning_effort === true ? (caps.reasoning_effort_levels ?? []) : []
-  const efforts = ["none", ...levels.filter((level) => level !== "none")]
+  const efforts = [
+    REASONING_EFFORT.none,
+    ...levels.filter((level) => level !== REASONING_EFFORT.none)
+  ]
   return {
     id,
     contextLimit,
@@ -297,9 +341,12 @@ const openRouterEfforts = (
   const listed = reasoning?.supported_efforts
   if (listed === undefined) return []
   const efforts = listed ?? OPENROUTER_EFFORTS
-  return reasoning?.mandatory === true ? efforts.filter((effort) => effort !== "none") : efforts
+  return reasoning?.mandatory === true
+    ? efforts.filter((effort) => effort !== REASONING_EFFORT.none)
+    : efforts
 }
 
+const OPENROUTER_HOST = "openrouter.ai"
 const OPENROUTER_EFFORTS = ["max", "xhigh", "high", "medium", "low", "minimal", "none"]
 
 /**

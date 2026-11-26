@@ -1,3 +1,5 @@
+import { TASK_PROPOSAL_PLACEMENT, TASK_PROPOSAL_STATUS } from "@arden-hq/protocol/proposals"
+import { SPACE_TASK_CAPTURE_BASIS } from "@arden-hq/protocol/spaces/work"
 import { RunContextSchema } from "../runs/stored-context.js"
 import { TaskSourceRecordSchema } from "../work/task-record.js"
 import { decodeKeyedTaskDraftEffect } from "../work/task-input.js"
@@ -50,7 +52,7 @@ export const makeProposalRevision = (options: {
       request.capture,
       { onExcessProperty: "error" }
     ).pipe(Effect.mapError((cause) => failure("invalid", "Invalid revised Task capture", cause)))
-    if (taskCapture.basis !== "inferred") {
+    if (taskCapture.basis !== SPACE_TASK_CAPTURE_BASIS.inferred) {
       return yield* failure("invalid", "Revised Task proposals require inferred capture")
     }
     const decodedSources = yield* Schema.decodeUnknownEffect(Schema.Array(TaskSourceRecordSchema))(
@@ -72,15 +74,15 @@ export const makeProposalRevision = (options: {
             identity: { runId: request.runId, toolCallId: request.toolCallId }
           })
           const row = yield* read(request.proposalId)
-          if (row.place !== "space" || row.space_id !== request.spaceId) {
+          if (row.place !== TASK_PROPOSAL_PLACEMENT.space || row.space_id !== request.spaceId) {
             return yield* new TaskProposalConflictError({
               kind: "not_offered",
               message: "Only this Space's open proposal can be revised"
             })
           }
-          if (row.status !== "offered") {
+          if (row.status !== TASK_PROPOSAL_STATUS.offered) {
             return yield* new TaskProposalConflictError({
-              kind: row.status === "held" ? "not_offered" : "settled",
+              kind: row.status === TASK_PROPOSAL_STATUS.held ? "not_offered" : "settled",
               message: "This proposal is no longer open"
             })
           }

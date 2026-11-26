@@ -1,6 +1,13 @@
 import { Schema, SchemaTransformation } from "effect"
 
-import { BROWSER_ACT_ACTION, SiteSecretNameSchema } from "../browser/service.js"
+import {
+  BROWSER_ACT_ACTION,
+  BROWSER_DISPOSITION,
+  BROWSER_SNAPSHOT_MODE,
+  BROWSER_TARGET_KIND,
+  BROWSER_WAIT_CONDITION,
+  SiteSecretNameSchema
+} from "../browser/service.js"
 import {
   atNodeRef,
   OriginSchema,
@@ -78,7 +85,7 @@ const TargetSchema = Schema.Struct({
     if (semantic && (target.kind === undefined || target.value === undefined)) {
       issues.push({ path: [], issue: "semantic targets require kind and value" })
     }
-    if (target.kind !== "role" && target.name !== undefined) {
+    if (target.kind !== BROWSER_TARGET_KIND.role && target.name !== undefined) {
       issues.push({ path: ["name"], issue: "is available only for role targets" })
     }
     return issues
@@ -98,7 +105,7 @@ export const OpenParametersSchema = Schema.Struct({
       "URL to open or navigate to, or a local HTML file as a file: URL or absolute path (1-4,096 characters)."
   }),
   disposition: Schema.optionalKey(
-    Schema.Literals(["current", "new"] as const).annotate({
+    Schema.Literals(Object.values(BROWSER_DISPOSITION)).annotate({
       description: "Open a new tab or navigate tab_ref in place. Defaults to new."
     })
   ),
@@ -118,7 +125,7 @@ export const OpenParametersSchema = Schema.Struct({
   read: Schema.optionalKey(ReadAfterSchema)
 }).check(
   Schema.makeFilter((input) =>
-    input.disposition === "current" && input.tab_ref === undefined
+    input.disposition === BROWSER_DISPOSITION.current && input.tab_ref === undefined
       ? [{ path: ["tab_ref"], issue: "is required when disposition is current" }]
       : []
   )
@@ -129,7 +136,7 @@ export const SnapshotParametersSchema = Schema.Struct({
     description: "Exact tab ref from browser_tabs or browser_open."
   }),
   mode: Schema.optionalKey(
-    Schema.Literals(["interactive", "text"] as const).annotate({
+    Schema.Literals(Object.values(BROWSER_SNAPSHOT_MODE)).annotate({
       description: [
         "interactive returns actionable @eN refs and authorizes one browser_act; text is read-only page text.",
         "Defaults to interactive."
@@ -155,7 +162,7 @@ export const SnapshotParametersSchema = Schema.Struct({
   ...textSelectFields
 }).check(
   Schema.makeFilter((input) =>
-    (input.mode ?? "interactive") === "text" &&
+    (input.mode ?? BROWSER_SNAPSHOT_MODE.interactive) === BROWSER_SNAPSHOT_MODE.text &&
     (input.scope !== undefined || input.depth !== undefined)
       ? [{ path: [], issue: "scope and depth are available only in interactive mode" }]
       : []
@@ -171,8 +178,10 @@ export const SnapshotRefSchema = Schema.String.check(
   ].join(" ")
 })
 
+export const PAGE_AFTER_NONE = "none"
+
 export const PageAfterSchema = Schema.Union([
-  Schema.Literal("none"),
+  Schema.Literal(PAGE_AFTER_NONE),
   Schema.Struct({
     scope: SnapshotParametersSchema.fields.scope,
     depth: SnapshotParametersSchema.fields.depth,
@@ -266,7 +275,7 @@ export const ActParametersSchema = Schema.Struct({
   Schema.makeFilter((input) => {
     const issues = originIssues(input.origin)
 
-    if (input.action === "press" || input.action === "scroll") {
+    if (input.action === BROWSER_ACT_ACTION.press || input.action === BROWSER_ACT_ACTION.scroll) {
       if (input.target !== undefined) {
         issues.push({ path: ["target"], issue: `is not used for ${input.action}` })
       }
@@ -283,7 +292,7 @@ export const ActParametersSchema = Schema.Struct({
       issues.push({ path: ["target"], issue: "this action requires a fresh node_ref" })
     }
     if (input.secret !== undefined) {
-      if (input.action !== "fill") {
+      if (input.action !== BROWSER_ACT_ACTION.fill) {
         issues.push({ path: ["secret"], issue: "is available only for fill" })
       }
       if (input.value !== undefined) {
@@ -295,14 +304,14 @@ export const ActParametersSchema = Schema.Struct({
     } else if (["fill", "type", "press"].includes(input.action) && input.value === undefined) {
       issues.push({ path: ["value"], issue: `is required for ${input.action}` })
     }
-    if (input.action === "select" && input.values === undefined) {
+    if (input.action === BROWSER_ACT_ACTION.select && input.values === undefined) {
       issues.push({ path: ["values"], issue: "is required for select" })
     }
-    if (input.action !== "select" && input.values !== undefined) {
+    if (input.action !== BROWSER_ACT_ACTION.select && input.values !== undefined) {
       issues.push({ path: ["values"], issue: "is available only for select" })
     }
     if (
-      input.action !== "scroll" &&
+      input.action !== BROWSER_ACT_ACTION.scroll &&
       (input.direction !== undefined || input.amount !== undefined)
     ) {
       issues.push({ path: [], issue: "direction and amount are available only for scroll" })
@@ -316,14 +325,7 @@ export const WaitParametersSchema = Schema.Struct({
     description:
       "Exact tab ref. Waiting for any condition except download invalidates any prior action snapshot."
   }),
-  condition: Schema.Literals([
-    "load",
-    "url",
-    "text",
-    "element",
-    "time",
-    "download"
-  ] as const).annotate({
+  condition: Schema.Literals(Object.values(BROWSER_WAIT_CONDITION)).annotate({
     description: [
       "Condition kind: load state, URL pattern, visible text, element selector, elapsed time,",
       "or download: the next file this Session's browser downloaded finishes; returns its saved path in the Downloads folder."
@@ -345,7 +347,7 @@ export const WaitParametersSchema = Schema.Struct({
   read: Schema.optionalKey(ReadAfterSchema)
 }).check(
   Schema.makeFilter((input) => {
-    if (input.condition === "download") {
+    if (input.condition === BROWSER_WAIT_CONDITION.download) {
       return input.value === undefined
         ? []
         : [{ path: ["value"], issue: "is not used with condition download" }]

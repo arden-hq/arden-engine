@@ -5,7 +5,9 @@ const FLUSH_INTERVAL_MS = 50
 
 const EMPTY = Buffer.alloc(0)
 
-type ToolOutputStreamName = "stdout" | "stderr"
+export const OUTPUT_STREAM = { stdout: "stdout", stderr: "stderr" } as const
+
+type ToolOutputStreamName = (typeof OUTPUT_STREAM)[keyof typeof OUTPUT_STREAM]
 
 export interface ToolOutputFrame {
   readonly stream: ToolOutputStreamName

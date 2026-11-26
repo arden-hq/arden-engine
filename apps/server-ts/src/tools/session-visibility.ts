@@ -3,7 +3,7 @@ import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { toolFailure } from "./tool-failure.js"
-import type { Actor, RunAuthority } from "../execution/authority.js"
+import { ACTOR, type Actor, type RunAuthority } from "../execution/authority.js"
 import { boundaryReach, refusalPath, type Path } from "../execution/decide.js"
 import type { Refusal } from "../execution/refusal.js"
 import { refusalError } from "./refusal.js"
@@ -18,7 +18,15 @@ export const unknownSession = (sessionRef: string): ToolExecutionError =>
     { preview: "Chat not found", retryable: false }
   )
 
-type ActionMiss = "other_space" | "archived"
+const SESSION_MISS = {
+  other_space: "other_space",
+  archived: "archived",
+  unknown: "unknown"
+} as const
+
+type SessionMiss = (typeof SESSION_MISS)[keyof typeof SESSION_MISS]
+
+type ActionMiss = Exclude<SessionMiss, typeof SESSION_MISS.unknown>
 
 export type ChatVerb = "message" | "change" | "open"
 
@@ -38,8 +46,8 @@ export const otherSpaceReach = (input: {
 const actionMiss = (sessionRef: string, miss: ActionMiss, actor: Actor): Refusal => {
   const read: Path = { kind: "tool", name: "session_read" }
   switch (miss) {
-    case "other_space":
-      return actor.kind === "person"
+    case SESSION_MISS.other_space:
+      return actor.kind === ACTOR.person
         ? {
             what: `Chat ${sessionRef} belongs to another Space. This chat can read it, open it, and send it a message (the user may have to approve it), but cannot change it; the user can, from that Space`,
             rule: "boundary",
@@ -50,7 +58,7 @@ const actionMiss = (sessionRef: string, miss: ActionMiss, actor: Actor): Refusal
             rule: "boundary",
             instead: [read, ...refusalPath(actor)]
           }
-    case "archived":
+    case SESSION_MISS.archived:
       return {
         what: `Chat ${sessionRef} was archived. It can still be read, but not changed, messaged or opened`,
         rule: "boundary",
@@ -63,22 +71,22 @@ export const sessionMiss = (
   queries: SessionQueries["Service"],
   sessionRef: string,
   signal: AbortSignal
-): Promise<"archived" | "unknown"> =>
+): Promise<ActionMiss | typeof SESSION_MISS.unknown> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const sessionId = yield* queries.sessionIdForRef(sessionRef)
-      if (sessionId === null) return "unknown" as const
+      if (sessionId === null) return SESSION_MISS.unknown
       const header = yield* queries.loadHistoryHeader(sessionId)
-      return header === null ? ("unknown" as const) : ("archived" as const)
+      return header === null ? SESSION_MISS.unknown : SESSION_MISS.archived
     }).pipe(Effect.mapError((error) => toolFailure(error, "Session unavailable"))),
     { signal }
   )
 
 export const unreachableSession = (
   sessionRef: string,
-  miss: ActionMiss | "unknown",
+  miss: SessionMiss,
   actor: Actor
 ): ToolExecutionError => {
-  if (miss === "unknown") return unknownSession(sessionRef)
+  if (miss === SESSION_MISS.unknown) return unknownSession(sessionRef)
   return refusalError(actionMiss(sessionRef, miss, actor))
 }

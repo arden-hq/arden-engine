@@ -7,7 +7,7 @@ import type { AutomationContextMode } from "@arden-hq/protocol/automations"
 import type { ChatApprovalMode, ChatUpdate, ConnectionArrival } from "@arden-hq/protocol/chat"
 import type { ChatForwardedSource } from "../persistence/deliveries/model.js"
 import type { StoredInteractionSender } from "../persistence/transcript/interaction.js"
-import type { ModelRole } from "@arden-hq/protocol/models"
+import { MODEL_ROLE, type ModelRole } from "@arden-hq/protocol/models"
 import { DateTime, Effect, Schema } from "effect"
 import { ChatUpdateSchema } from "@arden-hq/protocol/effect/chat"
 import type {
@@ -119,7 +119,7 @@ export const onboardingKickoff = (sessionId: string): ChatSendInput => {
 export const isNamingInput = (input: ChatSendInput): boolean => {
   if (
     input.sender !== undefined ||
-    input.modelRole === "background" ||
+    input.modelRole === MODEL_ROLE.background ||
     input.modelId !== undefined
   ) {
     return false

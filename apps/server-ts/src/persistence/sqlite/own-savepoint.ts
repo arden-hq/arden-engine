@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Exit } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { rememberTold, type Told, UnitOfWork } from "../unit-of-work.js"
 
@@ -21,7 +21,7 @@ export const inOwnSavepoint = Effect.fn("Sqlite.inOwnSavepoint")(function* <A, E
   const exit = yield* Effect.exit(
     sql.withTransaction(effect).pipe(Effect.provideService(UnitOfWork, own))
   )
-  if (exit._tag === "Failure") return exit
+  if (Exit.isFailure(exit)) return exit
   yield* Effect.forEach(told, ([key, through]) => unit.markTold(key, through), { discard: true })
   yield* Effect.forEach(woken, unit.afterCommit, { discard: true })
   return exit

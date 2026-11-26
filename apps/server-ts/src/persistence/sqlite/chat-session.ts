@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { ChatWriteError, ChatRunScheduling } from "../chat/store.js"
@@ -73,7 +74,7 @@ export const schedulingForSession = Effect.fn("SqliteChatWriteStore.schedulingFo
     maxConcurrentAgents: number,
     operation: ChatWriteOperation
   ): Effect.fn.Return<ChatRunScheduling, ChatWriteError> {
-    if (sessionType !== "agent") return { kind: "unrestricted" }
+    if (sessionType !== SESSION_TYPE.agent) return { kind: "unrestricted" }
     return {
       kind: "agent_tree",
       treeRootSessionId: yield* sessionTreeRoot(sql, sessionId, operation),

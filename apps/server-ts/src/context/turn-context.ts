@@ -1,3 +1,8 @@
+import { SPECIAL_CHAT_KIND } from "./special-chat.js"
+import { RUNTIME_SECTION, SECTION_LIFETIME } from "./runtime-update.js"
+import { SPACE_KIND } from "@arden-hq/protocol/spaces"
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
+import { ACTOR } from "../execution/authority.js"
 import { requestedSkillsContext } from "./requested-skills.js"
 import { ContextExperiments } from "./experiments.js"
 import type { ToolApprovalPolicy } from "../tools/approval-policy.js"
@@ -88,7 +93,11 @@ export const composeTurnContext = Effect.fn("Context.composeTurnContext")(functi
   input: TurnContextInput
 ) {
   const experiments = services.experiments ?? (yield* ContextExperiments)
-  const selection = experiments.begin(input.sessionId, input.runId, origin.source === "personal")
+  const selection = experiments.begin(
+    input.sessionId,
+    input.runId,
+    origin.source === SESSION_ORIGIN_SOURCE.personal
+  )
   const authority = yield* boundAuthority(services.runs, input)
   const compose = (memory: MemoryTurn | undefined) =>
     composePreparedTurnContext(services, origin, input, authority, memory, experiments, selection)
@@ -141,7 +150,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     chatTask: services.work.chatTask(input.sessionId),
     threads: measure(
       "threads",
-      origin.source === "personal"
+      origin.source === SESSION_ORIGIN_SOURCE.personal
         ? services.focusChoices
             .threads(input.sessionId)
             .pipe(
@@ -164,16 +173,20 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     ),
     answerBlocks: measure(
       "answers",
-      origin.source === "personal"
+      origin.source === SESSION_ORIGIN_SOURCE.personal
         ? answerBlockNote(services.answerBlocks, input)
         : Effect.succeed(undefined),
       undefined
     ),
     captureSpaces:
-      origin.source === "personal" && origin.special?.kind === "capture"
+      origin.source === SESSION_ORIGIN_SOURCE.personal &&
+      origin.special?.kind === SPECIAL_CHAT_KIND.capture
         ? services.spaces.list().pipe(
             Effect.map((spaces) =>
-              renderCaptureSpaces({ spaces, chatInMain: origin.header?.spaceKind === "main" })
+              renderCaptureSpaces({
+                spaces,
+                chatInMain: origin.header?.spaceKind === SPACE_KIND.main
+              })
             ),
             Effect.catchCause((cause) =>
               Effect.logWarning("Capture Space list failed", {
@@ -185,7 +198,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
           )
         : Effect.succeed(undefined),
     access:
-      authority.actor.kind !== "automation" && authority.actor.kind !== "unrecorded"
+      authority.actor.kind !== ACTOR.automation && authority.actor.kind !== ACTOR.unrecorded
         ? Effect.promise(() =>
             effectiveAccessContext(services, {
               sessionId: input.sessionId,
@@ -219,7 +232,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     )
   })
   const preparedSkills =
-    origin.source === "personal"
+    origin.source === SESSION_ORIGIN_SOURCE.personal
       ? yield* requestedSkillsContext({ skills: services.skills, messages: input.messages })
       : []
   const childRuns = yield* services.runs.currentForSessions(
@@ -245,7 +258,8 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     body: _body,
     ...continuation
   } = context.task ?? { contract: undefined, text: undefined, body: undefined }
-  const continuationShown = origin.source !== "scheduled_task" && context.task !== undefined
+  const continuationShown =
+    origin.source !== SESSION_ORIGIN_SOURCE.scheduledTask && context.task !== undefined
   const stateTask = context.task ?? context.chatTask?.task
   return {
     sections: [
@@ -259,7 +273,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
       ...textSection(
         "Execution",
         renderExecutionContext(
-          origin.source === "scheduled_task"
+          origin.source === SESSION_ORIGIN_SOURCE.scheduledTask
             ? {
                 automationId: origin.automationId,
                 policy: origin.policy,
@@ -270,7 +284,9 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
       ),
       ...textSection(
         "Research agent",
-        renderResearchAgentContext(origin.source === "agent" && origin.mode === "research")
+        renderResearchAgentContext(
+          origin.source === SESSION_ORIGIN_SOURCE.agent && origin.mode === AGENT_MODE.research
+        )
       ),
       ...taskDirectionSection(context.task),
       ...contractSections.lines,
@@ -304,12 +320,12 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
       ...textSection("Answer block values", context.answerBlocks, "turn"),
       ...textSection(
         "Starting context",
-        origin.source === "personal" ? origin.starting : undefined
+        origin.source === SESSION_ORIGIN_SOURCE.personal ? origin.starting : undefined
       ),
       ...textSection("Threads between chats", renderThreadLocations(context.threads)),
       ...textSection(
         "Special chat",
-        origin.source === "personal" ? origin.special?.context : undefined
+        origin.source === SESSION_ORIGIN_SOURCE.personal ? origin.special?.context : undefined
       ),
       ...textSection("Capture Spaces", context.captureSpaces),
       ...textSection("Command-line tools", renderCliToolsContext(context.cliTools))
@@ -422,7 +438,7 @@ const taskDirectionSection = (
     ? []
     : [
         {
-          kind: "direction",
+          kind: RUNTIME_SECTION.direction,
           key: "Task direction",
           text: renderPromptSection(
             "Task direction",
@@ -448,7 +464,9 @@ const taskContractSections = (
   readonly progress: ReadonlyArray<RuntimeSection>
 } => {
   const section = (key: string, text: string | undefined): ReadonlyArray<RuntimeSection> =>
-    text === undefined ? [] : [{ kind: "text", key, text, lifetime: "state" }]
+    text === undefined
+      ? []
+      : [{ kind: RUNTIME_SECTION.text, key, text, lifetime: SECTION_LIFETIME.state }]
   return contract === undefined
     ? { lines: [], progress: [] }
     : {

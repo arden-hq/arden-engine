@@ -1,7 +1,8 @@
 import { clipLine } from "@arden-hq/std/text"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
-import type { McpServer } from "@arden-hq/protocol/mcp"
+import { AUTOMATION_EVENT_TYPE, TRIGGER_TYPE } from "@arden-hq/protocol/automations"
+import { MCP_CONNECTION_STATUS, type McpServer } from "@arden-hq/protocol/mcp"
 import { Effect } from "effect"
 import type { ToolTrigger } from "./automation-tool-trigger-schema.js"
 
@@ -9,7 +10,7 @@ const LISTED_EVENTS = 40
 
 const availableWords = (servers: ReadonlyArray<McpServer>): string => {
   const events = servers
-    .filter((server) => server.status === "connected")
+    .filter((server) => server.status === MCP_CONNECTION_STATUS.connected)
     .flatMap((server) =>
       server.events.map((event) => {
         const properties = event.inputSchema["properties"]
@@ -31,7 +32,11 @@ const appEventProblem = (
 ): string | undefined => {
   const validator = new AjvJsonSchemaValidator()
   for (const trigger of triggers) {
-    if (trigger.type !== "event" || trigger.event_type !== "mcp.event") continue
+    if (
+      trigger.type !== TRIGGER_TYPE.event ||
+      trigger.event_type !== AUTOMATION_EVENT_TYPE.mcp_event
+    )
+      continue
     const selector = trigger.mcp_event
     if (selector === undefined || selector === null) {
       if (!options.creating && selector === undefined) continue
@@ -41,7 +46,7 @@ const appEventProblem = (
     if (server === undefined) {
       return `No MCP app is named ${JSON.stringify(selector.server)}. ${availableWords(servers)}`
     }
-    if (server.status !== "connected") {
+    if (server.status !== MCP_CONNECTION_STATUS.connected) {
       return `The MCP app ${JSON.stringify(server.name)} is not connected, so its events are unknown. The user connects it in Settings first.`
     }
     const event = server.events.find((candidate) => candidate.name === selector.event)
@@ -62,7 +67,8 @@ export const assertAppEvents = async (
   options: { readonly creating: boolean }
 ): Promise<void> => {
   const listens = triggers?.some(
-    (trigger) => trigger.type === "event" && trigger.event_type === "mcp.event"
+    (trigger) =>
+      trigger.type === TRIGGER_TYPE.event && trigger.event_type === AUTOMATION_EVENT_TYPE.mcp_event
   )
   if (triggers === undefined || listens !== true) return
   const problem = appEventProblem(triggers, await Effect.runPromise(apps()), options)

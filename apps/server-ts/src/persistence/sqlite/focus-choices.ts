@@ -1,5 +1,15 @@
 import { RunContextSchema } from "../runs/stored-context.js"
-import { FOCUS_CHOICE_STATUS, type FocusChoice } from "@arden-hq/protocol/sessions/focus-choices"
+import {
+  FOCUS_CHOICE_DECISION,
+  FOCUS_CHOICE_STATUS,
+  FOCUS_CHOICE_TARGET,
+  type FocusChoice
+} from "@arden-hq/protocol/sessions/focus-choices"
+import {
+  THREAD_EVENT,
+  THREAD_LOCATION,
+  THREAD_TRANSITION
+} from "../focus-choices/thread-location.js"
 import {
   FocusChoiceSchema,
   ResolveFocusChoiceInputSchema
@@ -37,7 +47,7 @@ const project = Effect.fn("FocusChoice.project")(function* (
     Effect.mapError((cause) => failure("storage", "Stored Focus choice is corrupt", cause))
   )
   const target =
-    storedTarget.kind === "existing"
+    storedTarget.kind === FOCUS_CHOICE_TARGET.existing
       ? {
           kind: "existing" as const,
           session_ref: storedTarget.session_ref,
@@ -112,7 +122,7 @@ export const recordFocusChoiceInTransaction = Effect.fn("FocusChoice.recordInTra
       )
     )
     let storedTarget: typeof internalTargetSchema.Type
-    if (options.target.kind === "existing") {
+    if (options.target.kind === FOCUS_CHOICE_TARGET.existing) {
       const targets = yield* options.sql<{
         readonly session_id: string
         readonly public_ref: string
@@ -222,10 +232,14 @@ export const makeFocusChoiceStore = (options: {
         Effect.gen(function* () {
           const row = yield* readRow({ sql, spaceId, questionId })
           const replay =
-            row.status === "settled" &&
+            row.status === FOCUS_CHOICE_STATUS.settled &&
             row.settlement_client_id === input.client_id &&
             row.decision === input.decision
-          if (!replay && row.status === "offered" && row.revision !== input.expected_revision) {
+          if (
+            !replay &&
+            row.status === FOCUS_CHOICE_STATUS.offered &&
+            row.revision !== input.expected_revision
+          ) {
             return yield* failure("conflict", "This Focus choice changed; review it again")
           }
           if (!replay) {
@@ -233,7 +247,12 @@ export const makeFocusChoiceStore = (options: {
               sql,
               sessionEvents,
               row,
-              event: { kind: input.decision === "open_target" ? "choose_target" : "choose_here" },
+              event: {
+                kind:
+                  input.decision === FOCUS_CHOICE_DECISION.openTarget
+                    ? THREAD_EVENT.chooseTarget
+                    : THREAD_EVENT.chooseHere
+              },
               clientId: input.client_id,
               now
             })
@@ -248,7 +267,9 @@ export const makeFocusChoiceStore = (options: {
           return {
             choice,
             session_ref: choice.result_session_ref,
-            created: input.decision === "open_target" && target.kind === "create"
+            created:
+              input.decision === FOCUS_CHOICE_DECISION.openTarget &&
+              target.kind === FOCUS_CHOICE_TARGET.create
           }
         })
       )
@@ -321,10 +342,14 @@ export const makeFocusChoiceStore = (options: {
           decodeJson(internalTargetSchema, row.target_json).pipe(
             Effect.map((target): ThreadRecord => ({
               threadId: row.question_id,
-              name: target.kind === "existing" ? target.label : target.name,
+              name: target.kind === FOCUS_CHOICE_TARGET.existing ? target.label : target.name,
               side: row.source_session_id === sessionId ? "source" : "target",
-              location: row.decision === "open_target" ? "target" : "source",
-              transition: row.transition === "brought_back" ? "brought_back" : "moved",
+              location:
+                row.decision === FOCUS_CHOICE_DECISION.openTarget
+                  ? THREAD_LOCATION.target
+                  : THREAD_LOCATION.source,
+              transition:
+                row.transition === THREAD_TRANSITION.broughtBack ? "brought_back" : "moved",
               at: row.transitioned_at,
               source: { ref: row.source_ref, name: row.source_name ?? "a chat" },
               target: { ref: row.target_ref, name: row.target_name ?? "a chat" }

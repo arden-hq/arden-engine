@@ -1,3 +1,4 @@
+import { WEB_PROTOCOL } from "@arden-hq/std/url"
 import { Schema } from "effect"
 
 import type { GoogleToolConnections } from "./google-accounts.js"
@@ -50,7 +51,7 @@ export const decodeDriveFileMetadata = (value: unknown, account: string): DriveF
     file.webViewLink ?? `https://drive.google.com/file/d/${encodeURIComponent(file.id)}/view`
   const parsed = URL.parse(url)
   if (
-    parsed?.protocol !== "https:" ||
+    parsed?.protocol !== WEB_PROTOCOL.https ||
     !["drive.google.com", "docs.google.com"].includes(parsed.hostname)
   ) {
     throw toolRefusal("Google Drive returned an invalid file link.", "Invalid Drive file")

@@ -11,6 +11,7 @@ import type {
   TaskInferencePolicy,
   UpdateSpaceInput
 } from "@arden-hq/protocol/spaces"
+import { SPACE_KIND } from "@arden-hq/protocol/spaces"
 import { Context, Effect, Schema } from "effect"
 import type { StoredMarkLook } from "./mark.js"
 
@@ -85,7 +86,7 @@ export const spaceChoices = (
     : `Pass space_id, one of: ${spaces.map((space) => `${space.name} (${space.space_id})`).join(", ")}.`
 
 export const archiveRefusal = (space: { readonly kind: SpaceKind }): string | undefined =>
-  space.kind === "main" ? "The Main Space cannot be archived." : undefined
+  space.kind === SPACE_KIND.main ? "The Main Space cannot be archived." : undefined
 
 export class SpaceStoreError extends Schema.TaggedError<SpaceStoreError>()("SpaceStoreError", {
   ...storeErrorFields({

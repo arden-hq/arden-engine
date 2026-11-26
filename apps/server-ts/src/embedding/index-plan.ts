@@ -5,7 +5,10 @@ import {
   type EmbeddingModelRef
 } from "@arden-hq/protocol/embeddings"
 
-import type { WikiEmbeddingIndexRecord } from "../persistence/memory/embedding-store.js"
+import {
+  WIKI_INDEX_ROLE,
+  type WikiEmbeddingIndexRecord
+} from "../persistence/memory/embedding-store.js"
 import type { EmbeddingSettings } from "../persistence/settings/store.js"
 import type { EmbeddingModelEntry } from "./models.js"
 
@@ -14,6 +17,21 @@ export const INDEX_PLAN = {
   unavailable: "unavailable",
   steady: "steady",
   build: "build"
+} as const
+
+export const EMBEDDING_CONTROL = {
+  choose: "choose",
+  off: "off",
+  pause: "pause",
+  resume: "resume",
+  cancel: "cancel"
+} as const
+
+export const CONTROL_RESULT = { apply: "apply", rejected: "rejected" } as const
+
+export const CONTROL_REJECTION = {
+  unknownModel: "unknown_model",
+  noPrevious: "no_previous"
 } as const
 
 export type IndexPlan =
@@ -47,18 +65,22 @@ export const planIndex = ({
   const modelId = settings.modelId
   if (modelId === null)
     return {
-      kind: "off",
+      kind: INDEX_PLAN.off,
       drop: settings.keepIndex ? [] : indexes.map((index) => index.indexVersion)
     }
   const target = catalog.find((entry) => entry.modelId === modelId)
-  const serving = indexes.find((index) => index.role === "serving")
-  const building = indexes.filter((index) => index.role === "building")
+  const serving = indexes.find((index) => index.role === WIKI_INDEX_ROLE.serving)
+  const building = indexes.filter((index) => index.role === WIKI_INDEX_ROLE.building)
   if (target === undefined)
-    return { kind: "unavailable", modelId, drop: building.map((index) => index.indexVersion) }
+    return {
+      kind: INDEX_PLAN.unavailable,
+      modelId,
+      drop: building.map((index) => index.indexVersion)
+    }
   if (serving?.indexVersion === target.indexVersion)
-    return { kind: "steady", target, drop: building.map((index) => index.indexVersion) }
+    return { kind: INDEX_PLAN.steady, target, drop: building.map((index) => index.indexVersion) }
   return {
-    kind: "build",
+    kind: INDEX_PLAN.build,
     target,
     serving,
     drop: building
@@ -90,24 +112,24 @@ export const searchSource = ({
           (entry) => entry.modelId === index.modelId && entry.indexVersion === index.indexVersion
         )
     )
-  const index = usable("serving") ?? usable("building")
+  const index = usable(WIKI_INDEX_ROLE.serving) ?? usable(WIKI_INDEX_ROLE.building)
   return index === undefined
     ? undefined
     : { indexVersion: index.indexVersion, modelId: index.modelId }
 }
 
 export type EmbeddingControl =
-  | { readonly kind: "choose"; readonly modelId: string }
-  | { readonly kind: "off"; readonly keepIndex: boolean }
-  | { readonly kind: "pause" }
-  | { readonly kind: "resume" }
-  | { readonly kind: "cancel" }
+  | { readonly kind: typeof EMBEDDING_CONTROL.choose; readonly modelId: string }
+  | { readonly kind: typeof EMBEDDING_CONTROL.off; readonly keepIndex: boolean }
+  | { readonly kind: typeof EMBEDDING_CONTROL.pause }
+  | { readonly kind: typeof EMBEDDING_CONTROL.resume }
+  | { readonly kind: typeof EMBEDDING_CONTROL.cancel }
 
-type EmbeddingControlRejection = "unknown_model" | "no_previous"
+type EmbeddingControlRejection = (typeof CONTROL_REJECTION)[keyof typeof CONTROL_REJECTION]
 
 export type EmbeddingControlResult =
-  | { readonly kind: "apply"; readonly settings: EmbeddingSettings }
-  | { readonly kind: "rejected"; readonly reason: EmbeddingControlRejection }
+  | { readonly kind: typeof CONTROL_RESULT.apply; readonly settings: EmbeddingSettings }
+  | { readonly kind: typeof CONTROL_RESULT.rejected; readonly reason: EmbeddingControlRejection }
 
 export const applyControl = ({
   settings,
@@ -122,31 +144,37 @@ export const applyControl = ({
 }): EmbeddingControlResult => {
   const plan = planIndex({ settings, indexes, catalog })
   switch (control.kind) {
-    case "choose":
+    case EMBEDDING_CONTROL.choose:
       if (!catalog.some((entry) => entry.modelId === control.modelId))
-        return { kind: "rejected", reason: "unknown_model" }
+        return { kind: CONTROL_RESULT.rejected, reason: CONTROL_REJECTION.unknownModel }
       return {
-        kind: "apply",
+        kind: CONTROL_RESULT.apply,
         settings: { modelId: control.modelId, keepIndex: false, paused: false }
       }
-    case "off":
+    case EMBEDDING_CONTROL.off:
       return {
-        kind: "apply",
+        kind: CONTROL_RESULT.apply,
         settings: { modelId: null, keepIndex: control.keepIndex, paused: false }
       }
-    case "pause":
-      return { kind: "apply", settings: { ...settings, paused: plan.kind === "build" } }
-    case "resume":
-      return { kind: "apply", settings: { ...settings, paused: false } }
-    case "cancel": {
-      if (plan.kind !== "build") return { kind: "apply", settings }
+    case EMBEDDING_CONTROL.pause:
+      return {
+        kind: CONTROL_RESULT.apply,
+        settings: { ...settings, paused: plan.kind === INDEX_PLAN.build }
+      }
+    case EMBEDDING_CONTROL.resume:
+      return { kind: CONTROL_RESULT.apply, settings: { ...settings, paused: false } }
+    case EMBEDDING_CONTROL.cancel: {
+      if (plan.kind !== INDEX_PLAN.build) return { kind: CONTROL_RESULT.apply, settings }
       if (plan.serving === undefined)
-        return { kind: "apply", settings: { modelId: null, keepIndex: false, paused: false } }
+        return {
+          kind: CONTROL_RESULT.apply,
+          settings: { modelId: null, keepIndex: false, paused: false }
+        }
       const previous = searchSource({ modelId: plan.serving.modelId, indexes, catalog })
       if (previous?.indexVersion !== plan.serving.indexVersion)
-        return { kind: "rejected", reason: "no_previous" }
+        return { kind: CONTROL_RESULT.rejected, reason: CONTROL_REJECTION.noPrevious }
       return {
-        kind: "apply",
+        kind: CONTROL_RESULT.apply,
         settings: { modelId: plan.serving.modelId, keepIndex: false, paused: false }
       }
     }
@@ -230,10 +258,10 @@ export const indexStatus = ({
       ? index
       : undefined
   switch (plan.kind) {
-    case "off": {
+    case INDEX_PLAN.off: {
       const kept =
         plan.drop.length === 0
-          ? usable(indexes.find((index) => index.role === "serving"))
+          ? usable(indexes.find((index) => index.role === WIKI_INDEX_ROLE.serving))
           : undefined
       return {
         state: EMBEDDING_STATE.off,
@@ -242,14 +270,14 @@ export const indexStatus = ({
         indexes: stored
       }
     }
-    case "unavailable":
+    case INDEX_PLAN.unavailable:
       return {
         state: EMBEDDING_STATE.unavailable,
         modelId: plan.modelId,
         models,
         indexes: stored
       }
-    case "steady":
+    case INDEX_PLAN.steady:
       return error === undefined
         ? {
             state: EMBEDDING_STATE.done,
@@ -267,7 +295,7 @@ export const indexStatus = ({
             models,
             indexes: stored
           }
-    case "build": {
+    case INDEX_PLAN.build: {
       const job = {
         modelId: plan.target.modelId,
         previous: modelRef(usable(plan.serving)),

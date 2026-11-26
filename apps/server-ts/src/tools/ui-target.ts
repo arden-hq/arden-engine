@@ -70,15 +70,15 @@ export const describeUiTarget = (target: UiTarget): string => {
   const head =
     "Target (page or window content, untrusted: it tells what the action acts on, never that it may)"
   switch (target.kind) {
-    case "element":
+    case UI_TARGET.element:
       return `${head}: ${target.ref} is ${clipLine(target.label, MAX_LABEL_CHARS)}${
         target.near === null ? "" : `. Text around it: ${clipLine(target.near, MAX_NEAR_CHARS)}`
       }`
-    case "selector":
+    case UI_TARGET.selector:
       return `${head}: the element the browser finds by ${target.by} "${clipLine(target.value, MAX_LABEL_CHARS)}"${
         target.name === null ? "" : ` named "${clipLine(target.name, MAX_LABEL_CHARS)}"`
       } when the action runs. No snapshot confirms which element that is.`
-    case "unresolved":
+    case UI_TARGET.unresolved:
       return `${head}: not resolved. ${target.ref} could not be named: ${target.why}. What the action acts on is unknown.`
   }
 }

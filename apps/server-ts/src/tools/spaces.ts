@@ -1,14 +1,10 @@
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
-import { activityWords } from "../persistence/work/public.js"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
-import {
-  SpaceStore,
-  type PersistedSpace,
-  type SpaceDetailRecord
-} from "../persistence/spaces/store.js"
+import { boardRows, taskStateWords } from "./space-board.js"
+import { SpaceStore, type PersistedSpace } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { RunQueries } from "../persistence/runs/queries.js"
@@ -94,41 +90,6 @@ const updateSpacePage = async (
     changed: true,
     receipt: pageReceipt({ ctx, page: updated, beforeVersion: expectedVersion })
   } as const
-}
-
-const boardRows = (detail: SpaceDetailRecord) => {
-  const comments = new Map<string, Array<(typeof detail.work.comments)[number]>>()
-  for (const comment of detail.work.comments) {
-    const current = comments.get(comment.item_id) ?? []
-    if (current.length < 3) current.push(comment)
-    comments.set(comment.item_id, current)
-  }
-  const attachments = new Map<string, Array<(typeof detail.work.attachments)[number]>>()
-  for (const attachment of detail.work.attachments) {
-    const current = attachments.get(attachment.item_id) ?? []
-    current.push(attachment)
-    attachments.set(attachment.item_id, current)
-  }
-  const live = detail.work.work_items.filter((item) => item.status === "open")
-  const deferred = detail.work.work_items.filter((item) => item.status === "deferred")
-  const settled = detail.work.work_items
-    .filter((item) => item.status === "done" || item.status === "cancelled")
-    .slice(0, 5)
-  const entries = [...live, ...deferred, ...settled].map((task) => ({
-    task,
-    comments: comments.get(task.item_id) ?? [],
-    attachments: attachments.get(task.item_id) ?? []
-  }))
-  return { entries, liveCount: live.length, settledShown: settled.length }
-}
-
-const taskStateWords = (task: SpaceDetailRecord["work"]["work_items"][number]): string[] => {
-  if (task.status !== "open") return []
-  const next = task.next_attempt_at === null ? [] : [`next check ${task.next_attempt_at}`]
-  const words = activityWords(task)
-  const nextShown =
-    task.activity === "waiting" || task.activity === "stopped" || words === undefined
-  return [...(words === undefined ? [] : [words]), ...(nextShown ? next : [])]
 }
 
 const namedLink = (label: string, url: string): string =>

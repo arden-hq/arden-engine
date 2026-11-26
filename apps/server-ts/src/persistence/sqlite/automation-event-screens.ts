@@ -8,6 +8,7 @@ import {
 } from "../automations/event-batch.js"
 import { renderEvents } from "../automations/event-text.js"
 import {
+  AUTOMATION_EVENT_SCREEN_KIND,
   AutomationStoreError,
   type AutomationEventScreen,
   type AutomationEventScreenOutcome,
@@ -105,8 +106,12 @@ export const makeEventScreens = (
           )
           yield* sql`UPDATE automation_event_queue SET context = ${encoded} WHERE id = ${fenced.parsed.queueId}`
           return allSkipped
-            ? ({ kind: "skip", skip: first.skip } as const)
-            : ({ kind: "run", triggerContext, itemIds: eventItemIds(screened) } as const)
+            ? ({ kind: AUTOMATION_EVENT_SCREEN_KIND.skip, skip: first.skip } as const)
+            : ({
+                kind: AUTOMATION_EVENT_SCREEN_KIND.run,
+                triggerContext,
+                itemIds: eventItemIds(screened)
+              } as const)
         })
       )
       .pipe(

@@ -4,7 +4,7 @@ import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { utcDay } from "@arden-hq/std/time"
 import { DateTime, Effect, Option, Schema } from "effect"
-import { usageGroup } from "@arden-hq/protocol/runs"
+import { MODEL_CALL_KIND, usageGroup } from "@arden-hq/protocol/runs"
 import { effectiveBackgroundLimit, KEEP_GOING } from "@arden-hq/protocol/settings"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { UsageStore } from "../persistence/usage/store.js"
@@ -33,6 +33,8 @@ interface Services {
   readonly limits: LimitSettingsStore["Service"]
   readonly models: ModelProviderService["Service"] | undefined
 }
+
+const USAGE_GROUP_BY = { model: "model", space: "space", kind: "kind", origin: "origin" } as const
 
 const metadata = {
   kind: "tool",
@@ -207,7 +209,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
             description: "Inclusive final UTC date, YYYY-MM-DD. Defaults to today in UTC."
           })
         ),
-        group_by: Schema.Literals(["model", "space", "kind", "origin"]).pipe(
+        group_by: Schema.Literals(Object.values(USAGE_GROUP_BY)).pipe(
           Schema.withDecodingDefault(Effect.succeed("space")),
           Schema.annotateEncoded({
             description:
@@ -245,13 +247,13 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
       for (const row of report.daily) {
         const key = (() => {
           switch (input.group_by) {
-            case "model":
+            case USAGE_GROUP_BY.model:
               return row.model_id ?? "Unknown model"
-            case "space":
+            case USAGE_GROUP_BY.space:
               return row.space_id ?? "Personal"
-            case "kind":
+            case USAGE_GROUP_BY.kind:
               return usageGroup(row.kind, row.origin)
-            case "origin":
+            case USAGE_GROUP_BY.origin:
               return row.origin
           }
         })()
@@ -272,7 +274,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
           target.output += row.output
           target.cache_read += row.cache_read
           target.cache_write += row.cache_write
-          if (row.kind === "chat") target.runs += row.runs
+          if (row.kind === MODEL_CALL_KIND.chat) target.runs += row.runs
           else target.model_calls += row.runs
         }
         groups.set(key, group)

@@ -6,7 +6,13 @@ import { commitWiki } from "./commit.js"
 import { requireCommitRules } from "./commit-rules.js"
 import { type WikiCommitPoint, type WikiWrite, type WikiWriter } from "./commit-write-types.js"
 import { type WikiCommitIdentity } from "./origin.js"
-import { mapRevisionError, WikiError, wikiError, type WikiOperation } from "./errors.js"
+import {
+  mapRevisionError,
+  WIKI_ERROR_REASON,
+  WikiError,
+  wikiError,
+  type WikiOperation
+} from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
 import { loadSnapshot, notFound, type PageRecord, type Snapshot } from "./snapshot.js"
 
@@ -94,7 +100,8 @@ const requireRead = Effect.fn("Wiki.requireRead")(function* (
 
 const withCurrent = (repository: ManagedFileRepositoryShape, cause: WikiError) => {
   const pageId = cause.pageId
-  if (cause.reason !== "conflict" || pageId === undefined) return Effect.succeed(cause)
+  if (cause.reason !== WIKI_ERROR_REASON.conflict || pageId === undefined)
+    return Effect.succeed(cause)
   const told = { ...cause, message: cause.message }
   return Effect.gen(function* () {
     const currentHead = yield* repository.currentRevision

@@ -2,7 +2,7 @@ import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import { ToolExecutionError, type ToolResult, type Toolset } from "@arden-hq/loop"
-import { chatDecoders } from "@arden-hq/protocol/chat"
+import { chatDecoders, RUN_STATUS } from "@arden-hq/protocol/chat"
 import type { JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import { Effect, type Schema } from "effect"
@@ -46,13 +46,20 @@ interface SpawnedAgentReference {
 class WorkflowChildInterrupted extends Error {}
 class WorkflowChildCancelled extends Error {}
 
-const childFailureStatus = (
-  cause: unknown,
-  signal: AbortSignal
-): "cancelled" | "interrupted" | "failed" => {
-  if (signal.aborted || cause instanceof WorkflowChildCancelled) return "cancelled"
-  if (cause instanceof WorkflowChildInterrupted) return "interrupted"
-  return "failed"
+const CHILD_STATUS = {
+  cancelled: "cancelled",
+  interrupted: "interrupted",
+  failed: "failed"
+} as const
+
+const CANCEL_RESULT = { succeeded: "Succeeded", failed: "Failed" } as const
+
+type ChildStatus = (typeof CHILD_STATUS)[keyof typeof CHILD_STATUS]
+
+const childFailureStatus = (cause: unknown, signal: AbortSignal): ChildStatus => {
+  if (signal.aborted || cause instanceof WorkflowChildCancelled) return CHILD_STATUS.cancelled
+  if (cause instanceof WorkflowChildInterrupted) return CHILD_STATUS.interrupted
+  return CHILD_STATUS.failed
 }
 
 const spawnedAgentReference = (result: ToolResult): SpawnedAgentReference => {
@@ -80,7 +87,7 @@ const childResult = async (
   while (true) {
     const run = await Effect.runPromise(services.runs.get(child.runId), { signal })
     if (run === null) throw new Error("Workflow child run disappeared")
-    if (run.status === "completed") {
+    if (run.status === RUN_STATUS.completed) {
       const page = await Effect.runPromise(
         services.transcript.page({
           _tag: "Latest",
@@ -94,17 +101,17 @@ const childResult = async (
       if (typeof content !== "string") throw new Error("Workflow child produced no text result")
       return content
     }
-    if (run.status === "interrupted") {
+    if (run.status === RUN_STATUS.interrupted) {
       throw new WorkflowChildInterrupted(
         run.errorMessage ?? run.stopReason ?? "Workflow child interrupted"
       )
     }
-    if (run.status === "cancelled") {
+    if (run.status === RUN_STATUS.cancelled) {
       throw new WorkflowChildCancelled(
         run.errorMessage ?? run.stopReason ?? "Workflow child cancelled"
       )
     }
-    if (run.status === "error") {
+    if (run.status === RUN_STATUS.error) {
       throw new Error(run.errorMessage ?? run.stopReason ?? `Workflow child ${run.status}`)
     }
     await Effect.runPromise(Effect.sleep("250 millis"), { signal })
@@ -321,13 +328,14 @@ export const makeWorkflowNodeRunner = (
         const childReference = { sessionRef: child.sessionRef, runId: child.runId }
         let cancellation:
           | Promise<
-              { readonly _tag: "Succeeded" } | { readonly _tag: "Failed"; readonly cause: unknown }
+              | { readonly _tag: typeof CANCEL_RESULT.succeeded }
+              | { readonly _tag: typeof CANCEL_RESULT.failed; readonly cause: unknown }
             >
           | undefined
         const cancelChild = (): NonNullable<typeof cancellation> => {
           cancellation ??= options.run.cancelAgent({ runId: child.runId }).then(
-            () => ({ _tag: "Succeeded" as const }),
-            (cause: unknown) => ({ _tag: "Failed" as const, cause })
+            () => ({ _tag: CANCEL_RESULT.succeeded }),
+            (cause: unknown) => ({ _tag: CANCEL_RESULT.failed, cause })
           )
           return cancellation
         }
@@ -367,9 +375,9 @@ export const makeWorkflowNodeRunner = (
             status,
             child: childReference,
             error: message,
-            retryable: status === "interrupted" || status === "failed"
+            retryable: status === CHILD_STATUS.interrupted || status === CHILD_STATUS.failed
           })
-          if (cancellationResult?._tag === "Failed") throw cancellationResult.cause
+          if (cancellationResult?._tag === CANCEL_RESULT.failed) throw cancellationResult.cause
           if (!(cause instanceof WorkflowChildInterrupted)) throw cause
           if (restart === 1) throw cause
         } finally {

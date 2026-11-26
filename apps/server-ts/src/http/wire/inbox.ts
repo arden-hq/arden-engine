@@ -1,3 +1,4 @@
+import { INBOX_ITEM_SOURCE } from "@arden-hq/protocol/inbox"
 import { wireRunQuestion } from "../../persistence/runs/stored-question.js"
 import type { InboxGroup, InboxItem, InboxView } from "@arden-hq/protocol/inbox"
 import type { InboxEntry, InboxEntryGroup, InboxState } from "../../persistence/inbox/store.js"
@@ -15,7 +16,7 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
         : { kind: "marked" as const, read_at: entry.readAt }
   }
   switch (entry.source) {
-    case "blocked_task":
+    case INBOX_ITEM_SOURCE.blocked_task:
       return {
         ...base,
         source: entry.source,
@@ -27,9 +28,9 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
         waiting_on: entry.waitingOn,
         ask: entry.ask
       }
-    case "approval":
+    case INBOX_ITEM_SOURCE.approval:
       return { ...entry.approval, ...base, source: entry.source }
-    case "failure":
+    case INBOX_ITEM_SOURCE.failure:
       return {
         ...base,
         source: entry.source,
@@ -41,9 +42,9 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
         last_at: entry.lastAt,
         automation_paused: entry.automationPaused
       }
-    case "question":
+    case INBOX_ITEM_SOURCE.question:
       return { ...base, source: entry.source, question: wireRunQuestion(entry.question) }
-    case "incident":
+    case INBOX_ITEM_SOURCE.incident:
       return {
         ...base,
         source: entry.source,
@@ -53,7 +54,7 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
         delivery_id: entry.deliveryId,
         source_run_id: entry.sourceRunId
       }
-    case "plan_limit":
+    case INBOX_ITEM_SOURCE.plan_limit:
       return {
         ...base,
         source: entry.source,

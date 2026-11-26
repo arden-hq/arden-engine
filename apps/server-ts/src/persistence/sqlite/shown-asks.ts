@@ -1,7 +1,10 @@
+import { APPROVAL_STATUS } from "./tool-rows.js"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
+import { DECISION_ROUTE_SOURCE } from "@arden-hq/protocol/chat"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { ConnectionRequiredDataSchema, connectionId } from "../../connections/recovery.js"
+import { ASK_REF_KIND, type AskRef } from "../automations/model.js"
 import type { EventDraft } from "../events/model.js"
 import type { ChatEventStore } from "../events/store.js"
 import { JsonObjectSchema } from "../json.js"
@@ -24,10 +27,8 @@ import { runColumns, runDestinationSessionId } from "./run-destination.js"
 import { tellInOwnSavepoint } from "./tells/savepoint.js"
 import { appendEscalatedApprovalDraft } from "./tool-approvals.js"
 
-type AskKind = "question" | "card"
-
 interface ShownAsk {
-  readonly ask_kind: AskKind
+  readonly ask_kind: AskRef["kind"]
   readonly run_id: string
   readonly ask_id: string
   readonly viewer_session_id: string
@@ -101,7 +102,7 @@ const groupByAsk = (rows: ReadonlyArray<ShownAsk>) => {
   const asks = new Map<string, Array<ShownAsk>>()
   for (const row of rows) {
     const key =
-      row.ask_kind === "question"
+      row.ask_kind === ASK_REF_KIND.question
         ? toldKey.question(row.ask_id)
         : toldKey.card(row.run_id, row.ask_id)
     asks.set(key, [...(asks.get(key) ?? []), row])
@@ -117,7 +118,7 @@ const reconcile = Effect.fn("ShownAsks.reconcile")(function* (options: {
   const { sql } = options
   const routed = new Set<string>()
   for (const change of yield* decisionRouteChanges(sql)) {
-    if (change.source_kind === "run" && change.closed.length > 0)
+    if (change.source_kind === DECISION_ROUTE_SOURCE.run && change.closed.length > 0)
       routed.add(toldKey.card(change.run_id, change.tool_call_id))
     yield* tellInOwnSavepoint(
       sql,
@@ -187,7 +188,7 @@ const tellAsk = Effect.fn("ShownAsks.tell")(function* (options: {
   const ask = rows[0]
   if (ask === undefined) return
   const told =
-    ask.ask_kind === "question"
+    ask.ask_kind === ASK_REF_KIND.question
       ? yield* appendQuestionChange({ sql, sessionEvents, questionId: ask.ask_id })
       : yield* tellClosedCard({ sql, sessionEvents, chatEvents, ask, vanished })
   if (!told) yield* readAsksAgain(chatEvents, rows)
@@ -222,7 +223,7 @@ const tellClosedCard = Effect.fn("ShownAsks.tellClosedCard")(function* (options:
     readonly payload_json: string
   }>`SELECT session_id, status, payload_json FROM deferred_tool_calls
     WHERE run_id = ${ask.run_id} AND tool_call_id = ${ask.ask_id}`
-  if (card === undefined || card.status === "pending") return false
+  if (card === undefined || card.status === APPROVAL_STATUS.pending) return false
   const routes: Array<DecisionRouteRef> = options.vanished.map((row) => ({
     viewer_session_id: row.viewer_session_id,
     source_session_id: card.session_id,
@@ -240,7 +241,7 @@ const tellClosedCard = Effect.fn("ShownAsks.tellClosedCard")(function* (options:
         tool_call_id: ask.ask_id
       },
       card.payload_json,
-      card.status !== "rejected"
+      card.status !== APPROVAL_STATUS.rejected
     ),
     runId: ask.run_id
   }
@@ -258,11 +259,11 @@ const tellRouteChange = Effect.fn("ShownAsks.tellRouteChange")(function* (
 ) {
   const { sql, sessionEvents, chatEvents } = options
   yield* journalDecisionRouteChange(sql, sessionEvents, change)
-  if (change.source_kind !== "run" || change.closed.length === 0) return
+  if (change.source_kind !== DECISION_ROUTE_SOURCE.run || change.closed.length === 0) return
   const [card] = yield* sql<RunCard>`SELECT run_id, tool_call_id, session_id, status,
     payload_json FROM tool_approvals
     WHERE run_id = ${change.run_id} AND tool_call_id = ${change.tool_call_id}`
-  if (card?.status === "pending")
+  if (card?.status === APPROVAL_STATUS.pending)
     return yield* readAsksAgain(chatEvents, [...change.closed, ...change.opened])
   if (card === undefined) return yield* readAsksAgain(chatEvents, change.closed)
   yield* tellRunCardClosed(options, card, change.closed)
@@ -303,7 +304,7 @@ const tellRunCardClosed = Effect.fn("ShownAsks.tellRunCardClosed")(function* (
         tool_call_id: card.tool_call_id
       },
       card.payload_json,
-      card.status !== "rejected"
+      card.status !== APPROVAL_STATUS.rejected
     ),
     runId: card.run_id
   }

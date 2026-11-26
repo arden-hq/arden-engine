@@ -1,5 +1,5 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { Backfill } from "./backfills/backfill.js"
 import {
@@ -11,6 +11,7 @@ import {
 } from "./automation-instruction-provenance.js"
 import { userAutomationSql } from "./authority-sql.js"
 import { fullResultJson } from "./tool-result-storage.js"
+import { TOOL_STATUS } from "./status-sets.js"
 
 const NAME = "automation_instruction_provenance"
 
@@ -80,7 +81,7 @@ export const automationInstructionBackfill: Backfill = {
     for (const row of rows) {
       if (row.instruction_revision_id !== null) continue
       const snapshot = yield* Effect.try(() => instructionSnapshot(row)).pipe(Effect.option)
-      if (snapshot._tag === "None") continue
+      if (Option.isNone(snapshot)) continue
       const payload = JSON.stringify(snapshot.value)
       const [candidate] = yield* sql<{
         readonly source_run_id: string
@@ -104,7 +105,7 @@ export const automationInstructionBackfill: Backfill = {
           : yield* fullResultJson(storedJson).pipe(Effect.orElseSucceed(() => storedJson))
       const sourceMatches =
         candidate !== undefined &&
-        candidate.status === "completed" &&
+        candidate.status === TOOL_STATUS.completed &&
         resultJson !== null &&
         resultJson !== undefined &&
         (yield* Effect.try(() =>

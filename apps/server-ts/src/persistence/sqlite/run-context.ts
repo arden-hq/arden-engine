@@ -9,7 +9,8 @@ import {
 import { INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import type { JobClassification } from "../job-classification.js"
+import { JOB_PURPOSE, type JobClassification } from "../job-classification.js"
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
 import { WorkStoreError } from "../work/store.js"
 import { type BoundAttempt, boundAttemptJson, decodeBoundAttempt } from "./automation-rows.js"
 import { decodeJson } from "./json.js"
@@ -31,6 +32,13 @@ const taskBindingRevoked = (sql: SqlClient.SqlClient, metadata: Statement.Fragme
       AND (authority_task.space_id IS NULL
         OR authority_space.archived_at IS NULL))
 )`
+
+const CAUSE_TYPE = {
+  message: "message",
+  run: "run",
+  toolCall: "tool_call",
+  workflow: "workflow"
+} as const
 
 export const RUN_AUTHORITY_STATE = {
   active: "active",
@@ -100,7 +108,7 @@ export const assertRunTaskBinding = Effect.fn(function* (
   const row = yield* readRunAuthority(sql, runId)
   if (
     !row ||
-    row.authority !== "active" ||
+    row.authority !== RUN_AUTHORITY_STATE.active ||
     (row.item_id !== null && itemId !== undefined && row.item_id !== itemId)
   ) {
     return yield* new WorkStoreError({
@@ -128,7 +136,7 @@ export const assertRunModelAuthority = Effect.fn(function* (
         })
     )
   )
-  if (rows[0] === undefined || rows[0].authority === "revoked") {
+  if (rows[0] === undefined || rows[0].authority === RUN_AUTHORITY_STATE.revoked) {
     return yield* new WorkStoreError({
       reason: "conflict",
       message: "This Run no longer has authority for model requests"
@@ -149,22 +157,22 @@ export const scheduledRunOrigin = (options: {
 }): RunOrigin => {
   const wokenAt = options.chainDepth === 0 ? {} : { chain_depth: options.chainDepth }
   switch (options.job.purpose) {
-    case "task_execution":
+    case JOB_PURPOSE.taskExecution:
       return {
         kind: "task",
         item_id: options.job.owner_task_id,
         occurrence_id: options.occurrenceId,
         ...wokenAt
       }
-    case "space_review":
+    case JOB_PURPOSE.spaceReview:
       return {
         kind: "space",
         space_id: options.job.owner_space_id,
         occurrence_id: options.occurrenceId,
         ...wokenAt
       }
-    case "user_automation":
-    case "system":
+    case JOB_PURPOSE.userAutomation:
+    case JOB_PURPOSE.system:
       return {
         kind: "automation",
         automation_id: options.automationId,
@@ -227,7 +235,7 @@ export const continuedContext = Effect.fn("RunContext.continued")(function* (
 })
 
 interface RunCause {
-  readonly type: "message" | "run" | "tool_call" | "workflow"
+  readonly type: (typeof CAUSE_TYPE)[keyof typeof CAUSE_TYPE]
   readonly id: string
 }
 
@@ -284,7 +292,7 @@ export const withCausedBelongsTo = Effect.fn("RunContext.withCausedBelongsTo")(f
       | undefined
   }
 ): Effect.fn.Return<RunContext, WorkStoreError> {
-  if (context.origin.kind !== "chat" || context.belongs_to !== undefined) return context
+  if (context.origin.kind !== RUN_ORIGIN.chat || context.belongs_to !== undefined) return context
   const belongsTo = yield* causedRunBelongsTo(sql, {
     sessionId: input.sessionId,
     cause:
@@ -309,16 +317,16 @@ const causingRunSql = (
   const { cause } = input
   switch (cause?.type) {
     case undefined:
-    case "message":
+    case CAUSE_TYPE.message:
       return undefined
-    case "run":
+    case CAUSE_TYPE.run:
       return sql`${cause.id}`
-    case "tool_call":
+    case CAUSE_TYPE.toolCall:
       return sql`(SELECT call.run_id FROM tool_calls AS call
         WHERE call.tool_call_id = ${cause.id} AND call.session_id IN (${input.sessionId},
           (SELECT session_id FROM sessions WHERE public_ref = ${input.senderRef ?? null}))
         ORDER BY call.started_at DESC LIMIT 1)`
-    case "workflow":
+    case CAUSE_TYPE.workflow:
       return input.workflowRef === undefined
         ? undefined
         : sql`(SELECT origin_run_id FROM code_mode_scripts WHERE script_ref = ${input.workflowRef})`

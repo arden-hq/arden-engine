@@ -3,16 +3,23 @@ import { WorkTaskKeySchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SpaceWorkPageOptions } from "@arden-hq/protocol/spaces/work"
-import { itemPage, type TaskAddress, type TaskScope, type WorkStoreError } from "../work/store.js"
+import {
+  itemPage,
+  TASK_ADDRESS,
+  TASK_SCOPE,
+  type TaskAddress,
+  type TaskScope,
+  type WorkStoreError
+} from "../work/store.js"
 import { workError } from "./work-records.js"
 
 export const taskScopeSql = (sql: SqlClient.SqlClient, scope: TaskScope): Statement.Fragment => {
   switch (scope.kind) {
-    case "space":
+    case TASK_SCOPE.space:
       return sql`item.space_id = ${scope.spaceId}`
-    case "chat":
+    case TASK_SCOPE.chat:
       return sql`item.space_id IS NULL AND item.home_session_id = ${scope.sessionId}`
-    case "none":
+    case TASK_SCOPE.none:
       return sql`item.space_id IS NULL AND item.home_session_id IS NULL`
   }
 }
@@ -22,7 +29,7 @@ export const resolveTaskItem = Effect.fn("Work.resolveTaskItem")(function* (
   address: TaskAddress
 ) {
   const match =
-    address.kind === "item"
+    address.kind === TASK_ADDRESS.item
       ? sql`item.item_id = ${address.itemId}`
       : sql`item.stable_key = ${yield* Schema.decodeUnknownEffect(WorkTaskKeySchema)(
           address.key

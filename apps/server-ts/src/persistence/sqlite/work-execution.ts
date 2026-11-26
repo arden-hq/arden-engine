@@ -1,3 +1,4 @@
+import { TASK_ACTIVITY, TASK_STATUS } from "@arden-hq/protocol/spaces/work"
 import { type TaskRecord } from "../work/task-record.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -29,13 +30,13 @@ export const makeWorkExecution = (sql: SqlClient.SqlClient): WorkStore["Service"
     )
     const task = rows[0]
     if (task === undefined) return yield* workError("not_found", "Task not found")
-    if (task.status !== "open") return { kind: "inactive", state: task.status }
-    if (task.activity === "working") return { kind: "working" }
-    if (task.activity === "needs_you" || task.activity === "on_hold")
+    if (task.status !== TASK_STATUS.open) return { kind: "inactive", state: task.status }
+    if (task.activity === TASK_ACTIVITY.working) return { kind: "working" }
+    if (task.activity === TASK_ACTIVITY.needs_you || task.activity === TASK_ACTIVITY.on_hold)
       return { kind: "inactive", state: task.activity }
     if (task.can_run && task.next_attempt_at !== null)
       return { kind: "scheduled", at: task.next_attempt_at }
     if (task.can_run && task.queued) return { kind: "queued" }
-    if (task.activity !== "idle") return { kind: "inactive", state: task.activity }
+    if (task.activity !== TASK_ACTIVITY.idle) return { kind: "inactive", state: task.activity }
     return { kind: "saved" }
   })

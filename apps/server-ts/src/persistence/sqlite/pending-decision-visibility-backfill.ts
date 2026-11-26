@@ -1,3 +1,6 @@
+import { DECISION_ROUTE_SOURCE, type DecisionRouteSource } from "@arden-hq/protocol/chat"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
+import { APPROVAL_STATUS } from "./tool-rows.js"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { Backfill } from "./backfills/backfill.js"
@@ -23,13 +26,13 @@ const validLineage = Effect.fn("PendingDecisionVisibility.validLineage")(functio
   const rows = yield* sql.unsafe<LineageRow>(decisionLineageSql("?"), [sourceSessionId])
   return (
     rows.length > 0 &&
-    rows.some((row) => row.session_type !== "agent") &&
+    rows.some((row) => row.session_type !== SESSION_TYPE.agent) &&
     rows.every((row) => row.edge_valid === 1)
   )
 })
 
-const cursorOf = (kind: "run" | "deferred", rowid: number): string =>
-  `${kind === "run" ? "r" : "d"}:${rowid}`
+const cursorOf = (kind: DecisionRouteSource, rowid: number): string =>
+  `${kind === DECISION_ROUTE_SOURCE.run ? "r" : "d"}:${rowid}`
 
 export const pendingDecisionVisibilityBackfill: Backfill = {
   name: "pending_decision_visibility_v2",
@@ -49,8 +52,8 @@ export const pendingDecisionVisibilityBackfill: Backfill = {
           ORDER BY rowid LIMIT ${limit}`
     let converted = 0
     for (const source of rows) {
-      if (source.status !== "pending") continue
-      const kind = deferred ? "deferred" : "run"
+      if (source.status !== APPROVAL_STATUS.pending) continue
+      const kind = deferred ? DECISION_ROUTE_SOURCE.deferred : DECISION_ROUTE_SOURCE.run
       if (!(yield* validLineage(sql, source.session_id))) {
         yield* sql`INSERT OR IGNORE INTO pending_decision_visibility_unresolved (
           source_kind, run_id, tool_call_id, approval_run_id, approval_tool_call_id,
@@ -77,7 +80,13 @@ export const pendingDecisionVisibilityBackfill: Backfill = {
     }
     const last = rows.at(-1)
     if (last !== undefined)
-      return { converted, next: cursorOf(deferred ? "deferred" : "run", last.rowid) }
+      return {
+        converted,
+        next: cursorOf(
+          deferred ? DECISION_ROUTE_SOURCE.deferred : DECISION_ROUTE_SOURCE.run,
+          last.rowid
+        )
+      }
     if (!deferred) return { converted, next: "d:0" }
     return { converted, next: undefined }
   }),

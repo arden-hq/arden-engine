@@ -1,15 +1,17 @@
 import { gmailThreadUrl } from "@arden-hq/protocol/google"
+import { SIGNAL_SOURCE } from "@arden-hq/protocol/signals"
 import { DateTime, Effect, Schema } from "effect"
 import { githubItemUrl } from "../persistence/connections/item-url.js"
 import { GoogleConnections } from "../google/service.js"
 import { messageRef } from "./google-gmail-refs.js"
 import {
+  CONNECTION_ITEM_AVAILABILITY,
   ConnectionItemStore,
   type ConnectionItem,
   type ConnectionItemsReport
 } from "../persistence/connections/store.js"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { passage } from "./source-passage.js"
+import { passage, SOURCE_USE } from "./source-passage.js"
 import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { toolFailure } from "./tool-failure.js"
 
@@ -54,8 +56,8 @@ const itemHref = (
   item: ConnectionItem,
   addresses: ReadonlyMap<string, string>
 ): string | undefined => {
-  if (item.source === "github") return githubItemUrl(item.threadKey)
-  if (item.source !== "gmail") return undefined
+  if (item.source === SIGNAL_SOURCE.github) return githubItemUrl(item.threadKey)
+  if (item.source !== SIGNAL_SOURCE.gmail) return undefined
   const email = addresses.get(item.account)
   return email === undefined ? undefined : gmailThreadUrl(email, item.threadKey)
 }
@@ -70,7 +72,7 @@ const itemSource = (
     item.sender === undefined
       ? ""
       : oneLine(item.sender.replace(/\s*<[^>]*>\s*$/u, "").replace(/^"|"$/gu, ""))
-  const excerpt = use === "read" ? passage(item.snippet) : undefined
+  const excerpt = use === SOURCE_USE.read ? passage(item.snippet) : undefined
   return {
     provider: item.source,
     kind: "connection_item",
@@ -190,14 +192,14 @@ const makeConnectionItemTools = (services: Services): ReadonlyArray<ServerTool> 
     },
     execute: async (input, ctx) => {
       const availability = await run(services.items.availability(input.item_id), ctx.signal)
-      if (availability.kind === "expired")
+      if (availability.kind === CONNECTION_ITEM_AVAILABILITY.expired)
         return {
           result:
             "Arden fetched this item, but its stored preview expired. Recheck the external source for its content.",
           preview: "Item preview expired",
           data: { item_id: input.item_id, availability: "expired" }
         }
-      if (availability.kind === "unknown")
+      if (availability.kind === CONNECTION_ITEM_AVAILABILITY.unknown)
         return {
           result:
             "Arden has no retained identity for this item. It may never have been fetched, or its identity may have been removed.",
@@ -238,13 +240,13 @@ const openWith = (
   item: ConnectionItem,
   addresses: ReadonlyMap<string, string>
 ): string | undefined => {
-  if (item.source === "github") {
+  if (item.source === SIGNAL_SOURCE.github) {
     const url = githubItemUrl(item.threadKey)
     return url === undefined ? undefined : `Open the whole item at ${url}.`
   }
-  if (item.source === "calendar")
+  if (item.source === SIGNAL_SOURCE.calendar)
     return "Find the event in the calendar with calendar_search(time_min=..., time_max=...)."
-  if (item.source !== "gmail") return undefined
+  if (item.source !== SIGNAL_SOURCE.gmail) return undefined
   const email = addresses.get(item.account)
   return email === undefined
     ? "Its Gmail account is no longer connected."

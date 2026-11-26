@@ -13,7 +13,7 @@ import {
   SkillVersionSchema,
   splitMarketplaceSkillId
 } from "@arden-hq/protocol/effect/skills"
-import { Context, Effect, Layer, Predicate, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { mkdir, rm, unlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { authoredSkillDirectory } from "../prompts/catalog.js"
@@ -30,7 +30,8 @@ import {
   isBuiltInSkillName,
   reservedName
 } from "./builtin.js"
-import { SkillError, skillError, type SkillOperation } from "./errors.js"
+import { SKILL_ERROR_REASON, SkillError, skillError, type SkillOperation } from "./errors.js"
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
 import {
   makeSkillMarketplace,
   type SkillMarketplaceOptions,
@@ -123,7 +124,7 @@ const make = Effect.fn("Skills.make")(function* (
       }
       const record = yield* loadRecord(root, name, operation).pipe(
         Effect.catch((error) =>
-          error.reason === "not_found" ? Effect.succeed(null) : Effect.fail(error)
+          error.reason === SKILL_ERROR_REASON.not_found ? Effect.succeed(null) : Effect.fail(error)
         )
       )
       if (record !== null) return record
@@ -207,10 +208,7 @@ const make = Effect.fn("Skills.make")(function* (
         }
       },
       catch: (cause) => {
-        const exists =
-          Predicate.hasProperty(cause, "code") &&
-          Predicate.isString(cause.code) &&
-          (cause.code === "EEXIST" || cause.code === "ENOTEMPTY")
+        const exists = isErrnoCode(cause, ERRNO.EEXIST) || isErrnoCode(cause, ERRNO.ENOTEMPTY)
         return skillError(
           "create",
           exists ? "invalid" : "storage",

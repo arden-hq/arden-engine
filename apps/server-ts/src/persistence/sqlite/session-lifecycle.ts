@@ -16,7 +16,7 @@ import { nextId } from "./deps.js"
 import { insertSession } from "./session-insert.js"
 import type { PersistenceDeps } from "./deps.js"
 import { storeError, sessionIdSchema, sessionNameSchema } from "./session-rows.js"
-import { moveConversationInTransaction } from "./session-space-move.js"
+import { CONVERSATION_MOVE, moveConversationInTransaction } from "./session-space-move.js"
 import { sessionOriginQuery } from "./session-origin.js"
 import { mainSpaceId } from "./main-space.js"
 import { SpaceId } from "../space-job-id.js"
@@ -367,7 +367,7 @@ export const makeSessionLifecycle = ({
         })
       )
       .pipe(Effect.mapError(moveFailure(validSessionId)))
-    return moved.kind === "missing" ? undefined : moved.spaceId
+    return moved.kind === CONVERSATION_MOVE.missing ? undefined : moved.spaceId
   })
 
   const moveFromRun = Effect.fn("SqliteSessionStore.moveFromRun")(function* (
@@ -396,11 +396,11 @@ export const makeSessionLifecycle = ({
       )
       .pipe(Effect.mapError(moveFailure(sessionId)))
     switch (moved.kind) {
-      case "missing":
+      case CONVERSATION_MOVE.missing:
         return undefined
-      case "moved":
+      case CONVERSATION_MOVE.moved:
         return { when: "now", spaceId: moved.spaceId, spaceName: moved.spaceName }
-      case "on_run_end":
+      case CONVERSATION_MOVE.onRunEnd:
         return { when: "run_end", spaceId: moved.spaceId, spaceName: moved.spaceName }
     }
   })

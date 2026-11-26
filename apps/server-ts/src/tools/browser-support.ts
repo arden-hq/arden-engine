@@ -1,8 +1,12 @@
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolResultOutput } from "@arden-hq/loop"
-import { Effect, Schema } from "effect"
+import { isWebProtocol } from "@arden-hq/std/url"
+import { Effect, Option, Schema } from "effect"
 
 import {
+  BROWSER_DISPOSITION,
+  BROWSER_ERROR_CODE,
+  BROWSER_OPERATION,
   BrowserClientError,
   type BrowserClient,
   type BrowserOutput,
@@ -11,7 +15,7 @@ import {
 import type { CallEffects } from "../execution/tool-effect.js"
 import { browserTarget, hostOf, pageLink, type BrowserElement } from "./action-targets.js"
 import { sharedResourceSessions, type RunAuthority } from "../execution/authority.js"
-import type { BrowserObservationRegistry } from "./run-context.js"
+import { BROWSER_SNAPSHOT_CLAIM, type BrowserObservationRegistry } from "./run-context.js"
 
 export { ProfileRefSchema, TabRefSchema } from "../browser/service.js"
 export const OriginSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048))
@@ -19,7 +23,7 @@ export const OriginSchema = Schema.String.check(Schema.isMinLength(1), Schema.is
 export const webUrl = (url: string): URL | undefined => {
   if (!URL.canParse(url)) return undefined
   const parsed = new URL(url)
-  return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed : undefined
+  return isWebProtocol(parsed.protocol) ? parsed : undefined
 }
 
 export const atNodeRef = (nodeHandle: string): string =>
@@ -50,13 +54,13 @@ export const claimObservedRevision = (
 ): number => {
   const claim = observations.consume(tabRef, snapshotRef, toolCallId)
   switch (claim.kind) {
-    case "leased":
+    case BROWSER_SNAPSHOT_CLAIM.leased:
       throw tabInUse()
-    case "claimed":
+    case BROWSER_SNAPSHOT_CLAIM.claimed:
       return claim.revision
-    case "missing":
+    case BROWSER_SNAPSHOT_CLAIM.missing:
       return requireObservedRevision(undefined)
-    case "other":
+    case BROWSER_SNAPSHOT_CLAIM.other:
       throw toolFailure(
         new BrowserClientError({
           code: "stale_browser_snapshot",
@@ -90,9 +94,9 @@ export const isStaleRead = (cause: unknown): boolean =>
 const failurePreview = (error: BrowserClientError): string => {
   if (error.outcomeUnknown)
     return "A step in the browser didn't confirm it finished — Arden checks the page before continuing"
-  if (error.code === "browser_snapshot_required") return "Fresh snapshot required"
-  if (error.code === "stale_browser_snapshot") return STALE_PREVIEW
-  if (error.code === "browser_unavailable") return "Browser unavailable"
+  if (error.code === BROWSER_ERROR_CODE.snapshotRequired) return "Fresh snapshot required"
+  if (error.code === BROWSER_ERROR_CODE.staleSnapshot) return STALE_PREVIEW
+  if (error.code === BROWSER_ERROR_CODE.unavailable) return "Browser unavailable"
   return "Browser request failed"
 }
 
@@ -160,7 +164,7 @@ const ReportedTabSchema = Schema.Struct({ tab: Schema.Struct({ url: Schema.Strin
 
 const reportedPage = (output: BrowserOutput): string | undefined => {
   const reported = Schema.decodeUnknownOption(ReportedTabSchema)(output.data)
-  if (reported._tag === "None") return undefined
+  if (Option.isNone(reported)) return undefined
   return pageLink(reported.value.tab.url)
 }
 
@@ -185,7 +189,7 @@ const runBrowser = (
     )
 
   const owners = [...new Set([sessionId, ...sharedSessionIds])]
-  if (operation.type === "tabs") {
+  if (operation.type === BROWSER_OPERATION.tabs) {
     return Promise.all(owners.map((owner) => execute(owner))).then((outputs) => {
       const tabs = [
         ...new Map(
@@ -208,7 +212,7 @@ const runBrowser = (
       }
     })
   }
-  if (operation.type === "site_secrets") {
+  if (operation.type === BROWSER_OPERATION.site_secrets) {
     return Promise.all(owners.map((owner) => execute(owner))).then((outputs) => {
       const names = [...new Set(outputs.flatMap((output) => decodedNames(output)))]
       return {
@@ -252,7 +256,7 @@ const decodedTabs = (output: BrowserOutput): ReadonlyArray<Record<string, unknow
   const value = output.data?.["tabs"]
   if (!Array.isArray(value)) return []
   const valid = Schema.decodeUnknownOption(Schema.Array(PublicTabSchema))(value)
-  if (valid._tag === "None") return []
+  if (Option.isNone(valid)) return []
   return value.filter(
     (tab): tab is Record<string, unknown> =>
       typeof tab === "object" &&
@@ -271,22 +275,22 @@ const decodedNames = (output: BrowserOutput) => {
 
 const operationTabRef = (operation: BrowserRequest["operation"]): string | undefined => {
   switch (operation.type) {
-    case "pointer":
-    case "close":
-    case "snapshot":
-    case "screenshot":
-    case "target":
-    case "act":
-    case "upload":
-    case "wait":
-    case "permission":
-    case "card_frame":
-    case "card_checkout":
+    case BROWSER_OPERATION.pointer:
+    case BROWSER_OPERATION.close:
+    case BROWSER_OPERATION.snapshot:
+    case BROWSER_OPERATION.screenshot:
+    case BROWSER_OPERATION.target:
+    case BROWSER_OPERATION.act:
+    case BROWSER_OPERATION.upload:
+    case BROWSER_OPERATION.wait:
+    case BROWSER_OPERATION.permission:
+    case BROWSER_OPERATION.card_frame:
+    case BROWSER_OPERATION.card_checkout:
       return operation.tabRef
-    case "open":
-      return operation.disposition === "current" ? operation.tabRef : undefined
-    case "tabs":
-    case "site_secrets":
+    case BROWSER_OPERATION.open:
+      return operation.disposition === BROWSER_DISPOSITION.current ? operation.tabRef : undefined
+    case BROWSER_OPERATION.tabs:
+    case BROWSER_OPERATION.site_secrets:
       return undefined
   }
 }

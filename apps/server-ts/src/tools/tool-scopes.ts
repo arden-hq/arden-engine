@@ -13,6 +13,15 @@ export const TOOL_SOURCE = {
   code: "_code"
 } as const
 
+type ToolSource = (typeof TOOL_SOURCE)[keyof typeof TOOL_SOURCE]
+
+const fromSource = (metadata: ServerToolMetadata, ...among: ReadonlyArray<ToolSource>): boolean =>
+  among.some((source) => source === metadata.source)
+
+const TOOL_HOLDER = { run: "run", tree: "tree" } as const
+
+const USER_AUTOMATION_ACTOR = "user_automation"
+
 const CODE_AGENT_SOURCES = new Set(["_code", "_filesystem", "_skills", "_system", "_web"])
 
 const WORKER_EXCLUDED_SOURCES = new Set([
@@ -55,11 +64,11 @@ const SCOPE_RULES: Record<
   reports: { internal: false, matches: readsOnly },
   browser: {
     internal: false,
-    matches: (metadata) => readsOnly(metadata) || metadata.source === "_browser"
+    matches: (metadata) => readsOnly(metadata) || fromSource(metadata, TOOL_SOURCE.browser)
   },
   memory_capture: {
     internal: false,
-    matches: (metadata) => readsOnly(metadata) && metadata.source === "_wiki"
+    matches: (metadata) => readsOnly(metadata) && fromSource(metadata, TOOL_SOURCE.wiki)
   },
   chat_summary: { internal: false, matches: () => false },
   agent_research: { internal: false, matches: readsOnly },
@@ -67,9 +76,7 @@ const SCOPE_RULES: Record<
     internal: false,
     matches: (metadata) =>
       (readsOnly(metadata) && CODE_AGENT_SOURCES.has(metadata.source)) ||
-      metadata.source === "_filesystem" ||
-      metadata.source === "_shell" ||
-      metadata.source === "_code"
+      fromSource(metadata, TOOL_SOURCE.filesystem, TOOL_SOURCE.shell, TOOL_SOURCE.code)
   },
   space: { internal: false, matches: () => true },
   all: { internal: false, matches: () => true }
@@ -114,7 +121,9 @@ export const scopedToolNames = (
   }
 }
 
-export type ToolHolder = { readonly kind: "run"; readonly actor: Actor } | { readonly kind: "tree" }
+export type ToolHolder =
+  | { readonly kind: typeof TOOL_HOLDER.run; readonly actor: Actor }
+  | { readonly kind: typeof TOOL_HOLDER.tree }
 
 export const scopedRunToolNames = (
   tools: ReadonlyArray<ServerTool>,
@@ -149,15 +158,15 @@ export const toolAvailableInScopes = (input: {
 }): boolean => {
   const metadata = input.tool.meta
   if (
-    metadata.actor === "user_automation" &&
-    input.holder.kind === "run" &&
+    metadata.actor === USER_AUTOMATION_ACTOR &&
+    input.holder.kind === TOOL_HOLDER.run &&
     !isUserAutomation(input.holder.actor)
   )
     return false
   const named = (scope: ToolScopeKey) => input.scopeNames[scope].has(input.tool.definition.name)
   const byRules =
     input.shellByRules === true &&
-    metadata.source === "_shell" &&
+    fromSource(metadata, TOOL_SOURCE.shell) &&
     input.scopes.filter((scope) => !input.primaryScopes.includes(scope)).every(named)
   if (!byRules && !input.scopes.every(named)) return false
   if (!metadata.internal_catalog) return true

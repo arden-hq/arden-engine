@@ -1,4 +1,7 @@
-import { WORK_PAGE_SCOPE, WORK_PAGE_START } from "@arden-hq/protocol/spaces/work"
+import { TASK_PROPOSAL_STATUS } from "@arden-hq/protocol/proposals"
+import { SPACE_KIND } from "@arden-hq/protocol/spaces"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
+import { TASK_STATUS, WORK_PAGE_SCOPE, WORK_PAGE_START } from "@arden-hq/protocol/spaces/work"
 import { DateTime, Effect } from "effect"
 
 import type { SpaceStore, PersistedSpace } from "../persistence/spaces/store.js"
@@ -59,7 +62,7 @@ export const loadOfferSpaces = Effect.fn("Router.offerSpaces")(function* (
   const listed: Array<OfferSpace> = []
   for (const space of spaces) {
     const offers = (yield* proposals.list({ place: "space", spaceId: space.space_id })).proposals
-      .filter((proposal) => proposal.status === "offered")
+      .filter((proposal) => proposal.status === TASK_PROPOSAL_STATUS.offered)
       .slice(0, MAX_TASKS_PER_SPACE)
       .map((proposal) => clean(proposal.text).slice(0, 220))
     if (offers.length > 0)
@@ -99,7 +102,7 @@ const makeRouterSpaces = (dependencies: Pick<RouterCandidateDependencies, "space
       limit: 50
     })
     const tasks = page.items
-      .filter((task) => task.status !== "done" && task.status !== "cancelled")
+      .filter((task) => task.status !== TASK_STATUS.done && task.status !== TASK_STATUS.cancelled)
       .slice(0, MAX_TASKS_PER_SPACE)
       .map((task) => clean(task.text).slice(0, 220))
     const homeId = detail?.conversation_session_id ?? null
@@ -113,7 +116,7 @@ const makeRouterSpaces = (dependencies: Pick<RouterCandidateDependencies, "space
   })
   return Effect.fn("Router.spaces")(function* () {
     return yield* Effect.forEach(
-      (yield* dependencies.spaces.list()).filter((space) => space.kind !== "main"),
+      (yield* dependencies.spaces.list()).filter((space) => space.kind !== SPACE_KIND.main),
       routerSpace
     )
   })
@@ -139,7 +142,7 @@ export const makeRouterCandidates = (
       limit: 80
     })).filter(
       (session) =>
-        session.sessionType === "chat" &&
+        session.sessionType === SESSION_TYPE.chat &&
         session.parentSessionId === undefined &&
         session.originAutomationId === undefined &&
         session.messageCount >= 2 &&

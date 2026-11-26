@@ -1,5 +1,5 @@
 import type { ToolResult } from "@arden-hq/loop"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import {
   BrowserObservationCheckpointSchema,
   type BrowserObservationCheckpoint
@@ -18,13 +18,13 @@ export const checkpointBrowserObservation = (input: {
   readonly previousRef: string | undefined
 }): BrowserObservationCheckpoint | undefined => {
   const reported = Schema.decodeUnknownOption(ReportedTabSchema)(input.result.data)
-  const returnedTab = reported._tag === "Some" ? reported.value.tab.tab_ref : undefined
+  const returnedTab = Option.isSome(reported) ? reported.value.tab.tab_ref : undefined
   const tabRef = typeof input.args["tab_ref"] === "string" ? input.args["tab_ref"] : returnedTab
   if (tabRef === undefined) return undefined
   const page = Schema.decodeUnknownOption(ReportedSnapshotSchema)(input.fields?.["page"])
   const direct = Schema.decodeUnknownOption(ReportedSnapshotSchema)(input.result.data)
-  const directRef = direct._tag === "Some" ? direct.value.snapshot_ref : undefined
-  const pageRef = page._tag === "Some" ? page.value.snapshot_ref : undefined
+  const directRef = Option.isSome(direct) ? direct.value.snapshot_ref : undefined
+  const pageRef = Option.isSome(page) ? page.value.snapshot_ref : undefined
   const ref = directRef ?? pageRef ?? input.previousRef
   const checkpoint = input.observations.checkpoint(tabRef)
   return checkpoint.snapshot !== null && checkpoint.snapshot.ref !== ref
@@ -39,5 +39,5 @@ export const restoreBrowserObservation = (
   const saved = Schema.decodeUnknownOption(BrowserObservationCheckpointSchema)(
     result.host?.["browser_observation"]
   )
-  if (saved._tag === "Some") observations.restore(saved.value)
+  if (Option.isSome(saved)) observations.restore(saved.value)
 }

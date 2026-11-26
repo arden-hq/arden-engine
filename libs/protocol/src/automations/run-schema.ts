@@ -1,5 +1,9 @@
 import { Schema } from "effect"
-import { AUTOMATION_CONTEXT_MODE, type AutomationRunsResponse } from "./contracts.js"
+import {
+  AUTOMATION_CONTEXT_MODE,
+  AUTOMATION_RUN_SKIP_REASON,
+  type AutomationRunsResponse
+} from "./contracts.js"
 import { IsoDateTimeStringSchema, PositiveIntSchema, withExtras } from "../common/schema.js"
 import { AUTOMATION_EVENT_TYPE } from "./triggers.js"
 
@@ -49,7 +53,7 @@ export const AutomationSkipRunWithEventSchema = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("kind"))
 
 export const AutomationRunSkipSchema = Schema.Struct({
-  reason: Schema.Literal("prefilter"),
+  reason: Schema.Literal(AUTOMATION_RUN_SKIP_REASON.prefilter),
   backend: Schema.NonEmptyString,
   event: AutomationSkippedEventSchema,
   asked: Schema.Array(Schema.NonEmptyString),

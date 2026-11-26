@@ -1,3 +1,4 @@
+import { TOOL_STATUS } from "./status-sets.js"
 import { Effect } from "effect"
 import type { SqlClient, SqlError, Statement } from "effect/unstable/sql"
 
@@ -31,7 +32,7 @@ export const requireLiveWorkflowOwner = Effect.fnUntraced(function* (
     SELECT status FROM code_mode_scripts
     WHERE origin_run_id = ${identity.runId} AND origin_tool_call_id = ${owner}
   `.pipe(Effect.mapError(preserveToolError(operation, identity)))
-  if (rows[0] !== undefined && rows[0].status !== "running")
+  if (rows[0] !== undefined && rows[0].status !== TOOL_STATUS.running)
     return yield* toolError(operation, "conflict", "The owning script has stopped", identity)
 })
 

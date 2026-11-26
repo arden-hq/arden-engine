@@ -5,7 +5,7 @@ import { Effect, Schema } from "effect"
 import { BrowserClient, SiteSecretNameSchema, type BrowserOutput } from "../browser/service.js"
 import { OriginSchema, originIssues, runBrowserForRun, TabRefSchema } from "./browser-support.js"
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
-import { personCard } from "../execution/decide.js"
+import { PERSON_CARD, personCard } from "../execution/decide.js"
 import type { ServerRunContext } from "./run-context.js"
 import { looksLikeSecret, VaultKeys, type VaultKeysService } from "../credentials/vault-keys.js"
 import { toolRefusal } from "./tool-failure.js"
@@ -37,11 +37,21 @@ const AskSecretParametersSchema = Schema.Struct({
 
 type AskSecretInput = typeof AskSecretParametersSchema.Type
 
+const SECRET_DECISION = {
+  saved: "saved",
+  ask: "ask",
+  answered: "answered",
+  refuse: "refuse"
+} as const
+
 type SiteSecretRequestDecision =
-  | { readonly kind: "saved" }
-  | { readonly kind: "ask" }
-  | { readonly kind: "answered" }
-  | { readonly kind: "refuse"; readonly reason: "never_ask" | "read_only" }
+  | { readonly kind: typeof SECRET_DECISION.saved }
+  | { readonly kind: typeof SECRET_DECISION.ask }
+  | { readonly kind: typeof SECRET_DECISION.answered }
+  | {
+      readonly kind: typeof SECRET_DECISION.refuse
+      readonly reason: "never_ask" | "read_only"
+    }
 
 const siteSecretRequestDecision = (input: {
   readonly mode: ChatApprovalMode
@@ -52,7 +62,7 @@ const siteSecretRequestDecision = (input: {
   if (input.answered) return { kind: "answered" }
   if (input.saved && !input.replace) return { kind: "saved" }
   const card = personCard(input.mode)
-  return card === "ask" ? { kind: "ask" } : { kind: "refuse", reason: card }
+  return card === PERSON_CARD.ask ? { kind: "ask" } : { kind: "refuse", reason: card }
 }
 
 const REFUSAL: Record<Extract<SiteSecretRequestDecision, { kind: "refuse" }>["reason"], string> = {
@@ -182,7 +192,7 @@ const makeBrowserAskSecretTool = (
         replace: input.replace === true,
         answered: false
       })
-      if (decision.kind !== "ask") return undefined
+      if (decision.kind !== SECRET_DECISION.ask) return undefined
       if (!vault.takeAsk(ctx.run.sessionId, ctx.toolCallId))
         throw toolRefusal(
           "You asked the user for passwords or keys 5 times in 5 minutes. Stop asking; tell the user they can sign in themselves in the browser with Take control.",
@@ -204,15 +214,15 @@ const makeBrowserAskSecretTool = (
         answered: ctx.approval !== undefined
       })
       switch (decision.kind) {
-        case "refuse":
+        case SECRET_DECISION.refuse:
           return { result: REFUSAL[decision.reason], preview: "Not asked" }
-        case "ask":
+        case SECRET_DECISION.ask:
           throw new ToolExecutionError("A site secret is asked only on the user's card.", {
             preview: "Asked only on the card",
             retryable: false
           })
-        case "saved":
-        case "answered":
+        case SECRET_DECISION.saved:
+        case SECRET_DECISION.answered:
           if (held === undefined) {
             throw new ToolExecutionError(
               `Nothing was saved for ${input.name} on ${input.origin}. Ask again only if the user wants to sign in.`,

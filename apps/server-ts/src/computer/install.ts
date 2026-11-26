@@ -115,7 +115,7 @@ export async function stageCuaApp(options: {
         .every(
           (entry) =>
             (entry === CUA_RELEASE.directory || entry.startsWith(`${CUA_RELEASE.directory}/`)) &&
-            !entry.split("/").some((part) => part === "..")
+            !entry.split("/").includes("..")
         )
     ) {
       throw new Error("Cua archive contains an unexpected installation path")

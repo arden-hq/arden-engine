@@ -1,20 +1,20 @@
-import type { StorageFile, StorageFiles } from "@arden-hq/protocol/storage"
+import { STORAGE_FILE_KIND, type StorageFile, type StorageFiles } from "@arden-hq/protocol/storage"
 import { Effect } from "effect"
 import { join } from "node:path"
 import { filesystem, scanStorageUnitsUnsafe, type StorageUnit } from "./inventory.js"
 import type { StorageError } from "./errors.js"
-import { classifyStorageRootEntry } from "./catalog.js"
+import { STORAGE_ROOT_ENTRY_KIND, classifyStorageRootEntry } from "./catalog.js"
 
 const management = (unit: StorageUnit, databaseName: string | null): StorageFile["management"] => {
   const known = unit.members
     .map((member) => classifyStorageRootEntry(member.name, databaseName))
-    .find((entry) => entry.kind === "known")
-  if (known !== undefined && known.kind === "known") {
+    .find((entry) => entry.kind === STORAGE_ROOT_ENTRY_KIND.known)
+  if (known !== undefined) {
     return { action: "inspect", reason: known.lifecycle }
   }
   return {
     action: "inspect",
-    reason: unit.members.some((member) => member.kind === "directory")
+    reason: unit.members.some((member) => member.kind === STORAGE_FILE_KIND.directory)
       ? "Unknown folder. Inspect in Finder; Arden cannot establish ownership or safe deletion."
       : "Unknown file. Inspect in Finder; Arden cannot establish ownership or safe deletion."
   }
@@ -49,7 +49,9 @@ export const makeStorageFiles = (options: {
           path: join(root, unit.name),
           sizeBytes: unit.sizeBytes,
           memberCount: unit.members.length,
-          kind: unit.members.some((member) => member.kind === "directory") ? "directory" : "file",
+          kind: unit.members.some((member) => member.kind === STORAGE_FILE_KIND.directory)
+            ? STORAGE_FILE_KIND.directory
+            : STORAGE_FILE_KIND.file,
           management: management(unit, options.databaseName)
         }))
         .sort(

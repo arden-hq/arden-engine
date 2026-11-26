@@ -1,5 +1,5 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import type { NavigationRequestedEvent } from "@arden-hq/protocol"
+import { APP_DESTINATION, type NavigationRequestedEvent } from "@arden-hq/protocol"
 import { NAVIGATION_ASKED_BY } from "@arden-hq/protocol/common"
 import { Effect, Schema } from "effect"
 
@@ -8,7 +8,7 @@ import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { SessionLifecycleEvents } from "../persistence/sessions/events.js"
-import { SessionStore } from "../persistence/sessions/store.js"
+import { ARCHIVE_WHEN_IDLE, SessionStore } from "../persistence/sessions/store.js"
 import { ToolExecutionStore } from "../persistence/tools/store.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { Wiki } from "../wiki/service.js"
@@ -19,6 +19,7 @@ import { chatHandoff } from "./chat-handoff.js"
 import { placeResource } from "./app-destination.js"
 import { resolveDestination } from "./app-open-destination.js"
 import {
+  APP_OPEN_MODE,
   AppOpenParametersSchema,
   ArchiveParametersSchema,
   ForwardMessageParametersSchema,
@@ -352,11 +353,11 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
               { signal: ctx.signal }
             )
           )
-          current = wish.kind === "kept"
+          current = wish.kind === ARCHIVE_WHEN_IDLE.kept
           const name = target.name?.trim() || "(untitled)"
-          if (wish.kind === "kept")
+          if (wish.kind === ARCHIVE_WHEN_IDLE.kept)
             lines.push(`- ${sessionRef} · archives when this turn and its agents finish — ${name}`)
-          else if (wish.kind === "automations")
+          else if (wish.kind === ARCHIVE_WHEN_IDLE.automations)
             lines.push(
               `- ${sessionRef} · skipped — archiving would delete its Automations (${wish.names.join(", ")}); ask the user first`
             )
@@ -428,7 +429,7 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
     },
     execute: async (input, ctx, effects) => {
       if (
-        input.destination.kind === "settings" &&
+        input.destination.kind === APP_DESTINATION.settings &&
         (await hasConnectionChoiceInRun(services, ctx.run.sessionId, ctx.run.runId, ctx.signal))
       ) {
         effects.unchanged()
@@ -470,7 +471,7 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
       )
       return {
         result:
-          mode === "open"
+          mode === APP_OPEN_MODE.open
             ? `Asked Arden to open: ${input.label}.`
             : `Offered in chat: ${input.label}. The user opens it if they want to.`,
         preview: input.label,

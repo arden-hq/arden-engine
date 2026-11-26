@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 
 import { PROMPTS } from "../prompts/catalog.js"
@@ -37,7 +38,8 @@ export const makeLetterSubject = (
     const text = input.text.trim()
     if (text.length === 0) return false
     const header = yield* dependencies.sessions.loadHistoryHeader(input.sessionId)
-    if (header === null || header.spaceId === null || header.sessionType === "agent") return false
+    if (header === null || header.spaceId === null || header.sessionType === SESSION_TYPE.agent)
+      return false
 
     const subject = yield* dependencies.completion.runText({
       role: "helper",

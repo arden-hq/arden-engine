@@ -1,3 +1,4 @@
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
 import { isWithin } from "@arden-hq/std/paths"
 import { open, realpath, stat } from "node:fs/promises"
 import path from "node:path"
@@ -13,11 +14,18 @@ const MAX_TOTAL_BYTES = 32 * 1024
 const MAX_FILE_BYTES = 16 * 1024
 const MAX_SOURCES = 24
 
+const SOURCE_STATUS = {
+  loaded: "loaded",
+  empty: "empty",
+  unreadable: "unreadable",
+  truncated: "truncated"
+} as const
+
 interface LocalInstructionSource {
   readonly path: string
   readonly scope: string
   readonly digest: string | undefined
-  readonly status: "loaded" | "empty" | "unreadable" | "truncated"
+  readonly status: (typeof SOURCE_STATUS)[keyof typeof SOURCE_STATUS]
   readonly content: string | undefined
 }
 
@@ -94,7 +102,11 @@ export const loadLocalInstructions = async ({
       if (read === undefined) continue
       sources.push(read.source)
       remaining -= read.bytesUsed
-      if (read.source.status === "loaded" || read.source.status === "truncated") break
+      if (
+        read.source.status === SOURCE_STATUS.loaded ||
+        read.source.status === SOURCE_STATUS.truncated
+      )
+        break
     }
   }
   const digest = sha256Hex(
@@ -123,7 +135,7 @@ const readSource = async (
   try {
     resolved = await realpath(candidate)
   } catch (cause) {
-    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return undefined
+    if (isErrnoCode(cause, ERRNO.ENOENT)) return undefined
     return {
       source: {
         path: candidate,

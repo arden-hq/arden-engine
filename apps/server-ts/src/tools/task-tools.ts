@@ -14,7 +14,14 @@ import {
 import { defineServerTool, type ServerTool, type ServerToolMetadataInput } from "./define.js"
 import { refuseCapChange, saveCap, tokenBudgetCard } from "./task-token-cap.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { WorkStore } from "../persistence/work/store.js"
+import { TASK_FINISH_CHECK, WorkStore } from "../persistence/work/store.js"
+import { STORE_REASON } from "../persistence/errors.js"
+import { WORK_TARGET } from "./work-reach.js"
+import {
+  SPACE_TASK_RUNS_IN,
+  SPACE_TASK_WAITING_ON,
+  TASK_STATUS
+} from "@arden-hq/protocol/spaces/work"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { toolFailure } from "./tool-failure.js"
 import { taskHandle } from "./task-handle.js"
@@ -29,7 +36,7 @@ import {
 import { askUserQuestion, questionData } from "./ask-user-input.js"
 import type { ServerRunContext } from "./run-context.js"
 import { recordApplied, type CallEffects } from "../execution/tool-effect.js"
-import { actsAsPerson, rootOf } from "../execution/authority.js"
+import { ACTOR, actsAsPerson, rootOf } from "../execution/authority.js"
 import { appliedReceipt } from "./call-receipt.js"
 import {
   fromWorker,
@@ -57,7 +64,8 @@ const applyTaskChange = async (
   const cap = input.patch.token_budget
   const target = await resolveWorkTarget(services, ctx, input.space_id, "refuse")
   if (cap !== undefined) refuseCapChange(input.patch, fromWorker(target, ctx))
-  const asksUser = target.kind === "job" && input.patch.waiting_on === "you"
+  const asksUser =
+    target.kind === WORK_TARGET.job && input.patch.waiting_on === SPACE_TASK_WAITING_ON.you
   const {
     blocked: _blocked,
     waiting_on: _waitingOn,
@@ -70,9 +78,9 @@ const applyTaskChange = async (
       "Say what you need from the user: set block_reason to one direct question or instruction. It reaches them as a question, and their answer resumes the Task.",
       { preview: "block_reason required", retryable: true }
     )
-  if (target.kind === "job") {
+  if (target.kind === WORK_TARGET.job) {
     const own = ctx.run.authority.owns.task_item_id !== null
-    refuseWidePatch(patch, own && rootOf(ctx.run.authority.actor) === "task_worker")
+    refuseWidePatch(patch, own && rootOf(ctx.run.authority.actor) === ACTOR.taskWorker)
   }
   if (patch.blocked === true && patch.block_reason === undefined) {
     throw new ToolExecutionError(
@@ -81,7 +89,7 @@ const applyTaskChange = async (
     )
   }
   const save = () => {
-    if (target.kind === "job")
+    if (target.kind === WORK_TARGET.job)
       return services.work.updateFromJob(
         target.automationId,
         input.key,
@@ -184,7 +192,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
             .get({ kind: "item", itemId: input.item_id })
             .pipe(
               Effect.mapError((error) =>
-                error.reason === "not_found"
+                error.reason === STORE_REASON.not_found
                   ? new ToolExecutionError(
                       `No Task has item_id ${JSON.stringify(input.item_id)}; it may have been deleted. Find it with space_board_read.`,
                       { preview: "Task not found", retryable: false }
@@ -241,7 +249,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
     },
     execute: async (input, ctx, effects) => {
       const target = await resolveWorkTarget(services, ctx, input.space_id, "handoff")
-      if (target.kind === "job") throw new Error("A background run cannot start a Task")
+      if (target.kind === WORK_TARGET.job) throw new Error("A background run cannot start a Task")
       const { space_id: _spaceId, capture, ...taskInput } = input
       const task = await recordApplied(
         effects,
@@ -263,7 +271,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
         signal: ctx.signal
       })
       const where =
-        task.runs_in === "chat"
+        task.runs_in === SPACE_TASK_RUNS_IN.chat
           ? "It works in this chat: keep going on it now, turn after turn, until it is done or needs the user."
           : executionWords(execution)
       return {
@@ -286,7 +294,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
       if (cap === undefined) return undefined
       const target = await resolveWorkTarget(services, ctx, input.space_id, "refuse")
       refuseCapChange(input.patch, fromWorker(target, ctx))
-      if (target.kind === "job") return undefined
+      if (target.kind === WORK_TARGET.job) return undefined
       const address = { kind: "key", scope: scopeOf(target), key: input.key } as const
       return Effect.runPromise(
         tokenBudgetCard(services.work, address, { key: input.key, cap }).pipe(
@@ -298,7 +306,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
     execute: (input, ctx, effects) =>
       applyTaskChange(
         services,
-        input.patch.status === "open"
+        input.patch.status === TASK_STATUS.open
           ? { ...input, patch: { ...input.patch, blocked: false } }
           : input,
         ctx,
@@ -343,7 +351,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
     execute: async (input, ctx, effects) => {
       const { space_id, key, expected_updated_at, ...patch } = input
       const change = { space_id, key, expected_updated_at, patch }
-      if (patch.status !== "done") return applyTaskChange(services, change, ctx, effects)
+      if (patch.status !== TASK_STATUS.done) return applyTaskChange(services, change, ctx, effects)
       const task = await readTaskAt(services, ctx, space_id, key)
       const check = await Effect.runPromise(
         services.work
@@ -351,7 +359,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
           .pipe(Effect.mapError(workFailure)),
         { signal: ctx.signal }
       )
-      if (check.kind === "warn")
+      if (check.kind === TASK_FINISH_CHECK.warn)
         return {
           result: finishWarning(check.open, check.request),
           preview: `Not finished: ${countOf(check.open.length, "open todo item")}`,
@@ -388,7 +396,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
       const added = await recordApplied(
         effects,
         Effect.runPromise(
-          (target.kind === "job"
+          (target.kind === WORK_TARGET.job
             ? services.work.commentFromJob(
                 target.automationId,
                 input.key,

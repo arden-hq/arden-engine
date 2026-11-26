@@ -11,11 +11,13 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { cwdFor, displayFor, filesystemError, resolveFor } from "./file-tool-support.js"
 import {
   binaryRefusal,
+  FILE_KIND,
   fileKind,
   imageConversionRefusal,
   imageForModel,
   imageNote,
   imageRefusal,
+  PDF_TEXT,
   pdfRefusal,
   readPdfText
 } from "./read-binary.js"
@@ -33,6 +35,7 @@ import {
   MAX_DISCOVERY_ENTRIES,
   MAX_READ_BYTES,
   ReadParametersSchema,
+  SEARCH_OUTPUT_MODE,
   SearchParametersSchema
 } from "./files-read-parameters.js"
 import {
@@ -125,10 +128,10 @@ export const fileReadTools = ({
           }
         ]
         const kind = fileKind({ bytes, name })
-        if (kind.kind === "binary") {
+        if (kind.kind === FILE_KIND.binary) {
           throw toolRefusal(binaryRefusal(name, kind.label), "Not a text file")
         }
-        if (kind.kind === "image") {
+        if (kind.kind === FILE_KIND.image) {
           const imageInput = ctx.run.imageInput
           if (imageInput === undefined) {
             throw toolRefusal(imageRefusal(name, kind.format), "Images not supported")
@@ -161,11 +164,11 @@ export const fileReadTools = ({
             ]
           }
         }
-        const pdf = kind.kind === "pdf" ? await readPdfText(bytes) : undefined
-        if (pdf !== undefined && pdf.kind !== "text") {
+        const pdf = kind.kind === FILE_KIND.pdf ? await readPdfText(bytes) : undefined
+        if (pdf !== undefined && pdf.kind !== PDF_TEXT.text) {
           throw toolRefusal(
             pdfRefusal(name, pdf, ctx.run.imageInput !== undefined),
-            pdf.kind === "no_text" ? "PDF has no text" : "PDF not readable"
+            pdf.kind === PDF_TEXT.noText ? "PDF has no text" : "PDF not readable"
           )
         }
         const source = pdf === undefined ? bytes.toString("utf8") : pdf.text
@@ -419,14 +422,14 @@ export const fileReadTools = ({
             relative_path: path.relative(root, absolute).split(path.sep).join("/")
           }
         }
-        if (input.output_mode === "files_only") {
+        if (input.output_mode === SEARCH_OUTPUT_MODE.filesOnly) {
           const searched = await ripgrepSearchFiles(request)
           const selected = searched.items.slice(offset, offset + input.limit)
           records.push(...selected.map((candidate) => addPath(candidate)))
           partial = searched.partial
           hasMore = searched.truncated || searched.items.length > offset + selected.length
           searchOutputBytes = searched.outputBytes
-        } else if (input.output_mode === "count") {
+        } else if (input.output_mode === SEARCH_OUTPUT_MODE.count) {
           const searched = await ripgrepSearchCounts(request)
           const selected = searched.items.slice(offset, offset + input.limit)
           records.push(
@@ -473,7 +476,7 @@ export const fileReadTools = ({
         const source_refs = [...matchedFiles]
           .slice(0, MAX_FOUND_SOURCES)
           .map(([absolute, relative]) => foundSource(absolute, relative))
-        const previewUnit = input.output_mode === "files_only" ? "file" : "match"
+        const previewUnit = input.output_mode === SEARCH_OUTPUT_MODE.filesOnly ? "file" : "match"
         return {
           host: { source_refs },
           result: `${content}${continuation}`,

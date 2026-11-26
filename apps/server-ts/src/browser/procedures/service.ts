@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Predicate, Schema } from "effect"
+import { Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import {
   PauseRequested,
   ToolExecutionError,
@@ -32,7 +32,10 @@ import {
   WaitParametersSchema,
   OpenParametersSchema
 } from "../../tools/browser-parameters.js"
-import type { BrowserProcedureDetail } from "@arden-hq/protocol/browser-procedures"
+import {
+  BROWSER_PROCEDURE_STATUS,
+  type BrowserProcedureDetail
+} from "@arden-hq/protocol/browser-procedures"
 import { procedureCode } from "./procedure-code.js"
 
 const BuildSchema = Schema.Struct({
@@ -194,7 +197,10 @@ export class BrowserProcedures extends Context.Service<
               stage: "draft_match",
               procedureId: build.existing_id
             })
-          if (previous?.status === "accepted" || previous?.status === "candidate")
+          if (
+            previous?.status === BROWSER_PROCEDURE_STATUS.accepted ||
+            previous?.status === BROWSER_PROCEDURE_STATUS.candidate
+          )
             return yield* skipped("The existing procedure already covers this operation.", {
               stage: "existing",
               procedureId: previous.id
@@ -435,7 +441,7 @@ export class BrowserProcedures extends Context.Service<
         if (stopped !== undefined) return stopped
         if (output !== undefined) {
           const verified = Schema.decodeUnknownOption(VerifiedSchema)(output.data?.["value"])
-          if (verified._tag === "Some") {
+          if (Option.isSome(verified)) {
             await Effect.runPromise(store.settle(ctx.run.runId, toolCallId, "succeeded"))
             return {
               result: output.content,

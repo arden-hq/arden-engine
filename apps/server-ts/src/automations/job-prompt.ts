@@ -1,4 +1,8 @@
-import type { AutomationJobPrompt } from "../persistence/automations/job-prompt.js"
+import { SYSTEM_HANDLER } from "../persistence/automations/model.js"
+import {
+  AUTOMATION_JOB_PROMPT,
+  type AutomationJobPrompt
+} from "../persistence/automations/job-prompt.js"
 import type {
   AutomationJobLease,
   ClaimedAutomationJobLease
@@ -7,11 +11,11 @@ import { renderSpaceJobPrompt } from "../prompts/space-jobs.js"
 
 const renderAutomationJobPrompt = (prompt: AutomationJobPrompt): string => {
   switch (prompt.kind) {
-    case "text":
+    case AUTOMATION_JOB_PROMPT.text:
       return prompt.triggerContext === undefined
         ? prompt.text
         : `${prompt.text}\n\n${prompt.triggerContext}`
-    case "space_job": {
+    case AUTOMATION_JOB_PROMPT.spaceJob: {
       const rendered = renderSpaceJobPrompt(prompt.context)
       return prompt.triggerContext === undefined
         ? rendered
@@ -30,7 +34,10 @@ export const withScreenedEvents = (
   }
   return {
     ...job,
-    payload: payload.handler === "events" ? { ...payload, itemIds: screened.itemIds } : payload
+    payload:
+      payload.handler === SYSTEM_HANDLER.events
+        ? { ...payload, itemIds: screened.itemIds }
+        : payload
   }
 }
 

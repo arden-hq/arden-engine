@@ -8,12 +8,22 @@ export interface RgbaImage {
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
+const PNG_CHUNK = {
+  header: "IHDR",
+  data: "IDAT",
+  palette: "PLTE",
+  transparency: "tRNS",
+  end: "IEND"
+} as const
+type PngChunkType = (typeof PNG_CHUNK)[keyof typeof PNG_CHUNK]
+const isChunk = (type: string, chunk: PngChunkType): boolean => type === chunk
+
 const CHANNELS: Readonly<Record<number, number>> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
 
 export const pngSize = (bytes: Uint8Array): { width: number; height: number } | undefined => {
   if (bytes.length < 24 || !SIGNATURE.equals(bytes.subarray(0, 8))) return undefined
   const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  if (view.toString("latin1", 12, 16) !== "IHDR") return undefined
+  if (view.toString("latin1", 12, 16) !== PNG_CHUNK.header) return undefined
   return { width: view.readUInt32BE(16), height: view.readUInt32BE(20) }
 }
 
@@ -117,10 +127,10 @@ const readChunks = (
     const type = view.toString("latin1", offset + 4, offset + 8)
     const body = view.subarray(offset + 8, offset + 8 + length)
     if (body.length !== length) return undefined
-    if (type === "IDAT") data.push(body)
-    if (type === "PLTE") palette = body
-    if (type === "tRNS") transparency = body
-    if (type === "IEND") break
+    if (isChunk(type, PNG_CHUNK.data)) data.push(body)
+    if (isChunk(type, PNG_CHUNK.palette)) palette = body
+    if (isChunk(type, PNG_CHUNK.transparency)) transparency = body
+    if (isChunk(type, PNG_CHUNK.end)) break
     offset += 12 + length
   }
   return { data, palette, transparency }

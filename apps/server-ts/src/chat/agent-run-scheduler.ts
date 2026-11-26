@@ -1,6 +1,6 @@
 import { RUN_EXECUTION } from "@arden-hq/protocol/daemon"
 import { Effect, Exit, Semaphore } from "effect"
-import type { ChatRunScheduling } from "../persistence/chat/store.js"
+import { CHAT_RUN_SCHEDULING, type ChatRunScheduling } from "../persistence/chat/store.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 
 interface RunIdentity {
@@ -29,7 +29,7 @@ export const makeAgentRunScheduler = (): AgentRunScheduler => {
           return effect.pipe(Effect.withSpan("ChatAgentRun.execute"))
         })
         const scheduled =
-          scheduling.kind === "unrestricted"
+          scheduling.kind === CHAT_RUN_SCHEDULING.unrestricted
             ? execute
             : Effect.acquireUseRelease(
                 Effect.sync(() => {

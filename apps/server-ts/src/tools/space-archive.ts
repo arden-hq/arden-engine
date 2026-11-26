@@ -4,6 +4,7 @@ import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { requireChat } from "./space-controls.js"
 import { SpaceStore, archiveRefusal, type PersistedSpace } from "../persistence/spaces/store.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import type { ServerRunContext } from "./run-context.js"
 import { recordApplied } from "../execution/tool-effect.js"
@@ -110,7 +111,7 @@ const makeSpaceArchiveTool = (services: Services): ServerTool =>
             .pipe(
               Effect.mapError((cause) =>
                 refuse(
-                  cause.reason === "conflict"
+                  cause.reason === STORE_REASON.conflict
                     ? `${cause.message}, so ${quoted(space.name)} was not archived. The user can archive it from its menu, which asks before stopping that work, or after the work finishes.`
                     : cause.message
                 )

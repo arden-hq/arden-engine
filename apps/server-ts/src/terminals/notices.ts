@@ -5,7 +5,7 @@ import { Effect, FiberSet, Layer } from "effect"
 
 import { ChatMessage } from "../chat/message.js"
 import { DataRoot } from "../runtime/data-root.js"
-import type { ProcessExit } from "./live-process.js"
+import { PROCESS_EXIT, type ProcessExit } from "./live-process.js"
 import {
   terminalsFile,
   writeRunning,
@@ -16,7 +16,7 @@ import {
   type TerminalNotice
 } from "./restart-notices.js"
 import { TerminalSessions } from "./service.js"
-import type { ExitNotice, TerminalInfo } from "./store.js"
+import { TERMINAL_EVENT, TERMINAL_PHASE, type ExitNotice, type TerminalInfo } from "./store.js"
 
 const EXIT_NOTICE_DELAY_MS = 1_500
 
@@ -66,14 +66,14 @@ export const TerminalNoticesRuntime: Layer.Layer<
       )
     )
     const unsubscribe = store.subscribe((event) => {
-      if (event.type === "output") return
-      if (event.type === "state") {
+      if (event.type === TERMINAL_EVENT.output) return
+      if (event.type === TERMINAL_EVENT.state) {
         const notice = store.peekExitNotice(event.terminal.id)
         if (notice !== undefined) enqueueTerminalNotice(file, exitNotice(notice))
       }
       persist()
-      if (event.type !== "state" || event.terminal.exit === undefined) return
-      if (event.terminal.phase !== "detached") return
+      if (event.type !== TERMINAL_EVENT.state || event.terminal.exit === undefined) return
+      if (event.terminal.phase !== TERMINAL_PHASE.detached) return
       const id = event.terminal.id
       const key = JSON.stringify([
         event.terminal.sessionId,
@@ -103,7 +103,7 @@ export const TerminalNoticesRuntime: Layer.Layer<
 )
 
 const isRunningDetached = (terminal: TerminalInfo): boolean =>
-  terminal.phase === "detached" && terminal.exit === undefined
+  terminal.phase === TERMINAL_PHASE.detached && terminal.exit === undefined
 
 const exitNotice = ({ terminal, tail }: ExitNotice): TerminalNotice => {
   const exit = terminal.exit
@@ -120,11 +120,13 @@ const exitNotice = ({ terminal, tail }: ExitNotice): TerminalNotice => {
     approvalMode: terminal.approvalMode,
     clientId: `terminal-exit:${terminal.toolCallId}`,
     content,
-    outcome: exit?.kind === "code" && exit.code === 0 ? "completed" : "failed"
+    outcome: exit?.kind === PROCESS_EXIT.code && exit.code === 0 ? "completed" : "failed"
   }
 }
 
 const exitPhrase = (exit: ProcessExit | undefined): string => {
   if (exit === undefined) return "ended"
-  return exit.kind === "code" ? `exited with code ${exit.code}` : `was stopped (${exit.signal})`
+  return exit.kind === PROCESS_EXIT.code
+    ? `exited with code ${exit.code}`
+    : `was stopped (${exit.signal})`
 }

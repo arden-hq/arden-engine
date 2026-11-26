@@ -103,10 +103,12 @@ export interface SessionListEntry extends StoredSession {
   readonly origin: "capture" | "onboarding" | undefined
 }
 
+export const ARCHIVE_WHEN_IDLE = { kept: "kept", gone: "gone", automations: "automations" } as const
+
 export type ArchiveWhenIdle =
-  | { readonly kind: "kept" }
-  | { readonly kind: "gone" }
-  | { readonly kind: "automations"; readonly names: ReadonlyArray<string> }
+  | { readonly kind: typeof ARCHIVE_WHEN_IDLE.kept }
+  | { readonly kind: typeof ARCHIVE_WHEN_IDLE.gone }
+  | { readonly kind: typeof ARCHIVE_WHEN_IDLE.automations; readonly names: ReadonlyArray<string> }
 
 export interface PendingArchive {
   readonly sessionId: string
@@ -136,8 +138,10 @@ export interface CreatedSession {
   readonly origin: "capture" | "onboarding" | undefined
 }
 
+export const OWN_CHAT_MOVE_WHEN = { now: "now", run_end: "run_end" } as const
+
 export interface OwnChatMove {
-  readonly when: "now" | "run_end"
+  readonly when: (typeof OWN_CHAT_MOVE_WHEN)[keyof typeof OWN_CHAT_MOVE_WHEN]
   readonly spaceId: string
   readonly spaceName: string
 }

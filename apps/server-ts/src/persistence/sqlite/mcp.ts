@@ -1,3 +1,4 @@
+import { MCP_TRANSPORT } from "@arden-hq/protocol/mcp"
 import { Clock, Effect, Schema, type SchemaAST } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { McpPresetId } from "@arden-hq/protocol/mcp"
@@ -70,7 +71,7 @@ const sameTransport = (
   right: McpStoredServer["transport"]
 ): boolean => {
   if (left.type !== right.type) return false
-  if (left.type === "stdio" && right.type === "stdio") {
+  if (left.type === MCP_TRANSPORT.stdio && right.type === MCP_TRANSPORT.stdio) {
     return (
       left.command === right.command &&
       left.cwd === right.cwd &&
@@ -80,8 +81,8 @@ const sameTransport = (
     )
   }
   return (
-    left.type === "http" &&
-    right.type === "http" &&
+    left.type === MCP_TRANSPORT.http &&
+    right.type === MCP_TRANSPORT.http &&
     left.url === right.url &&
     left.auth === right.auth &&
     sameKeys(left.headerKeys, right.headerKeys)

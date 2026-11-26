@@ -8,10 +8,13 @@ import {
   resolveLocalPath,
   sessionPathPolicy
 } from "../storage/local-paths.js"
-import { RipgrepSearchError } from "./ripgrep.js"
+import { RIPGREP_REASON, RipgrepSearchError } from "./ripgrep.js"
 import type { ServerRunContext } from "./run-context.js"
 import { toolFault, toolRefusal } from "./tool-failure.js"
 import type { SessionPathPolicy } from "../storage/local-paths.js"
+
+const DENIED_CODES: ReadonlySet<string> = new Set(["EACCES", "EPERM"])
+const MISSING_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"])
 import { LocalRevisionConflict } from "../storage/local-revision.js"
 import { displayLocalPath } from "../storage/local-directory.js"
 
@@ -28,10 +31,10 @@ export const filesystemError = (
   if (cause instanceof ToolExecutionError) return cause
   if (cause instanceof RipgrepSearchError) {
     return toolFault(
-      cause.reason === "timeout"
+      cause.reason === RIPGREP_REASON.timeout
         ? `File search timed out under ${target}. Narrow the path, glob, or query.`
         : `File search produced too much output under ${target}. Narrow the path, glob, or query.`,
-      cause.reason === "timeout" ? "Search timed out" : "Search too broad"
+      cause.reason === RIPGREP_REASON.timeout ? "Search timed out" : "Search too broad"
     )
   }
   if (cause instanceof LocalRevisionConflict) {
@@ -41,13 +44,13 @@ export const filesystemError = (
     )
   }
   const code = (cause as NodeJS.ErrnoException | undefined)?.code
-  if (code === "EACCES" || code === "EPERM") {
+  if (code !== undefined && DENIED_CODES.has(code)) {
     return toolRefusal(
       `Permission denied while trying to ${action} ${target}.`,
       "Permission denied"
     )
   }
-  if (code === "ENOENT" || code === "ENOTDIR") {
+  if (code !== undefined && MISSING_CODES.has(code)) {
     return toolRefusal(`Path not found: ${target}.`, "Not found")
   }
   return toolFault(`Could not ${action} ${target}.`, `${action} failed`)

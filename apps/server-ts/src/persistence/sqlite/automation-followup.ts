@@ -1,6 +1,11 @@
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { AutomationFollowup, AutomationQueue, FollowupOwner } from "../automations/queue.js"
+import {
+  AUTOMATION_FOLLOWUP,
+  type AutomationFollowup,
+  type AutomationQueue,
+  type FollowupOwner
+} from "../automations/queue.js"
 import { AutomationStoreError } from "../automations/store.js"
 import type { AutomationStoreDeps } from "./automation-rows.js"
 import { storeError } from "./automation-rows.js"
@@ -16,7 +21,7 @@ export const makeAutomationFollowup = ({
     const sql = writer.sql
     const now = yield* DateTime.now
     const at =
-      input.followup.action === "check_again"
+      input.followup.action === AUTOMATION_FOLLOWUP.check_again
         ? yield* Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString)(input.followup.at).pipe(
             Effect.mapError(() =>
               storeError("update", "invalid", "The next check needs an ISO timestamp")

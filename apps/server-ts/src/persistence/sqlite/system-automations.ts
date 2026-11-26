@@ -1,10 +1,16 @@
+import { JOB_PURPOSE } from "../job-classification.js"
 import { Clock, Effect } from "effect"
 
-import type {
-  AutomationRules,
-  PersonalAutomationTriggers,
-  SystemAutomationSpec
+import {
+  SYSTEM_PROMPT_EDIT,
+  SYSTEM_TRIGGER_SCOPE,
+  TRIGGERS_SOURCE,
+  type TriggersSource,
+  type AutomationRules,
+  type PersonalAutomationTriggers,
+  type SystemAutomationSpec
 } from "../automations/model.js"
+
 import { AutomationStoreError } from "../automations/store.js"
 import { namedPublicRef } from "../public-ref.js"
 import { nextId } from "./deps.js"
@@ -23,12 +29,18 @@ import { resumeOnTriggers } from "./automation-resume.js"
 import { renameOwnedJob } from "./job-labels.js"
 import { iso } from "../../runtime/clock.js"
 
+const SYSTEM_SESSION = { chat: "chat", none: "none" } as const
+
+type SystemSession =
+  | { readonly kind: typeof SYSTEM_SESSION.chat; readonly id: string; readonly create: boolean }
+  | { readonly kind: typeof SYSTEM_SESSION.none; readonly id: null; readonly create: false }
+
 interface StoredSystemAutomation {
   readonly task_id: string
   readonly enabled: number
   readonly purpose: string
   readonly triggers: string
-  readonly triggers_source: string | null
+  readonly triggers_source: TriggersSource | null
   readonly last_run_at: string | null
   readonly next_run_at: string | null
   readonly thread_id: string | null
@@ -62,7 +74,7 @@ const currentNextRunAt = (input: {
   readonly nowMs: number
 }): string | null => {
   if (!input.enabled) return null
-  if (input.row.triggers_source === "manual") return input.row.next_run_at
+  if (input.row.triggers_source === TRIGGERS_SOURCE.manual) return input.row.next_run_at
   const parsed = input.row.last_run_at === null ? input.nowMs : Date.parse(input.row.last_run_at)
   const next = scheduledAt(
     input.rules,
@@ -73,25 +85,27 @@ const currentNextRunAt = (input: {
   return input.row.next_run_at !== null && !input.spec.rearmOnSeed ? input.row.next_run_at : next
 }
 
+const OWNER_TRIGGERS_KIND = { spec: "spec", owner: "owner", noneTaken: "none_taken" } as const
+
 type OwnerTriggers =
-  | { readonly kind: "spec" }
-  | { readonly kind: "owner"; readonly triggers: string }
-  | { readonly kind: "none_taken" }
+  | { readonly kind: typeof OWNER_TRIGGERS_KIND.spec }
+  | { readonly kind: typeof OWNER_TRIGGERS_KIND.owner; readonly triggers: string }
+  | { readonly kind: typeof OWNER_TRIGGERS_KIND.noneTaken }
 
 const ownerTriggers = Effect.fn("SqliteAutomationStore.ownerTriggers")(function* (
   spec: SystemAutomationSpec,
   row: StoredSystemAutomation
 ): Effect.fn.Return<OwnerTriggers, AutomationStoreError> {
-  if (row.triggers_source !== "manual") return { kind: "spec" }
-  const kept = { kind: "owner", triggers: row.triggers } as const
-  if (spec.triggerScope === "any") return kept
+  if (row.triggers_source !== TRIGGERS_SOURCE.manual) return { kind: OWNER_TRIGGERS_KIND.spec }
+  const kept: OwnerTriggers = { kind: OWNER_TRIGGERS_KIND.owner, triggers: row.triggers }
+  if (spec.triggerScope === SYSTEM_TRIGGER_SCOPE.any) return kept
   const stored = yield* listenerTriggers({ task_id: spec.automationId, triggers: row.triggers })
   if (stored === undefined) return kept
   const taken = stored.filter((trigger) => systemTakesTrigger(spec, trigger))
-  if (taken.length === 0) return { kind: "none_taken" }
+  if (taken.length === 0) return { kind: OWNER_TRIGGERS_KIND.noneTaken }
   if (taken.length === stored.length) return kept
   return {
-    kind: "owner",
+    kind: OWNER_TRIGGERS_KIND.owner,
     triggers: yield* encodeJson(AutomationTriggersSchema, taken).pipe(
       Effect.mapError((cause) =>
         seedError("Could not encode the system Automation triggers", spec.automationId, cause)
@@ -102,11 +116,11 @@ const ownerTriggers = Effect.fn("SqliteAutomationStore.ownerTriggers")(function*
 
 const storedTriggers = (owner: OwnerTriggers, specTriggers: string): string => {
   switch (owner.kind) {
-    case "spec":
+    case OWNER_TRIGGERS_KIND.spec:
       return specTriggers
-    case "owner":
+    case OWNER_TRIGGERS_KIND.owner:
       return owner.triggers
-    case "none_taken":
+    case OWNER_TRIGGERS_KIND.noneTaken:
       return "[]"
   }
 }
@@ -163,7 +177,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
                 LIMIT 1
               `
             const row = rows[0]
-            if (row !== undefined && row.purpose !== "system") {
+            if (row !== undefined && row.purpose !== JOB_PURPOSE.system) {
               return yield* new AutomationStoreError({
                 operation: "seed_builtin",
                 reason: "conflict",
@@ -172,14 +186,14 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
               })
             }
 
-            const session = spec.chatSession
+            const session: SystemSession = spec.chatSession
               ? {
-                  kind: "chat" as const,
+                  kind: SYSTEM_SESSION.chat,
                   id: row?.thread_id ?? (yield* nextId),
                   create: row === undefined || row.thread_id === null
                 }
-              : { kind: "none" as const, id: null, create: false }
-            if (session.kind === "chat" && session.create) {
+              : { kind: SYSTEM_SESSION.none, id: null, create: false }
+            if (session.kind === SYSTEM_SESSION.chat && session.create) {
               yield* insertSession({
                 sql,
                 session: {
@@ -218,16 +232,16 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
             }
 
             const owner = yield* ownerTriggers(spec, row)
-            const noneTaken = owner.kind === "none_taken"
+            const noneTaken = owner.kind === OWNER_TRIGGERS_KIND.noneTaken
             const stored = storedTriggers(owner, triggers)
             const userOwnsTriggers = stored !== triggers
             const resumes =
               !noneTaken && spec.enabled && row.enabled === 0 && row.auto_resume_at !== null
             const enabled = !noneTaken && spec.enabled && (row.enabled === 1 || resumes)
-            const fixed = spec.promptEdit === "fixed" ? 1 : 0
+            const fixed = spec.promptEdit === SYSTEM_PROMPT_EDIT.fixed ? 1 : 0
             const current = {
               ...row,
-              triggers_source: userOwnsTriggers ? "manual" : null,
+              triggers_source: userOwnsTriggers ? TRIGGERS_SOURCE.manual : null,
               next_run_at: userOwnsTriggers && stored !== row.triggers ? null : row.next_run_at
             }
             const nextRunAt = currentNextRunAt({

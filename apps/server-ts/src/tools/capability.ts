@@ -1,4 +1,10 @@
-import type { CapabilityCandidate, CapabilityProposal } from "@arden-hq/protocol/chat"
+import {
+  CAPABILITY_CANDIDATE,
+  type CapabilityCandidate,
+  type CapabilityProposal
+} from "@arden-hq/protocol/chat"
+import { MCP_CONNECTION_STATUS } from "@arden-hq/protocol/mcp"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -12,7 +18,7 @@ import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { ownerKeystrokes } from "../persistence/transcript/owner-words.js"
 import { McpConnections } from "../mcp/service.js"
 import { connectedServer } from "../mcp/public-server.js"
-import { refusalText, vetServerRequest } from "./capability-server.js"
+import { refusalText, SERVER_VERDICT, vetServerRequest } from "./capability-server.js"
 
 const MAX_CANDIDATES = 3
 const MAX_CARDS_PER_RUN = 1
@@ -144,9 +150,9 @@ const offerCandidates = (
 ): ReadonlyArray<OfferCandidate> =>
   candidates.map((candidate): OfferCandidate => {
     switch (candidate.kind) {
-      case "mcp_preset":
+      case CAPABILITY_CANDIDATE.mcpPreset:
         return { kind: "preset", id: candidate.id, title: candidate.title }
-      case "mcp_custom":
+      case CAPABILITY_CANDIDATE.mcpCustom:
         return { kind: "url", url: candidate.url, title: candidate.title }
     }
   })
@@ -227,7 +233,7 @@ const makeCapabilityProposeTool = (services: CapabilityToolServices): ServerTool
           ownerWords: await services.ownerWords(ctx.run.sessionId),
           childAgent: await services.isChildAgent(ctx.run.sessionId)
         })
-        if (verdict.kind === "refused") {
+        if (verdict.kind === SERVER_VERDICT.refused) {
           return {
             result: refusalText(verdict.reason),
             preview: "Server not offered",
@@ -310,12 +316,12 @@ export const capabilityTools = Effect.gen(function* () {
       offers: yield* CapabilityOfferStore,
       connectedServers: async () =>
         (await Effect.runPromise(mcp.snapshot()))
-          .filter((server) => server.status === "connected")
+          .filter((server) => server.status === MCP_CONNECTION_STATUS.connected)
           .map(connectedServer),
       ownerWords: (sessionId) => readOwnerWords(transcript, sessionId),
       isChildAgent: async (sessionId) => {
         const header = await Effect.runPromise(sessions.loadHistoryHeader(sessionId))
-        return header?.sessionType === "agent"
+        return header?.sessionType === SESSION_TYPE.agent
       }
     })
   ]

@@ -15,7 +15,9 @@ export type ProcessExit =
   | { readonly kind: typeof PROCESS_EXIT.code; readonly code: number }
   | { readonly kind: typeof PROCESS_EXIT.signal; readonly signal: string }
 
-export type ProcessInput = "closed" | "pipe"
+export const PROCESS_INPUT = { closed: "closed", pipe: "pipe" } as const
+
+export type ProcessInput = (typeof PROCESS_INPUT)[keyof typeof PROCESS_INPUT]
 
 export interface LiveProcess {
   readonly pid: number | undefined
@@ -33,7 +35,7 @@ export const spawnLiveProcess = (
   invocation: ShellInvocation,
   { input }: { readonly input: ProcessInput }
 ): LiveProcess => {
-  const pty = input === "pipe" ? loadPty() : undefined
+  const pty = input === PROCESS_INPUT.pipe ? loadPty() : undefined
   if (pty !== undefined) {
     try {
       return spawnPtyProcess(pty, invocation)
@@ -90,7 +92,7 @@ const spawnPipeProcess = (invocation: ShellInvocation, input: ProcessInput): Liv
     cwd: invocation.cwd,
     detached: canDetach,
     env: invocation.env,
-    stdio: [input === "pipe" ? "pipe" : "ignore", "pipe", "pipe"]
+    stdio: [input === PROCESS_INPUT.pipe ? "pipe" : "ignore", "pipe", "pipe"]
   })
   const listeners = makeListeners()
   let spawned = false
@@ -109,14 +111,14 @@ const spawnPipeProcess = (invocation: ShellInvocation, input: ProcessInput): Liv
       for (const listener of [...listeners.error]) listener(cause)
       listeners.error.clear()
     }
-    settle(listeners, { kind: "signal", signal: "error" })
+    settle(listeners, { kind: PROCESS_EXIT.signal, signal: "error" })
   })
   child.once("close", (code, signal) =>
     settle(
       listeners,
       signal !== null || code === null
-        ? { kind: "signal", signal: signal ?? "unknown" }
-        : { kind: "code", code }
+        ? { kind: PROCESS_EXIT.signal, signal: signal ?? "unknown" }
+        : { kind: PROCESS_EXIT.code, code }
     )
   )
   const toGroup = (signal: NodeJS.Signals): void => {
@@ -159,12 +161,12 @@ const spawnPtyProcess = (pty: PtyModule, invocation: ShellInvocation): LiveProce
       listeners,
       signal !== undefined && signal > 0
         ? { kind: "signal", signal: signalName(signal) }
-        : { kind: "code", code: exitCode }
+        : { kind: PROCESS_EXIT.code, code: exitCode }
     )
   )
   return {
     pid: terminal.pid,
-    input: "pipe",
+    input: PROCESS_INPUT.pipe,
     ...subscriptions(listeners),
     write: (data) => {
       if (listeners.ended !== undefined) return false

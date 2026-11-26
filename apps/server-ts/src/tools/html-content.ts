@@ -1,6 +1,17 @@
 import { createDocument, type HtmlNode } from "@mixmark-io/domino"
 import TurndownService from "turndown"
 
+export const WEB_FORMAT = { markdown: "markdown", text: "text", html: "html" } as const
+
+type WebFormat = (typeof WEB_FORMAT)[keyof typeof WEB_FORMAT]
+
+const TAG = { pre: "PRE", br: "BR", td: "TD", th: "TH" } as const
+
+type Tag = (typeof TAG)[keyof typeof TAG]
+
+const isTag = (node: HtmlNode, ...among: ReadonlyArray<Tag>): boolean =>
+  among.some((tag) => tag === node.nodeName)
+
 const omitted = "head,script,style,noscript,template,iframe,object,svg,canvas"
 const blocks = new Set([
   "P",
@@ -55,11 +66,11 @@ const imageAddress = (node: HtmlNode): string | null => {
 
 export function readHtml(
   html: string,
-  options: { readonly format: "markdown" | "text" | "html"; readonly base?: URL }
+  options: { readonly format: WebFormat; readonly base?: URL }
 ): { readonly content: string; readonly title: string | undefined } {
   const document = createDocument(html)
   const title = document.title.replace(/\s+/gu, " ").trim() || undefined
-  if (options.format === "html") return { content: html, title }
+  if (options.format === WEB_FORMAT.html) return { content: html, title }
   const lead = LEAD_IMAGE_META.map((selector) =>
     document.querySelector(selector)?.getAttribute("content")
   ).find((content) => content !== null && content !== undefined && content.trim() !== "")
@@ -94,7 +105,7 @@ export function readHtml(
       node.setAttribute("src", url)
     }
   }
-  const leadImage = options.format === "markdown" ? absolute(lead) : undefined
+  const leadImage = options.format === WEB_FORMAT.markdown ? absolute(lead) : undefined
   if (leadImage !== undefined && /^https:/iu.test(leadImage) && !shown.has(leadImage)) {
     const image = document.createElement("img")
     image.setAttribute("src", leadImage)
@@ -117,14 +128,14 @@ export function readHtml(
     hr: "---",
     preformattedCode: true
   })
-  if (options.format === "text") {
+  if (options.format === WEB_FORMAT.text) {
     converter.escape = (text) => text
     converter.addRule("plain-text", {
       filter: () => true,
       replacement: (content, node: HtmlNode) => {
-        if (node.nodeName === "PRE") return `\n\n${node.textContent}\n\n`
-        if (node.nodeName === "BR") return "\n"
-        if (node.nodeName === "TD" || node.nodeName === "TH") return `${content}\t`
+        if (isTag(node, TAG.pre)) return `\n\n${node.textContent}\n\n`
+        if (isTag(node, TAG.br)) return "\n"
+        if (isTag(node, TAG.td, TAG.th)) return `${content}\t`
         return blocks.has(node.nodeName) ? `\n\n${content}\n\n` : content
       }
     })

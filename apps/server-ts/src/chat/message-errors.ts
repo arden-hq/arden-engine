@@ -18,13 +18,19 @@ export class ChatMessageError extends Schema.TaggedError<ChatMessageError>()("Ch
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
 
+export const CHAT_CONFLICT_KIND = {
+  sessionBusy: "session_busy",
+  taskIdle: "task_idle",
+  queueChanged: "queue_changed"
+} as const
+
 export class ChatMessageConflictError extends Schema.TaggedError<ChatMessageConflictError>()(
   "ChatMessageConflictError",
   {
     sessionId: Schema.NonEmptyString,
     clientId: Schema.NonEmptyString,
     message: Schema.String,
-    kind: Schema.optionalKey(Schema.Literals(["session_busy", "task_idle", "queue_changed"]))
+    kind: Schema.optionalKey(Schema.Literals(Object.values(CHAT_CONFLICT_KIND)))
   }
 ) {}
 
@@ -40,18 +46,22 @@ export class StoredMessageDecodeError extends Schema.TaggedError<StoredMessageDe
   }
 ) {}
 
-const writeErrorReason = (reason: ChatWriteError["reason"]) => {
-  switch (reason) {
-    case "not_found":
-    case "invalid":
-      return reason
-    case "terminal":
-      return "invalid" as const
-    case "corrupt":
-    case "storage":
-      return "storage" as const
-  }
+const WRITE_ERROR_REASON: Readonly<
+  Record<
+    ChatWriteError["reason"],
+    | typeof CHAT_MESSAGE_FAILURE.not_found
+    | typeof CHAT_MESSAGE_FAILURE.invalid
+    | typeof CHAT_MESSAGE_FAILURE.storage
+  >
+> = {
+  not_found: CHAT_MESSAGE_FAILURE.not_found,
+  invalid: CHAT_MESSAGE_FAILURE.invalid,
+  terminal: CHAT_MESSAGE_FAILURE.invalid,
+  corrupt: CHAT_MESSAGE_FAILURE.storage,
+  storage: CHAT_MESSAGE_FAILURE.storage
 }
+
+const writeErrorReason = (reason: ChatWriteError["reason"]) => WRITE_ERROR_REASON[reason]
 
 export const mapWriteError = (
   error: ChatWriteError | ChatWriteConflictError
@@ -70,19 +80,25 @@ export const mapWriteError = (
         ...(error.cause === undefined ? {} : { cause: error.cause })
       })
 
-const toolStoreErrorReason = (reason: ToolExecutionStoreError["reason"]) => {
-  switch (reason) {
-    case "invalid":
-    case "not_found":
-      return reason
-    case "conflict":
-    case "blocked":
-      return "conflict" as const
-    case "corrupt":
-    case "storage":
-      return "storage" as const
-  }
+const TOOL_STORE_ERROR_REASON: Readonly<
+  Record<
+    ToolExecutionStoreError["reason"],
+    | typeof CHAT_MESSAGE_FAILURE.invalid
+    | typeof CHAT_MESSAGE_FAILURE.not_found
+    | typeof CHAT_MESSAGE_FAILURE.conflict
+    | typeof CHAT_MESSAGE_FAILURE.storage
+  >
+> = {
+  invalid: CHAT_MESSAGE_FAILURE.invalid,
+  not_found: CHAT_MESSAGE_FAILURE.not_found,
+  conflict: CHAT_MESSAGE_FAILURE.conflict,
+  blocked: CHAT_MESSAGE_FAILURE.conflict,
+  corrupt: CHAT_MESSAGE_FAILURE.storage,
+  storage: CHAT_MESSAGE_FAILURE.storage
 }
+
+const toolStoreErrorReason = (reason: ToolExecutionStoreError["reason"]) =>
+  TOOL_STORE_ERROR_REASON[reason]
 
 export const mapToolStoreError = (error: ToolExecutionStoreError): ChatMessageError =>
   new ChatMessageError({

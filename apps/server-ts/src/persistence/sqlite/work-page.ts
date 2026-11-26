@@ -1,3 +1,4 @@
+import { AUTOMATION_RUN_STATUS } from "@arden-hq/protocol/automations"
 import { WorkPageRecordSchema } from "../work/task-record.js"
 import { type WorkPageRecord } from "../work/task-record.js"
 import { countsAsRun } from "./automation-skip-record.js"
@@ -256,7 +257,10 @@ export const makeWorkPage = ({
               started_at: row.started_at,
               ended_at: running ? null : (row.chat_ended_at ?? row.ended_at),
               result: inArdenWords(
-                row.status === "failed" || row.status === "interrupted" ? row.error : row.result
+                row.status === AUTOMATION_RUN_STATUS.failed ||
+                  row.status === AUTOMATION_RUN_STATUS.interrupted
+                  ? row.error
+                  : row.result
               )
             }
           })

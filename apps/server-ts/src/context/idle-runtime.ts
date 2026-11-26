@@ -1,3 +1,5 @@
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
+import { JOURNAL_DELIVERY } from "@arden-hq/journal/effect"
 import { Clock, Effect, Layer, Stream } from "effect"
 import { ModelProviderService } from "../models/provider.js"
 import { SessionLifecycleEvents } from "../persistence/sessions/events.js"
@@ -22,16 +24,16 @@ export const idleCompactionRuntime = ({
           const activity = follow.stream.pipe(
             Stream.runForEach((delivery) =>
               Effect.sync(() => {
-                if (delivery.kind !== "record") {
+                if (delivery.kind !== JOURNAL_DELIVERY.record) {
                   idle.queue.clear("event stream gap")
                   return
                 }
                 const event = delivery.event
-                if (event.type === "session_activity")
+                if (event.type === SERVER_EVENT_TYPE.sessionActivity)
                   idle.queue.interrupt(event.session.session_id)
-                if (event.type === "chat_input_committed")
+                if (event.type === SERVER_EVENT_TYPE.chatInputCommitted)
                   idle.queue.cancel(event.chat_session_id, "owner wrote in the chat")
-                if (event.type === "session_blocking_work" && event.blocking_work)
+                if (event.type === SERVER_EVENT_TYPE.sessionBlockingWork && event.blocking_work)
                   idle.queue.cancel(event.session_id, "chat has blocking work")
               })
             )

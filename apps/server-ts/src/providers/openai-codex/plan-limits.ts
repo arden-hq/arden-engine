@@ -31,18 +31,19 @@ const readCredits = (body: unknown): PlanCredits | undefined => {
   }
 }
 
+const HEADER_BOOLEAN = { true: "true", one: "1", false: "false", zero: "0" } as const
+type HeaderBoolean = (typeof HEADER_BOOLEAN)[keyof typeof HEADER_BOOLEAN]
+const isHeaderBoolean = (value: string | undefined): value is HeaderBoolean =>
+  value === HEADER_BOOLEAN.true ||
+  value === HEADER_BOOLEAN.one ||
+  value === HEADER_BOOLEAN.false ||
+  value === HEADER_BOOLEAN.zero
+const CODEX_LIMIT_NAME = "codex"
+
 const headerBoolean = (value: string | null): boolean | undefined => {
-  switch (value?.trim().toLowerCase()) {
-    case "true":
-    case "1":
-      return true
-    case "false":
-    case "0":
-      return false
-    case undefined:
-    default:
-      return undefined
-  }
+  const token = value?.trim().toLowerCase()
+  if (!isHeaderBoolean(token)) return undefined
+  return token === HEADER_BOOLEAN.true || token === HEADER_BOOLEAN.one
 }
 
 const resetTime = (
@@ -155,7 +156,7 @@ const readCodexEvent = (
   if (Option.isNone(decoded)) return undefined
   const event = decoded.value
   const limit = event.metered_limit_name ?? event.limit_name
-  if (limit !== undefined && limit !== null && limit !== "codex") return undefined
+  if (limit !== undefined && limit !== null && limit !== CODEX_LIMIT_NAME) return undefined
   const windows = [event.rate_limits?.primary, event.rate_limits?.secondary].flatMap(
     (window): ReadonlyArray<PlanWindowReading> => {
       if (

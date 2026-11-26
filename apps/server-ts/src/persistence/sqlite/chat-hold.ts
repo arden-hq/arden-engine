@@ -1,7 +1,7 @@
 import { isLastingRunError } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import { activeRunStatusList } from "./status-sets.js"
+import { STORED_RUN_STATUS, activeRunStatusList } from "./status-sets.js"
 
 interface LastEndedRun {
   readonly status: string
@@ -14,7 +14,7 @@ export const holdsUnattendedInput = (
   modelId: string | null
 ): boolean =>
   last !== undefined &&
-  last.status === "error" &&
+  last.status === STORED_RUN_STATUS.error &&
   isLastingRunError(last.errorCode) &&
   last.modelId === modelId
 

@@ -10,7 +10,12 @@ import { withBrowserProcedures } from "../browser/procedures/discovery.js"
 import { BrowserProcedures } from "../browser/procedures/service.js"
 import { PAGE_TEXT_MAX_CHARS } from "../persistence/browser-procedures/model.js"
 import { INERT, OUTWARD } from "../execution/impact.js"
-import { BrowserClient, type BrowserOutput } from "../browser/service.js"
+import {
+  BROWSER_DISPOSITION,
+  BROWSER_WAIT_CONDITION,
+  BrowserClient,
+  type BrowserOutput
+} from "../browser/service.js"
 import { ConversationArtifacts } from "../artifacts/conversation.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { RunQueries } from "../persistence/runs/queries.js"
@@ -121,13 +126,13 @@ const makeBrowserTools = ({
           {
             type: "open",
             url,
-            disposition: input.disposition ?? "new",
+            disposition: input.disposition ?? BROWSER_DISPOSITION.new,
             ...(input.tab_ref === undefined ? {} : { tabRef: input.tab_ref }),
             profileRef: input.profile_ref ?? "default"
           },
           ctx.signal
         )
-        if (input.disposition !== "current") {
+        if (input.disposition !== BROWSER_DISPOSITION.current) {
           const tab = openedTab(opened)
           if (tab !== undefined) observations(ctx.run).opened(tab)
         }
@@ -135,7 +140,7 @@ const makeBrowserTools = ({
           await withBrowserProcedures(
             procedures,
             await withPageRead(browser, ctx, opened, {
-              tabRef: input.disposition === "current" ? input.tab_ref : undefined,
+              tabRef: input.disposition === BROWSER_DISPOSITION.current ? input.tab_ref : undefined,
               read: input.read
             })
           )
@@ -305,7 +310,7 @@ const makeBrowserTools = ({
       },
       execute: async (input, ctx) => {
         const timeoutMs = input.timeout_ms ?? 30_000
-        if (input.condition === "download") {
+        if (input.condition === BROWSER_WAIT_CONDITION.download) {
           return browserOutput(
             await runBrowserForRun(
               browser,

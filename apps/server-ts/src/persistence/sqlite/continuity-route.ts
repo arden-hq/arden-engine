@@ -1,3 +1,4 @@
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
 import { type RunContext } from "../runs/stored-context.js"
 import type { CommunicationDoor } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
@@ -33,7 +34,7 @@ export const runDoor = Effect.fn(function* (
 ) {
   const href = chatHref({ publicRef: source.source_ref })
   const owner = context.belongs_to ?? context.origin
-  const automationId = owner.kind === "automation" ? owner.automation_id : undefined
+  const automationId = owner.kind === RUN_ORIGIN.automation ? owner.automation_id : undefined
   const automation =
     automationId === undefined
       ? undefined

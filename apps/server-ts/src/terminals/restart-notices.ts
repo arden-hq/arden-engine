@@ -1,3 +1,5 @@
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
+import { onWindows } from "@arden-hq/std/process"
 import { parseJsonText } from "@arden-hq/protocol/common"
 import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { execFileSync } from "node:child_process"
@@ -114,8 +116,7 @@ const readManifest = (file: string): Manifest => {
   try {
     text = readFileSync(file, "utf8")
   } catch (cause) {
-    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
-      return { running: [], pending: [] }
+    if (isErrnoCode(cause, ERRNO.ENOENT)) return { running: [], pending: [] }
     throw cause
   }
   const value = parseJsonText(text)
@@ -142,7 +143,7 @@ export const writeRunning = (file: string, terminals: ReadonlyArray<TerminalInfo
 }
 
 const stopOrphan = (command: RunningCommand): void => {
-  if (command.pid === undefined || process.platform === "win32") return
+  if (command.pid === undefined || onWindows) return
   let commandLine: string
   try {
     commandLine = execFileSync("/bin/ps", ["-ww", "-o", "command=", "-p", String(command.pid)], {

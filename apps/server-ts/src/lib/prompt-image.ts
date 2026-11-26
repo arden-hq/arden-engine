@@ -1,4 +1,5 @@
 import type { ImageInputLimits } from "@arden-hq/loop"
+import { IMAGE_MEDIA_TYPE } from "@arden-hq/std/message-vocabulary"
 
 import { decodePng, encodePng, pngSize, type RgbaImage } from "./png.js"
 
@@ -53,8 +54,8 @@ export const fitDimensions = (
 }
 
 export const imageSize = (bytes: Uint8Array, mediaType: string): ImageSize | undefined => {
-  if (mediaType === "image/png") return pngSize(bytes)
-  if (mediaType === "image/jpeg") return jpegSize(bytes)
+  if (mediaType === IMAGE_MEDIA_TYPE.png) return pngSize(bytes)
+  if (mediaType === IMAGE_MEDIA_TYPE.jpeg) return jpegSize(bytes)
   return undefined
 }
 

@@ -2,10 +2,15 @@ import { Schema } from "effect"
 
 export const RECORDED_HISTORY_THROUGH = { head: "head", version: "version" } as const
 export const RECORDED_HISTORY_NEXT = { end: "end", more: "more" } as const
+export const RECORDED_HISTORY_ENTRY_KIND = {
+  baseline: "baseline",
+  created: "created",
+  changed: "changed"
+} as const
 
 export const RecordedHistoryEntrySchema = Schema.Struct({
   version: Schema.Int.check(Schema.isGreaterThan(0)),
-  kind: Schema.Literals(["baseline", "created", "changed"]),
+  kind: Schema.Literals(Object.values(RECORDED_HISTORY_ENTRY_KIND)),
   recorded_at: Schema.String,
   state: Schema.Record(Schema.String, Schema.Json)
 })

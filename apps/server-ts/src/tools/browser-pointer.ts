@@ -1,6 +1,6 @@
 import { APPROVAL_FIELD_LABEL } from "@arden-hq/protocol/chat"
 import { Effect, Schema } from "effect"
-import { BrowserClient } from "../browser/service.js"
+import { BROWSER_POINTER_ACTION, BrowserClient } from "../browser/service.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import {
   browserOutput,
@@ -105,7 +105,9 @@ export const browserPointerTools: Effect.Effect<
             {
               label: "Coordinates",
               value: JSON.stringify(
-                input.action === "click" ? input.point : { from: input.from, to: input.to }
+                input.action === BROWSER_POINTER_ACTION.click
+                  ? input.point
+                  : { from: input.from, to: input.to }
               )
             }
           ]
@@ -115,7 +117,9 @@ export const browserPointerTools: Effect.Effect<
           ...uiTargetData(
             pointTarget(
               `A ${input.action} on screenshot ${input.screenshot_ref} at ${JSON.stringify(
-                input.action === "click" ? input.point : { from: input.from, to: input.to }
+                input.action === BROWSER_POINTER_ACTION.click
+                  ? input.point
+                  : { from: input.from, to: input.to }
               )}`
             )
           )
@@ -132,9 +136,9 @@ export const browserPointerTools: Effect.Effect<
               profileRef: input.profile_ref,
               origin: input.origin,
               screenshotRef: input.screenshot_ref,
-              ...(input.action === "click"
-                ? { action: "click", point: input.point }
-                : { action: "drag", from: input.from, to: input.to })
+              ...(input.action === BROWSER_POINTER_ACTION.click
+                ? { action: BROWSER_POINTER_ACTION.click, point: input.point }
+                : { action: BROWSER_POINTER_ACTION.drag, from: input.from, to: input.to })
             },
             ctx.signal,
             { effects }

@@ -59,7 +59,7 @@ const AGENT_CAPABILITY: Record<AgentMode, RunCapability> = {
   work: RUN_CAPABILITY.all
 }
 
-const NARROW_RESULT = { narrowed: "narrowed", refused: "refused" } as const
+export const NARROW_RESULT = { narrowed: "narrowed", refused: "refused" } as const
 
 export type NarrowResult =
   | { readonly kind: typeof NARROW_RESULT.narrowed; readonly authority: RunAuthority }

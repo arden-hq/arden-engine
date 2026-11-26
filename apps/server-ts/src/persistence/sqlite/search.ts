@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { searchSchemaSection, searchSchemaUpgrades } from "../schema/search.js"
 import { timerSleep } from "../../lib/timer-sleep.js"
 import { pauseBetweenBatches, runIsActive } from "./background-pause.js"
-import type { Writer } from "./deps.js"
+import { SQLITE_MEMORY_FILENAME, SQLITE_SEARCH_FILENAME, type Writer } from "./deps.js"
 
 const CHANGES_PER_INDEX_WRITE = 100
 const PENDING_CHANGES_POLL_INTERVAL = "2 seconds"
@@ -50,9 +50,9 @@ export const initializeSearchIndex = Effect.fn("SqliteSearch.initialize")(functi
 ) {
   const filename =
     options.searchFilename ??
-    (operationalFilename === ":memory:"
-      ? ":memory:"
-      : join(dirname(operationalFilename), "search.sqlite"))
+    (operationalFilename === SQLITE_MEMORY_FILENAME
+      ? SQLITE_MEMORY_FILENAME
+      : join(dirname(operationalFilename), SQLITE_SEARCH_FILENAME))
   yield* sql.unsafe("ATTACH DATABASE ? AS search", [filename])
   const version = yield* searchVersion(sql)
   const upgradable = version !== 0 && version < searchSchemaSection.version

@@ -1,5 +1,10 @@
 import { WorkflowErrorSchema } from "@arden-hq/protocol/effect/workflows"
-import { MESSAGE_PREVIEW, NO_RECOVERY, type WorkflowError } from "@arden-hq/protocol/workflows"
+import {
+  MESSAGE_PREVIEW,
+  NO_RECOVERY,
+  WORKFLOW_STATUS,
+  type WorkflowError
+} from "@arden-hq/protocol/workflows"
 import { DateTime, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 
@@ -35,11 +40,11 @@ interface ScriptRow {
 }
 
 const StatusSchema = Schema.Literals([
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-  "needs_attention"
+  WORKFLOW_STATUS.running,
+  WORKFLOW_STATUS.succeeded,
+  WORKFLOW_STATUS.failed,
+  WORKFLOW_STATUS.cancelled,
+  WORKFLOW_STATUS.needs_attention
 ] as const)
 
 const storeError = (
@@ -204,7 +209,7 @@ export const makeScriptStore = ({
       .transact(
         Effect.gen(function* () {
           const record = yield* load(input.ref)
-          if (record.status === "running") {
+          if (record.status === WORKFLOW_STATUS.running) {
             return yield* storeError("conflict", "A running script cannot be retried", input.ref)
           }
           if (record.version !== input.expectedVersion) {
@@ -261,7 +266,7 @@ export const makeScriptStore = ({
       .transact(
         Effect.gen(function* () {
           const record = yield* load(ref)
-          if (record.status !== "running") return record
+          if (record.status !== WORKFLOW_STATUS.running) return record
           yield* settleUnstartedToolWorkForTerminalInTransaction(
             sql,
             record.originRunId,

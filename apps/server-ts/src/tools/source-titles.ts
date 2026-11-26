@@ -1,8 +1,15 @@
 import { clipLine } from "@arden-hq/std/text"
-import { publicWebUrl, webSourceTitle } from "@arden-hq/std/url"
+import { PUBLIC_WEB_URL, publicWebUrl, webSourceTitle } from "@arden-hq/std/url"
 import { fetchPage } from "./web-fetch.js"
 import { readHtml } from "./html-content.js"
 import { currentMillis } from "../runtime/clock.js"
+
+const HTML_MIME = { html: "text/html", xhtml: "application/xhtml+xml" } as const
+
+type HtmlMime = (typeof HTML_MIME)[keyof typeof HTML_MIME]
+
+const isHtmlMime = (mime: string | undefined): mime is HtmlMime =>
+  Object.values(HTML_MIME).some((accepted) => accepted === mime)
 
 export const makeSourceTitles = (): {
   readonly read: (input: { readonly url: string; readonly title: string }) => Promise<string | null>
@@ -15,7 +22,7 @@ export const makeSourceTitles = (): {
     readonly title: string
   }): Promise<string | null> => {
     const page = publicWebUrl(input.url)
-    if (page.kind !== "ok") return null
+    if (page.kind !== PUBLIC_WEB_URL.ok) return null
     const own = webSourceTitle(input.title, input.url)
     if (own !== undefined) return own
     const key = page.url.href
@@ -29,7 +36,7 @@ export const makeSourceTitles = (): {
       const fetch = fetchPage(page.url, "html", AbortSignal.timeout(5000))
         .then((result) => {
           const mime = result.contentType.split(";", 1)[0]?.trim().toLowerCase()
-          if (mime !== "text/html" && mime !== "application/xhtml+xml") return null
+          if (!isHtmlMime(mime)) return null
           const title = readHtml(result.content, { format: "html" }).title
           const named = title === undefined ? undefined : webSourceTitle(title, input.url)
           return named === undefined ? null : clipLine(named, 256)

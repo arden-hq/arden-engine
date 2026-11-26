@@ -1,21 +1,24 @@
 import type { ImageInput, ModelContentBlock } from "@arden-hq/loop"
+import { WEB_PROTOCOL } from "@arden-hq/std/url"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
 import type { DocumentImage } from "./google-docs-document.js"
-import { fileKind, imageForModel, type ModelImage } from "./read-binary.js"
+import { FILE_KIND, fileKind, imageForModel, type ModelImage } from "./read-binary.js"
 
 const MAX_DOCUMENT_IMAGES = 8
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
+const GOOGLE_CONTENT_HOST = "googleusercontent.com"
+
 const isGoogleContent = (address: string): boolean => {
   const url = URL.parse(address)
   return (
     url !== null &&
-    url.protocol === "https:" &&
-    (url.hostname === "googleusercontent.com" || url.hostname.endsWith(".googleusercontent.com"))
+    url.protocol === WEB_PROTOCOL.https &&
+    (url.hostname === GOOGLE_CONTENT_HOST || url.hostname.endsWith(`.${GOOGLE_CONTENT_HOST}`))
   )
 }
 
@@ -43,9 +46,26 @@ export interface DocumentImages {
   readonly note: string
 }
 
+const IMAGE_OUTCOME = {
+  attached: "attached",
+  not_fetched: "not_fetched",
+  not_converted: "not_converted",
+  over_cap: "over_cap"
+} as const
+
 type Outcome =
-  | { readonly kind: "attached"; readonly marker: string; readonly image: ModelImage }
-  | { readonly kind: "not_fetched" | "not_converted" | "over_cap"; readonly marker: string }
+  | {
+      readonly kind: typeof IMAGE_OUTCOME.attached
+      readonly marker: string
+      readonly image: ModelImage
+    }
+  | {
+      readonly kind:
+        | typeof IMAGE_OUTCOME.not_fetched
+        | typeof IMAGE_OUTCOME.not_converted
+        | typeof IMAGE_OUTCOME.over_cap
+      readonly marker: string
+    }
 
 const markersOf = (outcomes: ReadonlyArray<Outcome>, kind: Outcome["kind"]): string =>
   outcomes
@@ -108,7 +128,7 @@ export const documentImagesForModel = async (input: {
         })
         if (bytes === undefined) return { kind: "not_fetched", marker }
         const kind = fileKind({ bytes, name: "image" })
-        if (kind.kind !== "image") return { kind: "not_fetched", marker }
+        if (kind.kind !== FILE_KIND.image) return { kind: "not_fetched", marker }
         const file = path.join(directory, `image-${index}`)
         await writeFile(file, bytes)
         const image = await imageForModel({
@@ -125,7 +145,7 @@ export const documentImagesForModel = async (input: {
     )
     return {
       content: outcomes.flatMap((outcome) =>
-        outcome.kind === "attached"
+        outcome.kind === IMAGE_OUTCOME.attached
           ? [
               {
                 type: "image" as const,

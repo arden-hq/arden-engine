@@ -22,7 +22,13 @@ import {
 } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 
-import { mapRevisionError, WikiError, wikiError, type WikiOperation } from "./errors.js"
+import {
+  WIKI_ERROR_REASON,
+  mapRevisionError,
+  WikiError,
+  wikiError,
+  type WikiOperation
+} from "./errors.js"
 import type { WikiLinkToken } from "./links.js"
 import {
   nameKeys,
@@ -111,7 +117,7 @@ export const readRecord = Effect.fn("Wiki.readRecord")(function* (
   const content = yield* Effect.try({
     try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
     catch: (cause) =>
-      invalidReason === "corrupt"
+      invalidReason === WIKI_ERROR_REASON.corrupt
         ? corruptPage(operation, resource, cause)
         : wikiError(operation, "invalid", "Memory page must be valid UTF-8", {
             pageId: resource.resourceId,
@@ -124,7 +130,7 @@ export const readRecord = Effect.fn("Wiki.readRecord")(function* (
     codeOwnedPage(resource.path)?.plainTitle
   ).pipe(
     Effect.mapError((cause) =>
-      invalidReason === "corrupt"
+      invalidReason === WIKI_ERROR_REASON.corrupt
         ? corruptPage(operation, resource, cause)
         : wikiError(operation, "invalid", cause.message, { pageId: resource.resourceId, cause })
     )

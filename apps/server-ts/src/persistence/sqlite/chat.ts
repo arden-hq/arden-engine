@@ -4,6 +4,7 @@ import { ChatWriteStore } from "../chat/store.js"
 import type { ModelCatalog } from "../../models/catalog.js"
 import type { IntelligenceSettingsStore, LimitSettingsStore } from "../settings/store.js"
 import {
+  QUOTA_DECISION,
   automationLimitPercent,
   quotaDecision,
   quotaLimits,
@@ -137,7 +138,7 @@ const makeChatWriteStore = ({
                 itemLimitPercent: automationLimitPercent(settings, owner.automationId),
                 now: DateTime.toEpochMillis(now)
               })
-              if (decision.kind === "pause") {
+              if (decision.kind === QUOTA_DECISION.pause) {
                 const until = iso(decision.until)
                 yield* parkRunForQuota(sql, {
                   runId,

@@ -1,5 +1,5 @@
 import { gmailThreadUrl } from "@arden-hq/protocol/google"
-import { passage, unquotedEmail } from "./source-passage.js"
+import { passage, SOURCE_USE, unquotedEmail } from "./source-passage.js"
 
 export const emailSource = (
   input: {
@@ -22,7 +22,7 @@ export const emailSource = (
   use: "read" | "found"
   href: string
 } => {
-  const excerpt = input.use === "read" ? passage(unquotedEmail(input.body)) : undefined
+  const excerpt = input.use === SOURCE_USE.read ? passage(unquotedEmail(input.body)) : undefined
   const by = input.from
     .replace(/\s*<[^>]*>\s*$/, "")
     .replace(/^"|"$/g, "")

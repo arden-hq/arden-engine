@@ -5,7 +5,7 @@ import type { SqlClient } from "effect/unstable/sql"
 import { finishDecision, originalRequest, taskWords } from "../todos/items.js"
 import { decodeJson, type JsonColumnError } from "./json.js"
 import { workError } from "./work-records.js"
-import { WorkStoreError, type TaskFinishCheck } from "../work/store.js"
+import { TASK_FINISH_CHECK, WorkStoreError, type TaskFinishCheck } from "../work/store.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 
 const TodoItemsSchema = Schema.Array(TodoListItemSchema)
@@ -85,7 +85,7 @@ export const makeFinishCheck = (
           AND json_extract(result_json, '$.data.finish_check.closed') = 0
         LIMIT 1`
       const decision = finishDecision({ itemId, items, warned: warned.length > 0 })
-      if (decision.kind === "close") return decision
+      if (decision.kind === TASK_FINISH_CHECK.close) return decision
       return { ...decision, request: yield* readOriginalRequest(sql, itemId) }
     },
     Effect.mapError((cause) =>

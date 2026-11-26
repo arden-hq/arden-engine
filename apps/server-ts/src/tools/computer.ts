@@ -1,6 +1,6 @@
 import { every } from "@arden-hq/std/timer"
 import { Effect, Schema } from "effect"
-import { ToolExecutionError, type ModelContentBlock } from "@arden-hq/loop"
+import { CONTENT_BLOCK_TYPE, ToolExecutionError, type ModelContentBlock } from "@arden-hq/loop"
 import { ComputerKernel } from "../computer/kernel.js"
 import { ComputerService } from "../computer/service.js"
 import { KeyedSerialQueue } from "../mcp/serial.js"
@@ -127,7 +127,7 @@ export const computerTools = Effect.gen(function* () {
                     const step = result.data?.["computer"]
                     if (isComputerStep(step)) steps.push(step)
                     for (const block of result.model_content ?? []) {
-                      if (block.type === "image") {
+                      if (block.type === CONTENT_BLOCK_TYPE.image) {
                         media.push(block)
                         if (media.length > 4) media.shift()
                       }

@@ -1,7 +1,8 @@
 import { Schema } from "effect"
-import type {
-  SpaceReviewAdmission,
-  SpaceReviewReads
+import {
+  SPACE_REVIEW_ADMISSION,
+  type SpaceReviewAdmission,
+  type SpaceReviewReads
 } from "../persistence/automations/space-review.js"
 import { UNFINISHED_TASK_STATUSES } from "../persistence/sqlite/task-status-sql.js"
 
@@ -48,8 +49,8 @@ export const spaceReviewAdmission = (
 }
 
 const verdictOf = (starts: boolean, changes: number): SpaceReviewAdmission => {
-  if (starts) return "changed"
-  return changes === 0 ? "unchanged" : "nothing_to_act_on"
+  if (starts) return SPACE_REVIEW_ADMISSION.changed
+  return changes === 0 ? SPACE_REVIEW_ADMISSION.unchanged : SPACE_REVIEW_ADMISSION.nothingToActOn
 }
 
 const SpaceRowSchema = Schema.fromJsonString(

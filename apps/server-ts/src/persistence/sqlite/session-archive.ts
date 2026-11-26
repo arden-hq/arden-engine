@@ -9,8 +9,12 @@ import {
   type PendingArchive,
   type SessionStore
 } from "../sessions/store.js"
-import { deleteSessionTree } from "./session-tree-deletion.js"
-import { automationsOfChat, deleteAutomationsOfChat } from "./automation-removal.js"
+import { SESSION_TREE_DELETION, deleteSessionTree } from "./session-tree-deletion.js"
+import {
+  CHAT_AUTOMATION_REMOVAL,
+  automationsOfChat,
+  deleteAutomationsOfChat
+} from "./automation-removal.js"
 import type { PersistenceDeps } from "./deps.js"
 import { storeError, sessionIdSchema } from "./session-rows.js"
 import { activeRunStatusList } from "./status-sets.js"
@@ -107,7 +111,7 @@ export const makeSessionArchive = ({
             sessionEvents,
             sessionId: validSessionId
           })
-          if (automations.kind === "running") {
+          if (automations.kind === CHAT_AUTOMATION_REMOVAL.running) {
             return yield* storeError(
               "archive",
               "conflict",
@@ -220,8 +224,8 @@ export const makeSessionArchive = ({
             sessionEvents,
             sql`session_id = ${validSessionId} AND archived_at IS NOT NULL`
           )
-          if (deleted.kind === "missing") return false
-          if (deleted.kind === "active") {
+          if (deleted.kind === SESSION_TREE_DELETION.missing) return false
+          if (deleted.kind === SESSION_TREE_DELETION.active) {
             return yield* storeError(
               "delete",
               "conflict",

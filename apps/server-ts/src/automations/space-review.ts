@@ -1,8 +1,15 @@
-import { Effect } from "effect"
-import type {
-  AutomationJobLease,
-  AutomationJobSettlement
+import { AUTOMATION_RUN_OUTCOME } from "@arden-hq/protocol/automations"
+import { Effect, Result } from "effect"
+import {
+  AUTOMATION_JOB_STATUS,
+  type AutomationJobLease,
+  type AutomationJobSettlement
 } from "../persistence/automations/store.js"
+import {
+  SPACE_REVIEW_ADMISSION,
+  SPACE_REVIEW_DISPOSITION
+} from "../persistence/automations/space-review.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import type { SpaceReviewStore } from "../persistence/automations/space-review-store.js"
 import type { Wiki } from "../wiki/service.js"
 import { buildSpaceReviewInput } from "./space-review-input.js"
@@ -30,11 +37,17 @@ export const makeSpaceReviewRunner = (services: {
             buildSpaceReviewInput(yield* services.wiki.snapshot())
           )
     switch (input.admission) {
-      case "unchanged":
-        return jobResult.withoutRun("no_change", "Space evidence is unchanged.")
-      case "nothing_to_act_on":
-        return jobResult.withoutRun("no_change", "Nothing this review can act on changed.")
-      case "changed":
+      case SPACE_REVIEW_ADMISSION.unchanged:
+        return jobResult.withoutRun(
+          AUTOMATION_RUN_OUTCOME.no_change,
+          "Space evidence is unchanged."
+        )
+      case SPACE_REVIEW_ADMISSION.nothingToActOn:
+        return jobResult.withoutRun(
+          AUTOMATION_RUN_OUTCOME.no_change,
+          "Nothing this review can act on changed."
+        )
+      case SPACE_REVIEW_ADMISSION.changed:
         break
     }
     const result = yield* services.execute({
@@ -48,27 +61,26 @@ export const makeSpaceReviewRunner = (services: {
         spaceReviewInput: input
       }
     })
-    if (result.status !== "ended" || result.chatRunId === null) return result
-    if (result.outcome === "blocked") return { ...result, outcome: "failed" }
-    if (result.outcome !== "finished") return result
-    const completion = yield* services.spaceReviews.completeSpaceReview(job, result.chatRunId).pipe(
-      Effect.match({
-        onFailure: (error) => ({ kind: "failure" as const, error }),
-        onSuccess: (disposition) => ({ kind: "success" as const, disposition })
-      })
-    )
-    if (completion.kind === "failure") {
-      if (completion.error.reason !== "invalid") return yield* completion.error
-      return { ...result, outcome: "failed", error: completion.error.message }
+    if (result.status !== AUTOMATION_JOB_STATUS.ended || result.chatRunId === null) return result
+    if (result.outcome === AUTOMATION_RUN_OUTCOME.blocked)
+      return { ...result, outcome: AUTOMATION_RUN_OUTCOME.failed }
+    if (result.outcome !== AUTOMATION_RUN_OUTCOME.finished) return result
+    const completion = yield* services.spaceReviews
+      .completeSpaceReview(job, result.chatRunId)
+      .pipe(Effect.match({ onFailure: Result.fail, onSuccess: Result.succeed }))
+    if (Result.isFailure(completion)) {
+      const error = completion.failure
+      if (error.reason !== STORE_REASON.invalid) return yield* error
+      return { ...result, outcome: AUTOMATION_RUN_OUTCOME.failed, error: error.message }
     }
-    switch (completion.disposition.kind) {
-      case "needs_user":
-        return { ...result, outcome: "needs_you" }
-      case "no_change":
-        return { ...result, outcome: "no_change" }
-      case "changed":
-      case "reconciled":
-      case "proposed":
-        return { ...result, outcome: "finished" }
+    switch (completion.success.kind) {
+      case SPACE_REVIEW_DISPOSITION.needs_user:
+        return { ...result, outcome: AUTOMATION_RUN_OUTCOME.needs_you }
+      case SPACE_REVIEW_DISPOSITION.no_change:
+        return { ...result, outcome: AUTOMATION_RUN_OUTCOME.no_change }
+      case SPACE_REVIEW_DISPOSITION.changed:
+      case SPACE_REVIEW_DISPOSITION.reconciled:
+      case SPACE_REVIEW_DISPOSITION.proposed:
+        return { ...result, outcome: AUTOMATION_RUN_OUTCOME.finished }
     }
   })

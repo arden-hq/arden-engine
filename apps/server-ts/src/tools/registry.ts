@@ -1,6 +1,6 @@
 import { scopedRunToolNames, scopedToolNames } from "./tool-scopes.js"
 import { makeReviewPlans } from "./review-plans.js"
-import type { ToolScopeKey } from "../execution/policy.js"
+import { RUN_CAPABILITY, type ToolScopeKey } from "../execution/policy.js"
 import { summaryOf, type ServerTool } from "./define.js"
 import { makeToolApprovalPolicy, reachOf, toolRule } from "./approval-policy.js"
 import { ApprovalPolicyStore } from "../persistence/permissions/approval-policy.js"
@@ -8,7 +8,7 @@ import { ModelStore } from "../persistence/models/store.js"
 import { ModelCatalog } from "../models/catalog.js"
 import { createToolset, ToolExecutionError, type Toolset } from "@arden-hq/loop"
 import type { ToolCatalogResponse } from "@arden-hq/protocol/tools"
-import type { NewPermissionRule } from "@arden-hq/protocol/permissions"
+import { PERMISSION_RULE_DECISION, type NewPermissionRule } from "@arden-hq/protocol/permissions"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import {
@@ -152,8 +152,9 @@ export class ServerToolRegistry extends Context.Service<
       const missingRole = ROLE_TOOLS.find(
         (name) => !builtins.some((tool) => tool.definition.name === name)
       )
-      if (missingRole !== undefined)
+      if (missingRole !== undefined) {
         return yield* Effect.die(new Error(`Tool role names an unregistered tool: ${missingRole}`))
+      }
       const providers = yield* toolProviders
       yield* checkToolContract([...builtins, ...providers[0].catalog()])
       const executionProfile = makeExecutionProfile(builtins)
@@ -366,7 +367,7 @@ export class ServerToolRegistry extends Context.Service<
             sessionId: run.sessionId,
             onResult: codeMode.captureResult
           }),
-          ...(scope === "agent_research"
+          ...(scope === RUN_CAPABILITY.agentResearch
             ? [
                 captureResearchSources({
                   run,
@@ -391,7 +392,8 @@ export class ServerToolRegistry extends Context.Service<
                 return current
                   .filter(
                     (tool) =>
-                      names.has(tool.definition.name) && toolRule(live, tool.definition) !== "never"
+                      names.has(tool.definition.name) &&
+                      toolRule(live, tool.definition) !== PERMISSION_RULE_DECISION.never
                   )
                   .map((tool) => tool.entry(toolParametersJsonSchema, TOOL_DISPLAY_TITLE))
               }

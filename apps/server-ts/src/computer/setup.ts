@@ -4,7 +4,8 @@ import { join } from "node:path"
 import { sleep } from "@arden-hq/std/sleep"
 import { Effect } from "effect"
 import { lock } from "proper-lockfile"
-import type { ComputerSetup } from "@arden-hq/protocol/computer"
+import { PLATFORM } from "@arden-hq/std/process"
+import { COMPUTER_INSTALLATION, type ComputerSetup } from "@arden-hq/protocol/computer"
 import { downloadFile } from "../lib/download.js"
 import {
   cuaAppIsRunning,
@@ -15,6 +16,8 @@ import {
   verifyCuaApp
 } from "./install.js"
 import { CUA_RELEASE } from "./release.js"
+
+const LOCKED_CODE = "ELOCKED"
 
 export class CuaSetup {
   #installation: ComputerSetup["installation"] = { kind: "disabled" }
@@ -29,7 +32,8 @@ export class CuaSetup {
       readonly maintain: (operation: () => Promise<void>) => Promise<boolean>
     }
   ) {
-    if (process.platform !== "darwin") this.#installation = { kind: "unsupported" }
+    if (process.platform !== PLATFORM.darwin)
+      this.#installation = { kind: COMPUTER_INSTALLATION.unsupported }
   }
 
   status(): ComputerSetup {
@@ -41,7 +45,7 @@ export class CuaSetup {
   }
 
   async initialize(): Promise<void> {
-    if (this.#installation.kind === "unsupported") return
+    if (this.#installation.kind === COMPUTER_INSTALLATION.unsupported) return
     this.#installation = { kind: "verifying" }
     const enabled = await access(join(this.options.root, "enabled")).then(
       () => true,
@@ -52,7 +56,11 @@ export class CuaSetup {
   }
 
   async start(): Promise<ComputerSetup> {
-    if (this.#closed || this.#operation !== undefined || this.#installation.kind === "unsupported")
+    if (
+      this.#closed ||
+      this.#operation !== undefined ||
+      this.#installation.kind === COMPUTER_INSTALLATION.unsupported
+    )
       return this.status()
     const controller = new AbortController()
     this.#controller = controller
@@ -73,7 +81,7 @@ export class CuaSetup {
             }
           })
         } catch (cause) {
-          if (!(cause instanceof Error) || !("code" in cause) || cause.code !== "ELOCKED")
+          if (!(cause instanceof Error) || !("code" in cause) || cause.code !== LOCKED_CODE)
             throw cause
           this.#installation = { kind: "waiting" }
           await sleep(5000, controller.signal)
@@ -115,7 +123,7 @@ export class CuaSetup {
   }
 
   async app(signal: AbortSignal): Promise<string> {
-    if (this.#installation.kind === "unsupported")
+    if (this.#installation.kind === COMPUTER_INSTALLATION.unsupported)
       throw new Error("Native app control is available on macOS.")
     if (!this.#available && this.#operation !== undefined) {
       let abort: () => void = () => {}
@@ -134,7 +142,7 @@ export class CuaSetup {
     if (!this.#available) {
       const state = this.#installation
       throw new Error(
-        state.kind === "failed"
+        state.kind === COMPUTER_INSTALLATION.failed
           ? state.message
           : "Enable computer use in Settings → Permissions. Arden downloads and verifies its native helper."
       )

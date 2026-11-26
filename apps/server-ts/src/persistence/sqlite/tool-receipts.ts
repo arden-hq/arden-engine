@@ -1,3 +1,5 @@
+import { RUN_TERMINAL, type RunTerminal } from "./run-ending-said.js"
+import { STORE_REASON } from "../errors.js"
 import { stripChangeEvidence } from "../tools/change-evidence.js"
 import { descendantCalls, detachedWorkflowCalls } from "./detached-workflow-calls.js"
 import { withChangeEvidence, refreshChangeEvidence } from "./change-evidence.js"
@@ -34,6 +36,7 @@ import type { ManagedObjectDescriptor } from "../managed-output/descriptor.js"
 import {
   answeredApprovalStatusList,
   outToolStatusList,
+  TOOL_STATUS,
   resultToolStatusList,
   waitingToolStatusList
 } from "./status-sets.js"
@@ -75,7 +78,7 @@ const storageError =
   (cause: StoredToolResultError): ToolExecutionStoreError =>
     toolError(
       operation,
-      cause.reason === "corrupt" ? "corrupt" : "storage",
+      cause.reason === STORE_REASON.corrupt ? STORE_REASON.corrupt : STORE_REASON.storage,
       cause.message,
       identity,
       cause
@@ -89,7 +92,7 @@ export const requireRunningToolExecutionInTransaction = Effect.fn(
 ): Effect.fn.Return<void, ToolExecutionStoreError> {
   const identity = yield* decodeIdentity(input, "complete")
   const current = yield* requireRow(sql, identity, "complete")
-  if (current.status !== "running") {
+  if (current.status !== TOOL_STATUS.running) {
     return yield* toolError("complete", "conflict", "Tool execution is not running", identity)
   }
 })
@@ -127,7 +130,7 @@ export const settleToolExecutionInTransaction = Effect.fn(
     )
   )
   const current = yield* requireRow(sql, identity, "complete")
-  if (current.status === "completed") {
+  if (current.status === TOOL_STATUS.completed) {
     const sameDigest =
       current.row.result_json !== null &&
       storedResultDigest(current.row.result_json) === resultDigest(result)
@@ -173,10 +176,10 @@ export const settleToolExecutionInTransaction = Effect.fn(
     )
     return result
   }
-  if (current.status === "paused" || current.status === "ready") {
+  if (current.status === TOOL_STATUS.paused || current.status === TOOL_STATUS.ready) {
     return yield* toolError("complete", "conflict", "Tool execution is not running", identity)
   }
-  if (current.status === "uncertain") {
+  if (current.status === TOOL_STATUS.uncertain) {
     const runs = yield* sql<ChatRunRow>`
       SELECT status FROM chat_runs
       WHERE run_id = ${identity.runId} AND session_id = ${identity.sessionId}
@@ -306,7 +309,7 @@ export const settleUnstartedToolWorkForTerminalInTransaction = Effect.fn(
   sql: SqlClient.SqlClient,
   runId: string,
   endedAt: string,
-  terminal: "cancelled" | "failed" | "completed",
+  terminal: RunTerminal["status"],
   owner?: { readonly scriptToolCallId: string }
 ): Effect.fn.Return<void, ToolExecutionStoreError, UnitOfWork> {
   const scope =
@@ -352,10 +355,11 @@ export const settleUnstartedToolWorkForTerminalInTransaction = Effect.fn(
     const identity = { runId, toolCallId: row.tool_call_id }
     const base: ToolResult = {
       content:
-        terminal === "cancelled"
+        terminal === RUN_TERMINAL.cancelled
           ? "The tool was not executed because the assistant run was cancelled."
           : "The tool was not executed because the assistant run ended.",
-      preview: terminal === "cancelled" ? "Tool execution cancelled" : "Tool execution stopped",
+      preview:
+        terminal === RUN_TERMINAL.cancelled ? "Tool execution cancelled" : "Tool execution stopped",
       is_error: true,
       retryable: false,
       data: {
@@ -407,7 +411,9 @@ export const settleUnstartedToolWorkForTerminalInTransaction = Effect.fn(
   if (settling.length === 0) return
   const feedback =
     owner === undefined
-      ? RUN_END_APPROVAL_FEEDBACK[terminal === "cancelled" ? "cancelled" : "ended"]
+      ? RUN_END_APPROVAL_FEEDBACK[
+          terminal === RUN_TERMINAL.cancelled ? RUN_TERMINAL.cancelled : "ended"
+        ]
       : "The script was cancelled before this was answered"
   const resolutionJson = yield* encodeJson(JsonObjectSchema, {
     approved: false,

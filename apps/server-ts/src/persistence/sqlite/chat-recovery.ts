@@ -23,7 +23,7 @@ import { loadRunStreamedMessages } from "./recovery-finish.js"
 import { staleStreamedIds } from "../transcript/minted-ids.js"
 import type { PersistenceDeps } from "./deps.js"
 import { noApprovalForRun } from "./approval-policy.js"
-import { activeRunStatusList } from "./status-sets.js"
+import { STORED_RUN_STATUS, activeRunStatusList } from "./status-sets.js"
 
 export const makeChatRecovery = ({
   writer,
@@ -113,7 +113,7 @@ export const makeChatRecovery = ({
       .transact(
         Effect.gen(function* () {
           const run = yield* loadRun(sql, runId, "claim_resume")
-          if (run.status !== "pending") return null
+          if (run.status !== STORED_RUN_STATUS.pending) return null
           const automation = yield* runAutomationOrigin(run, "claim_resume")
           const automationContextMode = yield* runAutomationContextMode(run, "claim_resume")
           const outputSchema = yield* runOutputSchema(run, "claim_resume")

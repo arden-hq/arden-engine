@@ -4,8 +4,9 @@ import { ardenCliDir } from "@arden-hq/std/paths"
 import { spawn } from "node:child_process"
 
 import type { CliDependencies } from "./command.js"
+import { LOGIN_ACTION, type LoginAction } from "./cli-words.js"
 
-export type LoginAction = "sign_in" | "status" | "sign_out"
+export type { LoginAction }
 
 export const loginCommand = async (
   action: LoginAction,
@@ -14,18 +15,18 @@ export const loginCommand = async (
   const store = chatGptLoginFile(ardenCliDir(dependencies.homeDirectory))
   try {
     switch (action) {
-      case "status": {
+      case LOGIN_ACTION.status: {
         const tokens = await store.read()
         dependencies.writeStdout(
           tokens === undefined ? "Not signed in. Run `arden login`.\n" : "Signed in with ChatGPT.\n"
         )
         return tokens === undefined ? 1 : 0
       }
-      case "sign_out":
+      case LOGIN_ACTION.signOut:
         await store.remove()
         dependencies.writeStdout("Signed out.\n")
         return 0
-      case "sign_in":
+      case LOGIN_ACTION.signIn:
         return await signIn(store, dependencies)
     }
   } catch (cause) {

@@ -1,12 +1,14 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { INTERACTION_KIND, ROLE } from "@arden-hq/std/message-vocabulary"
 import { Buffer } from "node:buffer"
-import { isUserAutomation, type Actor } from "../execution/authority.js"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
+import { ACTOR, isUserAutomation, type Actor } from "../execution/authority.js"
 import { Effect, Predicate } from "effect"
 import { runAuthorityChat, runPolicyOf } from "../execution/policy.js"
-import type {
-  AutomationCatalog,
-  AutomationDelegation,
-  AutomationInstructionRevision
+import {
+  PROMPT_WRITER,
+  type AutomationCatalog,
+  type AutomationDelegation,
+  type AutomationInstructionRevision
 } from "../persistence/automations/catalog.js"
 import type { RunQueries } from "../persistence/runs/queries.js"
 import { sessionLineage, spawnClientId } from "../persistence/sessions/lineage.js"
@@ -48,7 +50,8 @@ export const assignmentBrief = (
   envelopes: ReadonlyArray<Readonly<Record<string, unknown>>>
 ): DelegationBrief | undefined => {
   for (const envelope of envelopes) {
-    if (envelope["role"] !== ROLE.interaction || envelope["kind"] !== "assignment") continue
+    if (envelope["role"] !== ROLE.interaction || envelope["kind"] !== INTERACTION_KIND.assignment)
+      continue
     const content = envelope["content"]
     if (!Predicate.isString(content)) continue
     const from = envelope["from"]
@@ -88,7 +91,7 @@ export const approvalReviewAuthority =
         )
         const origin = yield* executionOrigin(runs, runId)
         const ownerRequest =
-          origin?.actor.kind === "person"
+          origin?.actor.kind === ACTOR.person
             ? yield* originatingRequest(transcript, origin.actor)
             : undefined
         const delegation =
@@ -104,7 +107,7 @@ export const approvalReviewAuthority =
         const owner = yield* Effect.gen(function* () {
           if (root === null) return { words: [] }
           const type = root.sessionType
-          if (type !== "chat" && type !== "channel") return { words: [] }
+          if (type !== SESSION_TYPE.chat && type !== SESSION_TYPE.channel) return { words: [] }
           const conversation = yield* transcript.conversationPage({
             _tag: "Latest",
             sessionId: root.sessionId,
@@ -126,7 +129,7 @@ export const approvalReviewAuthority =
         const briefs: DelegationBrief[] = []
         for (const header of lineage) {
           if (
-            header.sessionType !== "agent" ||
+            header.sessionType !== SESSION_TYPE.agent ||
             header.parentRunId === null ||
             header.parentToolCallId === null
           )
@@ -175,12 +178,12 @@ const executionOrigin = Effect.fn("ApprovalReview.executionOrigin")(function* (
     const authority = yield* runs.authority(next)
     if (authority === undefined) return undefined
     const actor = authority.actor
-    if (actor.kind === "agent") {
+    if (actor.kind === ACTOR.agent) {
       next = actor.parent_run_id
       continue
     }
     const run = yield* runs.get(next)
-    if (run === null || (actor.kind === "person" && run.sessionId !== actor.session_id))
+    if (run === null || (actor.kind === ACTOR.person && run.sessionId !== actor.session_id))
       return undefined
     return { actor, runId: next }
   }
@@ -215,7 +218,7 @@ const automationDelegation = Effect.fn("ApprovalReview.automationDelegation")(fu
       )
     active.add(revision.revisionId)
     if (revision.source === undefined) {
-      if (revision.author !== "owner")
+      if (revision.author !== PROMPT_WRITER.owner)
         return yield* Effect.fail(new Error("Automation instruction has no owner or write source"))
       active.delete(revision.revisionId)
       return
@@ -223,7 +226,7 @@ const automationDelegation = Effect.fn("ApprovalReview.automationDelegation")(fu
     const source = yield* executionOrigin(runs, revision.source.runId)
     if (source === undefined)
       return yield* Effect.fail(new Error("Automation write source has no execution origin"))
-    if (source?.actor.kind === "person") {
+    if (source?.actor.kind === ACTOR.person) {
       const request = yield* originatingRequest(transcript, source.actor)
       if (request === undefined)
         return yield* Effect.fail(new Error("Automation write source has no owner request"))

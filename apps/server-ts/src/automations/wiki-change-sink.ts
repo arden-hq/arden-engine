@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect"
 
 import { WikiEventOutbox } from "../persistence/automations/wiki-event-outbox.js"
 import { causedChainDepth } from "../persistence/automations/chain-depth.js"
-import { wikiOriginSource, type WikiCommitOrigin } from "../wiki/origin.js"
+import { WIKI_ORIGIN_KIND, wikiOriginSource, type WikiCommitOrigin } from "../wiki/origin.js"
 import { shownPathToRuns } from "../wiki/change.js"
 import { isImportedPath } from "../wiki/collections.js"
 import { WikiChangeSink, WikiChangeSinkError } from "../wiki/publication.js"
@@ -11,33 +11,33 @@ import { MEMORY_CAPTURE_AUTOMATION_ID } from "./handlers/memory-capture.js"
 
 const producerWakeDepth = (origin: WikiCommitOrigin): number => {
   switch (origin.kind) {
-    case "automation":
-    case "upkeep":
-    case "agent":
+    case WIKI_ORIGIN_KIND.automation:
+    case WIKI_ORIGIN_KIND.upkeep:
+    case WIKI_ORIGIN_KIND.agent:
       return origin.chainDepth ?? 0
-    case "capture":
-    case "user":
-    case "forget":
-    case "rules":
-    case "space_page":
-    case "system":
+    case WIKI_ORIGIN_KIND.capture:
+    case WIKI_ORIGIN_KIND.user:
+    case WIKI_ORIGIN_KIND.forget:
+    case WIKI_ORIGIN_KIND.rules:
+    case WIKI_ORIGIN_KIND.space_page:
+    case WIKI_ORIGIN_KIND.system:
       return 0
   }
 }
 
 const automationOfOrigin = (origin: WikiCommitOrigin): string | null => {
   switch (origin.kind) {
-    case "automation":
-    case "upkeep":
+    case WIKI_ORIGIN_KIND.automation:
+    case WIKI_ORIGIN_KIND.upkeep:
       return origin.automationId
-    case "capture":
+    case WIKI_ORIGIN_KIND.capture:
       return MEMORY_CAPTURE_AUTOMATION_ID
-    case "user":
-    case "forget":
-    case "rules":
-    case "agent":
-    case "space_page":
-    case "system":
+    case WIKI_ORIGIN_KIND.user:
+    case WIKI_ORIGIN_KIND.forget:
+    case WIKI_ORIGIN_KIND.rules:
+    case WIKI_ORIGIN_KIND.agent:
+    case WIKI_ORIGIN_KIND.space_page:
+    case WIKI_ORIGIN_KIND.system:
       return null
   }
 }

@@ -1,5 +1,7 @@
 import { after } from "@arden-hq/std/timer"
 import { formatBytes } from "@arden-hq/std/count"
+import { MCP_AUTH, MCP_OAUTH_CLIENT, MCP_PRESET_AUTH, MCP_TRANSPORT } from "@arden-hq/protocol/mcp"
+import { HTTP_METHOD } from "@arden-hq/relay-protocol"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import type {
   FetchLike,
@@ -38,16 +40,22 @@ const PROCESS_EXIT_GRACE_MS = 250
 
 const redirectStatuses = new Set([301, 302, 303, 307, 308])
 
+const MCP_RESPONSE_LIMIT = { declared: "declared_length", streamed: "streamed_bytes" } as const
+
+type McpResponseLimit = (typeof MCP_RESPONSE_LIMIT)[keyof typeof MCP_RESPONSE_LIMIT]
+
+const HEAD_METHOD = "HEAD"
+
 class McpHttpResponseTooLargeError extends Error {
   readonly code = "MCP_HTTP_RESPONSE_TOO_LARGE"
 
   constructor(
-    readonly reason: "declared_length" | "streamed_bytes",
+    readonly reason: McpResponseLimit,
     readonly observedBytes: number
   ) {
     super(
       `MCP HTTP response exceeded Arden's ${formatBytes(MAX_HTTP_RESPONSE_BYTES)} transport limit (${observedBytes} bytes ${
-        reason === "declared_length" ? "declared" : "received"
+        reason === MCP_RESPONSE_LIMIT.declared ? "declared" : "received"
       }). Ask the MCP server to return a smaller result or a resource link.`
     )
     this.name = "McpHttpResponseTooLargeError"
@@ -64,14 +72,14 @@ const redirectedRequest = (request: Request, response: Response): Request => {
   }
   const becomesGet =
     response.status === 303 ||
-    ((response.status === 301 || response.status === 302) && request.method === "POST")
+    ((response.status === 301 || response.status === 302) && request.method === HTTP_METHOD.POST)
   if (!becomesGet) return new Request(nextUrl, request)
   const headers = new Headers(request.headers)
   for (const name of ["content-encoding", "content-length", "content-type", "transfer-encoding"]) {
     headers.delete(name)
   }
   return new Request(nextUrl, {
-    method: request.method === "HEAD" ? "HEAD" : "GET",
+    method: request.method === HEAD_METHOD ? HEAD_METHOD : HTTP_METHOD.GET,
     headers,
     signal: request.signal
   })
@@ -81,7 +89,7 @@ const boundedResponse = async (response: Response): Promise<Response> => {
   const declaredBytes = Number(response.headers.get("content-length"))
   if (Number.isFinite(declaredBytes) && declaredBytes > MAX_HTTP_RESPONSE_BYTES) {
     await response.body?.cancel().catch(() => undefined)
-    throw new McpHttpResponseTooLargeError("declared_length", declaredBytes)
+    throw new McpHttpResponseTooLargeError(MCP_RESPONSE_LIMIT.declared, declaredBytes)
   }
   if (response.body === null) return response
   if (response.headers.get("content-type")?.includes("text/event-stream") === true) {
@@ -94,7 +102,9 @@ const boundedResponse = async (response: Response): Promise<Response> => {
       transform(chunk, controller) {
         receivedBytes += chunk.byteLength
         if (receivedBytes > MAX_HTTP_RESPONSE_BYTES) {
-          controller.error(new McpHttpResponseTooLargeError("streamed_bytes", receivedBytes))
+          controller.error(
+            new McpHttpResponseTooLargeError(MCP_RESPONSE_LIMIT.streamed, receivedBytes)
+          )
           return
         }
         controller.enqueue(chunk)
@@ -118,7 +128,7 @@ const boundedSseEvents = (): TransformStream<Uint8Array, Uint8Array> => {
         eventBytes = lineFeeds >= 2 ? 0 : eventBytes + 1
       }
       if (eventBytes > MAX_HTTP_RESPONSE_BYTES) {
-        controller.error(new McpHttpResponseTooLargeError("streamed_bytes", eventBytes))
+        controller.error(new McpHttpResponseTooLargeError(MCP_RESPONSE_LIMIT.streamed, eventBytes))
         return
       }
       controller.enqueue(chunk)
@@ -184,7 +194,7 @@ export interface McpTransportOptions {
 }
 
 export const mcpOAuthVaultTarget = (config: McpStoredServer): McpOAuthVaultTarget => {
-  if (config.transport.type !== "http") {
+  if (config.transport.type !== MCP_TRANSPORT.http) {
     throw new Error("Only HTTP MCP servers have OAuth credential targets")
   }
   if (config.presetId === null) {
@@ -194,7 +204,7 @@ export const mcpOAuthVaultTarget = (config: McpStoredServer): McpOAuthVaultTarge
     }
   }
   const auth = MCP_PRESETS[config.presetId].auth
-  if (resolveMcpPresetServer(config) === undefined || auth.type !== "oauth") {
+  if (resolveMcpPresetServer(config) === undefined || auth.type !== MCP_PRESET_AUTH.oauth) {
     throw new Error("Stored MCP preset identity does not match its trusted definition")
   }
   return {
@@ -211,7 +221,9 @@ export const mcpTransportSecretTarget = (config: McpStoredServer): McpTransportS
 export const mcpStaticOAuth = (config: McpStoredServer): McpStaticOAuthMetadata | undefined => {
   if (config.presetId === null || resolveMcpPresetServer(config) === undefined) return undefined
   const auth = MCP_PRESETS[config.presetId].auth
-  return auth.type === "oauth" && auth.clientType === "confidential" ? auth : undefined
+  return auth.type === MCP_PRESET_AUTH.oauth && auth.clientType === MCP_OAUTH_CLIENT.confidential
+    ? auth
+    : undefined
 }
 
 export const mcpServiceTitle = (config: McpStoredServer): string =>
@@ -238,7 +250,7 @@ export const makeMcpTransport = async (
   options: McpTransportOptions
 ): Promise<McpOwnedTransport> => {
   const value = config.transport
-  if (value.type === "stdio") {
+  if (value.type === MCP_TRANSPORT.stdio) {
     return new McpStdioTransport(
       await prepareMcpStdioLaunch({
         transport: value,
@@ -254,7 +266,7 @@ export const makeMcpTransport = async (
   }
   const staticOAuth = mcpStaticOAuth(config)
   const oauth =
-    value.auth === "oauth"
+    value.auth === MCP_AUTH.oauth
       ? new McpOAuthProvider({
           target: mcpOAuthVaultTarget(config),
           ...(options.vault === undefined ? {} : { vault: options.vault }),
@@ -267,7 +279,9 @@ export const makeMcpTransport = async (
   return new StreamableHTTPClientTransport(new URL(value.url), {
     fetch: options.wrapFetch(createSameOriginFetch()),
     ...(oauth === undefined ? {} : { authProvider: oauth }),
-    ...(value.auth !== "headers" ? {} : { requestInit: { headers: options.transportSecrets } })
+    ...(value.auth !== MCP_AUTH.headers
+      ? {}
+      : { requestInit: { headers: options.transportSecrets } })
   })
 }
 

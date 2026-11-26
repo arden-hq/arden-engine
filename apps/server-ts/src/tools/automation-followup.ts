@@ -6,6 +6,8 @@ import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt } from "./call-receipt.js"
 import { automationResource } from "./automation-records.js"
 
+const FOLLOWUP_ACTION = { stop: "stop", check_again: "check_again" } as const
+
 const makeAutomationFollowupTools = ({
   queue
 }: {
@@ -20,9 +22,9 @@ const makeAutomationFollowupTools = ({
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         followup: Schema.Union([
-          Schema.Struct({ action: Schema.Literal("stop") }),
+          Schema.Struct({ action: Schema.Literal(FOLLOWUP_ACTION.stop) }),
           Schema.Struct({
-            action: Schema.Literal("check_again"),
+            action: Schema.Literal(FOLLOWUP_ACTION.check_again),
             at: Schema.String.annotate({
               description: "When to check next: a future ISO 8601 timestamp."
             })
@@ -62,7 +64,7 @@ const makeAutomationFollowupTools = ({
       )
       return {
         result:
-          input.followup.action === "stop"
+          input.followup.action === FOLLOWUP_ACTION.stop
             ? "Saved: this Automation's job is done; it is removed when this run completes successfully."
             : `Saved: this Automation's next check will be at ${input.followup.at} when this run completes successfully.`,
         preview: "Follow-up saved",
@@ -70,7 +72,7 @@ const makeAutomationFollowupTools = ({
           ctx,
           automationResource(
             owner,
-            input.followup.action === "stop"
+            input.followup.action === FOLLOWUP_ACTION.stop
               ? `${owner.name}: stops checking`
               : `${owner.name}: next check scheduled`
           )

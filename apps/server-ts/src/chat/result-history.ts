@@ -1,3 +1,5 @@
+import { isSessionHandoff as isHandoffKind } from "../persistence/transcript/model.js"
+import { AUTOMATION_CONTEXT_MODE } from "@arden-hq/protocol/automations"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage, Result as LoopResult } from "@arden-hq/loop"
 import { Effect, Result, Schema } from "effect"
@@ -9,6 +11,8 @@ import type { ChatRunnerMessage } from "./runner-contract.js"
 import type { HistoryChange } from "@arden-hq/loop"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
 import { currentIso } from "../runtime/clock.js"
+
+const PROJECTION_MODE = { checkpoint: "checkpoint", terminal: "terminal" } as const
 
 export class ResultHistoryError extends Schema.TaggedError<ResultHistoryError>()(
   "ResultHistoryError",
@@ -66,7 +70,7 @@ const isSessionHandoff = (message: ChatMessage): boolean => {
     typeof compaction === "object" &&
     compaction !== null &&
     "kind" in compaction &&
-    compaction.kind === "session_handoff"
+    isHandoffKind(compaction.kind)
   )
 }
 
@@ -90,7 +94,7 @@ export const makeResultHistoryProjector = (
   let rootAssigned =
     input.assistantMessagePersisted || initialMessageIds.has(input.assistantMessageId)
   const durablePrefix =
-    input.automationContextMode === "fresh"
+    input.automationContextMode === AUTOMATION_CONTEXT_MODE.fresh
       ? input.initialMessages.filter((message) => message.turn_id !== input.turnId)
       : []
 
@@ -101,7 +105,7 @@ export const makeResultHistoryProjector = (
 
   const project = (
     source: ReadonlyArray<ChatRunnerMessage>,
-    mode: "checkpoint" | "terminal",
+    mode: (typeof PROJECTION_MODE)[keyof typeof PROJECTION_MODE],
     terminalText?: string
   ): Result.Result<ReadonlyArray<StoredMessageEnvelope>, ResultHistoryError> => {
     const timestamp = currentIso()
@@ -160,7 +164,11 @@ export const makeResultHistoryProjector = (
     }
     projectedBySource = projected
 
-    if (terminalIndex < 0 && mode !== "checkpoint" && !ids.has(input.assistantMessageId)) {
+    if (
+      terminalIndex < 0 &&
+      mode !== PROJECTION_MODE.checkpoint &&
+      !ids.has(input.assistantMessageId)
+    ) {
       const messageId = rootAssigned ? input.terminalMessageId : input.assistantMessageId
       const synthetic = decodeEnvelope({
         message_id: messageId,
@@ -181,7 +189,7 @@ export const makeResultHistoryProjector = (
       messages.push(synthetic.success)
     }
     const all = [...durablePrefix, ...messages]
-    if (mode === "checkpoint") {
+    if (mode === PROJECTION_MODE.checkpoint) {
       projectedHistory = all
       projectedRawCount = source.length
       seenIds = new Set(all.map((message) => message.message_id))
@@ -294,8 +302,8 @@ export const makeResultHistoryProjector = (
     )
 
   return {
-    checkpoint: (messages) => run(() => project(messages, "checkpoint")),
+    checkpoint: (messages) => run(() => project(messages, PROJECTION_MODE.checkpoint)),
     checkpointAppend: (change) => run(() => append(change)),
-    result: (result) => run(() => project(result.messages, "terminal", result.text))
+    result: (result) => run(() => project(result.messages, PROJECTION_MODE.terminal, result.text))
   }
 }

@@ -1,5 +1,9 @@
-import { readRunAuthority } from "./run-context.js"
-import { TaskDirectionReceiptSchema, type ToolCallPlan } from "../work/task-direction.js"
+import { readRunAuthority, RUN_AUTHORITY_STATE } from "./run-context.js"
+import {
+  TASK_TOOL_CALL_PLAN,
+  TaskDirectionReceiptSchema,
+  type ToolCallPlan
+} from "../work/task-direction.js"
 import { refreshChangeEvidence } from "./change-evidence.js"
 import type { ToolResult } from "@arden-hq/loop"
 import { DateTime, Effect } from "effect"
@@ -41,13 +45,13 @@ import {
 } from "./tool-approvals.js"
 import { settleUncertainRow } from "./tool-uncertainty.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-import { unresolvedToolStatusList } from "./status-sets.js"
+import { TOOL_STATUS, unresolvedToolStatusList } from "./status-sets.js"
 import {
   MAX_CALL_TARGETS,
   type EffectTarget,
   type EffectTargetOrigin
 } from "../../execution/tool-effect.js"
-import { storeEffectTarget } from "./effect-targets.js"
+import { EFFECT_TARGET_RESULT, storeEffectTarget } from "./effect-targets.js"
 import { makeToolExecutionSettlement } from "./tool-execution-settlement.js"
 
 export const makeToolExecutions = ({
@@ -77,7 +81,7 @@ export const makeToolExecutions = ({
       return yield* toolError("begin", "not_found", "Owning chat run was not found", identity)
     if (run.budget_missing === 1)
       return yield* toolError("begin", "corrupt", "This Run's token budget is missing", identity)
-    return run.authority === "active"
+    return run.authority === RUN_AUTHORITY_STATE.active
       ? undefined
       : ({ _tag: "NotAdmitted", authority: run.authority } as const)
   })
@@ -95,7 +99,7 @@ export const makeToolExecutions = ({
       )
     )
     const shownJson =
-      options.plan?.kind !== "turn" || options.plan.shown === undefined
+      options.plan?.kind !== TASK_TOOL_CALL_PLAN.turn || options.plan.shown === undefined
         ? null
         : yield* encodeJson(TaskDirectionReceiptSchema, options.plan.shown).pipe(
             Effect.mapError((cause) =>
@@ -109,7 +113,7 @@ export const makeToolExecutions = ({
             )
           )
     const planned =
-      options.plan?.kind === "call"
+      options.plan?.kind === TASK_TOOL_CALL_PLAN.call
         ? sql`(SELECT planned_from_json FROM tool_calls
             WHERE run_id = ${identity.runId} AND tool_call_id = ${options.plan.toolCallId})`
         : sql`${shownJson}`
@@ -166,7 +170,7 @@ export const makeToolExecutions = ({
           const existing = yield* loadRow(sql, identity, "begin")
           if (existing !== null) {
             const status = yield* validateRowIdentity(existing, identity, "begin")
-            if (status === "ready") {
+            if (status === TOOL_STATUS.ready) {
               const refused = yield* notAdmitted(identity)
               if (refused !== undefined) return refused
               const approval = yield* resumeApprovedTool(sql, identity)
@@ -175,7 +179,7 @@ export const makeToolExecutions = ({
                 ...(approval === undefined ? {} : { approval })
               } as const
             }
-            if (status === "completed" || status === "uncertain") {
+            if (status === TOOL_STATUS.completed || status === TOOL_STATUS.uncertain) {
               const stored = yield* decodeStoredResult(existing, identity, "begin")
               const result = yield* refreshChangeEvidence(sql, identity, stored).pipe(
                 Effect.mapError((cause) =>
@@ -230,7 +234,7 @@ export const makeToolExecutions = ({
             )
             const backgrounded = options.backgrounded ?? new Set<string>()
             const blocking = unresolved.filter(
-              (row) => row.status !== "running" || !backgrounded.has(row.tool_call_id)
+              (row) => row.status !== TOOL_STATUS.running || !backgrounded.has(row.tool_call_id)
             )
             if (blocking.length > 0) {
               return yield* toolError(
@@ -280,7 +284,7 @@ export const makeToolExecutions = ({
           const current = yield* requireRow(sql, identity, "uncertain")
           const outcome = yield* settleUncertainRow(sql, identity, "uncertain", current)
           let committed: CommittedEventBatch | null = null
-          if (identity.changesState && outcome.status === "uncertain") {
+          if (identity.changesState && outcome.status === TOOL_STATUS.uncertain) {
             const runs = yield* sql<ChatRunRow>`
             SELECT status FROM chat_runs
             WHERE run_id = ${identity.runId} AND session_id = ${identity.sessionId}
@@ -440,9 +444,9 @@ export const makeToolExecutions = ({
     const stored = yield* writer
       .transactInteractive(storeEffectTarget(sql, input, at))
       .pipe(Effect.mapError(preserveToolError("target", input)))
-    if (stored === "not_running")
+    if (stored === EFFECT_TARGET_RESULT.notRunning)
       return yield* toolError("target", "conflict", "The call is no longer running", input)
-    if (stored === "too_many")
+    if (stored === EFFECT_TARGET_RESULT.tooMany)
       return yield* toolError(
         "target",
         "conflict",

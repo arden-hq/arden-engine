@@ -102,7 +102,7 @@ const LearningMarkSchema = Schema.Struct({
     withheld: Schema.optionalKey(Schema.Literal(true))
   })
 })
-const CAPTURE_LEARNING = {
+export const CAPTURE_LEARNING = {
   safe: "safe",
   withheld: "withheld",
   sensitive: "sensitive",

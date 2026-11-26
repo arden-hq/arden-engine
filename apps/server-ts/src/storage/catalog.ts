@@ -1,10 +1,13 @@
 import type { StorageCategoryId } from "@arden-hq/protocol/storage"
+import { SQLITE_SEARCH_FILENAME } from "../persistence/sqlite/deps.js"
 
 export type StorageRootBucket = "database" | Exclude<StorageCategoryId, "channels">
 
+export const STORAGE_ROOT_ENTRY_KIND = { known: "known", unknown: "unknown" } as const
+
 export type StorageRootEntry =
   | {
-      readonly kind: "known"
+      readonly kind: typeof STORAGE_ROOT_ENTRY_KIND.known
       readonly authority:
         | "operational_sqlite"
         | "wiki_revisions"
@@ -22,7 +25,7 @@ export type StorageRootEntry =
       readonly lifecycle: string
     }
   | {
-      readonly kind: "unknown"
+      readonly kind: typeof STORAGE_ROOT_ENTRY_KIND.unknown
       readonly bucket: "other"
     }
 
@@ -68,7 +71,7 @@ const rootEntries = {
     lifecycle:
       "Copies of files attached from Downloads, the Trash or a temporary folder, so their chats can still read them. Removed when no remaining Chat names them; a copy never sent goes a day after it was attached."
   },
-  "search.sqlite": {
+  [SQLITE_SEARCH_FILENAME]: {
     kind: "known",
     authority: "search_index",
     bucket: "housekeeping",
@@ -135,16 +138,16 @@ const rootEntries = {
   }
 } as const satisfies Record<string, StorageRootEntry>
 
+const isDatabaseFile = (name: string, databaseName: string): boolean =>
+  name === databaseName || name === `${databaseName}-wal` || name === `${databaseName}-shm`
+
 export const classifyStorageRootEntry = (
   name: string,
   databaseName: string | null
 ): StorageRootEntry => {
-  if (
-    databaseName !== null &&
-    (name === databaseName || name === `${databaseName}-wal` || name === `${databaseName}-shm`)
-  ) {
+  if (databaseName !== null && isDatabaseFile(name, databaseName)) {
     return {
-      kind: "known",
+      kind: STORAGE_ROOT_ENTRY_KIND.known,
       authority: "operational_sqlite",
       bucket: "database",
       backup: "sqlite_snapshot",
@@ -152,9 +155,8 @@ export const classifyStorageRootEntry = (
       lifecycle: "Active database and companion files. Never delete while Arden runs."
     }
   }
-  const catalogName =
-    name === "search.sqlite-wal" || name === "search.sqlite-shm" ? "search.sqlite" : name
+  const catalogName = isDatabaseFile(name, SQLITE_SEARCH_FILENAME) ? SQLITE_SEARCH_FILENAME : name
   if (Object.hasOwn(rootEntries, catalogName))
     return rootEntries[catalogName as keyof typeof rootEntries]
-  return { kind: "unknown", bucket: "other" }
+  return { kind: STORAGE_ROOT_ENTRY_KIND.unknown, bucket: "other" }
 }

@@ -6,6 +6,8 @@ import {
   ContractLineInputSchema,
   EvidenceInputSchema,
   evidenceWords,
+  CONTRACT_CHANGE,
+  CONTRACT_LINE_KIND,
   type ContractChange,
   type ContractLine,
   type TaskContract
@@ -14,6 +16,8 @@ import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { recordApplied } from "../execution/tool-effect.js"
+import { ACTOR } from "../execution/authority.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import { appliedReceipt, inChatTarget } from "./call-receipt.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
@@ -82,13 +86,13 @@ const resolveTask = async (
   services: TaskToolServices,
   ctx: ToolContext<ServerRunContext>,
   input: TaskSelector,
-  scope: "this_chat" | "reach"
+  scope: TaskReach
 ): Promise<{ readonly itemId: string; readonly contract: TaskContract }> => {
   const run = <A>(effect: Effect.Effect<A, WorkStoreError>) =>
     Effect.runPromise(effect.pipe(Effect.mapError(workFailure)), { signal: ctx.signal })
   if (input.key !== undefined) {
     const task = await readTaskAt(services, ctx, input.space_id, input.key)
-    if (scope === "this_chat" && task.home_session_id !== ctx.run.sessionId)
+    if (scope === TASK_REACH.this_chat && task.home_session_id !== ctx.run.sessionId)
       throw new ToolExecutionError(
         "Propose lines only for a Task this chat works on or started; the owner's words here are about it, not about another chat's Task.",
         { preview: "Not this chat's Task", retryable: false }
@@ -111,6 +115,10 @@ const resolveTask = async (
 const notFound = (): ToolExecutionError =>
   new ToolExecutionError("The Task is gone.", { preview: "Task not found", retryable: false })
 
+const TASK_REACH = { this_chat: "this_chat", reach: "reach" } as const
+
+type TaskReach = (typeof TASK_REACH)[keyof typeof TASK_REACH]
+
 const KIND_NAME: Record<ContractLine["kind"], string> = {
   rule: "rule",
   criterion: "done-when criterion",
@@ -128,7 +136,7 @@ const savedLine = (contract: TaskContract, lineId: number): ContractLine => {
 }
 
 const proposalCard = (contract: TaskContract, change: ContractChange): StoredRunQuestionContent => {
-  if (change.kind === "retire") {
+  if (change.kind === CONTRACT_CHANGE.retire) {
     const line = savedLine(contract, change.line_id)
     return {
       prompt: `Remove this ${KIND_NAME[line.kind]} from the Task?`,
@@ -146,7 +154,7 @@ const proposalCard = (contract: TaskContract, change: ContractChange): StoredRun
     detail: [
       ...(replaced === undefined ? [] : [`~~${replaced.text}~~`]),
       change.line.text,
-      ...(change.line.kind === "decision" && change.line.rejected !== undefined
+      ...(change.line.kind === CONTRACT_LINE_KIND.decision && change.line.rejected !== undefined
         ? [`Rejected: ${change.line.rejected}`]
         : [])
     ].join("  \n"),
@@ -175,7 +183,7 @@ const makeTaskContractTools = (services: TaskToolServices): ReadonlyArray<Server
       approval_preview: "Propose a line for a Task's contract."
     },
     execute: async (input, ctx, effects) => {
-      if (ctx.run.authority.actor.kind !== "person")
+      if (ctx.run.authority.actor.kind !== ACTOR.person)
         throw new ToolExecutionError(
           "Only the owner's own turn proposes a contract line. To add, remove or reword one, ask the owner with ask_user, or wait on them with task_wait (waiting_on you); the change is proposed in their turn.",
           { preview: "Not proposed", retryable: false }
@@ -246,7 +254,7 @@ const makeTaskContractTools = (services: TaskToolServices): ReadonlyArray<Server
             })
             .pipe(
               Effect.mapError((error) =>
-                error.reason === "invalid" || error.reason === "not_found"
+                error.reason === STORE_REASON.invalid || error.reason === STORE_REASON.not_found
                   ? new ToolExecutionError(`Not recorded: ${error.message}`, {
                       preview: "Evidence refused",
                       retryable: false

@@ -1,3 +1,6 @@
+import { HOME_EVIDENCE } from "../persistence/home/letter-schema.js"
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
+import { MARKDOWN_NODE } from "../wiki/markdown-node.js"
 import { type HomeEvidence, type HomeLetterBody } from "../persistence/home/letter-schema.js"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { Effect } from "effect"
@@ -23,15 +26,15 @@ const PLACE = /^(?:https?:|file:|arden:(?!automation\b))/i
 
 const proseOf = (entry: HomeEvidence): ReadonlyArray<string | null> => {
   switch (entry.kind) {
-    case "task":
+    case HOME_EVIDENCE.task:
       return [entry.title, entry.summary]
-    case "run":
+    case HOME_EVIDENCE.run:
       return [entry.text]
-    case "approval":
+    case HOME_EVIDENCE.approval:
       return [entry.preview]
-    case "question":
+    case HOME_EVIDENCE.question:
       return [entry.question.content.prompt, entry.question.content.detail]
-    case "offer":
+    case HOME_EVIDENCE.offer:
       return []
   }
 }
@@ -40,7 +43,7 @@ const plain = (node: MarkdownNode): string =>
   node.value ?? (node.children ?? []).map(plain).join("")
 
 function* linksIn(node: MarkdownNode): Generator<MarkdownNode> {
-  if (node.type === "link") yield node
+  if (node.type === MARKDOWN_NODE.link) yield node
   for (const child of node.children ?? []) yield* linksIn(child)
 }
 
@@ -66,18 +69,22 @@ const homeAddressNeeds = (entries: readonly HomeEvidence[]): HomeAddressNeeds =>
   sessionIds: [
     ...new Set(
       entries.flatMap((entry) => {
-        if (entry.kind === "question") {
+        if (entry.kind === HOME_EVIDENCE.question) {
           const origin = entry.question.context.origin
-          return [origin.kind === "chat" ? origin.session_id : entry.question.session_id]
+          return [origin.kind === RUN_ORIGIN.chat ? origin.session_id : entry.question.session_id]
         }
-        return entry.kind === "task" || entry.kind === "offer" ? [] : [entry.session_id]
+        return entry.kind === HOME_EVIDENCE.task || entry.kind === HOME_EVIDENCE.offer
+          ? []
+          : [entry.session_id]
       })
     )
   ],
   runIds: [
     ...new Set(
       entries.flatMap((entry) =>
-        entry.kind === "run" || entry.kind === "approval" ? [entry.run_id] : []
+        entry.kind === HOME_EVIDENCE.run || entry.kind === HOME_EVIDENCE.approval
+          ? [entry.run_id]
+          : []
       )
     )
   ]
@@ -92,22 +99,22 @@ function evidenceHref(entry: HomeEvidence, book: HomeAddressBook): string | null
     return chatHref(turnId === undefined ? { publicRef: ref } : { publicRef: ref, turnId })
   }
   switch (entry.kind) {
-    case "task":
+    case HOME_EVIDENCE.task:
       return task(entry.item_id)
-    case "question": {
+    case HOME_EVIDENCE.question: {
       const { context, session_id, turn_id } = entry.question
       if (context.task) return task(context.task.item_id)
-      return context.origin.kind === "chat"
+      return context.origin.kind === RUN_ORIGIN.chat
         ? turn(context.origin.session_id, context.origin.turn_id)
         : turn(session_id, turn_id)
     }
-    case "run":
-    case "approval": {
+    case HOME_EVIDENCE.run:
+    case HOME_EVIDENCE.approval: {
       if (entry.context?.task) return task(entry.context.task.item_id)
-      if (entry.context?.origin.kind === "automation") return null
+      if (entry.context?.origin.kind === RUN_ORIGIN.automation) return null
       return turn(entry.session_id, book.runTurns.get(entry.run_id))
     }
-    case "offer":
+    case HOME_EVIDENCE.offer:
       return null
   }
 }

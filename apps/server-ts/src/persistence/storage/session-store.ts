@@ -50,7 +50,8 @@ export interface ReleasedPages {
   readonly free: number
 }
 
-export type CheckpointMode = "passive" | "truncate"
+export const CHECKPOINT_MODE = { passive: "passive", truncate: "truncate" } as const
+export type CheckpointMode = (typeof CHECKPOINT_MODE)[keyof typeof CHECKPOINT_MODE]
 
 export class StorageSessionStoreError extends Schema.TaggedError<StorageSessionStoreError>()(
   "StorageSessionStoreError",

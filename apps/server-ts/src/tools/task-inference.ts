@@ -3,7 +3,16 @@ import { KeyedTaskDraftSchema } from "../persistence/work/task-input.js"
 import { quoted } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { ChatActionRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
-import { TASK_PROPOSAL_ORIGIN, TASK_PROPOSAL_TASK } from "@arden-hq/protocol/proposals"
+import {
+  TASK_PROPOSAL_ORIGIN,
+  TASK_PROPOSAL_RETIREMENT_EVIDENCE,
+  TASK_PROPOSAL_RETIREMENT_SOURCE,
+  TASK_PROPOSAL_STATUS,
+  TASK_PROPOSAL_TASK
+} from "@arden-hq/protocol/proposals"
+import { SPACE_KIND } from "@arden-hq/protocol/spaces"
+import { TASK_STATUS } from "@arden-hq/protocol/spaces/work"
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { Effect, Schema, Struct } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { WorkStore } from "../persistence/work/store.js"
@@ -89,9 +98,16 @@ const revisedTaskInput = taskInput
   .mapFields(Struct.omit(["key"]))
   .annotate({ description: "The revised outcome; the proposal keeps its original Task key." })
 
+const INFERENCE_DECISION = {
+  retire: "retire",
+  create: "create",
+  revise: "revise",
+  reuse: "reuse"
+} as const
+
 const inferenceDecision = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("retire"),
+    kind: Schema.Literal(INFERENCE_DECISION.retire),
     proposal_id: Schema.NonEmptyString,
     expected_revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
     reason: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(2000)).annotate({
@@ -100,7 +116,9 @@ const inferenceDecision = Schema.Union([
     })
   }),
   Schema.Struct({
-    kind: Schema.Literal("create").annotate({ description: "Create a distinct Task." }),
+    kind: Schema.Literal(INFERENCE_DECISION.create).annotate({
+      description: "Create a distinct Task."
+    }),
     task: taskInput,
     reason: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(2000)).pipe(
       Schema.annotateEncoded({
@@ -110,7 +128,7 @@ const inferenceDecision = Schema.Union([
     )
   }),
   Schema.Struct({
-    kind: Schema.Literal("revise").annotate({
+    kind: Schema.Literal(INFERENCE_DECISION.revise).annotate({
       description: "Revise an open proposal using current evidence, preserving its identity."
     }),
     proposal_id: Schema.NonEmptyString.annotate({
@@ -127,7 +145,9 @@ const inferenceDecision = Schema.Union([
     )
   }),
   Schema.Struct({
-    kind: Schema.Literal("reuse").annotate({ description: "Reuse an existing canonical Task." }),
+    kind: Schema.Literal(INFERENCE_DECISION.reuse).annotate({
+      description: "Reuse an existing canonical Task."
+    }),
     item_id: Schema.NonEmptyString.annotate({
       description: "Exact canonical item_id from space_inference_review."
     }),
@@ -159,7 +179,7 @@ const reviewedSpace = async (
     services.spaces.list().pipe(Effect.mapError((cause) => failure(cause))),
     { signal }
   )
-  const main = spaces.find((space) => space.kind === "main")
+  const main = spaces.find((space) => space.kind === SPACE_KIND.main)
   if (main === undefined) throw failure({ reason: "storage", message: "The Main Space is missing" })
   return main.space_id
 }
@@ -240,15 +260,19 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
             "Call space_inference_review first; a proposal is checked against what that review showed"
         })
       if (
-        input.decision.kind !== "retire" &&
-        input.sources.some((source) => source.kind === "chat_action")
+        input.decision.kind !== INFERENCE_DECISION.retire &&
+        input.sources.some((source) => source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action)
       )
         throw refusal("Action evidence is for proposal retirement only")
-      const memoryCited = input.sources.some((source) => source.kind === "memory")
+      const memoryCited = input.sources.some(
+        (source) => source.kind === TASK_PROPOSAL_RETIREMENT_EVIDENCE.memory
+      )
       const snapshot = memoryCited ? await loadSnapshot(services.wiki, ctx.signal) : undefined
       const sources = input.sources.map((source) => observedSource(ctx.run, source, snapshot))
-      const ordinarySources = sources.filter((source) => source.kind !== "chat_action")
-      if (input.decision.kind === "retire") {
+      const ordinarySources = sources.filter(
+        (source) => source.kind !== TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action
+      )
+      if (input.decision.kind === INFERENCE_DECISION.retire) {
         if (spaceId === undefined) throw refusal("Retirement requires a Space review")
         const proposal = await recordApplied(
           effects,
@@ -274,7 +298,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
           data: { decision: "retire", proposal }
         }
       }
-      if (input.decision.kind === "reuse") {
+      if (input.decision.kind === INFERENCE_DECISION.reuse) {
         const decision = input.decision
         const target = await reviewedSpace(services, spaceId, ctx.signal)
         const review = await Effect.runPromise(
@@ -289,7 +313,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
         const task = review.tasks.find((candidate) => candidate.item_id === decision.item_id)
         if (task === undefined)
           throw refusal("The selected Task is not on this Space; review the Space again")
-        if (task.status === "cancelled")
+        if (task.status === TASK_STATUS.cancelled)
           throw new ToolExecutionError(
             "That Task is cancelled, so it owns no new work. Create a Task only for a distinct outcome the evidence fully defines; otherwise infer nothing. This refusal changed nothing, so the review can still finish as no change.",
             { preview: "Task is closed", retryable: false }
@@ -302,7 +326,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
           data: { decision: "reuse", task, task_url: taskUrl, reason: decision.reason }
         }
       }
-      if (input.decision.kind === "revise") {
+      if (input.decision.kind === INFERENCE_DECISION.revise) {
         if (spaceId === undefined) throw refusal("Proposal revision requires a Space review")
         const decision = input.decision
         const proposal = await recordApplied(
@@ -356,22 +380,22 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
         proposal.origin.tool_call_id === ctx.toolCallId
       let result: string
       switch (proposal.status) {
-        case "held":
-        case "offered":
+        case TASK_PROPOSAL_STATUS.held:
+        case TASK_PROPOSAL_STATUS.offered:
           result = authored
             ? `Proposed ${quoted(proposal.text)}. The user must accept it before a Task exists. proposal_id: ${proposal.proposal_id} (a Space review passes it verbatim to space_review_finish).`
             : `Already proposed: ${quoted(proposal.text)}. This call changed nothing; do not count it as a new proposal.`
           break
-        case "retired":
+        case TASK_PROPOSAL_STATUS.retired:
           result = `The proposal ${quoted(proposal.text)} was retired after its outcome was reviewed.`
           break
-        case "rejected":
+        case TASK_PROPOSAL_STATUS.rejected:
           result = `You rejected ${quoted(proposal.text)}; it is not offered again. This call changed nothing.`
           break
-        case "expired":
+        case TASK_PROPOSAL_STATUS.expired:
           result = `${quoted(proposal.text)} expired unanswered; it is not offered again. This call changed nothing.`
           break
-        case "accepted":
+        case TASK_PROPOSAL_STATUS.accepted:
           if (proposal.task.kind === TASK_PROPOSAL_TASK.gone)
             throw refusal("Accepted Task proposal is missing its Task")
           taskUrl = `arden:task/${encodeURIComponent(proposal.task.item_id)}`
@@ -399,20 +423,22 @@ const observedSource = (
   snapshot: Snapshot | undefined
 ): RetirementSourceRecord => {
   switch (source.kind) {
-    case "chat":
+    case TASK_PROPOSAL_RETIREMENT_EVIDENCE.chat:
       return { ...source, revision: source.turn_id }
-    case "connection_item":
+    case TASK_PROPOSAL_RETIREMENT_EVIDENCE.connection_item:
       return { ...source, revision: source.item_id }
-    case "memory": {
+    case TASK_PROPOSAL_RETIREMENT_EVIDENCE.memory: {
       const page = snapshot?.pages.find(
-        (record) => record.page.pageId === source.page_ref && record.page.lifecycle === "active"
+        (record) =>
+          record.page.pageId === source.page_ref &&
+          record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
       )
       const revision = run.observations.observed(source.page_ref)
       if (page === undefined || revision !== page.resource.versionId)
         throw unread("Read the current Memory page in this Run first, then cite its exact page_ref")
       return { ...source, page_ref: page.page.pageId, revision }
     }
-    case "task": {
+    case TASK_PROPOSAL_RETIREMENT_EVIDENCE.task: {
       const revision = run.observations.observed(observedKey.task(source.item_id))
       if (revision === undefined)
         throw unread(
@@ -420,7 +446,7 @@ const observedSource = (
         )
       return { ...source, revision }
     }
-    case "chat_action": {
+    case TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action: {
       const revision = run.observations.observed(
         observedKey.chatAction(source.run_id, source.tool_call_id)
       )

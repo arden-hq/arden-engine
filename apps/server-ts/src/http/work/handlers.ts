@@ -1,3 +1,5 @@
+import { STOPPED_RUN_OUTCOME } from "../../work/stop-task-runs.js"
+import { TASK_STATUS } from "@arden-hq/protocol/spaces/work"
 import {
   storedResolveInput,
   wireRunQuestion,
@@ -56,8 +58,9 @@ const stopTask = Effect.fn("WorkHandlers.stopTask")(function* (options: {
     itemId: task.item_id
   })
   let state: "acknowledged" | "finished" | "partial" = "finished"
-  if (runs.some((run) => run.outcome === "failed")) state = "partial"
-  else if (runs.some((run) => run.outcome === "acknowledged")) state = "acknowledged"
+  if (runs.some((run) => run.outcome === STOPPED_RUN_OUTCOME.failed)) state = "partial"
+  else if (runs.some((run) => run.outcome === STOPPED_RUN_OUTCOME.acknowledged))
+    state = "acknowledged"
   return {
     task,
     authority: "revoked" as const,
@@ -180,7 +183,7 @@ export const WorkHandlers = HttpApiBuilder.group(
           .update({ kind: "item", itemId: params.itemId }, payload.expected_updated_at, patch)
           .pipe(
             Effect.tap((task) =>
-              patch.status === "cancelled" || patch.status === "done"
+              patch.status === TASK_STATUS.cancelled || patch.status === TASK_STATUS.done
                 ? stopTaskRuns({ work: store, chat, itemId: task.item_id }).pipe(
                     Effect.catch((cause) =>
                       Effect.logWarning("A closed Task's runs were not stopped at once", cause)

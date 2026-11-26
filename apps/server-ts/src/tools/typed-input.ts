@@ -44,7 +44,7 @@ export const EMPTY_LINE: TypedLine = {
   escaped: false
 }
 
-const TYPED_INPUT = { refused: "refused", typed: "typed" } as const
+export const TYPED_INPUT = { refused: "refused", typed: "typed" } as const
 
 export type TypedInput =
   | { readonly kind: typeof TYPED_INPUT.refused }

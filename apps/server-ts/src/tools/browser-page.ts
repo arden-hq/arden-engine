@@ -1,14 +1,20 @@
 import { countOf } from "@arden-hq/std/count"
-import { Predicate, Schema } from "effect"
+import { Option, Predicate, Schema } from "effect"
 
-import type { BrowserClient, BrowserOutput } from "../browser/service.js"
+import {
+  BROWSER_SNAPSHOT_MODE,
+  type BrowserClient,
+  type BrowserOutput
+} from "../browser/service.js"
 import { PAGE_TEXT_MAX_CHARS, learningMark } from "../persistence/browser-procedures/model.js"
 import { isJsonObject } from "../persistence/json.js"
 import { isStaleRead, runBrowserForRun } from "./browser-support.js"
-import type { PageAfterSchema } from "./browser-parameters.js"
+import { PAGE_AFTER_NONE, type PageAfterSchema } from "./browser-parameters.js"
 import { bodyFields } from "./code-mode-result.js"
 import type { BrowserPageView, ServerRunContext } from "./run-context.js"
 import { selectText, type TextSelectOptions } from "./text-select.js"
+
+const PAGE_BODY_FIELDS: ReadonlySet<string> = new Set(["snapshot", "content"])
 
 type ReadCtx = {
   readonly run: ServerRunContext
@@ -25,7 +31,7 @@ const ReportedTabSchema = Schema.Struct({
 })
 const reportedTab = (data: unknown) => {
   const decoded = Schema.decodeUnknownOption(ReportedTabSchema)(data)
-  return decoded._tag === "Some" ? decoded.value.tab : undefined
+  return Option.isSome(decoded) ? decoded.value.tab : undefined
 }
 
 const ReadPageSchema = Schema.Struct({
@@ -53,26 +59,28 @@ const pageWords = (
   }
 ): { readonly text: string; readonly matches?: number } => {
   const decoded = Schema.decodeUnknownOption(ReadPageSchema)(value.data)
-  const read = decoded._tag === "Some" ? decoded.value : undefined
+  const read = Option.isSome(decoded) ? decoded.value : undefined
   const outer = record(read?.snapshot)
   const boundary = Schema.decodeUnknownOption(BoundarySchema)(outer?.untrusted_content)
-  const page = boundary._tag === "Some" ? record(outer?.data) : outer
+  const page = Option.isSome(boundary) ? record(outer?.data) : outer
   const raw = [read?.snapshot, page?.snapshot, page?.content].find(
     (text): text is string => typeof text === "string"
   )
   const footer = [
     `Tab: ${tabRef}`,
-    ...(mode === "interactive" && read?.tab?.profile_ref !== undefined
+    ...(mode === BROWSER_SNAPSHOT_MODE.interactive && read?.tab?.profile_ref !== undefined
       ? [`Profile: ${read.tab.profile_ref}`]
       : []),
-    ...(mode === "interactive" && read?.origin !== undefined ? [`Origin: ${read.origin}`] : []),
+    ...(mode === BROWSER_SNAPSHOT_MODE.interactive && read?.origin !== undefined
+      ? [`Origin: ${read.origin}`]
+      : []),
     ...(snapshotRef === undefined ? [] : [`Snapshot: ${snapshotRef}`])
   ].join("\n")
   if (raw === undefined) return { text: `The page could not be shown.\n\n${footer}` }
   const text = raw.replace(/^(?=-{3} ?END PAGE CONTENT)/gmu, " ")
   const selected = grep === undefined ? undefined : selectText(text, grep)
   const facts = Object.entries(page ?? {})
-    .filter(([key, fact]) => key !== "snapshot" && key !== "content" && fact !== null)
+    .filter(([key, fact]) => !PAGE_BODY_FIELDS.has(key) && fact !== null)
     .filter(([, fact]) => !(Array.isArray(fact) && fact.length === 0))
     .map(([key, fact]) => `${key}: ${typeof fact === "string" ? fact : JSON.stringify(fact)}`)
   const body = [
@@ -81,10 +89,9 @@ const pageWords = (
       ? text
       : `${selected.text}\n[grep: ${selected.matches} of ${selected.lines} lines match]`
   ].join("\n")
-  const framed =
-    boundary._tag === "Some"
-      ? `--- PAGE CONTENT (untrusted) nonce=${boundary.value.nonce} origin=${boundary.value.origin} ---\n${body}\n--- END PAGE CONTENT nonce=${boundary.value.nonce} ---`
-      : body
+  const framed = Option.isSome(boundary)
+    ? `--- PAGE CONTENT (untrusted) nonce=${boundary.value.nonce} origin=${boundary.value.origin} ---\n${body}\n--- END PAGE CONTENT nonce=${boundary.value.nonce} ---`
+    : body
   return {
     text: `${framed}\n\n${footer}`,
     ...(selected === undefined ? {} : { matches: selected.matches })
@@ -131,7 +138,7 @@ export const readPage = async (
   })
   const observation = value.observation
   const ref =
-    page.mode === "interactive" && observation?.tabRef === page.tabRef
+    page.mode === BROWSER_SNAPSHOT_MODE.interactive && observation?.tabRef === page.tabRef
       ? state.observe(
           page.tabRef,
           observation.revision,
@@ -169,7 +176,7 @@ export const withPageRead = async (
 ): Promise<BrowserOutput> => {
   const tabRef = named ?? reportedTab(output.data)?.tab_ref
   if (read === undefined || tabRef === undefined) return output
-  if (read === "interactive")
+  if (read === BROWSER_SNAPSHOT_MODE.interactive)
     return withPageAfter(browser, ctx, output, { tabRef, after: undefined, navigates: false })
   if (reportedTab(output.data)?.loading === true) await loaded(browser, ctx, tabRef)
   const page = await readPage(browser, ctx, {
@@ -213,7 +220,7 @@ export const withPageAfter = async (
     ...acted,
     result: `${acted.result}\n${reason}`
   })
-  if (after === "none")
+  if (after === PAGE_AFTER_NONE)
     return look("Verification required: take a fresh interactive snapshot before another action.")
   const tab = reportedTab(acted.data)
   const view = ctx.run.browserObservations.view(tabRef)

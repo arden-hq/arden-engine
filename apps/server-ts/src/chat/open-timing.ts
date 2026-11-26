@@ -5,7 +5,8 @@ import {
   type ChatOpenServerTiming
 } from "@arden-hq/protocol/chat-open-timing"
 
-const traceChatOpen = process.env.ARDEN_CHAT_OPEN_TRACE === "1"
+const CHAT_OPEN_TRACE_ENABLED = "1"
+const traceChatOpen = process.env.ARDEN_CHAT_OPEN_TRACE === CHAT_OPEN_TRACE_ENABLED
 export const chatOpenTracingEnabled = (): boolean => traceChatOpen
 export type ChatOpenTimingPhase = ChatOpenServerTiming
 

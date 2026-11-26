@@ -1,4 +1,6 @@
 import { countOf } from "@arden-hq/std/count"
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 
@@ -71,8 +73,10 @@ const researchWorkspace = async (
     }
   )
   const agent =
-    snapshot?.header.sessionType === "agent" ? readAgentSessionMetadata(snapshot.metadata) : null
-  if (agent?.mode !== "research" || agent.researchWorkspaceId === null) {
+    snapshot?.header.sessionType === SESSION_TYPE.agent
+      ? readAgentSessionMetadata(snapshot.metadata)
+      : null
+  if (agent?.mode !== AGENT_MODE.research || agent.researchWorkspaceId === null) {
     throw new ToolExecutionError(
       "Claim tools are available only inside a research agent with a task workspace.",
       { preview: "Research workspace unavailable", retryable: false }

@@ -1,3 +1,4 @@
+import { INBOX_SCOPE } from "@arden-hq/protocol/inbox"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InboxStore } from "../../persistence/inbox/store.js"
@@ -21,7 +22,9 @@ export const InboxHandlers = HttpApiBuilder.group(
       .handle("dismiss", ({ payload }) =>
         store
           .dismiss(
-            payload.scope === "group" ? { scope: "group", groupKey: payload.group_key } : payload
+            payload.scope === INBOX_SCOPE.group
+              ? { scope: INBOX_SCOPE.group, groupKey: payload.group_key }
+              : payload
           )
           .pipe(Effect.map(inboxToWire), Effect.catch(failStore))
       )

@@ -1,3 +1,5 @@
+import { SOURCE_KIND } from "@arden-hq/protocol/spaces/work"
+import { TASK_PROPOSAL_STATUS } from "@arden-hq/protocol/proposals"
 import { TaskSourceRecordSchema } from "../work/task-record.js"
 import { type TaskSourceRecord } from "../work/task-record.js"
 import { assertCurrentTaskRevision } from "./work-history.js"
@@ -95,7 +97,10 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
         const rejections = yield* Effect.forEach(
           [
             ...refusedProposals.map((row) => ({
-              kind: row.status === "rejected" ? ("proposal" as const) : ("expired" as const),
+              kind:
+                row.status === TASK_PROPOSAL_STATUS.rejected
+                  ? ("proposal" as const)
+                  : ("expired" as const),
               item_id: null,
               proposal_id: row.proposal_id,
               sources: row.sources,
@@ -184,7 +189,7 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
     for (const source of options.sources) {
       if (source.revision === null)
         return yield* workError("invalid", "Inferred Tasks require exact evidence revisions")
-      if (source.kind === "chat") {
+      if (source.kind === SOURCE_KIND.chat) {
         const evidence =
           yield* sql`SELECT 1 FROM chat_runs AS run JOIN sessions AS session ON session.session_id = run.session_id
           WHERE run.session_id = ${source.session_id} AND session.space_id = ${options.spaceId}
@@ -195,14 +200,14 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
             "invalid",
             "Chat evidence must identify a recorded turn in this Space"
           )
-      } else if (source.kind === "task") {
+      } else if (source.kind === SOURCE_KIND.task) {
         yield* assertCurrentTaskRevision(sql, source.item_id, source.revision)
         if (source.item_id !== rows[0]?.origin_task)
           return yield* workError(
             "invalid",
             "A proposal cites only the Task whose worker is proposing it"
           )
-      } else if (source.kind === "space") {
+      } else if (source.kind === SOURCE_KIND.space) {
         return yield* workError("invalid", BARE_SPACE)
       }
     }
@@ -256,7 +261,7 @@ export const assertMainProposalAdmission = Effect.fn("Work.admitMainProposal")(f
     const review = yield* readInferenceReview({ sql, consistent: (read) => read }, options.spaceId)
     if (review.snapshot !== options.snapshot) return yield* workError("conflict", WORK_CHANGED)
     for (const source of options.sources) {
-      if (source.kind === "chat") {
+      if (source.kind === SOURCE_KIND.chat) {
         const own = yield* sql`SELECT 1 FROM chat_runs WHERE session_id = ${run.session_id}
           AND session_id = ${source.session_id}
           AND json_extract(metadata_json, '$.turn_id') = ${source.turn_id}
@@ -266,14 +271,14 @@ export const assertMainProposalAdmission = Effect.fn("Work.admitMainProposal")(f
             "invalid",
             "Chat evidence must be a recorded turn of this run's chat"
           )
-      } else if (source.kind === "task") {
+      } else if (source.kind === SOURCE_KIND.task) {
         yield* assertCurrentTaskRevision(sql, source.item_id, source.revision)
         if (source.item_id !== run.origin_task)
           return yield* workError(
             "invalid",
             "A proposal cites only the Task whose worker is proposing it"
           )
-      } else if (source.kind === "space") {
+      } else if (source.kind === SOURCE_KIND.space) {
         return yield* workError("invalid", BARE_SPACE)
       }
     }
@@ -293,7 +298,7 @@ export const assertCitedTurnsFinished = Effect.fn("Work.citedTurnsFinished")(fun
   sources: ReadonlyArray<TaskSourceRecord>
 ) {
   for (const source of sources) {
-    if (source.kind !== "chat") continue
+    if (source.kind !== SOURCE_KIND.chat) continue
     const runs = yield* sql<{ readonly status: string }>`SELECT run.status
       FROM chat_runs AS run JOIN sessions AS session ON session.session_id = run.session_id
       WHERE run.session_id = ${source.session_id}

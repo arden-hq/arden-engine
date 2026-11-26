@@ -1,10 +1,16 @@
+import { SQLITE_MEMORY_FILENAME } from "./deps.js"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { parseJsonText } from "@arden-hq/protocol/common"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { Reactivity } from "effect/unstable/reactivity"
 import { makeSqliteThreadClient } from "@arden-hq/sqlite-thread"
 
-import { deleteSessionTree, sessionDeletionTree } from "./session-tree-deletion.js"
+import {
+  SESSION_TREE_DELETION,
+  deleteSessionTree,
+  sessionDeletionTree
+} from "./session-tree-deletion.js"
 import { sessionActiveWorkSql } from "./work-retention.js"
 import { BREAKDOWN_QUERIES, type BreakdownRows } from "./storage-breakdown-queries.js"
 import {
@@ -34,9 +40,11 @@ interface CandidateRow {
   readonly has_unfinished_todo: number
 }
 
+const STORAGE_SCOPE = { all: "all", chat: "chat" } as const
+
 type CandidateScope =
-  | { readonly kind: "all" }
-  | { readonly kind: "chat"; readonly sessionId: string }
+  | { readonly kind: typeof STORAGE_SCOPE.all }
+  | { readonly kind: typeof STORAGE_SCOPE.chat; readonly sessionId: string }
 
 const storeError = (
   operation: StorageSessionStoreError["operation"],
@@ -75,7 +83,7 @@ const loadRows = (sql: SqlClient.SqlClient, scope: CandidateScope) => sql<Candid
     name: "deletion_tree",
     from: sql`SELECT session_id FROM sessions
       WHERE ${userChatSql()} AND parent_session_id IS NULL
-        ${scope.kind === "chat" ? sql`AND session_id = ${scope.sessionId}` : sql``}`,
+        ${scope.kind === STORAGE_SCOPE.chat ? sql`AND session_id = ${scope.sessionId}` : sql``}`,
     root: true
   })},
   members(root_session_id, session_id) AS MATERIALIZED (
@@ -244,7 +252,7 @@ export const makeStorageSessionStore = (
     const { rows, totals } = yield* writer
       .snapshot(
         Effect.all({
-          rows: loadRows(writer.reader, { kind: "all" }),
+          rows: loadRows(writer.reader, { kind: STORAGE_SCOPE.all }),
           totals: loadTotalBytes(writer.reader)
         })
       )
@@ -314,7 +322,7 @@ export const makeStorageSessionStore = (
               storeError("delete", "storage", "Could not delete Session", expected.sessionId, cause)
             )
           )
-          if (deleted.kind !== "deleted") {
+          if (deleted.kind !== SESSION_TREE_DELETION.deleted) {
             return yield* storeError(
               "delete",
               "conflict",
@@ -343,7 +351,7 @@ export const makeStorageSessionStore = (
     const fail = (message: string) => (cause: unknown) =>
       storeError("breakdown", "storage", message, undefined, cause)
     const { others, size, weights, counts } = yield* (
-      filename === ":memory:" ? readBreakdown(sql) : measureOnOwnConnection(filename)
+      filename === SQLITE_MEMORY_FILENAME ? readBreakdown(sql) : measureOnOwnConnection(filename)
     ).pipe(Effect.mapError(fail("Could not measure the database")))
 
     const file = size[0]
@@ -366,8 +374,8 @@ export const makeStorageSessionStore = (
     }
 
     const kindOf = (type: string): "chats" | "channels" | "agents" => {
-      if (type === "channel") return "channels"
-      if (type === "agent") return "agents"
+      if (type === SESSION_TYPE.channel) return "channels"
+      if (type === SESSION_TYPE.agent) return "agents"
       return "chats"
     }
     const weight = { chats: 0, channels: 0, agents: 0 }

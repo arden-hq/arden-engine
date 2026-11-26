@@ -1,6 +1,8 @@
 import { NativeAxActions, type NativeAxAction } from "./contract.js"
 import { Schema } from "effect"
 
+const ELEMENT_ACTIONS_KEY = "actions"
+
 const axActions = new Map<string, NativeAxAction>(Object.entries(NativeAxActions))
 const isArray = Schema.is(Schema.Array(Schema.Json))
 const isJson = Schema.is(Schema.Json)
@@ -30,10 +32,12 @@ export function nativeObservation(state: unknown, screenshot: boolean): Schema.J
       isObject(element)
         ? Object.fromEntries(
             Object.entries(element)
-              .filter(([key]) => key !== "frame" && (screenshot || key !== "screenshot_frame"))
+              .filter(
+                ([key]) => !(screenshot ? ["frame"] : ["frame", "screenshot_frame"]).includes(key)
+              )
               .map(([key, value]) => [
                 key,
-                key === "actions" && isArray(value)
+                key === ELEMENT_ACTIONS_KEY && isArray(value)
                   ? value.flatMap((action) => {
                       const supported =
                         typeof action === "string" ? axActions.get(action) : undefined

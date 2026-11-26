@@ -1,5 +1,11 @@
-import type { ApprovalMode } from "@arden-hq/protocol/permissions"
+import {
+  APPROVAL_MODE,
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  type ApprovalMode
+} from "@arden-hq/protocol/permissions"
 import { countOf, formatBytes } from "@arden-hq/std/count"
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
 import { Schema } from "effect"
 import { readFile, stat } from "node:fs/promises"
 
@@ -20,6 +26,7 @@ import type { ServerRunContext } from "./run-context.js"
 import { toolRefusal } from "./tool-failure.js"
 import { atomicCompareAndSwap, LocalRevisionConflict } from "../storage/local-revision.js"
 
+const ABSENT_REVISION = "absent"
 const MAX_MUTATION_FILE_BYTES = 8 * 1024 * 1024
 
 const WriteParametersSchema = Schema.Struct({
@@ -52,7 +59,7 @@ const writePrompt = async (
   try {
     const before = await readWriteSource(target)
     return {
-      preview: `${before.revision === "absent" ? "Create" : "Replace"} ${displayFor(cwd, target)}`,
+      preview: `${before.revision === ABSENT_REVISION ? "Create" : "Replace"} ${displayFor(cwd, target)}`,
       diff:
         before.content === undefined || input.content.includes("\0")
           ? DIFF_UNAVAILABLE
@@ -71,7 +78,8 @@ const editPrompt = async (
 ): Promise<ServerApprovalPrompt> => {
   try {
     const before = await readMutationSource(target)
-    if (before.revision === "absent") throw toolRefusal(`File not found: ${target}.`, "Not found")
+    if (before.revision === ABSENT_REVISION)
+      throw toolRefusal(`File not found: ${target}.`, "Not found")
     const matches = before.content.split(input.old_text).length - 1
     if (matches !== 1) {
       throw toolRefusal(
@@ -96,8 +104,9 @@ const lineCount = (text: string): number =>
   text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0)
 
 const writesWithoutCard = (mode: ApprovalMode, cwd: SessionPathPolicy, target: string): boolean =>
-  pathRuleFor(cwd, { lexical: target, real: target }, "change") === "allow" ||
-  (mode === "safe" && insideLocalFolder(cwd, target))
+  pathRuleFor(cwd, { lexical: target, real: target }, PERMISSION_PATH_ACCESS.change) ===
+    PERMISSION_RULE_DECISION.allow ||
+  (mode === APPROVAL_MODE.safe && insideLocalFolder(cwd, target))
 
 const withFolderGrant = async (
   services: LocalPathServices,
@@ -129,7 +138,7 @@ const readMutationSource = async (
     const bytes = await readFile(target)
     return { content: bytes.toString("utf8"), revision: sha256Hex(bytes) }
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+    if (isErrnoCode(cause, ERRNO.ENOENT)) {
       return { content: "", revision: "absent" }
     }
     throw cause
@@ -148,7 +157,7 @@ const readWriteSource = async (
       Buffer.from(content, "utf8").equals(bytes)
     return { content: text ? content : undefined, revision: sha256Hex(bytes) }
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+    if (isErrnoCode(cause, ERRNO.ENOENT)) {
       return { content: "", revision: "absent" }
     }
     throw cause
@@ -337,7 +346,7 @@ export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<Serve
       const target = await resolveFor(cwd, input.path, { mutation: true })
       try {
         const before = await readMutationSource(target)
-        if (before.revision === "absent")
+        if (before.revision === ABSENT_REVISION)
           throw toolRefusal(`File not found: ${target}.`, "Not found")
         const matches = before.content.split(input.old_text).length - 1
         if (matches !== 1) {

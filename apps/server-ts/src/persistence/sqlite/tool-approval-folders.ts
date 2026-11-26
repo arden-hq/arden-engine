@@ -5,7 +5,7 @@ import { ToolExecutionStoreError, type ToolExecutionIdentity } from "../tools/st
 import { spaceFolderGrantOf } from "../permissions/space-folder-approval.js"
 import { saveRuleInTransaction } from "./permission-rules.js"
 import type { RuleList } from "../permissions/rules.js"
-import { toolError, type ApprovalRow } from "./tool-rows.js"
+import { TOOL_APPROVAL_KIND, toolError, type ApprovalRow } from "./tool-rows.js"
 
 interface SpaceFolderRow {
   readonly space_id: string
@@ -58,7 +58,7 @@ export const attachFolderToSpaceInTransaction = Effect.fn(
   identity: Pick<ToolExecutionIdentity, "runId" | "toolCallId">
 ): Effect.fn.Return<void, ToolExecutionStoreError> {
   const grant =
-    approval.kind === "tool_approval"
+    approval.kind === TOOL_APPROVAL_KIND.approval
       ? spaceFolderGrantOf(approval.tool_name, payload["approval_data"])
       : undefined
   if (grant === undefined) {

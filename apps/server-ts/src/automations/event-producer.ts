@@ -30,21 +30,28 @@ interface AutomationEventAvailability {
 
 type ProducerPoll<R> = Effect.Effect<unknown, Cause.YieldableError, R>
 
+export const AUTOMATION_EVENT_SOURCE = {
+  always: "always",
+  onDemand: "on_demand",
+  live: "live",
+  feed: "feed"
+} as const
+
 type AutomationEventSource<R> =
-  | { readonly kind: "always"; readonly poll: ProducerPoll<R> }
+  | { readonly kind: typeof AUTOMATION_EVENT_SOURCE.always; readonly poll: ProducerPoll<R> }
   | {
-      readonly kind: "on_demand"
+      readonly kind: typeof AUTOMATION_EVENT_SOURCE.onDemand
       readonly poll: (
         triggers: readonly [EventAutomationTrigger, ...Array<EventAutomationTrigger>]
       ) => ProducerPoll<R>
     }
   | {
-      readonly kind: "live"
+      readonly kind: typeof AUTOMATION_EVENT_SOURCE.live
       readonly follow: (
         triggers: ReadonlyArray<EventAutomationTrigger>
       ) => Effect.Effect<ReadonlyArray<string>, Cause.YieldableError, R>
     }
-  | { readonly kind: "feed" }
+  | { readonly kind: typeof AUTOMATION_EVENT_SOURCE.feed }
 
 export interface AutomationEventProducer<
   T extends AutomationEventType = AutomationEventType,

@@ -1,3 +1,15 @@
+import { RECORDED_HISTORY_ERROR_TAG } from "../history.js"
+import {
+  TASK_PROPOSAL_ACCEPTED_IN,
+  TASK_PROPOSAL_DECISION,
+  TASK_PROPOSAL_PLACEMENT,
+  TASK_PROPOSAL_START_SPACE,
+  TASK_PROPOSAL_STATUS,
+  type TaskProposal,
+  type TaskProposalRetirement,
+  type TaskProposalScope
+} from "@arden-hq/protocol/proposals"
+import { SPACE_TASK_CAPTURE_BASIS } from "@arden-hq/protocol/spaces/work"
 import { RunContextSchema } from "../runs/stored-context.js"
 import { publicTask } from "../work/public.js"
 import { TaskRecordSchema, TaskSourceRecordSchema } from "../work/task-record.js"
@@ -6,16 +18,10 @@ import { captureMutationVersions } from "./mutation-links.js"
 import type { SqlClient } from "effect/unstable/sql"
 import { readRecordedHistory } from "./recorded-history.js"
 import { UNSTARTED } from "./proposal-task.js"
-import type {
-  TaskProposal,
-  TaskProposalRetirement,
-  TaskProposalScope
-} from "@arden-hq/protocol/proposals"
 import {
   ResolveTaskProposalInputSchema,
   TaskProposalSchema
 } from "@arden-hq/protocol/effect/proposals"
-import { TASK_PROPOSAL_ACCEPTED_IN, TASK_PROPOSAL_START_SPACE } from "@arden-hq/protocol/proposals"
 import { SpaceTaskCaptureInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { DateTime, Effect, Schema } from "effect"
 import {
@@ -47,7 +53,7 @@ import {
 import { isOrdinaryChat } from "./in-chat-task.js"
 import { makeProposalRevision, proposalHash } from "./proposal-revision.js"
 import { refusedProposalStatusList } from "./status-sets.js"
-import { type ProposalRow, canonicalizeSources, failure } from "./task-proposal-support.js"
+import { decided, type ProposalRow, canonicalizeSources, failure } from "./task-proposal-support.js"
 import { makeTaskProposalStart } from "./task-proposal-start.js"
 
 export const makeTaskProposalStore = (options: {
@@ -108,11 +114,11 @@ export const makeTaskProposalStore = (options: {
 
   const listed = (scope: TaskProposalScope) => {
     switch (scope.place) {
-      case "space":
+      case TASK_PROPOSAL_PLACEMENT.space:
         return sql<ProposalRow>`SELECT * FROM task_proposals
           WHERE place = 'space' AND space_id = ${scope.spaceId}
           ORDER BY updated_at DESC, proposal_id`
-      case "chat":
+      case TASK_PROPOSAL_PLACEMENT.chat:
         return sql<ProposalRow>`SELECT * FROM task_proposals
           WHERE place = 'chat' AND chat_session_id = ${scope.sessionId}
           ORDER BY updated_at DESC, proposal_id`
@@ -154,7 +160,7 @@ export const makeTaskProposalStore = (options: {
         request.capture,
         { onExcessProperty: "error" }
       ).pipe(Effect.mapError((cause) => failure("invalid", "Invalid proposed Task capture", cause)))
-      if (taskCapture.basis !== "inferred") {
+      if (taskCapture.basis !== SPACE_TASK_CAPTURE_BASIS.inferred) {
         return yield* failure("invalid", "Task proposals require inferred capture")
       }
       const decodedSources = yield* Schema.decodeUnknownEffect(
@@ -349,17 +355,17 @@ export const makeTaskProposalStore = (options: {
       return yield* writer.transact(
         Effect.gen(function* () {
           const row = yield* read(proposalId)
-          if (row.status === "retired")
+          if (row.status === TASK_PROPOSAL_STATUS.retired)
             return yield* new TaskProposalConflictError({
               kind: "settled",
               message: "This proposal was retired after its evidence was reviewed"
             })
-          if (row.status === "expired")
+          if (row.status === TASK_PROPOSAL_STATUS.expired)
             return yield* new TaskProposalConflictError({
               kind: "settled",
               message: "This offer expired unanswered"
             })
-          if (row.status === "accepted" || row.status === "rejected") {
+          if (decided(row.status)) {
             if (
               row.settlement_client_id !== input.client_id ||
               row.settlement_decision !== input.decision
@@ -390,7 +396,7 @@ export const makeTaskProposalStore = (options: {
               )
             return { proposal, task: { kind: "started" as const, task: publicTask(receipt) } }
           }
-          if (row.status === "held")
+          if (row.status === TASK_PROPOSAL_STATUS.held)
             return yield* new TaskProposalConflictError({
               kind: "not_offered",
               message: "This suggestion is not open yet"
@@ -401,13 +407,13 @@ export const makeTaskProposalStore = (options: {
               message: "This Task proposal changed; review it again"
             })
           }
-          if (input.decision === "later") {
+          if (input.decision === TASK_PROPOSAL_DECISION.later) {
             yield* putOfferOff(sql, proposalId, at)
             const proposal = yield* read(proposalId).pipe(Effect.flatMap(project))
             yield* changed(row)
             return { proposal, task: UNSTARTED }
           }
-          if (input.decision === "reject") {
+          if (input.decision === TASK_PROPOSAL_DECISION.reject) {
             yield* sql`UPDATE task_proposals SET
             status = 'rejected', settlement_client_id = ${input.client_id},
             settlement_decision = 'reject', updated_at = ${now}, settled_at = ${now}
@@ -497,7 +503,7 @@ export const makeTaskProposalStore = (options: {
         .pipe(
           Effect.mapError((cause) =>
             failure(
-              cause._tag === "RecordedHistoryError" ? cause.reason : "storage",
+              cause._tag === RECORDED_HISTORY_ERROR_TAG ? cause.reason : "storage",
               cause.message,
               cause
             )

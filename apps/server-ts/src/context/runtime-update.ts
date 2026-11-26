@@ -13,26 +13,32 @@ import {
   type SpaceView
 } from "./space-render.js"
 
+export const RUNTIME_SECTION = { text: "text", space: "space", direction: "direction" } as const
+
+export const SECTION_LIFETIME = { state: "state", turn: "turn" } as const
+
 const RUNTIME_CONTEXT_SOURCE = { runtime: "runtime" } as const
 export const isRuntimeContextSource = (
   source: unknown
 ): source is typeof RUNTIME_CONTEXT_SOURCE.runtime => source === RUNTIME_CONTEXT_SOURCE.runtime
 
+const RUNTIME_UPDATE = { full: "full", delta: "delta" } as const
+
 export type RuntimeSection =
   | {
-      readonly kind: "text"
+      readonly kind: typeof RUNTIME_SECTION.text
       readonly key: string
       readonly text: string
-      readonly lifetime: "state" | "turn"
+      readonly lifetime: (typeof SECTION_LIFETIME)[keyof typeof SECTION_LIFETIME]
     }
   | {
-      readonly kind: "space"
+      readonly kind: typeof RUNTIME_SECTION.space
       readonly key: string
       readonly text: string
       readonly space: SpaceView
     }
   | {
-      readonly kind: "direction"
+      readonly kind: typeof RUNTIME_SECTION.direction
       readonly key: string
       readonly text: string
       readonly receipt: TaskDirectionReceipt
@@ -41,7 +47,7 @@ export type RuntimeSection =
 export const textSection = (
   name: string,
   value: string | undefined,
-  lifetime: "state" | "turn" = "state"
+  lifetime: (typeof SECTION_LIFETIME)[keyof typeof SECTION_LIFETIME] = SECTION_LIFETIME.state
 ): ReadonlyArray<RuntimeSection> => {
   const trimmed = value?.trim()
   if (trimmed === undefined || trimmed === "") return []
@@ -63,7 +69,7 @@ const RuntimeStateSchema = Schema.Struct({
 export type RuntimeState = typeof RuntimeStateSchema.Type
 
 export interface RuntimeUpdate {
-  readonly kind: "full" | "delta"
+  readonly kind: (typeof RUNTIME_UPDATE)[keyof typeof RUNTIME_UPDATE]
   readonly text: string
   readonly state: RuntimeState
 }
@@ -86,7 +92,7 @@ export const runtimeUpdate = ({
   if (presented === undefined) {
     if (current.sections.length === 0 && current.endNote === undefined) return undefined
     return {
-      kind: "full",
+      kind: RUNTIME_UPDATE.full,
       text: joinParts([
         FULL_HEADER,
         ...current.sections.map((section) => section.text),
@@ -111,7 +117,8 @@ export const presentedRuntimeState = (
   records: ReadonlyArray<{ readonly update: unknown; readonly state: unknown }>
 ): RuntimeState | undefined => {
   const latest = records.at(-1)
-  if (latest === undefined || !records.some((record) => record.update === "full")) return undefined
+  if (latest === undefined || !records.some((record) => record.update === RUNTIME_UPDATE.full))
+    return undefined
   return Option.getOrUndefined(decodeState(latest.state))
 }
 
@@ -129,7 +136,8 @@ export const producingTaskDirection = (
   const record = messages
     .slice(0, Math.max(asked, 0))
     .findLast(
-      (message) => message.role === ROLE.developer && message.arden_context_source === "runtime"
+      (message) =>
+        message.role === ROLE.developer && isRuntimeContextSource(message.arden_context_source)
     )
   if (asked < 0 || record === undefined || record.role !== ROLE.developer) return undefined
   return Option.getOrUndefined(decodeState(record.arden_context_state))?.direction
@@ -141,9 +149,9 @@ const sectionChanges = (
 ): ReadonlyArray<string> => {
   const present = new Set(current.sections.map((section) => section.key))
   const changed = current.sections.flatMap((section) => {
-    if (section.kind === "direction")
+    if (section.kind === RUNTIME_SECTION.direction)
       return presented.sections[section.key] === digest(section.text) ? [] : [section.text]
-    if (section.kind === "space") {
+    if (section.kind === RUNTIME_SECTION.space) {
       if (presented.space === undefined || presented.space.key !== section.key)
         return [section.text]
       return [renderSpaceChanges(presented.space.facts, section.space)].filter(
@@ -151,7 +159,9 @@ const sectionChanges = (
       )
     }
     const before =
-      section.lifetime === "state" ? presented.sections[section.key] : presented.turn[section.key]
+      section.lifetime === SECTION_LIFETIME.state
+        ? presented.sections[section.key]
+        : presented.turn[section.key]
     return before === digest(section.text) ? [] : [section.text]
   })
   const removed = [
@@ -164,19 +174,20 @@ const sectionChanges = (
 }
 
 const runtimeState = (context: RuntimeContext): RuntimeState => {
-  const space = context.sections.find((section) => section.kind === "space")
-  const direction = context.sections.find((section) => section.kind === "direction")
+  const space = context.sections.find((section) => section.kind === RUNTIME_SECTION.space)
+  const direction = context.sections.find((section) => section.kind === RUNTIME_SECTION.direction)
   return {
     sections: Object.fromEntries(
       context.sections.flatMap((section) =>
-        (section.kind === "text" && section.lifetime === "state") || section.kind === "direction"
+        (section.kind === RUNTIME_SECTION.text && section.lifetime === SECTION_LIFETIME.state) ||
+        section.kind === RUNTIME_SECTION.direction
           ? [[section.key, digest(section.text)]]
           : []
       )
     ),
     turn: Object.fromEntries(
       context.sections.flatMap((section) =>
-        section.kind === "text" && section.lifetime === "turn"
+        section.kind === RUNTIME_SECTION.text && section.lifetime === SECTION_LIFETIME.turn
           ? [[section.key, digest(section.text)]]
           : []
       )

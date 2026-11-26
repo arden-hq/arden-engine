@@ -1,7 +1,9 @@
-import type {
-  DecisionBackendState,
-  DecisionSiteId,
-  DecisionSiteStatus
+import {
+  DECISION_BACKEND,
+  MODEL_ENDPOINT_INPUT,
+  type DecisionBackendState,
+  type DecisionSiteId,
+  type DecisionSiteStatus
 } from "@arden-hq/protocol/model-endpoints"
 
 interface DecisionSite {
@@ -33,8 +35,8 @@ export const decisionSiteStatuses = (
 ): ReadonlyArray<DecisionSiteStatus> =>
   Object.entries(DECISION_SITES).map(([site, entry]): DecisionSiteStatus => {
     const usable =
-      (backend.state === "ready" || backend.state === "failing") &&
-      (!entry.needsImages || backend.input === "text+image")
+      (backend.state === DECISION_BACKEND.ready || backend.state === DECISION_BACKEND.failing) &&
+      (!entry.needsImages || backend.input === MODEL_ENDPOINT_INPUT.textImage)
     return {
       site: site as DecisionSiteId,
       needsImages: entry.needsImages,

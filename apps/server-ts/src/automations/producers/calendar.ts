@@ -12,6 +12,7 @@ import { DateTime, Effect, Option, Schema } from "effect"
 import {
   calendarEventListUrl,
   CalendarEventListSchema,
+  isCancelledStatus,
   PRIMARY_CALENDAR,
   type CalendarListedEvent
 } from "../../google/calendar-client.js"
@@ -19,7 +20,7 @@ import { GoogleConnections } from "../../google/service.js"
 import { allDayFireAt, nextWallDay, wallDayOf, wallInstant } from "../../google/zoned-time.js"
 import type { AutomationTriggerEvent } from "../../persistence/automations/model.js"
 import { AutomationTriggers } from "../../persistence/automations/triggers.js"
-import type { AutomationEventProducer } from "../event-producer.js"
+import { AUTOMATION_EVENT_SOURCE, type AutomationEventProducer } from "../event-producer.js"
 import { readField } from "../events.js"
 import { calendarKeyPart, watchedCalendars } from "./calendar-sources.js"
 
@@ -88,7 +89,7 @@ const approachingEvents = (
   input: PolledCalendarEvent & { readonly horizonMs: number; readonly timeZone: string }
 ): ReadonlyArray<AutomationTriggerEvent> => {
   const { event, nowMs } = input
-  if (event.status === "cancelled") return []
+  if (isCancelledStatus(event.status)) return []
   const timed = timedInstant(event.start.dateTime)
   if (timed !== undefined) {
     const startMs = DateTime.toEpochMillis(timed)
@@ -263,6 +264,6 @@ export const calendarEventProducer: AutomationEventProducer<
     const minutes = readField(event.context, "event.minutes_until")
     return typeof minutes === "number" && minutes <= trigger.lead.minutes
   },
-  source: { kind: "on_demand", poll: pollApproaching },
+  source: { kind: AUTOMATION_EVENT_SOURCE.onDemand, poll: pollApproaching },
   failureMessage: "Google Calendar Automation trigger producer failed"
 }

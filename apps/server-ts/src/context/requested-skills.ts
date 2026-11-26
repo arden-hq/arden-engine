@@ -4,7 +4,7 @@ import { loadSkillInstructions } from "../skills/instructions.js"
 import type { SkillCatalog } from "../skills/service.js"
 import { latestHumanText, type ContentEnvelope } from "../persistence/transcript/content.js"
 import { renderPromptSection } from "../prompts/format.js"
-import type { RuntimeSection } from "./runtime-update.js"
+import { SECTION_LIFETIME, type RuntimeSection } from "./runtime-update.js"
 
 export const requestedSkillsContext = Effect.fn("Context.requestedSkills")(function* ({
   skills,
@@ -28,7 +28,7 @@ export const requestedSkillsContext = Effect.fn("Context.requestedSkills")(funct
             block.content
           ].join("\n\n")
         ),
-        lifetime: "turn" as const
+        lifetime: SECTION_LIFETIME.turn
       })),
       Effect.catchTag("SkillError", () => Effect.succeed(undefined))
     )

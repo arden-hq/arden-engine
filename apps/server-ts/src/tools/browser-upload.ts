@@ -22,6 +22,7 @@ import { withPageAfter } from "./browser-page.js"
 import { nodeRefSchema, PageAfterSchema, SnapshotRefSchema } from "./browser-parameters.js"
 import {
   FileRefSchema,
+  PREPARED_FILE,
   PreparedFileSchema,
   createSharedFileAccess,
   preparedFilesApproval,
@@ -109,7 +110,7 @@ const makeBrowserUploadTool = (services: UploadServices): ServerTool => {
     site: (input) => input.origin,
     approvalRequirement: async (input, ctx) => {
       const prepared = await prepareUpload(files, input, ctx)
-      return prepared.some((file) => file.kind === "outside")
+      return prepared.some((file) => file.kind === PREPARED_FILE.outside)
         ? uploadPrompt(services, input, ctx, prepared)
         : undefined
     },
@@ -187,7 +188,7 @@ const uploadPrompt = async (
   ctx: UploadCtx,
   prepared: ReadonlyArray<PreparedFile>
 ): Promise<ServerApprovalPrompt> => {
-  const outside = prepared.filter((file) => file.kind === "outside")
+  const outside = prepared.filter((file) => file.kind === PREPARED_FILE.outside)
   const grant =
     outside.length === 0
       ? undefined
@@ -251,7 +252,7 @@ const uploadCard = ({
   readonly data: JsonObject
 }): ServerApprovalPrompt => {
   const site = new URL(origin).host
-  const outside = files.some((file) => file.kind === "outside")
+  const outside = files.some((file) => file.kind === PREPARED_FILE.outside)
   return {
     preview: `Upload ${files.map((file) => file.name).join(", ")} to ${site}`,
     presentation: {
@@ -259,7 +260,7 @@ const uploadCard = ({
       fields: [
         ...files.flatMap((file) => [
           { label: "File", value: `${file.name} · ${formatBytes(file.size)}` },
-          ...(file.kind === "outside" ? [{ label: "Path", value: file.path }] : [])
+          ...(file.kind === PREPARED_FILE.outside ? [{ label: "Path", value: file.path }] : [])
         ]),
         { label: APPROVAL_FIELD_LABEL.site, value: origin }
       ],

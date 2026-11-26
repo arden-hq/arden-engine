@@ -23,7 +23,11 @@ import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { PostStore } from "../src/persistence/posts/store.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { claimAll, startChat } from "./fixtures/job-runs.js"
-import { withTempDatabase } from "./fixtures/temp-database.js"
+import {
+  runTestDatabase,
+  withTempDatabase,
+  withTempDatabaseFile
+} from "./fixtures/temp-database.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
 
@@ -189,41 +193,105 @@ const setup = Effect.gen(function* () {
   return { sql, queue, spaces, arrive, runEvents, settle, drain, postedIn }
 })
 
-it("post_message posts in the named Space, and a retried job posts nothing twice", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, spaces, arrive, runEvents, drain, postedIn } = yield* setup
-      const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
-      const lease = yield* arrive("mail-1")
-      const call = yield* posting({
-        space_id: taxes.space_id,
-        text: "The bank needs a form by Friday."
-      })
-      const first = yield* runEvents(lease, [call])
-      expect(first.result).toMatchObject({ status: "ended", outcome: "finished" })
-      const runId = first.result.chatRunId
-      const sessionId = first.result.chatSessionId
-      if (runId === null || sessionId === null) return yield* Effect.die("the run has no chat")
-      const reclaimed = {
-        ...lease,
-        payload: {
-          ...lease.payload,
-          chatRun: { runId, sessionId, authority: "active" as const }
-        }
-      }
-      const again = yield* runEvents(reclaimed, [call])
-      expect(again.result).toMatchObject({ status: "ended", outcome: "finished" })
-      yield* drain
-      const [chat] = yield* sql<{ readonly session_id: string }>`
-        SELECT session_id FROM sessions WHERE space_id = ${taxes.space_id}`
-      if (chat === undefined) return yield* Effect.die("no Space chat")
-      expect(yield* postedIn(chat.session_id)).toEqual([
-        { role: ROLE.assistant, content: "The bank needs a form by Friday." }
-      ])
-      expect(yield* sql`SELECT 1 FROM automation_deliveries`).toHaveLength(1)
+it.each([
+  { phase: "before delivery", alreadyDelivered: false, initialStatus: "pending" },
+  { phase: "after delivery", alreadyDelivered: true, initialStatus: "delivered" }
+])(
+  "an Events job reclaimed $phase produces one post and Task",
+  async ({ alreadyDelivered, initialStatus }) => {
+    await withTempDatabaseFile(async (filename) => {
+      const text = "The bank needs a form by Friday."
+      const task = { title: "Send the form", brief: "Fill in the bank form and send it." }
+      const first = await runTestDatabase(
+        filename,
+        Effect.gen(function* () {
+          const { sql, spaces, arrive, runEvents, drain, postedIn } = yield* setup
+          const taxes = yield* spaces.create({ name: "Taxes", instructions: { kind: "unwritten" } })
+          const lease = yield* arrive("mail-1")
+          const call = yield* posting({ space_id: taxes.space_id, text, task })
+          const { result } = yield* runEvents(lease, [call])
+          expect(result).toMatchObject({ status: "ended", outcome: "finished" })
+          if (alreadyDelivered) yield* drain
+          const posts = yield* sql<{
+            readonly session_id: string
+            readonly message_id: string
+            readonly status: string
+          }>`SELECT json_extract(payload, '$.sessionId') AS session_id,
+          json_extract(payload, '$.messageId') AS message_id, status
+          FROM automation_deliveries WHERE task_id = ${eventsHandler.spec.automationId}`
+          expect(posts).toHaveLength(1)
+          const [post] = posts
+          if (post === undefined) return yield* Effect.die("The Events run did not save a post")
+          expect(post.status).toBe(initialStatus)
+          expect(yield* postedIn(post.session_id)).toEqual(
+            alreadyDelivered ? [{ role: ROLE.assistant, content: text }] : []
+          )
+          expect(
+            yield* sql`SELECT text, body, origin_message_id FROM space_tasks
+          WHERE space_id = ${taxes.space_id}`
+          ).toEqual(
+            alreadyDelivered
+              ? [{ text: task.title, body: task.brief, origin_message_id: post.message_id }]
+              : []
+          )
+          return { lease, result, spaceId: taxes.space_id, post }
+        })
+      )
+
+      await runTestDatabase(
+        filename,
+        Effect.gen(function* () {
+          const { sql, queue, runEvents, settle, drain, postedIn } = yield* setup
+          yield* Effect.promise(async () => queue.jobs.recoverExpired(Date.now()))
+          const [reclaimed] = yield* Effect.promise(async () =>
+            queue.jobs.claim({
+              workerId: "restarted-events",
+              now: first.lease.expiresAt,
+              limit: 1,
+              leaseDurationMs: 60_000
+            })
+          )
+          if (reclaimed === undefined)
+            return yield* Effect.die("The restarted worker did not claim the job")
+          expect(reclaimed).toMatchObject({
+            id: first.lease.id,
+            attempt: 2,
+            payload: { automationRunId: first.lease.payload.automationRunId }
+          })
+          expect(reclaimed.token).not.toBe(first.lease.token)
+          const again = yield* runEvents(reclaimed, [])
+          expect(again.runs).toEqual([])
+          expect(again.result).toEqual(first.result)
+          yield* settle(reclaimed, again.result)
+          yield* drain
+
+          expect(yield* postedIn(first.post.session_id)).toEqual([
+            { role: ROLE.assistant, content: text }
+          ])
+          expect(
+            yield* sql`SELECT text, body, origin_message_id FROM space_tasks
+          WHERE space_id = ${first.spaceId}`
+          ).toEqual([
+            { text: task.title, body: task.brief, origin_message_id: first.post.message_id }
+          ])
+          expect(yield* sql`SELECT status FROM automation_deliveries`).toEqual([
+            { status: "delivered" }
+          ])
+          expect(
+            yield* sql`SELECT id, status, claim_count FROM automation_runs
+          WHERE task_id = ${eventsHandler.spec.automationId}`
+          ).toEqual([
+            { id: first.lease.payload.automationRunId, status: "completed", claim_count: 2 }
+          ])
+          expect(
+            yield* sql`SELECT id FROM automation_event_queue
+          WHERE task_id = ${eventsHandler.spec.automationId}`
+          ).toEqual([])
+        })
+      )
     })
-  )
-})
+  }
+)
 
 it("report no_change followed by free text posts nothing and completes with no change", async () => {
   await withTempDatabase(

@@ -11,12 +11,26 @@ export interface DownloadFile {
   readonly sha256: string
 }
 
+export const DOWNLOAD_REASON = {
+  http: "http",
+  incomplete: "incomplete",
+  size: "size",
+  hash: "hash",
+  io: "io"
+} as const
+
 export class DownloadError extends Schema.TaggedError<DownloadError>()("DownloadError", {
-  reason: Schema.Literals(["http", "incomplete", "size", "hash", "io"]),
+  reason: Schema.Literals(Object.values(DOWNLOAD_REASON)),
   path: Schema.String,
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
+
+const DOWNLOAD_RECEIVED = { done: "done", http: "http" } as const
+
+type Received =
+  | { readonly kind: typeof DOWNLOAD_RECEIVED.done; readonly bytes: number; readonly hash: Hash }
+  | { readonly kind: typeof DOWNLOAD_RECEIVED.http; readonly status: number }
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>
 
@@ -96,12 +110,12 @@ export const downloadFile = Effect.fn("Downloads.file")(function* (options: File
   })
 
   const received = yield* Effect.tryPromise({
-    try: async (signal) => {
+    try: async (signal): Promise<Received> => {
       const onDisk = (await sizeOf(partial)) ?? 0
       const kept = onDisk <= file.bytes ? onDisk : 0
       const hash = createHash("sha256")
       if (kept > 0) await hashInto(hash, partial)
-      if (kept === file.bytes) return { kind: "done" as const, bytes: kept, hash }
+      if (kept === file.bytes) return { kind: DOWNLOAD_RECEIVED.done, bytes: kept, hash }
       const response = await options.fetch(file.url, {
         redirect: "follow",
         signal,
@@ -109,7 +123,7 @@ export const downloadFile = Effect.fn("Downloads.file")(function* (options: File
       })
       if (response.status === 206 && contentRangeStart(response) === kept) {
         return {
-          kind: "done" as const,
+          kind: DOWNLOAD_RECEIVED.done,
           bytes: await appendBody(options, partial, response, kept, hash),
           hash
         }
@@ -117,19 +131,19 @@ export const downloadFile = Effect.fn("Downloads.file")(function* (options: File
       if (response.status === 200) {
         const fresh = createHash("sha256")
         return {
-          kind: "done" as const,
+          kind: DOWNLOAD_RECEIVED.done,
           bytes: await appendBody(options, partial, response, 0, fresh),
           hash: fresh
         }
       }
       await response.body?.cancel()
-      return { kind: "http" as const, status: response.status }
+      return { kind: DOWNLOAD_RECEIVED.http, status: response.status }
     },
     catch: (cause) =>
       fail("incomplete", file, "The download stopped before the file was complete", cause)
   })
 
-  if (received.kind === "http") {
+  if (received.kind === DOWNLOAD_RECEIVED.http) {
     return yield* fail("http", file, `The server answered HTTP ${received.status}`)
   }
   if (received.bytes > file.bytes) {

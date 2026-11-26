@@ -1,15 +1,17 @@
 import type { ChatMessage } from "../contracts/messages.js"
 import { decodeMessage } from "../internal/validate.js"
 
+export const HISTORY_CHANGE_KIND = { append: "append", replace: "replace" } as const
+
 export type HistoryChange =
   | {
-      readonly kind: "append"
+      readonly kind: typeof HISTORY_CHANGE_KIND.append
       readonly revision: number
       readonly start: number
       readonly messages: ReadonlyArray<ChatMessage>
     }
   | {
-      readonly kind: "replace"
+      readonly kind: typeof HISTORY_CHANGE_KIND.replace
       readonly revision: number
       readonly messages: ReadonlyArray<ChatMessage>
     }
@@ -91,12 +93,16 @@ export const makeHistoryJournal = (initial: ReadonlyArray<ChatMessage>): History
         const change: HistoryChange =
           !changedWhileQueued && capturedReplacement === acknowledgedReplacement
             ? {
-                kind: "append",
+                kind: HISTORY_CHANGE_KIND.append,
                 revision: capturedRevision,
                 start: acknowledgedLength,
                 messages: messages.slice(acknowledgedLength, capturedLength)
               }
-            : { kind: "replace", revision: capturedRevision, messages: messages.slice() }
+            : {
+                kind: HISTORY_CHANGE_KIND.replace,
+                revision: capturedRevision,
+                messages: messages.slice()
+              }
         await write(target, change)
         acknowledgedReplacement = capturedReplacement
         acknowledgedLength = capturedLength

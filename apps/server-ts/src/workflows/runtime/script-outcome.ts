@@ -1,17 +1,22 @@
 import { Schema } from "effect"
 
 import type { ScriptAgentChildAttemptEvent, ScriptAgentMode } from "./contract.js"
-import type { ScriptProgressTool } from "./nested-trace.js"
+import type { ScriptProgressStatus, ScriptProgressTool } from "./nested-trace.js"
+
+export const SCRIPT_ENVELOPE_STATUS = {
+  succeeded: "succeeded",
+  failed: "failed"
+} as const
 
 const ScriptEnvelopeSchema = Schema.Union([
   Schema.Struct({
-    status: Schema.Literal("succeeded"),
+    status: Schema.Literal(SCRIPT_ENVELOPE_STATUS.succeeded),
     value: Schema.Json,
     logs: Schema.Array(Schema.String),
     phases: Schema.Array(Schema.String)
   }),
   Schema.Struct({
-    status: Schema.Literal("failed"),
+    status: Schema.Literal(SCRIPT_ENVELOPE_STATUS.failed),
     error: Schema.Struct({
       code: Schema.Literals([
         "coordinator_failed",
@@ -41,7 +46,7 @@ export interface ScriptProgressAgent {
   readonly label: string
   readonly phase: string
   readonly mode: ScriptAgentMode
-  readonly status: "running" | "completed" | "failed"
+  readonly status: ScriptProgressStatus
 }
 
 export interface ScriptProgress {
@@ -51,9 +56,11 @@ export interface ScriptProgress {
   readonly tools: ReadonlyArray<ScriptProgressTool>
 }
 
+export const SCRIPT_OUTCOME_STATUS = { completed: "completed", failed: "failed" } as const
+
 export type ScriptOutcome =
   | {
-      readonly status: "completed"
+      readonly status: typeof SCRIPT_OUTCOME_STATUS.completed
       readonly phase_entries: NonNullable<ScriptProgress["phase_entries"]>
       readonly value: Schema.Json
       readonly calls: ReadonlyArray<string>
@@ -62,7 +69,7 @@ export type ScriptOutcome =
       readonly phases: ReadonlyArray<string>
     }
   | {
-      readonly status: "failed"
+      readonly status: typeof SCRIPT_OUTCOME_STATUS.failed
       readonly error: ScriptError
       readonly calls: ReadonlyArray<string>
       readonly logs: ReadonlyArray<string>

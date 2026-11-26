@@ -1,6 +1,12 @@
 import { Context } from "effect"
 
-export type UploadDecision = "kept" | "remove" | "wait" | "gone"
+export const UPLOAD_DECISION = {
+  kept: "kept",
+  remove: "remove",
+  wait: "wait",
+  gone: "gone"
+} as const
+export type UploadDecision = (typeof UPLOAD_DECISION)[keyof typeof UPLOAD_DECISION]
 
 export class ManagedOutputLifecycleStore extends Context.Service<
   ManagedOutputLifecycleStore,

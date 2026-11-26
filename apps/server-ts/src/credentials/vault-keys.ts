@@ -84,7 +84,7 @@ const ASKS_PER_WINDOW = 5
 const ASK_WINDOW_MS = 5 * 60 * 1_000
 const MAX_RUNS_HOLDING_GRANTS = 1_000
 
-class VaultUnavailableError extends Error {
+export class VaultUnavailableError extends Error {
   constructor() {
     super("The Vault needs the Arden app, and this server runs without it.")
     this.name = "VaultUnavailableError"

@@ -6,8 +6,18 @@ import {
   type AutomationTriggerInput,
   type AutomationTriggerSpec
 } from "@arden-hq/protocol/automations"
-import type { SystemPromptEdit, SystemTriggerScope } from "./model.js"
-import type { AutomationContextMode, SystemAutomationSetting } from "@arden-hq/protocol/automations"
+import {
+  SYSTEM_PROMPT_EDIT,
+  SYSTEM_TRIGGER_SCOPE,
+  TRIGGERS_SOURCE,
+  type SystemPromptEdit,
+  type SystemTriggerScope
+} from "./model.js"
+import {
+  AUTOMATION_CONTEXT_MODE,
+  type AutomationContextMode,
+  type SystemAutomationSetting
+} from "@arden-hq/protocol/automations"
 import type { AutomationPatch } from "./automation-patch.js"
 
 export interface SystemAutomationRow {
@@ -31,8 +41,8 @@ export const systemSettable = (
   spec: SystemSettableSpec
 ): ReadonlyArray<SystemAutomationSetting> => [
   "triggers",
-  ...(spec.contextMode === "fork" ? [] : (["model"] as const)),
-  ...(spec.promptEdit === "owner" ? (["prompt"] as const) : []),
+  ...(spec.contextMode === AUTOMATION_CONTEXT_MODE.fork ? [] : (["model"] as const)),
+  ...(spec.promptEdit === SYSTEM_PROMPT_EDIT.owner ? (["prompt"] as const) : []),
   "enabled"
 ]
 
@@ -40,7 +50,7 @@ export const changedSystemSettings = (
   row: SystemAutomationRow,
   spec: { readonly enabled: boolean }
 ): ReadonlyArray<SystemAutomationSetting> => [
-  ...(row.triggers_source === "manual" ? (["triggers"] as const) : []),
+  ...(row.triggers_source === TRIGGERS_SOURCE.manual ? (["triggers"] as const) : []),
   ...(row.model !== null ? (["model"] as const) : []),
   ...(row.prompt_author !== null ? (["prompt"] as const) : []),
   ...((row.enabled === 1) !== spec.enabled ? (["enabled"] as const) : [])
@@ -86,10 +96,10 @@ export const systemTakesTrigger = (
   trigger: AutomationTrigger
 ): boolean => {
   switch (spec.triggerScope) {
-    case "any":
+    case SYSTEM_TRIGGER_SCOPE.any:
       return true
-    case "item_events":
-      return trigger.type === "event" && isItemEventType(trigger.event_type)
+    case SYSTEM_TRIGGER_SCOPE.item_events:
+      return trigger.type === TRIGGER_TYPE.event && isItemEventType(trigger.event_type)
   }
 }
 

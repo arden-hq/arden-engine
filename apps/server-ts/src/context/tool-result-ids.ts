@@ -3,9 +3,15 @@ import type { ChatMessage } from "@arden-hq/loop"
 
 const toolResultIdLine = (toolCallId: string): string => `[call id: ${toolCallId}]`
 
+const JSON_OPENERS = { object: "{", array: "[" } as const
+type JsonOpener = (typeof JSON_OPENERS)[keyof typeof JSON_OPENERS]
+
+const isJsonOpener = (value: string | undefined): value is JsonOpener =>
+  value === JSON_OPENERS.object || value === JSON_OPENERS.array
+
 const looksLikeJson = (content: string): boolean => {
   const first = content.trimStart()[0]
-  return first === "{" || first === "["
+  return isJsonOpener(first)
 }
 
 export const labelToolResults = (

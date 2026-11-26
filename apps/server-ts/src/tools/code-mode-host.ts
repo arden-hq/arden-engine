@@ -1,4 +1,5 @@
 import {
+  PAUSE_REASON,
   PauseRequested,
   callEndsTurn,
   splitToolArguments,
@@ -10,12 +11,14 @@ import {
 import type { Schema } from "effect"
 import { TOOL_DISPLAY_TITLE } from "../execution/tool-call-presentation.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
-import type {
-  CodeModeCallRequest,
-  CodeModeHost,
-  NestedCallFacts,
-  ScriptFields
+import {
+  APPROVAL_CONTINUATION,
+  type CodeModeCallRequest,
+  type CodeModeHost,
+  type NestedCallFacts,
+  type ScriptFields
 } from "../workflows/runtime/contract.js"
+import { TOOL_SOURCE } from "./tool-scopes.js"
 import {
   refusalReason,
   resolveToolName,
@@ -71,7 +74,7 @@ export const makeCodeModeHost = (options: {
     codeMode: tool.meta.code_mode,
     hosted: tool.meta.hosted === true,
     endsTurn: tool.meta.ends_turn !== undefined && tool.meta.ends_turn !== false,
-    agentTool: tool.meta.source === "_agents",
+    agentTool: tool.meta.source === TOOL_SOURCE.agents,
     inScope: options.scope.has(tool.definition.name)
   })
   const callable = tools.filter(
@@ -158,7 +161,7 @@ export const makeCodeModeHost = (options: {
       const execute = request.detached ? run.executeDetachedTool : run.executeTool
       const captured: PendingCall = { result: undefined, offered: undefined, fields: undefined }
       const browserObservations =
-        metadata.source === "_browser" ? options.browserObservations : undefined
+        metadata.source === TOOL_SOURCE.browser ? options.browserObservations : undefined
       const previousRef =
         typeof args["tab_ref"] === "string"
           ? browserObservations?.latest(args["tab_ref"])?.ref
@@ -213,9 +216,9 @@ export const makeCodeModeHost = (options: {
               })
               .catch((cause: unknown) => {
                 if (
-                  request.approvalContinuation === "caller" &&
+                  request.approvalContinuation === APPROVAL_CONTINUATION.caller &&
                   cause instanceof PauseRequested &&
-                  cause.reason === "approval"
+                  cause.reason === PAUSE_REASON.approval
                 ) {
                   throw new ToolExecutionError(
                     `${toolName} requires approval. Make this call directly with the same arguments; the browser worker cannot safely replay its earlier actions.`,

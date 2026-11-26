@@ -1,3 +1,4 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Array as Arr, Effect, Schema } from "effect"
@@ -42,12 +43,15 @@ import {
 import {
   boundedBody,
   formatListingEntry,
+  LISTING_ENTRY,
   listingEntries,
   pageData,
   renderListing,
   writtenPageData
 } from "./wiki-render.js"
 import { changePages, keptPage } from "./wiki-page-writes.js"
+
+const README = "README.md"
 
 const makeWikiTools = ({
   wiki,
@@ -98,7 +102,7 @@ const makeWikiTools = ({
       const hasMore = nextOffset < entries.length
       const source_refs = visible
         .flatMap((entry) =>
-          entry.kind === "page" && entry.title !== undefined
+          entry.kind === LISTING_ENTRY.page && entry.title !== undefined
             ? [memorySource({ path: entry.path, title: entry.title, use: "found" })]
             : []
         )
@@ -167,7 +171,7 @@ const makeWikiTools = ({
         await Effect.runPromise(loadPageAges(wiki, snapshot.head), { signal: ctx.signal })
       ).lines.get(record.page.pageId)
       const outside = wiki.outsideEditState(record.resource.path)
-      const isReadme = input.path === "README.md" || input.path.endsWith("/README.md")
+      const isReadme = input.path === README || input.path.endsWith(`/${README}`)
       const directory = input.path.slice(0, Math.max(0, input.path.length - "/README.md".length))
       const children = isReadme
         ? listingEntries(activeRunPages(snapshot.pages), directory).filter(
@@ -267,7 +271,7 @@ const makeWikiTools = ({
       const existing = snapshot.pages.find((record) => record.resource.path === input.path)
       if (existing !== undefined) {
         if (
-          existing.page.lifecycle === "active" &&
+          existing.page.lifecycle === WIKI_PAGE_LIFECYCLE.active &&
           existing.page.title === input.title &&
           existing.page.body === input.body
         ) {

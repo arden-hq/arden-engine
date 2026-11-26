@@ -1,3 +1,4 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { Effect, Layer } from "effect"
 import { readFile, rm } from "node:fs/promises"
 import { dirname } from "node:path"
@@ -16,7 +17,8 @@ import {
 
 export const rulesPage = (snapshot: Snapshot): PageRecord | undefined =>
   snapshot.wholeSet.find(
-    (record) => isRulesPage(record.resource.path) && record.page.lifecycle === "active"
+    (record) =>
+      isRulesPage(record.resource.path) && record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
   )
 
 const readRulesFile = async (file: string): Promise<string | undefined> => {
@@ -44,9 +46,11 @@ export const rulesMoveLayer = (file: string): Layer.Layer<never, never, Wiki> =>
     )
   )
 
+const GLOBAL_LOAD = { read: "read", failed: "failed" } as const
+
 export type GlobalInstructionsLoad =
-  | { readonly kind: "read"; readonly page: PageRecord }
-  | { readonly kind: "failed" }
+  | { readonly kind: typeof GLOBAL_LOAD.read; readonly page: PageRecord }
+  | { readonly kind: typeof GLOBAL_LOAD.failed }
 
 export const loadForRun = (wiki: Wiki["Service"]): Effect.Effect<GlobalInstructionsLoad> =>
   wiki.snapshot().pipe(
@@ -64,7 +68,7 @@ export const loadForRun = (wiki: Wiki["Service"]): Effect.Effect<GlobalInstructi
   )
 
 const rulesText = (load: GlobalInstructionsLoad): string | undefined => {
-  if (load.kind === "failed") return undefined
+  if (load.kind === GLOBAL_LOAD.failed) return undefined
   const rules = load.page.page.body.trim()
   return rules === "" ? undefined : rules
 }
@@ -83,7 +87,7 @@ export const globalInstructionManifest = (
     status,
     digest
   })
-  if (load.kind === "failed") return [entry("unreadable", null)]
+  if (load.kind === GLOBAL_LOAD.failed) return [entry("unreadable", null)]
   return rulesText(load) === undefined
     ? [entry("empty", null)]
     : [entry("loaded", load.page.resource.versionId)]

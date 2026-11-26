@@ -30,7 +30,8 @@ export const ERRNO = {
   ENOTEMPTY: "ENOTEMPTY",
   ELOOP: "ELOOP",
   EACCES: "EACCES",
-  ENOEXEC: "ENOEXEC"
+  ENOEXEC: "ENOEXEC",
+  ESRCH: "ESRCH"
 } as const
 
 export type ErrnoCode = (typeof ERRNO)[keyof typeof ERRNO]

@@ -8,6 +8,8 @@ import { LimitSettingsStore } from "../persistence/settings/store.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import {
+  CHAT_WRITE_START,
+  CHAT_WRITE_STORED,
   ChatWriteStore,
   type ChatWriteResume,
   type ChatWriteReceiveResult
@@ -29,9 +31,14 @@ import { makeHelperJobs } from "./helper-jobs.js"
 import { startRunRecovery } from "./run-recovery.js"
 import { runChat } from "./run-driver.js"
 import { type TaskContinuationInput, type RunHost, type RunServices } from "./run-driver-support.js"
-import { ChatMessageError, mapWriteError, type ChatMessageFailure } from "./message-errors.js"
+import {
+  CHAT_CONFLICT_KIND,
+  ChatMessageError,
+  mapWriteError,
+  type ChatMessageFailure
+} from "./message-errors.js"
 import { taskContinuation, receipt, type ChatSendInput } from "./message-input.js"
-import type { ChatMessageShape, StopReason } from "./message-shape.js"
+import { STOP_REASON, type ChatMessageShape, type StopReason } from "./message-shape.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { makeDeliverBootArrivals } from "./message-boot.js"
 import { makeResolveTool } from "./message-resolve-tool.js"
@@ -41,7 +48,7 @@ import { makePrepare } from "./message-prepare.js"
 import { makeCancellation } from "./message-cancellation.js"
 
 const drainStatus = (reason: StopReason): string =>
-  reason === "quit"
+  reason === STOP_REASON.quit
     ? "Finishing the current tool, then quitting"
     : "Finishing the current tool, then restarting"
 
@@ -189,16 +196,16 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
         ): Effect.Effect<ChatSendReceipt, ChatMessageFailure> => {
           const start = (): Effect.Effect<ChatSendReceipt> => {
             switch (started._tag) {
-              case "Stored":
+              case CHAT_WRITE_STORED.stored:
                 return Effect.succeed(receipt(input, null, "accepted"))
-              case "Queued":
+              case CHAT_WRITE_START.queued:
                 return Effect.sync(() => {
                   pendingArrivals.notify(started.runId)
                   return receipt(input, started.runId, "queued")
                 })
-              case "Existing":
+              case CHAT_WRITE_START.existing:
                 return Effect.succeed(receipt(input, started.runId, started.status))
-              case "Started":
+              case CHAT_WRITE_START.started:
                 return launch({
                   runId: started.runId,
                   sessionId: input.sessionId,
@@ -330,7 +337,8 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
             ).pipe(
               Effect.asVoid,
               Effect.catchTag("ChatMessageConflictError", (error) =>
-                error.kind === "session_busy" || error.kind === "task_idle"
+                error.kind === CHAT_CONFLICT_KIND.sessionBusy ||
+                error.kind === CHAT_CONFLICT_KIND.taskIdle
                   ? Effect.void
                   : Effect.fail(error)
               )

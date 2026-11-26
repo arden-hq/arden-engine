@@ -1,6 +1,8 @@
 import { markdownWords } from "@arden-hq/protocol/chat"
 import { cutText } from "@arden-hq/std/text"
-type SourceUse = "read" | "found" | "work"
+export const SOURCE_USE = { read: "read", found: "found", work: "work" } as const
+
+type SourceUse = (typeof SOURCE_USE)[keyof typeof SOURCE_USE]
 
 export interface SourcePassage {
   readonly use: SourceUse

@@ -1,3 +1,5 @@
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { type RunContext } from "../runs/stored-context.js"
 import { delegatedCauses } from "../transcript/run-causes.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
@@ -134,7 +136,7 @@ export const makeAgentSpawner = ({
           const childRef = friendlySessionRef(childSessionId)
           const childName = valid.name ?? textBefore(valid.task, "\n").slice(0, 160)
           const parentAgent =
-            parent.session_type !== "agent"
+            parent.session_type !== SESSION_TYPE.agent
               ? null
               : readAgentSessionMetadata(
                   yield* decodeJson(JsonObjectSchema, parent.session_metadata ?? "{}").pipe(
@@ -147,7 +149,7 @@ export const makeAgentSpawner = ({
                     )
                   )
                 )
-          if (parent.session_type === "agent" && parentAgent === null) {
+          if (parent.session_type === SESSION_TYPE.agent && parentAgent === null) {
             return yield* writeError("spawn_agent", "corrupt", "Parent agent metadata is invalid", {
               sessionId: parent.session_id,
               runId: parent.run_id
@@ -155,7 +157,7 @@ export const makeAgentSpawner = ({
           }
           if (
             parentAgent !== null &&
-            parentAgent.mode !== "work" &&
+            parentAgent.mode !== AGENT_MODE.work &&
             valid.mode !== parentAgent.mode
           ) {
             return yield* spawnError(
@@ -172,15 +174,16 @@ export const makeAgentSpawner = ({
           const childEffort =
             valid.reasoningEffort ?? (valid.model === undefined ? inheritedEffort : null)
           let agent: NewAgentSessionMetadata
-          if (valid.mode === "research") {
+          if (valid.mode === AGENT_MODE.research) {
             agent = {
               mode: "research",
               researchWorkspaceId:
-                parentAgent?.mode === "research" && parentAgent.researchWorkspaceId !== null
+                parentAgent?.mode === AGENT_MODE.research &&
+                parentAgent.researchWorkspaceId !== null
                   ? parentAgent.researchWorkspaceId
                   : rules.researchWorkspaceId(childSessionId)
             }
-          } else if (valid.mode === "work") agent = { mode: "work" }
+          } else if (valid.mode === AGENT_MODE.work) agent = { mode: "work" }
           else agent = { mode: "code", workspace: valid.workspace }
           const forkOriginRows =
             valid.forkHistory === undefined
@@ -275,7 +278,7 @@ export const makeAgentSpawner = ({
             mode: valid.mode,
             sessionId: childSessionId,
             parentRunId: parent.run_id,
-            workspaceRoot: agent.mode === "code" ? agent.workspace.root : null,
+            workspaceRoot: agent.mode === AGENT_MODE.code ? agent.workspace.root : null,
             taskItemId: childRunContext.task?.item_id ?? null
           }).pipe(
             Effect.mapError((cause) =>

@@ -1,8 +1,14 @@
+import { TOOL_ACTION } from "@arden-hq/protocol/tools"
 import { Effect, Predicate } from "effect"
 
 import { summaryOf, type ServerTool } from "./define.js"
 import { catalogNameProblems } from "./tool-catalog.js"
-import { toolParametersJsonSchema } from "./tool-json-schema.js"
+import {
+  isSchemaOfType,
+  JSON_SCHEMA_TYPE,
+  takesAnyValue,
+  toolParametersJsonSchema
+} from "./tool-json-schema.js"
 
 export const checkToolContract = (tools: ReadonlyArray<ServerTool>): Effect.Effect<void> => {
   const problems = toolContractProblems(tools)
@@ -26,7 +32,7 @@ const toolContractProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<s
 }
 
 const readLabelProblems = (tool: ServerTool): ReadonlyArray<string> =>
-  tool.meta.action === "read" && tool.meta.changes_state
+  tool.meta.action === TOOL_ACTION.read && tool.meta.changes_state
     ? [`${tool.definition.name} is labeled read but changes state`]
     : []
 
@@ -72,7 +78,7 @@ export const objectRootProblems = (
   tool: string,
   parameters: Readonly<Record<string, unknown>>
 ): ReadonlyArray<string> =>
-  parameters["type"] === "object"
+  isSchemaOfType(parameters, JSON_SCHEMA_TYPE.object)
     ? []
     : [
         `${tool} parameters must be type "object" at the root; an empty input is EmptyParametersSchema`
@@ -155,7 +161,7 @@ export const hashInputPaths = (
 }
 
 const takesText = (schema: Readonly<Record<string, unknown>>): boolean =>
-  schema["type"] === "string" && schema["enum"] === undefined && schema["const"] === undefined
+  isSchemaOfType(schema, JSON_SCHEMA_TYPE.string) && takesAnyValue(schema)
 
 const namesHash = (name: string, schema: Readonly<Record<string, unknown>>): boolean =>
   HASH_NAME.test(name) ||

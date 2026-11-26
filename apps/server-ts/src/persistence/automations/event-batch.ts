@@ -1,5 +1,5 @@
 import type { JsonValue } from "@arden-hq/protocol"
-import { isItemEventType } from "@arden-hq/protocol/automations"
+import { AUTOMATION_EVENT_TYPE, isItemEventType } from "@arden-hq/protocol/automations"
 import { Predicate } from "effect"
 
 export interface BatchedEvent {
@@ -134,7 +134,7 @@ export const pageRunEvents = (
 const identityOf = (event: BatchedEvent): string => {
   const chat = event.context["chat"]
   if (
-    event.event_type === "chat.quiet" &&
+    event.event_type === AUTOMATION_EVENT_TYPE.chat_quiet &&
     Predicate.isObject(chat) &&
     !Array.isArray(chat) &&
     typeof chat["session_id"] === "string"

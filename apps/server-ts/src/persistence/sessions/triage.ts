@@ -1,4 +1,4 @@
-import type { SessionTriageDecision } from "@arden-hq/protocol/sessions"
+import { SESSION_TRIAGE_DECISION, type SessionTriageDecision } from "@arden-hq/protocol/sessions"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import { SessionTriageDecisionSchema } from "@arden-hq/protocol/effect/sessions"
 import { DateTime, Option, Schema } from "effect"
@@ -11,10 +11,20 @@ const checked = {
   checked_count: Schema.Natural
 }
 
+export const TRIAGE_OUTCOME = {
+  suggested: "suggested",
+  dismissed: "dismissed",
+  filed: "filed",
+  undone: "undone"
+} as const
+
 export const StoredTriageSchema = Schema.Union([
-  Schema.Struct({ outcome: Schema.Literals(["suggested", "dismissed"] as const), ...checked }),
   Schema.Struct({
-    outcome: Schema.Literals(["filed", "undone"] as const),
+    outcome: Schema.Literals([TRIAGE_OUTCOME.suggested, TRIAGE_OUTCOME.dismissed] as const),
+    ...checked
+  }),
+  Schema.Struct({
+    outcome: Schema.Literals([TRIAGE_OUTCOME.filed, TRIAGE_OUTCOME.undone] as const),
     ...checked,
     filed: Schema.Struct({
       space_id: Schema.NonEmptyString,
@@ -27,7 +37,7 @@ export const StoredTriageSchema = Schema.Union([
 export type StoredTriage = (typeof StoredTriageSchema)["Type"]
 
 export const NO_TRIAGE: SessionTriageDecision = {
-  decision: "none",
+  decision: SESSION_TRIAGE_DECISION.none,
   target: null,
   new_title: null,
   rationale: ""
@@ -40,15 +50,15 @@ export const freshTriage = (
 ): SessionTriageDecision | undefined => {
   if (stored === undefined) return undefined
   switch (stored.outcome) {
-    case "filed":
-    case "undone":
+    case TRIAGE_OUTCOME.filed:
+    case TRIAGE_OUTCOME.undone:
       return NO_TRIAGE
-    case "suggested":
-    case "dismissed": {
+    case TRIAGE_OUTCOME.suggested:
+    case TRIAGE_OUTCOME.dismissed: {
       const grown = chat.messageCount >= stored.checked_count + TRIAGE_RECHECK_MESSAGES
       const newDay = localDay(chat.lastActivity, zone) > localDay(stored.checked_at, zone)
       if (grown || newDay) return undefined
-      return stored.outcome === "dismissed" ? NO_TRIAGE : stored.decision
+      return stored.outcome === TRIAGE_OUTCOME.dismissed ? NO_TRIAGE : stored.decision
     }
   }
 }

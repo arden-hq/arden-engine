@@ -1,3 +1,5 @@
+import { isImageMediaType } from "@arden-hq/std/message-vocabulary"
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import type { ChatImageInput } from "@arden-hq/protocol/chat"
 import { contentParts } from "./content.js"
 
@@ -7,7 +9,7 @@ export interface UserContent {
 }
 
 const isMediaType = (value: unknown): value is ChatImageInput["mediaType"] =>
-  value === "image/png" || value === "image/jpeg"
+  isImageMediaType(value)
 
 export const userContent = (content: unknown): UserContent => {
   if (typeof content === "string") return { text: content.trim(), images: [] }
@@ -15,9 +17,10 @@ export const userContent = (content: unknown): UserContent => {
   const text: Array<string> = []
   const images: Array<ChatImageInput> = []
   for (const part of contentParts(content)) {
-    if (part["type"] === "text" && typeof part["text"] === "string") text.push(part["text"])
+    if (part["type"] === CONTENT_BLOCK_TYPE.text && typeof part["text"] === "string")
+      text.push(part["text"])
     if (
-      part["type"] === "image" &&
+      part["type"] === CONTENT_BLOCK_TYPE.image &&
       isMediaType(part["media_type"]) &&
       typeof part["data"] === "string"
     )

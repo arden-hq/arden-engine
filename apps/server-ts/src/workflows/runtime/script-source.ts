@@ -1,4 +1,10 @@
+import { SCRIPT_ENVELOPE_STATUS } from "./script-outcome.js"
 import { MAX_BRANCH_NAME, MAX_PARALLEL_ITEMS } from "./script-run.js"
+
+export const SCRIPT_RPC_PHASE = "__script_phase"
+export const SCRIPT_RPC_DESCRIBE = "__script_describe"
+export const SCRIPT_RPC_TOOL = "__script_tool"
+export const SCRIPT_RPC_AGENT = "__script_agent"
 
 export const buildScript = (
   userCode: string,
@@ -28,13 +34,13 @@ export const buildScript = (
       __state.phase = value;
       __state.phaseId = "phase:" + __state.phaseCount++;
       if (__state.phases[__state.phases.length - 1] !== value) __state.phases.push(value);
-      __rpc("__script_phase", { title: value, id: __state.phaseId });
+      __rpc("${SCRIPT_RPC_PHASE}", { title: value, id: __state.phaseId });
     };
     const log = (message) => {
       if (__state.logs.length >= 200) throw new Error("scripts allow at most 200 log entries");
       __state.logs.push(String(message).slice(0, 2000));
     };
-    const describe = (name) => __rpc("__script_describe", { name: String(name) });
+    const describe = (name) => __rpc("${SCRIPT_RPC_DESCRIBE}", { name: String(name) });
     const tools = Object.freeze({
       describe,
       call: async (name, callArgs = {}) => {
@@ -44,7 +50,7 @@ export const buildScript = (
         if (callArgs === null || typeof callArgs !== "object" || Array.isArray(callArgs)) {
           throw new TypeError("tools.call arguments for " + name + " must be an object, got " + __show(callArgs).slice(0, 200));
         }
-        const response = await __rpc("__script_tool", {
+        const response = await __rpc("${SCRIPT_RPC_TOOL}", {
           phase_id: __state.phaseId,
           name: String(name),
           args: callArgs,
@@ -77,7 +83,7 @@ export const buildScript = (
       __state.occurrences.set(fingerprint, occurrence + 1);
       request.occurrence = occurrence;
       request.phase_id = options.phase === undefined ? __state.phaseId : "override:" + String(options.phase);
-      const response = await __rpc("__script_agent", request);
+      const response = await __rpc("${SCRIPT_RPC_AGENT}", request);
       if (!response || response.kind !== "script_agent_result") {
         throw new Error("the agent returned an invalid host envelope");
       }
@@ -122,13 +128,13 @@ export const buildScript = (
     const __branchSucceeded = (value, name) => ({
       kind: "workflow_branch",
       ...__named(name),
-      status: "succeeded",
+      status: "${SCRIPT_ENVELOPE_STATUS.succeeded}",
       value
     });
     const __branchFailed = (error, name) => ({
       kind: "workflow_branch",
       ...__named(name),
-      status: "failed",
+      status: "${SCRIPT_ENVELOPE_STATUS.failed}",
       error: __branchError(error)
     });
     const __isBranchOutcome = (value) => value !== null && typeof value === "object" &&
@@ -202,14 +208,14 @@ export const buildScript = (
     try {
       const __value = await (async () => { "use strict"; ${userCode}\n })();
       return {
-        status: "succeeded",
+        status: "${SCRIPT_ENVELOPE_STATUS.succeeded}",
         value: __value === undefined ? null : __value,
         logs: __state.logs,
         phases: __state.phases
       };
     } catch (error) {
       return {
-        status: "failed",
+        status: "${SCRIPT_ENVELOPE_STATUS.failed}",
         error: {
           code: error && typeof error.code === "string" ? error.code : "coordinator_failed",
           message: __describe(error).slice(0, 2000),

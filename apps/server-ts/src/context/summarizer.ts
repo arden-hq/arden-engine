@@ -1,5 +1,7 @@
+import { DECISION_FALLBACK } from "../models/decisions/questions.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import {
+  MODEL_STREAM_ITEM_TAG,
   resolveModelCapabilities,
   ToolChoice,
   type ChatMessage,
@@ -8,10 +10,15 @@ import {
   type ModelProviderRequest
 } from "@arden-hq/loop"
 import { withUntrustedDataRule } from "../models/instructions.js"
-import { outputLimitDelivery, sideCallOutputLimit } from "../models/side-call.js"
+import {
+  OUTPUT_LIMIT_DELIVERY,
+  outputLimitDelivery,
+  sideCallOutputLimit
+} from "../models/side-call.js"
 import { PROMPTS } from "../prompts/catalog.js"
 import { HANDOFF_BYTES_PER_TOKEN, handoffContent } from "./handoff.js"
 
+const STOP_FINISH = "stop"
 const MAX_PROMPT_HEADROOM_TOKENS = 2_000
 const OMITTED_HISTORY = "[oldest history omitted because it did not fit the summarizer context]"
 
@@ -78,7 +85,7 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
     model: input.model
   })
   const tokensActuallySent =
-    outputLimitDelivery(capabilities) === "sent" ? requestTokens : handoffTokens
+    outputLimitDelivery(capabilities) === OUTPUT_LIMIT_DELIVERY.sent ? requestTokens : handoffTokens
   const maxBytes = handoffTokens * HANDOFF_BYTES_PER_TOKEN
   const summaryBytes = maxBytes - Buffer.byteLength(handoffContent({ ...input, summary: "" }))
   if (summaryBytes <= 0) throw new Error("Compaction budget cannot fit its recovery reference")
@@ -105,14 +112,18 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
     },
     ...(input.reasoningEffort === null ? {} : { reasoningEffort: input.reasoningEffort })
   }
-  if (input.cachedRequest === undefined && input.fallback === "none")
+  if (input.cachedRequest === undefined && input.fallback === DECISION_FALLBACK.none)
     throw new Error("No reusable request for idle compaction")
   let request = input.cachedRequest ?? standalone
   let summary: string
   try {
     summary = await complete(input, request, instruction, requestTokens)
   } catch (cause) {
-    if (input.signal?.aborted === true || input.fallback === "none" || request === standalone)
+    if (
+      input.signal?.aborted === true ||
+      input.fallback === DECISION_FALLBACK.none ||
+      request === standalone
+    )
       throw cause
     request = standalone
     summary = await complete(input, request, instruction, requestTokens)
@@ -152,7 +163,7 @@ const complete = async (
       maxOutputTokens,
       ...(input.signal === undefined ? {} : { signal: input.signal })
     })) {
-      if (item._tag === "Completed") {
+      if (item._tag === MODEL_STREAM_ITEM_TAG.completed) {
         input.onResponse(item)
         response = item
       }
@@ -161,7 +172,7 @@ const complete = async (
     if (
       response === undefined ||
       response.continuation === true ||
-      response.finish_reason !== "stop" ||
+      response.finish_reason !== STOP_FINISH ||
       (response.message.tool_calls?.length ?? 0) > 0 ||
       (response.message.provider_tool_calls?.length ?? 0) > 0
     )

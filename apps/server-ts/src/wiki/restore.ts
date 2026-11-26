@@ -5,13 +5,18 @@ import {
   RESOURCE_STATE,
   CHANGE_ACTION
 } from "@arden-hq/revisions/effect"
-import { WIKI_PAGE_LIFECYCLE, type WikiPage, type WikiRestoreSide } from "@arden-hq/protocol/wiki"
+import {
+  WIKI_RESTORE_SIDE,
+  WIKI_PAGE_LIFECYCLE,
+  type WikiPage,
+  type WikiRestoreSide
+} from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
 import type { WikiLocationAuthority } from "./authority.js"
 import { restoreArchivedPage, restoreVersion } from "./commit.js"
-import { decodeWikiOrigin, type WikiCommitIdentity } from "./origin.js"
+import { WIKI_ORIGIN_KIND, decodeWikiOrigin, type WikiCommitIdentity } from "./origin.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { pageIn, writerOf, type WikiChanges } from "./page-change.js"
 import { isReadme, replacementContent } from "./page.js"
@@ -69,7 +74,7 @@ export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
   const pageId = current.page.pageId
   const { commitId, side } = version
   const invalid = (message: string) => wikiError("restore", "invalid", message, { pageId })
-  if (side === "before" && current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
+  if (side === WIKI_RESTORE_SIDE.before && current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
     return yield* invalid("Only active Memory pages can be restored")
   }
   const selected = pageHistory.find((commit) => commit.commitId === commitId)
@@ -86,7 +91,7 @@ export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
   )
   const change = changes.length === 1 ? changes[0] : undefined
   const resource = yield* Effect.gen(function* () {
-    if (side === "after") {
+    if (side === WIKI_RESTORE_SIDE.after) {
       if (change?.after?.state !== RESOURCE_STATE.active) {
         return yield* invalid(
           "Selected revision does not contain one active version of this Memory page"
@@ -94,7 +99,7 @@ export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
       }
       return change.after
     }
-    if (decodeWikiOrigin(selected.origin).kind !== "upkeep") {
+    if (decodeWikiOrigin(selected.origin).kind !== WIKI_ORIGIN_KIND.upkeep) {
       return yield* invalid("Commit is not a Wiki Maintenance change")
     }
     if (

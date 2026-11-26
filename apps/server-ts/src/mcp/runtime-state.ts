@@ -23,7 +23,7 @@ import { McpCredentialUnavailable } from "./github-connection.js"
 import { mcpSignInNotSetUpDetail, type McpOwnedTransport } from "./transport.js"
 import { MCP_CREDENTIALS_UNREADABLE, McpSignInNotSetUp } from "./vault.js"
 
-const MCP_CONNECT_FAILURE = {
+export const MCP_CONNECT_FAILURE = {
   credentialUnavailable: "credential_unavailable",
   toolNameCollision: "tool_name_collision",
   signInNotSetUp: "sign_in_not_set_up",

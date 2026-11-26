@@ -3,7 +3,11 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { AutomationQueue, HandlerToolName } from "../automations/queue.js"
 import type { AutomationStoreDeps } from "./automation-rows.js"
 import { storeError } from "./automation-rows.js"
-import { loadFullResult } from "./tool-result-storage.js"
+import {
+  STORED_TOOL_RESULT_ERROR_TAG,
+  STORED_TOOL_RESULT_REASON,
+  loadFullResult
+} from "./tool-result-storage.js"
 
 export const handlerToolContent = Effect.fn("AutomationHandlerTool.content")(function* (
   sql: SqlClient.SqlClient,
@@ -30,7 +34,8 @@ export const makeHandlerToolResults = ({
         Effect.mapError((cause) =>
           storeError(
             "observe_chat_run",
-            cause._tag === "StoredToolResultError" && cause.reason === "corrupt"
+            cause._tag === STORED_TOOL_RESULT_ERROR_TAG &&
+              cause.reason === STORED_TOOL_RESULT_REASON.corrupt
               ? "corrupt"
               : "storage",
             "Could not read the run's result",

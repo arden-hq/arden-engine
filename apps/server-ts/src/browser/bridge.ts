@@ -1,6 +1,7 @@
 import { Effect, Result, Schema, SchemaIssue } from "effect"
 
 import {
+  PARENT_PORT_FAILURE,
   createParentPortRpc,
   type ParentPortFailure,
   type ParentPortResponse,
@@ -18,17 +19,19 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 65_000
 
+const BROWSER_PORT_MESSAGE = { request: "browser_request", response: "browser_response" } as const
+
 const RequestIdSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128))
 
 const BrowserSuccessSchema = Schema.Struct({
-  type: Schema.Literal("browser_response"),
+  type: Schema.Literal(BROWSER_PORT_MESSAGE.response),
   requestId: RequestIdSchema,
   ok: Schema.Literal(true),
   output: BrowserOutputSchema
 })
 
 const BrowserFailureSchema = Schema.Struct({
-  type: Schema.Literal("browser_response"),
+  type: Schema.Literal(BROWSER_PORT_MESSAGE.response),
   requestId: RequestIdSchema,
   ok: Schema.Literal(false),
   error: Schema.Struct({
@@ -58,7 +61,7 @@ export const createBrowserBrokerBridge = (
   timeoutMs = DEFAULT_TIMEOUT_MS
 ): BrowserBrokerBridge => {
   const rpc = createParentPortRpc(parentPort, {
-    type: "browser_request",
+    type: BROWSER_PORT_MESSAGE.request,
     timeoutMs,
     decode: decodeBrowserResponse,
     cancelMessage: "browser_cancel"
@@ -104,7 +107,7 @@ const decodeBrowserResponse = (
     typeof input !== "object" ||
     input === null ||
     !("type" in input) ||
-    input.type !== "browser_response"
+    input.type !== BROWSER_PORT_MESSAGE.response
   )
     return undefined
   if (!isBrowserResponse(input)) {
@@ -127,7 +130,7 @@ const browserFailure = (
   action: boolean
 ): BrowserClientError => {
   switch (failure.kind) {
-    case "aborted":
+    case PARENT_PORT_FAILURE.aborted:
       return failure.dispatched
         ? new BrowserClientError({
             code: "browser_cancelled",
@@ -143,7 +146,7 @@ const browserFailure = (
             retryable: true,
             outcomeUnknown: false
           })
-    case "timeout":
+    case PARENT_PORT_FAILURE.timeout:
       return new BrowserClientError({
         code: action ? "browser_action_outcome_unknown" : "browser_internal_error",
         message: action
@@ -152,7 +155,7 @@ const browserFailure = (
         retryable: !action,
         outcomeUnknown: action
       })
-    case "stopped":
+    case PARENT_PORT_FAILURE.stopped:
       return new BrowserClientError({
         code: action ? "browser_action_outcome_unknown" : "browser_cancelled",
         message: action
@@ -161,14 +164,14 @@ const browserFailure = (
         retryable: !action,
         outcomeUnknown: action
       })
-    case "dispatch_failed":
+    case PARENT_PORT_FAILURE.dispatch_failed:
       return new BrowserClientError({
         code: "browser_internal_error",
         message: "Browser request could not be dispatched",
         retryable: true,
         outcomeUnknown: false
       })
-    case "invalid_response":
+    case PARENT_PORT_FAILURE.invalid_response:
       return new BrowserClientError({
         code: action ? "browser_action_outcome_unknown" : "browser_internal_error",
         message: action
@@ -177,7 +180,7 @@ const browserFailure = (
         retryable: false,
         outcomeUnknown: action
       })
-    case "rejected":
+    case PARENT_PORT_FAILURE.rejected:
       return new BrowserClientError(failure.error)
   }
 }

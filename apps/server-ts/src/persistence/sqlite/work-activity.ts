@@ -2,13 +2,19 @@ import { type TaskRecord } from "../work/task-record.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import type { SpaceTaskActivity, SpaceTaskStopKind } from "@arden-hq/protocol/spaces/work"
+import {
+  TASK_ACTIVITY,
+  type SpaceTaskActivity,
+  type SpaceTaskStopKind
+} from "@arden-hq/protocol/spaces/work"
+import { CHAT_RUN_ERROR_CODE } from "@arden-hq/protocol/chat"
+
 import { workError } from "./work-records.js"
 import { taskHasHold } from "./task-hold-state.js"
 import { hasPendingTaskQuestion } from "./task-question-state.js"
 import { activeRunStatusList, STORED_RUN_STATUS, type StoredRunStatus } from "./status-sets.js"
 import { inTaskWords } from "@arden-hq/protocol/chat"
-import { failureWords, type TaskStopCause } from "./task-next-move.js"
+import { failureWords, TASK_STOP_CAUSE, type TaskStopCause } from "./task-next-move.js"
 import { inArdenWords } from "../restart-notice.js"
 import { taskOpenSql } from "./task-status-sql.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
@@ -70,15 +76,15 @@ const stopOf = (facts: StopFacts): Stop => {
     }
   }
   switch (facts.run_status) {
-    case "cancelled":
+    case STORED_RUN_STATUS.cancelled:
       return {
         kind: "cancelled",
         reason: "Its last run was stopped, and nothing is scheduled to run it again."
       }
-    case "interrupted":
-    case "error":
-    case "failed":
-      return facts.run_error_code === "run_interrupted"
+    case STORED_RUN_STATUS.interrupted:
+    case STORED_RUN_STATUS.error:
+    case STORED_RUN_STATUS.failed:
+      return facts.run_error_code === CHAT_RUN_ERROR_CODE.runInterrupted
         ? { kind: "restart", reason: "A restart cut its last run off, and nothing tried it again." }
         : {
             kind: "failed",
@@ -101,14 +107,14 @@ const stopOf = (facts: StopFacts): Stop => {
 
 const eventStopKind = (cause: TaskStopCause | null): SpaceTaskStopKind => {
   switch (cause) {
-    case "run_interrupted":
+    case TASK_STOP_CAUSE.runInterrupted:
       return "restart"
-    case "stalled":
+    case TASK_STOP_CAUSE.stalled:
       return "stalled"
-    case "request_invalid":
-    case "provider_unavailable":
-    case "rate_limited":
-    case "failed":
+    case TASK_STOP_CAUSE.requestInvalid:
+    case TASK_STOP_CAUSE.providerUnavailable:
+    case TASK_STOP_CAUSE.rateLimited:
+    case TASK_STOP_CAUSE.failed:
     case null:
       return "failed"
   }
@@ -168,7 +174,9 @@ export const readWorkState = Effect.fn(function* (
         AND ${taskOpenSql("task")} AND task.blocked = 1
     WHERE task.item_id IN ${sql.in(itemIds)}
   `.pipe(Effect.mapError((cause) => workError("storage", "Could not read Task activity", cause)))
-  const stopped = rows.filter((row) => row.activity === "stopped").map((row) => row.item_id)
+  const stopped = rows
+    .filter((row) => row.activity === TASK_ACTIVITY.stopped)
+    .map((row) => row.item_id)
   const facts =
     stopped.length === 0
       ? []
@@ -187,8 +195,10 @@ export const readWorkState = Effect.fn(function* (
           row.question_id !== null && row.acknowledged_at !== null
             ? { question_id: row.question_id, acknowledged_at: row.acknowledged_at }
             : null,
-        stop_reason: row.activity === "stopped" ? (stops.get(row.item_id)?.reason ?? null) : null,
-        stop_kind: row.activity === "stopped" ? (stops.get(row.item_id)?.kind ?? null) : null
+        stop_reason:
+          row.activity === TASK_ACTIVITY.stopped ? (stops.get(row.item_id)?.reason ?? null) : null,
+        stop_kind:
+          row.activity === TASK_ACTIVITY.stopped ? (stops.get(row.item_id)?.kind ?? null) : null
       }
     ])
   )

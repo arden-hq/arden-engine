@@ -1,3 +1,4 @@
+import { WORKING_FILE_CHANGE_KIND } from "@arden-hq/revisions/effect"
 import type { AdoptableWorkingChange, CommitResult } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 
@@ -101,7 +102,7 @@ export const commitOutsideChange = (
   change: AdoptableWorkingChange
 ): Effect.Effect<CommitResult, WikiCommitError> =>
   requireCommitRules(point, options, [
-    change.kind === "changed"
+    change.kind === WORKING_FILE_CHANGE_KIND.changed
       ? {
           action: "edit",
           operation: {

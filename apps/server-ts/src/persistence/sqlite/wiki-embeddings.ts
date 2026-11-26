@@ -5,6 +5,7 @@ import {
   WikiEmbeddingPageWriteSchema,
   WikiEmbeddingStore,
   WikiEmbeddingStoreError,
+  WIKI_INDEX_ROLE,
   type StoredWikiEmbeddingChunk,
   type WikiEmbeddingIndexRecord,
   type WikiEmbeddingPageState,
@@ -28,7 +29,7 @@ const IndexRowSchema = Schema.Struct({
   index_version: Schema.NonEmptyString,
   model_id: Schema.NonEmptyString,
   dimensions: Schema.Int.check(Schema.isGreaterThan(0)),
-  role: Schema.Literals(["serving", "building"] as const),
+  role: Schema.Literals(Object.values(WIKI_INDEX_ROLE)),
   started_at: Schema.NonEmptyString
 })
 

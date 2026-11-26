@@ -1,3 +1,5 @@
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
+import { SPAWN_AGENT_TOOL } from "../tools/tool-roles.js"
 import { isWithin } from "@arden-hq/std/paths"
 import { Schema } from "effect"
 import path from "node:path"
@@ -32,15 +34,15 @@ const SpawnAgentInputBaseSchema = Schema.Struct({
 export const spawnAgentInputSchema = Schema.Union([
   Schema.Struct({
     ...SpawnAgentInputBaseSchema.fields,
-    mode: Schema.Literal("research")
+    mode: Schema.Literal(AGENT_MODE.research)
   }),
   Schema.Struct({
     ...SpawnAgentInputBaseSchema.fields,
-    mode: Schema.Literal("work")
+    mode: Schema.Literal(AGENT_MODE.work)
   }),
   Schema.Struct({
     ...SpawnAgentInputBaseSchema.fields,
-    mode: Schema.Literal("code"),
+    mode: Schema.Literal(AGENT_MODE.code),
     requestedWorkingDirectory: Schema.optionalKey(Schema.NonEmptyString),
     workspace: Schema.Struct({
       root: Schema.NonEmptyString,
@@ -68,7 +70,7 @@ export const spawnAgentInputSchema = Schema.Union([
         issue: "must match output schema"
       })
     }
-    if (input.parent.toolName !== "spawn_agent") {
+    if (input.parent.toolName !== SPAWN_AGENT_TOOL) {
       issues.push({ path: ["parent", "toolName"], issue: "must be spawn_agent" })
     }
     if (!input.parent.changesState) {
@@ -111,7 +113,7 @@ export const spawnAgentInputSchema = Schema.Union([
         issue: "must match reasoning effort"
       })
     }
-    if (input.mode !== "code") {
+    if (input.mode !== AGENT_MODE.code) {
       if (argumentWorkingDirectory !== undefined) {
         issues.push({
           path: ["parent", "arguments", "working_directory"],

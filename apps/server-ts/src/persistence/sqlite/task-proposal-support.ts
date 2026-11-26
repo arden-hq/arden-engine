@@ -1,3 +1,4 @@
+import { TASK_PROPOSAL_STATUS } from "@arden-hq/protocol/proposals"
 import { TaskSourceRecordSchema } from "../work/task-record.js"
 import { Effect } from "effect"
 import { TaskProposalStoreError } from "../proposals/store.js"
@@ -69,3 +70,6 @@ export const canonicalizeSources = (
       .map(([, source]) => source)
   )
 }
+
+export const decided = (status: string): boolean =>
+  status === TASK_PROPOSAL_STATUS.accepted || status === TASK_PROPOSAL_STATUS.rejected

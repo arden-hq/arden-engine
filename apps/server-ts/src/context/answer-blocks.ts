@@ -1,3 +1,4 @@
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { replaceAnswerBlocks } from "@arden-hq/protocol/chat"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
@@ -35,7 +36,7 @@ const isTextBlock = (block: unknown): block is { readonly type: "text"; readonly
   typeof block === "object" &&
   block !== null &&
   "type" in block &&
-  block.type === "text" &&
+  block.type === CONTENT_BLOCK_TYPE.text &&
   "text" in block &&
   typeof block.text === "string"
 

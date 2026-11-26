@@ -29,7 +29,7 @@ import {
 } from "../local-models/service.js"
 import { wikiEmbeddingIndexLayer } from "../embedding/wiki-index.js"
 import type { ServerConfigShape } from "../config/service.js"
-import { ServerConfig } from "../config/service.js"
+import { DATA_LOCATION, ServerConfig } from "../config/service.js"
 import { ChatEventStream } from "../chat/events.js"
 import { ChatStop } from "../chat/chat-stop.js"
 import { ChatMessage } from "../chat/message.js"
@@ -175,7 +175,9 @@ const composeServer = (
   )
   const skills = skillCatalogLayer(root.skills, { extraRoots: config.sharedSkillRoots })
   const rulesMove = rulesMoveLayer(root.globalInstructions).pipe(Layer.provide(wiki))
-  const cliTools = cliToolsLayer({ warm: config.data.kind === "disk" }).pipe(Layer.provide(skills))
+  const cliTools = cliToolsLayer({ warm: config.data.kind === DATA_LOCATION.disk }).pipe(
+    Layer.provide(skills)
+  )
   const modelsRoot = join(root.dir, "models")
   const llama = llamaServerLayer({
     binary: config.llamaServer,

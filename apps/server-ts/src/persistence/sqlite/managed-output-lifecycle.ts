@@ -1,7 +1,7 @@
 import { backoffDelayMs } from "@arden-hq/std/retry"
 import { DateTime, Effect } from "effect"
 
-import { ManagedOutputLifecycleStore } from "../managed-output/lifecycle-store.js"
+import { ManagedOutputLifecycleStore, UPLOAD_DECISION } from "../managed-output/lifecycle-store.js"
 import { CHAT_UPLOAD_MESSAGES_BACKFILL, listUploadRefsChunk } from "./chat-upload-messages.js"
 import type { PersistenceDeps } from "./deps.js"
 import { makeManagedOutputFence } from "./managed-output-fence.js"
@@ -162,19 +162,19 @@ export const makeManagedOutputLifecycleStore = ({
   ) {
     const queued = yield* sql<{ readonly upload_id: string }>`
         SELECT upload_id FROM chat_upload_cleanup WHERE upload_id = ${uploadId}`
-    if (queued.length === 0) return "gone" as const
+    if (queued.length === 0) return UPLOAD_DECISION.gone
     const listed = yield* sql<{ readonly done: number }>`
         SELECT 1 AS done FROM data_backfills
         WHERE name = ${CHAT_UPLOAD_MESSAGES_BACKFILL} AND finished_at IS NOT NULL`
-    if (listed.length === 0) return "wait" as const
+    if (listed.length === 0) return UPLOAD_DECISION.wait
     while (yield* listUploadRefsChunk(sql)) yield* Effect.yieldNow
     const named = yield* sql.unsafe<{ readonly named: number }>(UPLOAD_NAMED_SQL, [
       uploadId,
       `/uploads/${uploadId}/`
     ])
-    if (named.length === 0) return "remove" as const
+    if (named.length === 0) return UPLOAD_DECISION.remove
     yield* sql`DELETE FROM chat_upload_cleanup WHERE upload_id = ${uploadId}`
-    return "kept" as const
+    return UPLOAD_DECISION.kept
   })
 
   const finishUpload: ManagedOutputLifecycleStore["Service"]["finishUpload"] = (uploadId) =>

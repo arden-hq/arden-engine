@@ -1,5 +1,6 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect } from "effect"
+import { BROWSER_DISPOSITION, BROWSER_TOOL } from "../service.js"
 import type { BrowserProcedureStore } from "../../persistence/browser-procedures/store.js"
 import { refusalOf, typingRule } from "../../tools/browser-task-rules.js"
 import type { BrowserObservationRegistry } from "../../tools/run-context.js"
@@ -23,7 +24,7 @@ export const validateProcedureCall = async (
   if (scope.rejected) refusal("The user declined a step. This saved procedure has stopped.")
   if (scope.replay) return
   const { name, args } = request
-  if (name === "browser_procedure_verify") return
+  if (name === BROWSER_TOOL.procedureVerify) return
   if (scope.calls >= scope.policy.maxSteps)
     refusal(
       "The saved procedure reached this task's browser-call limit. Inspect the current page before continuing."
@@ -45,17 +46,17 @@ export const validateProcedureCall = async (
   if (!allowed.includes(name)) refusal("A saved browser procedure can only use its browser tab.")
   if (args["tab_ref"] !== scope.tab) refusal("The saved procedure tried to use another tab.")
   if (
-    name === "browser_act" &&
+    name === BROWSER_TOOL.act &&
     (args["origin"] !== scope.origin || args["profile_ref"] !== scope.profile)
   )
     refusal("The saved procedure's site or browser profile changed.")
-  if (name === "browser_open") {
+  if (name === BROWSER_TOOL.open) {
     const url = args["url"]
     if (
       typeof url !== "string" ||
       !URL.canParse(url) ||
       new URL(url).origin !== scope.origin ||
-      args["disposition"] !== "current"
+      args["disposition"] !== BROWSER_DISPOSITION.current
     )
       refusal("The saved procedure tried to leave its site.")
   }

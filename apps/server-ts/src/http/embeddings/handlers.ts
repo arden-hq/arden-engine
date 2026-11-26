@@ -1,3 +1,4 @@
+import { EMBEDDING_MODEL_CHOICE } from "@arden-hq/protocol/embeddings"
 import {
   decodeEmbeddingModelChoiceRequestEffect,
   embeddingStatusResponse
@@ -5,7 +6,11 @@ import {
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
-import type { EmbeddingControl } from "../../embedding/index-plan.js"
+import {
+  CONTROL_REJECTION,
+  EMBEDDING_CONTROL,
+  type EmbeddingControl
+} from "../../embedding/index-plan.js"
 import { WikiEmbeddingIndex } from "../../embedding/wiki-index.js"
 import { ArdenApi } from "../api.js"
 import { failInternal } from "../errors.js"
@@ -21,7 +26,7 @@ export const EmbeddingHandlers = HttpApiBuilder.group(
         Effect.catchTags({
           EmbeddingControlRejected: (rejected) =>
             Effect.fail(
-              rejected.reason === "unknown_model"
+              rejected.reason === CONTROL_REJECTION.unknownModel
                 ? new HttpApiError.UnprocessableEntity({})
                 : new HttpApiError.Conflict({})
             ),
@@ -39,15 +44,15 @@ export const EmbeddingHandlers = HttpApiBuilder.group(
           Effect.mapError(() => new HttpApiError.BadRequest({})),
           Effect.flatMap((choice) =>
             control(
-              choice.kind === "off"
-                ? { kind: "off", keepIndex: choice.keepIndex }
-                : { kind: "choose", modelId: choice.modelId }
+              choice.kind === EMBEDDING_MODEL_CHOICE.off
+                ? { kind: EMBEDDING_CONTROL.off, keepIndex: choice.keepIndex }
+                : { kind: EMBEDDING_CONTROL.choose, modelId: choice.modelId }
             )
           )
         )
       )
-      .handle("pause", () => control({ kind: "pause" }))
-      .handle("resume", () => control({ kind: "resume" }))
-      .handle("cancel", () => control({ kind: "cancel" }))
+      .handle("pause", () => control({ kind: EMBEDDING_CONTROL.pause }))
+      .handle("resume", () => control({ kind: EMBEDDING_CONTROL.resume }))
+      .handle("cancel", () => control({ kind: EMBEDDING_CONTROL.cancel }))
   })
 )

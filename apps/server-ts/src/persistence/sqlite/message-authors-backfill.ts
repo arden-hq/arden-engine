@@ -3,7 +3,7 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isRecord } from "@arden-hq/std/json"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { messageAuthor } from "../transcript/model.js"
+import { MESSAGE_AUTHOR, messageAuthor } from "../transcript/model.js"
 import type { Backfill } from "./backfills/backfill.js"
 
 const MESSAGE_AUTHORS_BACKFILL = "message_authors"
@@ -35,12 +35,15 @@ export const messageAuthorsBackfill: Backfill = {
     const proofs = new Map<string, ReadonlySet<string>>()
     for (const row of unset) {
       const message = parseJsonTextOrUndefined(row.message_json)
-      const marked = (isRecord(message) ? messageAuthor(message) : null) ?? "unknown"
+      const marked = (isRecord(message) ? messageAuthor(message) : null) ?? MESSAGE_AUTHOR.unknown
       let author = marked
-      if (isRecord(message) && (marked === "owner" || marked === "answer")) {
+      if (
+        isRecord(message) &&
+        (marked === MESSAGE_AUTHOR.owner || marked === MESSAGE_AUTHOR.answer)
+      ) {
         const known = proofs.get(row.session_id) ?? (yield* ownerProofs(sql, row.session_id))
         proofs.set(row.session_id, known)
-        if (!known.has(proofKey(marked, message, row.message_id))) author = "unknown"
+        if (!known.has(proofKey(marked, message, row.message_id))) author = MESSAGE_AUTHOR.unknown
       }
       yield* sql`UPDATE session_messages SET author = ${author}
         WHERE message_rowid = ${row.message_rowid}`
@@ -65,11 +68,11 @@ export const messageAuthorsBackfill: Backfill = {
 }
 
 const proofKey = (
-  author: "owner" | "answer",
+  author: typeof MESSAGE_AUTHOR.owner | typeof MESSAGE_AUTHOR.answer,
   message: Readonly<Record<string, unknown>>,
   messageId: string
 ): string => {
-  if (author === "owner")
+  if (author === MESSAGE_AUTHOR.owner)
     return `turn:${typeof message.turn_id === "string" ? message.turn_id : messageId}`
   const answer = message.question_answer
   return `question:${isRecord(answer) && typeof answer.question_id === "string" ? answer.question_id : ""}`

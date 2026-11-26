@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto"
-import { captureLearning, procedureInputHash } from "../browser-procedures/model.js"
-import { DateTime, Effect, Schema } from "effect"
+import {
+  CAPTURE_LEARNING,
+  captureLearning,
+  procedureInputHash
+} from "../browser-procedures/model.js"
+import { DateTime, Effect, Option, Schema } from "effect"
+import { WORKFLOW_STATUS } from "@arden-hq/protocol/workflows"
+import { CALL_CHANGE, type CallChange } from "./script-derive.js"
 import type { SqlClient } from "effect/unstable/sql"
 import {
   BrowserProcedureJobSchema,
@@ -19,6 +25,14 @@ import { jsonText } from "../json.js"
 import type { WriterDeps } from "./deps.js"
 import { ACTIVE_RUN_STATUSES } from "@arden-hq/protocol/runs"
 import { callChange } from "./run-effects.js"
+
+const PROCEDURE_SETTLE = {
+  succeeded: "succeeded",
+  failed: "failed",
+  uncertain: "uncertain",
+  not_applicable: "not_applicable"
+} as const
+type ProcedureSettle = (typeof PROCEDURE_SETTLE)[keyof typeof PROCEDURE_SETTLE]
 import { RejectedToolResultSchema } from "../tools/store.js"
 import {
   activeRunStatusList,
@@ -52,7 +66,7 @@ const loadRejection = Effect.fn("BrowserProcedures.rejection")(function* (
       AND a.kind='tool_approval' AND a.status='rejected' AND t.result_json IS NOT NULL`
   for (const row of rows) {
     const parsed = Schema.decodeUnknownOption(rejectedResult)(row.result_json)
-    if (parsed._tag === "Some") return { feedback: parsed.value.data.approval.feedback ?? null }
+    if (Option.isSome(parsed)) return { feedback: parsed.value.data.approval.feedback ?? null }
   }
   return undefined
 })
@@ -236,7 +250,7 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
       readonly arguments_json: string
       readonly result_json: string
       readonly changes_state: number
-      readonly change: "none" | "arden" | "applied" | "uncertain"
+      readonly change: CallChange
     }>`
       SELECT tool_call_id,tool_name,arguments_json,result_json,changes_state,${callChange(reader)} change FROM tool_calls AS call
       WHERE run_id = ${runId} AND tool_name IN ('browser_open','browser_snapshot','browser_act','browser_wait')
@@ -247,9 +261,9 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
       const resultJson = yield* writer.withToolResults(fullResultJson(row.result_json))
       const raw = yield* Schema.decodeUnknownEffect(jsonObject)(resultJson)
       const learning = captureLearning(raw["data"])
-      if (learning === "sensitive") return undefined
-      if (raw["is_error"] === true && row.change === "none") continue
-      if (learning === "unmarked") return undefined
+      if (learning === CAPTURE_LEARNING.sensitive) return undefined
+      if (raw["is_error"] === true && row.change === CALL_CHANGE.none) continue
+      if (learning === CAPTURE_LEARNING.unmarked) return undefined
       const args = yield* Schema.decodeUnknownEffect(jsonObject)(row.arguments_json)
       const data = Schema.decodeUnknownOption(jsonObject.to)(raw["data"])
       calls.push({
@@ -257,10 +271,10 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
         name: row.tool_name,
         args,
         content: jsonText(raw["content"]),
-        data: data._tag === "None" ? {} : data.value,
+        data: Option.isNone(data) ? {} : data.value,
         isError: raw["is_error"] === true,
         changesState: row.changes_state === 1,
-        pageChecked: learning === "safe"
+        pageChecked: learning === CAPTURE_LEARNING.safe
       })
     }
     if (calls.length === 0) return undefined
@@ -320,7 +334,7 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
   const settle = Effect.fn("BrowserProcedures.settle")(function* (
     runId: string,
     toolCallId: string,
-    status: "succeeded" | "failed" | "uncertain" | "not_applicable"
+    status: ProcedureSettle
   ) {
     yield* writer.transact(
       Effect.gen(function* () {
@@ -333,9 +347,9 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
         const at = yield* now
         const rejected = yield* loadRejection(sql, runId, toolCallId)
         yield* sql`UPDATE browser_procedure_invocations SET status=${rejected === undefined ? status : "failed"},ended_at=${at} WHERE run_id=${runId} AND tool_call_id=${toolCallId}`
-        if (rejected !== undefined || status === "not_applicable") return
-        yield* sql`UPDATE browser_procedures SET status=CASE WHEN status='suspended' THEN 'suspended' WHEN ${status === "succeeded" ? 1 : 0} THEN 'accepted' ELSE 'suspended' END,
-        success_count=success_count+${status === "succeeded" ? 1 : 0}, failure_count=failure_count+${status === "succeeded" ? 0 : 1},updated_at=${at}
+        if (rejected !== undefined || status === PROCEDURE_SETTLE.not_applicable) return
+        yield* sql`UPDATE browser_procedures SET status=CASE WHEN status='suspended' THEN 'suspended' WHEN ${status === PROCEDURE_SETTLE.succeeded ? 1 : 0} THEN 'accepted' ELSE 'suspended' END,
+        success_count=success_count+${status === PROCEDURE_SETTLE.succeeded ? 1 : 0}, failure_count=failure_count+${status === PROCEDURE_SETTLE.succeeded ? 0 : 1},updated_at=${at}
         WHERE id=${row.procedure_id} AND revision=${row.revision}`
       })
     )
@@ -366,7 +380,7 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
           data: Schema.Struct({ detached: Schema.Struct({ workflow_ref: Schema.String }) })
         })
       )(value)
-      if (receipt._tag === "Some") {
+      if (Option.isSome(receipt)) {
         const scripts = yield* reader<{
           readonly status: string
           readonly body: string | null
@@ -374,7 +388,7 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
           LEFT JOIN automation_deliveries d ON json_extract(d.payload,'$.kind')='script_result' AND json_extract(d.payload,'$.workflowRef')=s.script_ref AND json_extract(d.payload,'$.attempt')=s.attempt
           WHERE s.origin_run_id=${row.run_id} AND s.origin_tool_call_id=${row.tool_call_id} LIMIT 1`
         const script = scripts[0]
-        if (script === undefined || script.status === "running") continue
+        if (script === undefined || script.status === WORKFLOW_STATUS.running) continue
         const result =
           script.body === null
             ? undefined
@@ -384,16 +398,25 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
         yield* settle(
           row.run_id,
           row.tool_call_id,
-          script.status === "succeeded" && result?._tag === "Some" ? "succeeded" : "uncertain"
+          script.status === WORKFLOW_STATUS.succeeded &&
+            result !== undefined &&
+            Option.isSome(result)
+            ? PROCEDURE_SETTLE.succeeded
+            : PROCEDURE_SETTLE.uncertain
         )
         continue
       }
       const changed = yield* mayHaveChanged(row.run_id, row.tool_call_id)
-      const failureStatus = row.status === "uncertain" || changed ? "uncertain" : "failed"
+      const failureStatus =
+        row.status === PROCEDURE_SETTLE.uncertain || changed
+          ? PROCEDURE_SETTLE.uncertain
+          : PROCEDURE_SETTLE.failed
       yield* settle(
         row.run_id,
         row.tool_call_id,
-        row.status !== "uncertain" && outcome._tag === "Some" ? "succeeded" : failureStatus
+        row.status !== PROCEDURE_SETTLE.uncertain && Option.isSome(outcome)
+          ? PROCEDURE_SETTLE.succeeded
+          : failureStatus
       )
     }
   })

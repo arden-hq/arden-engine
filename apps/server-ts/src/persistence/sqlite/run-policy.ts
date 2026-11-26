@@ -1,3 +1,4 @@
+import { JOB_SUBJECT_KIND } from "../space-job-id.js"
 import { Effect, Option, Schema } from "effect"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
 import {
@@ -19,7 +20,9 @@ import {
   type RunCapability,
   type RunPolicy
 } from "../../execution/policy.js"
-import { RunAuthoritySchema } from "../../execution/authority.js"
+import { ACTOR, RunAuthoritySchema } from "../../execution/authority.js"
+import { RUN_EXECUTION_MODE } from "../../execution/policy.js"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
 import { WorkStoreError } from "../work/store.js"
 import { decodeJson } from "./json.js"
@@ -29,7 +32,11 @@ import {
   readBudgetRemaining,
   readExecutionBudget
 } from "./execution-budgets.js"
-import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
+import {
+  APPROVAL_MODE,
+  AUTOMATION_APPROVAL,
+  DEFAULT_APPROVAL_MODE
+} from "@arden-hq/protocol/permissions"
 import { readCopySource } from "./automation-copy.js"
 import { taskOpenSql } from "./task-status-sql.js"
 import { defaultModeSql } from "./default-approval-mode.js"
@@ -139,12 +146,13 @@ const sessionResourceReach = Effect.fn("RunPolicy.sessionResourceReach")(functio
       return yield* failure("The source chat's effective resource authority is unavailable")
     if (
       sourcePolicy === undefined &&
-      (source.session_type !== "chat" || source.origin_automation_id !== null)
+      (source.session_type !== SESSION_TYPE.chat || source.origin_automation_id !== null)
     )
       return { sessions: [], sourcePolicy: undefined }
     if (recent[0]?.authority_json != null) {
       const sourceAuthority = yield* decodeJson(RunAuthoritySchema, recent[0].authority_json)
-      if (sourceAuthority.actor.kind !== "person") return { sessions: [], sourcePolicy: undefined }
+      if (sourceAuthority.actor.kind !== ACTOR.person)
+        return { sessions: [], sourcePolicy: undefined }
     }
     const authoritySessionId =
       sourcePolicy === undefined
@@ -186,7 +194,7 @@ const sessionResourceReach = Effect.fn("RunPolicy.sessionResourceReach")(functio
     )(sourceMetadata["fork_resources"])
     if (sourcePolicy === undefined && Option.isSome(parent))
       return yield* failure("The source chat's inherited resource authority is unavailable")
-    if (parent._tag === "None") return { sessions: resources, sourcePolicy: effectiveSourcePolicy }
+    if (Option.isNone(parent)) return { sessions: resources, sourcePolicy: effectiveSourcePolicy }
     current = parent.value
   }
   return yield* failure("The fork resource chain is too deep")
@@ -223,7 +231,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
       const parent = yield* decodeJson(RunPolicySchema, row.policy)
       if (parent.execution.observe)
         return yield* failure("Observation permission does not authorize delegated execution")
-      if (parent.execution.mode === "inline") {
+      if (parent.execution.mode === RUN_EXECUTION_MODE.inline) {
         const current = yield* captureRunPolicy(sql, {
           runId: options.runId,
           sessionId: options.sessionId,
@@ -271,9 +279,9 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     let approvalMode = options.approvalMode
     let observe = false
     let authoritySessionId = options.sessionId
-    let budgetTask: BudgetTask = { kind: "home_chat", sessionId: options.sessionId }
+    let budgetTask: BudgetTask = { kind: BUDGET_TASK.homeChat, sessionId: options.sessionId }
     if (options.automationId !== undefined) {
-      budgetTask = { kind: "none" }
+      budgetTask = { kind: BUDGET_TASK.none }
       const owner = yield* readWorkOwner(sql, options.automationId)
       const around = yield* sql<{
         readonly default_mode: string
@@ -305,7 +313,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
         return yield* failure("The Automation is disabled or unavailable")
       const inSpaceMode = (ownRule: ApprovalMode): ApprovalMode =>
         isApprovalMode(facts.default_mode) ? facts.default_mode : ownRule
-      if (owner.kind === "automation" && isUserAutomationPurpose(owner.purpose)) {
+      if (owner.kind === JOB_SUBJECT_KIND.automation && isUserAutomationPurpose(owner.purpose)) {
         if (facts.chat_id === null) return yield* failure("The execution Chat is unavailable")
         capability = "all"
         authoritySessionId = facts.chat_id
@@ -315,11 +323,12 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
       } else {
         const job = ownerPolicy(owner)
         capability = yield* Schema.decodeUnknownEffect(RunCapabilitySchema)(job.toolScope)
-        if (job.approval.kind === "space") approvalMode = inSpaceMode("allow")
+        if (job.approval.kind === AUTOMATION_APPROVAL.space) approvalMode = inSpaceMode("allow")
         else approvalMode = job.approval.autoApprove ? "allow" : "ask"
       }
-      if (owner.kind === "space_review") observe = true
-      if (owner.kind === "task") budgetTask = { kind: "task", itemId: owner.itemId }
+      if (owner.kind === JOB_SUBJECT_KIND.spaceReview) observe = true
+      if (owner.kind === JOB_SUBJECT_KIND.task)
+        budgetTask = { kind: BUDGET_TASK.task, itemId: owner.itemId }
     } else {
       const copy = yield* readCopySource(sql, options.sessionId)
       if (copy !== undefined) {
@@ -413,7 +422,8 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
           FROM chat_runs AS run LEFT JOIN execution_budgets AS budget
             ON budget.budget_id = json_extract(run.metadata_json, '$.run_policy.budget_id')
           WHERE run.run_id = ${options.sharesRunId}`)[0]
-    if (options.taskItemId !== undefined) budgetTask = { kind: "task", itemId: options.taskItemId }
+    if (options.taskItemId !== undefined)
+      budgetTask = { kind: BUDGET_TASK.task, itemId: options.taskItemId }
     const budgetId = yield* runBudget(sql, {
       runId: options.runId,
       ...(options.automationTokenLimit === undefined
@@ -445,8 +455,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
       budget_id: budgetId,
       execution: { mode: options.mode, observe },
       capabilities,
-      // oxlint-disable-next-line arden/restricted-owner -- the stored legacy boolean of the mode, not a card outcome
-      auto_approve: approvalMode === "allow",
+      auto_approve: approvalMode === APPROVAL_MODE.allow,
       google_accounts: googleAccounts,
       resource_sessions: resourceSessions,
       space
@@ -458,10 +467,12 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
   )
 })
 
+const BUDGET_TASK = { task: "task", homeChat: "home_chat", none: "none" } as const
+
 type BudgetTask =
-  | { readonly kind: "task"; readonly itemId: string }
-  | { readonly kind: "home_chat"; readonly sessionId: string }
-  | { readonly kind: "none" }
+  | { readonly kind: typeof BUDGET_TASK.task; readonly itemId: string }
+  | { readonly kind: typeof BUDGET_TASK.homeChat; readonly sessionId: string }
+  | { readonly kind: typeof BUDGET_TASK.none }
 
 const runBudget = Effect.fn("RunPolicy.budget")(function* (
   sql: SqlClient.SqlClient,
@@ -473,13 +484,13 @@ const runBudget = Effect.fn("RunPolicy.budget")(function* (
   }
 ) {
   const subject = options.budgetTask
-  if (subject.kind !== "none") {
+  if (subject.kind !== BUDGET_TASK.none) {
     const task = (yield* sql<{ readonly budget_id: string }>`
       SELECT budget.budget_id
       FROM space_tasks AS item JOIN execution_budgets AS budget ON budget.task_item_id = item.item_id
       WHERE ${taskOpenSql("item")} AND item.owner = 'worker'
         AND ${
-          subject.kind === "task"
+          subject.kind === BUDGET_TASK.task
             ? sql`item.item_id = ${subject.itemId}`
             : sql`item.home_session_id = ${subject.sessionId} AND item.runs_in = 'chat'
                 AND item.blocked = 0`

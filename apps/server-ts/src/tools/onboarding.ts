@@ -6,7 +6,8 @@ import { Effect, Schema } from "effect"
 import { homedir } from "node:os"
 import { basename, isAbsolute, join } from "node:path"
 
-import { readSpecialChat } from "../context/special-chat.js"
+import { GOOGLE_CLIENT_BLOCK, GOOGLE_CLIENT_CONFIGURED } from "@arden-hq/protocol/google"
+import { readSpecialChat, SPECIAL_CHAT_KIND } from "../context/special-chat.js"
 import { GoogleConnections } from "../google/service.js"
 import { ApprovalPolicyStore } from "../persistence/permissions/approval-policy.js"
 import { RunQueries } from "../persistence/runs/queries.js"
@@ -114,7 +115,10 @@ export const makeOnboardingFinishTool = ({
       const session = await Effect.runPromise(sessions.loadHeaderSnapshot(ctx.run.sessionId), {
         signal: ctx.signal
       })
-      if (session === null || readSpecialChat(session.metadata)?.kind !== "onboarding") {
+      if (
+        session === null ||
+        readSpecialChat(session.metadata)?.kind !== SPECIAL_CHAT_KIND.onboarding
+      ) {
         throw new ToolExecutionError("Getting started is not running in this chat.", {
           preview: "Not available here",
           retryable: false
@@ -330,7 +334,10 @@ const makeOnboardingTools = ({
       const session = await Effect.runPromise(sessions.loadHeaderSnapshot(ctx.run.sessionId), {
         signal: ctx.signal
       })
-      if (session === null || readSpecialChat(session.metadata)?.kind !== "onboarding") {
+      if (
+        session === null ||
+        readSpecialChat(session.metadata)?.kind !== SPECIAL_CHAT_KIND.onboarding
+      ) {
         throw new ToolExecutionError(
           "Only the Getting started chat sets its approval mode. Tell the user to use the shield under the message box.",
           { preview: "Not available here", retryable: false }
@@ -442,11 +449,11 @@ const makeOnboardingTools = ({
           .pipe(Effect.mapError((error) => toolFailure(error, "Google client not saved"))),
         { signal: ctx.signal }
       )
-      if (configured.status === "blocked") {
+      if (configured.status === GOOGLE_CLIENT_CONFIGURED.blocked) {
         effects.unchanged()
         return {
           result:
-            configured.reason === "accounts_connected"
+            configured.reason === GOOGLE_CLIENT_BLOCK.accountsConnected
               ? "Not imported: Google accounts are already connected with another client. Disconnect them in Settings first, or keep the current client."
               : "Not imported: a Google sign-in is in progress. Finish or cancel it, then retry.",
           preview: "Google client not changed",

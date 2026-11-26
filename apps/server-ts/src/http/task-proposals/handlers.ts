@@ -1,4 +1,11 @@
-import type { TaskProposalScope } from "@arden-hq/protocol/proposals"
+import {
+  TASK_PROPOSAL_DECISION,
+  TASK_PROPOSAL_PLACEMENT,
+  TASK_PROPOSAL_STATUS,
+  type TaskProposalScope
+} from "@arden-hq/protocol/proposals"
+import { SOURCE_KIND } from "@arden-hq/protocol/spaces/work"
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { TaskProposalStore, TaskProposalStoreError } from "../../persistence/proposals/store.js"
@@ -15,7 +22,7 @@ const scopeOf = (
     | { readonly place: "space"; readonly space_id: string }
     | { readonly place: "chat"; readonly session_id: string }
 ): TaskProposalScope =>
-  query.place === "space"
+  query.place === TASK_PROPOSAL_PLACEMENT.space
     ? { place: "space", spaceId: query.space_id }
     : { place: "chat", sessionId: query.session_id }
 
@@ -55,15 +62,19 @@ export const TaskProposalHandlers = HttpApiBuilder.group(
       .handle("resolve", ({ params, payload }) =>
         Effect.gen(function* () {
           const proposal = yield* proposals.get(params.proposalId)
-          if (proposal?.status === "offered" && proposal.revision !== payload.expected_revision) {
+          if (
+            proposal?.status === TASK_PROPOSAL_STATUS.offered &&
+            proposal.revision !== payload.expected_revision
+          ) {
             return yield* new TaskProposalConflictError({
               kind: "proposal_changed",
               message: "This suggestion changed. Review the updated instructions before starting."
             })
           }
           const memorySources =
-            proposal?.status === "offered" && payload.decision === "accept"
-              ? proposal.sources.filter((source) => source.kind === "memory")
+            proposal?.status === TASK_PROPOSAL_STATUS.offered &&
+            payload.decision === TASK_PROPOSAL_DECISION.accept
+              ? proposal.sources.filter((source) => source.kind === SOURCE_KIND.memory)
               : []
           const spaceId =
             memorySources.length === 0 ? undefined : yield* proposals.memoryScope(params.proposalId)
@@ -108,7 +119,7 @@ export const TaskProposalHandlers = HttpApiBuilder.group(
             const current = snapshot.pages.find((record) => record.page.pageId === source.page_ref)
             if (
               current === undefined ||
-              current.page.lifecycle !== "active" ||
+              current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active ||
               !spaceOwnsPath(boundaryPath, current.resource.path)
             ) {
               return Effect.fail(

@@ -7,10 +7,21 @@ import {
 } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 
-import { decodeWikiOrigin, wikiOriginSource } from "./origin.js"
+import {
+  decodeWikiOrigin,
+  WIKI_COMMIT_SOURCE,
+  WIKI_ORIGIN_KIND,
+  wikiOriginSource
+} from "./origin.js"
 import { isContentStepOrigin } from "./content-steps.js"
 import { mapRevisionError, wikiError, type WikiError, type WikiOperation } from "./errors.js"
-import { pageKind, recordFolders, type RecordFolders } from "./collections.js"
+import {
+  PAGE_KIND,
+  pageKind,
+  RECORD_PRODUCER,
+  recordFolders,
+  type RecordFolders
+} from "./collections.js"
 import { pageWikiLinks } from "./links.js"
 import {
   activeRunPages,
@@ -33,18 +44,24 @@ const MAX_CURRENT_WIKI_BYTES = 8 * 1_024 * 1_024
 const STORAGE_METADATA =
   /^([+-]?\s*(?:-\s*)?["']?(?:page_id|generated_from_revision)["']?\s*:\s*).*$/gimu
 
+export const WIKI_MAINTENANCE_PREPARATION = {
+  idle: "idle",
+  advance: "advance",
+  review: "review"
+} as const
+
 export type WikiMaintenancePreparation =
   | {
-      readonly kind: "idle"
+      readonly kind: typeof WIKI_MAINTENANCE_PREPARATION.idle
       readonly head: string | null
     }
   | {
-      readonly kind: "advance"
+      readonly kind: typeof WIKI_MAINTENANCE_PREPARATION.advance
       readonly head: string
       readonly sourceHead: string
     }
   | {
-      readonly kind: "review"
+      readonly kind: typeof WIKI_MAINTENANCE_PREPARATION.review
       readonly sourceHead: string
       readonly markdown: string
     }
@@ -63,11 +80,11 @@ const utf8Bytes = (value: string): number => Buffer.byteLength(value, "utf8")
 
 const sourceCategory = (commit: Commit): string => {
   const source = wikiOriginSource(decodeWikiOrigin(commit.origin))
-  return source === "automation" ? "scheduled automation" : source
+  return source === WIKI_COMMIT_SOURCE.automation ? "scheduled automation" : source
 }
 
 const isUpkeepCommit = (commit: Commit): boolean =>
-  decodeWikiOrigin(commit.origin).kind === "upkeep"
+  decodeWikiOrigin(commit.origin).kind === WIKI_ORIGIN_KIND.upkeep
 
 interface PageChange {
   readonly before: { readonly path: string } | null
@@ -82,7 +99,7 @@ const changesPage = (change: PageChange): boolean =>
 
 const isImportRecord = (folders: RecordFolders, path: string): boolean => {
   const kind = pageKind(folders, path)
-  return kind.kind !== "knowledge" && kind.folder.producer.kind === "import"
+  return kind.kind !== PAGE_KIND.knowledge && kind.folder.producer.kind === RECORD_PRODUCER.import
 }
 
 const isReviewableChange = (folders: RecordFolders, change: PageChange): boolean =>
@@ -92,9 +109,9 @@ const isReviewableChange = (folders: RecordFolders, change: PageChange): boolean
 
 const readOnlyMark = (folders: RecordFolders, path: string): string => {
   const kind = pageKind(folders, path).kind
-  return kind === "knowledge"
+  return kind === PAGE_KIND.knowledge
     ? ""
-    : ` (${kind === "record" ? "record" : "folder contract"}; read only)`
+    : ` (${kind === PAGE_KIND.record ? "record" : "folder contract"}; read only)`
 }
 
 const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(function* (
@@ -231,7 +248,7 @@ export const makeWikiMaintenanceMethods = (
     const baseHead = yield* repository.currentRevision.pipe(
       Effect.mapError(mapRevisionError("list"))
     )
-    if (baseHead === null) return { kind: "idle", head: null } as const
+    if (baseHead === null) return { kind: WIKI_MAINTENANCE_PREPARATION.idle, head: null } as const
     if (historyCache?.head !== baseHead) historyCache = undefined
     let cachedEnd = -1
     if (historyCache !== undefined) {
@@ -258,7 +275,8 @@ export const makeWikiMaintenanceMethods = (
     }
     const sourceIds = ids.slice(-MAX_RANGE_COMMITS)
     const sourceHead = sourceIds[0]
-    if (sourceHead === undefined) return { kind: "idle", head: baseHead } as const
+    if (sourceHead === undefined)
+      return { kind: WIKI_MAINTENANCE_PREPARATION.idle, head: baseHead } as const
     const sources = yield* Effect.forEach(
       sourceIds,
       (sourceId) =>
@@ -273,7 +291,7 @@ export const makeWikiMaintenanceMethods = (
     )
     if (candidates.length === 0) {
       return {
-        kind: "advance",
+        kind: WIKI_MAINTENANCE_PREPARATION.advance,
         head: baseHead,
         sourceHead
       } as const
@@ -301,7 +319,7 @@ export const makeWikiMaintenanceMethods = (
     const reviewSources = candidates.filter((source) => source.changes.some(reviewable))
     if (reviewSources.length === 0) {
       return {
-        kind: "advance",
+        kind: WIKI_MAINTENANCE_PREPARATION.advance,
         head: baseHead,
         sourceHead
       } as const
@@ -397,7 +415,7 @@ export const makeWikiMaintenanceMethods = (
     }
 
     return {
-      kind: "review",
+      kind: WIKI_MAINTENANCE_PREPARATION.review,
       sourceHead,
       markdown: sections.join("\n\n")
     } as const

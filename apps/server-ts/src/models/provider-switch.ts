@@ -9,7 +9,12 @@ import { Context, Effect, Layer, Semaphore, type Schema } from "effect"
 import type { ModelProviderOptions } from "../config/options.js"
 import { ModelCatalog, type ModelCatalogError } from "./catalog.js"
 import type { ServerModels } from "./endpoints/chat.js"
-import { decodeModelHostSource, type ModelHost, type ModelHostSource } from "./host.js"
+import {
+  decodeModelHostSource,
+  MODEL_HOST_SOURCE,
+  type ModelHost,
+  type ModelHostSource
+} from "./host.js"
 import { ModelProviderService, type ModelRouteInput } from "./provider.js"
 
 export class ModelProviderSwitch extends Context.Service<
@@ -105,7 +110,7 @@ const mergedSource = (
   source: ModelHostSource,
   merge: (host: ModelHost) => ModelHost
 ): ModelHostSource => {
-  if (source.kind === "ready") return { kind: "ready", host: merge(source.host) }
+  if (source.kind === MODEL_HOST_SOURCE.ready) return { kind: "ready", host: merge(source.host) }
   const host = source.host.then(merge)
   void host.catch(() => undefined)
   return { kind: "discovering", host }

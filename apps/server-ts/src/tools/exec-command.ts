@@ -23,6 +23,8 @@ import {
 import {
   EMPTY_LINE,
   INTERRUPT,
+  TYPED_COMMANDS,
+  TYPED_INPUT,
   typedCommands,
   typedInputJudged,
   typedInputRefused,
@@ -30,13 +32,15 @@ import {
   type TypedLine
 } from "./typed-input.js"
 import { sessionPathPolicy } from "../storage/local-paths.js"
+import { APPROVAL_MODE } from "@arden-hq/protocol/permissions"
+import { TERMINAL_INPUT_STATUS } from "@arden-hq/protocol/sessions/terminals"
 import { ServerConfig } from "../config/service.js"
 import { DataRoot } from "../runtime/data-root.js"
 import { resolveCommandSandbox } from "../runtime/command-sandbox.js"
-import { CommandInterrupted, runCommandUntil } from "./shell-run.js"
+import { COMMAND_STATE, CommandInterrupted, runCommandUntil } from "./shell-run.js"
 import { TerminalSessions } from "../terminals/service.js"
-import type { TerminalInfo } from "../terminals/store.js"
-import { spawnLiveProcess } from "../terminals/live-process.js"
+import { TERMINAL_EVENT, type TerminalInfo } from "../terminals/store.js"
+import { PROCESS_EXIT, spawnLiveProcess } from "../terminals/live-process.js"
 import { refusalPath } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
 import { toolRefusal } from "./tool-failure.js"
@@ -227,7 +231,7 @@ const makeExecCommandTool = (
           retryable: false
         })
       }
-      if (outcome.state === "running") {
+      if (outcome.state === COMMAND_STATE.running) {
         if (terminalId === undefined) throw new Error("A running command has no terminal.")
         services.terminals.detach(terminalId)
         return {
@@ -254,13 +258,13 @@ const makeExecCommandTool = (
 const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
   const pendingLines = new Map<number, { readonly toolCallId: string; readonly line: TypedLine }>()
   services.terminals.subscribe((event) => {
-    if (event.type === "removed" || event.terminal.exit !== undefined)
+    if (event.type === TERMINAL_EVENT.removed || event.terminal.exit !== undefined)
       pendingLines.delete(event.terminal.id)
   })
   const typed = (terminal: TerminalInfo, chars: string) => {
     const held = pendingLines.get(terminal.id)
     const input = typeInto(held?.toolCallId === terminal.toolCallId ? held.line : EMPTY_LINE, chars)
-    if (input.kind === "refused")
+    if (input.kind === TYPED_INPUT.refused)
       throw toolRefusal(
         "The input holds a NUL character, which cannot be checked, so nothing was typed.",
         "Input refused"
@@ -299,13 +303,14 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
       const terminal = reachableTerminal(services.terminals, input.session_id, ctx.run)
       if (terminal === undefined) return undefined
       const { commands } = typed(terminal, input.chars ?? "")
-      return commands.kind === "lines" && commands.judged !== undefined
+      return commands.kind === TYPED_COMMANDS.lines && commands.judged !== undefined
         ? { command: commands.judged, cwd: terminal.cwd }
         : undefined
     },
     approvalRequirement: async (input, ctx) => {
       const terminal = reachableTerminal(services.terminals, input.session_id, ctx.run)
-      if (terminal === undefined || ctx.run.approvalMode === "read_only") return undefined
+      if (terminal === undefined || ctx.run.approvalMode === APPROVAL_MODE.readOnly)
+        return undefined
       const judged = typedInputJudged({
         access: terminal.access,
         launchMode: terminal.approvalMode,
@@ -314,7 +319,7 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
       if (!judged) return undefined
       const chars = input.chars ?? ""
       const { commands } = typed(terminal, chars)
-      if (commands.kind !== "lines") return undefined
+      if (commands.kind !== TYPED_COMMANDS.lines) return undefined
       const card = await commandCard(services, {
         command: commands.judged ?? "",
         resolved: await terminalShell(services, terminal, ctx),
@@ -335,7 +340,7 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
       const chars = input.chars ?? ""
       const { commands } = typed(terminal, chars)
       const resolved = await terminalShell(services, terminal, ctx)
-      const judged = commands.kind === "lines" ? (commands.judged ?? "") : chars
+      const judged = commands.kind === TYPED_COMMANDS.lines ? (commands.judged ?? "") : chars
       return approvalPrompt({
         command: judged,
         resolved,
@@ -363,7 +368,11 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
           "Input changed"
         )
       }
-      if (ctx.run.approvalMode === "read_only" && chars.length > 0 && chars !== INTERRUPT) {
+      if (
+        ctx.run.approvalMode === APPROVAL_MODE.readOnly &&
+        chars.length > 0 &&
+        chars !== INTERRUPT
+      ) {
         throw refusalError({
           what: 'This run is read-only, so write_stdin can only read output or send "\\u0003" (Ctrl-C)',
           rule: "read_only",
@@ -372,7 +381,7 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
       }
       if (chars.length > 0) {
         const { pending, commands } = typed(terminal, chars)
-        if (commands.kind === "lines" && commands.judged !== undefined)
+        if (commands.kind === TYPED_COMMANDS.lines && commands.judged !== undefined)
           await refuseNeverPaths(
             commands.judged,
             terminal.cwd,
@@ -383,13 +392,13 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
             })
           )
         const written = services.terminals.write(input.session_id, chars)
-        if (written === "stdin_closed") {
+        if (written === TERMINAL_INPUT_STATUS.stdin_closed) {
           throw toolRefusal(
             `Session ${input.session_id} was started without tty, so it cannot read input. Only "\\u0003" (Ctrl-C) reaches it; start the command again with tty=true to answer prompts.`,
             "Input closed"
           )
         }
-        if (written === "sent")
+        if (written === TERMINAL_INPUT_STATUS.sent)
           pendingLines.set(terminal.id, { toolCallId: terminal.toolCallId, line: pending })
       }
       const wait =
@@ -414,7 +423,7 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
         data: {
           session_id: input.session_id,
           state: read.exit === undefined ? "running" : "exited",
-          ...(read.exit?.kind === "code" ? { exit_code: read.exit.code } : {})
+          ...(read.exit?.kind === PROCESS_EXIT.code ? { exit_code: read.exit.code } : {})
         }
       }
     }

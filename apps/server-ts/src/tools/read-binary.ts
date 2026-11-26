@@ -6,13 +6,17 @@ import { extractText, getDocumentProxy } from "unpdf"
 import { fitPng, fitsLimits, imageSize, patchCount, type ImageSize } from "../lib/prompt-image.js"
 import { fitImageWithSips } from "../lib/image-fit-sips.js"
 
-export type ImageFormat = "png" | "jpeg" | "gif" | "webp" | "heic"
+const IMAGE_FORMAT = { png: "png", jpeg: "jpeg", gif: "gif", webp: "webp", heic: "heic" } as const
+
+export type ImageFormat = (typeof IMAGE_FORMAT)[keyof typeof IMAGE_FORMAT]
+
+export const FILE_KIND = { text: "text", pdf: "pdf", image: "image", binary: "binary" } as const
 
 export type FileKind =
-  | { readonly kind: "text" }
-  | { readonly kind: "pdf" }
-  | { readonly kind: "image"; readonly format: ImageFormat }
-  | { readonly kind: "binary"; readonly label: string }
+  | { readonly kind: typeof FILE_KIND.text }
+  | { readonly kind: typeof FILE_KIND.pdf }
+  | { readonly kind: typeof FILE_KIND.image; readonly format: ImageFormat }
+  | { readonly kind: typeof FILE_KIND.binary; readonly label: string }
 
 const GIT_BINARY_SNIFF_BYTES = 8_000
 
@@ -22,14 +26,24 @@ const startsWith = (bytes: Uint8Array, signature: ReadonlyArray<number>, at = 0)
 const ascii = (bytes: Uint8Array, from: number, to: number): string =>
   String.fromCharCode(...bytes.subarray(from, to))
 
+const PASSWORD_EXCEPTION = "PasswordException"
+
+const MAGIC = { gif: "GIF8", riff: "RIFF", webp: "WEBP", ftyp: "ftyp", pdf: "%PDF-" } as const
+
+type Magic = (typeof MAGIC)[keyof typeof MAGIC]
+
+const hasMagic = (bytes: Uint8Array, magic: Magic, at: number): boolean =>
+  String.fromCharCode(...bytes.subarray(at, at + magic.length)) === magic
+
 const HEIF_BRANDS: ReadonlySet<string> = new Set(["heic", "heix", "heim", "heis", "mif1", "msf1"])
 
 const imageFormat = (bytes: Uint8Array): ImageFormat | undefined => {
   if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "png"
   if (startsWith(bytes, [0xff, 0xd8, 0xff])) return "jpeg"
-  if (ascii(bytes, 0, 4) === "GIF8") return "gif"
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WEBP") return "webp"
-  if (ascii(bytes, 4, 8) === "ftyp" && HEIF_BRANDS.has(ascii(bytes, 8, 12))) return "heic"
+  if (hasMagic(bytes, MAGIC.gif, 0)) return IMAGE_FORMAT.gif
+  if (hasMagic(bytes, MAGIC.riff, 0) && hasMagic(bytes, MAGIC.webp, 8)) return IMAGE_FORMAT.webp
+  if (hasMagic(bytes, MAGIC.ftyp, 4) && HEIF_BRANDS.has(ascii(bytes, 8, 12)))
+    return IMAGE_FORMAT.heic
   return undefined
 }
 
@@ -56,7 +70,7 @@ export const fileKind = (input: {
   readonly name: string
 }): FileKind => {
   const { bytes } = input
-  if (ascii(bytes, 0, 5) === "%PDF-") return { kind: "pdf" }
+  if (hasMagic(bytes, MAGIC.pdf, 0)) return { kind: FILE_KIND.pdf }
   const format = imageFormat(bytes)
   if (format !== undefined) return { kind: "image", format }
   if (bytes.subarray(0, GIT_BINARY_SNIFF_BYTES).includes(0)) {
@@ -68,18 +82,25 @@ export const fileKind = (input: {
 export const binaryRefusal = (name: string, label: string): string =>
   `${name} is ${label}, not text, so file_read cannot read it; use exec_command to convert it to text first.`
 
+export const PDF_TEXT = {
+  text: "text",
+  noText: "no_text",
+  locked: "locked",
+  unreadable: "unreadable"
+} as const
+
 export type PdfText =
-  | { readonly kind: "text"; readonly text: string; readonly pages: number }
-  | { readonly kind: "no_text"; readonly pages: number }
-  | { readonly kind: "locked" }
-  | { readonly kind: "unreadable" }
+  | { readonly kind: typeof PDF_TEXT.text; readonly text: string; readonly pages: number }
+  | { readonly kind: typeof PDF_TEXT.noText; readonly pages: number }
+  | { readonly kind: typeof PDF_TEXT.locked }
+  | { readonly kind: typeof PDF_TEXT.unreadable }
 
 export const readPdfText = async (bytes: Uint8Array): Promise<PdfText> => {
   let document: Awaited<ReturnType<typeof getDocumentProxy>>
   try {
     document = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 })
   } catch (cause) {
-    return cause instanceof Error && cause.name === "PasswordException"
+    return cause instanceof Error && cause.name === PASSWORD_EXCEPTION
       ? { kind: "locked" }
       : { kind: "unreadable" }
   }
@@ -111,11 +132,11 @@ export const pdfRefusal = (
   imagesShown: boolean
 ): string => {
   switch (outcome.kind) {
-    case "locked":
+    case PDF_TEXT.locked:
       return `${name} is a password-protected PDF, so file_read cannot read its text.`
-    case "unreadable":
+    case PDF_TEXT.unreadable:
       return `${name} starts like a PDF but could not be parsed, so file_read cannot read its text.`
-    case "no_text":
+    case PDF_TEXT.noText:
       return [
         `${name} is a PDF of ${countOf(outcome.pages, "page")} with no text layer (it is probably scanned), so it has no text to read.`,
         ...(imagesShown
@@ -160,14 +181,14 @@ export const imageForModel = async (input: {
     limits === undefined ||
     fitsLimits(size, { maxSide: limits.fitSide, maxPatches: limits.fitPatches }, limits.patchSize)
   const direct = (): ModelImage | undefined => {
-    if (input.format === "png") {
+    if (input.format === IMAGE_FORMAT.png) {
       if (limits !== undefined) return fitPng({ bytes: input.bytes, limits })
       const size = imageSize(input.bytes, "image/png")
       return size === undefined
         ? undefined
         : { mediaType: "image/png", data: Buffer.from(input.bytes), source: size, size }
     }
-    if (input.format !== "jpeg") return undefined
+    if (input.format !== IMAGE_FORMAT.jpeg) return undefined
     const size = imageSize(input.bytes, "image/jpeg")
     return size !== undefined && fits(size)
       ? { mediaType: "image/jpeg", data: Buffer.from(input.bytes), source: size, size }

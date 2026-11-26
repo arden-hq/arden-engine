@@ -4,7 +4,7 @@ import { clipLine } from "@arden-hq/std/text"
 import { Effect, Schema } from "effect"
 
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import type { WikiError } from "../wiki/errors.js"
+import { WIKI_ERROR_REASON, WIKI_OPERATION, type WikiError } from "../wiki/errors.js"
 import type { RetractionChange } from "../wiki/forgotten.js"
 import { claimKey, MAX_CLAIM_CHARS } from "../wiki/retraction.js"
 import { Wiki } from "../wiki/service.js"
@@ -44,9 +44,15 @@ const ForgetParametersSchema = Schema.Struct({
   )
 )
 
+const FORGET_REQUEST = { forget: "forget", undo: "undo" } as const
+
 type ForgetRequest =
-  | { readonly kind: "forget"; readonly lines: ReadonlyArray<string>; readonly claim: string }
-  | { readonly kind: "undo"; readonly id: number }
+  | {
+      readonly kind: typeof FORGET_REQUEST.forget
+      readonly lines: ReadonlyArray<string>
+      readonly claim: string
+    }
+  | { readonly kind: typeof FORGET_REQUEST.undo; readonly id: number }
 
 const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
   input.undo !== undefined
@@ -54,7 +60,8 @@ const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
     : { kind: "forget", lines: input.lines ?? [], claim: input.claim ?? "" }
 
 const isForgetRefusal = (error: WikiError): boolean =>
-  error.operation === "forget" && (error.reason === "invalid" || error.reason === "not_found")
+  error.operation === WIKI_OPERATION.forget &&
+  (error.reason === WIKI_ERROR_REASON.invalid || error.reason === WIKI_ERROR_REASON.not_found)
 
 const forgetRefusal = (error: WikiError): ToolExecutionError =>
   new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
@@ -116,7 +123,7 @@ const makeMemoryForgetTools = ({
   const plan = async (request: ForgetRequest, ctx: ToolContext<ServerRunContext>) => {
     const turn = await ownerTurn(ctx)
     return Effect.runPromise(
-      (request.kind === "forget"
+      (request.kind === FORGET_REQUEST.forget
         ? wiki.planForget({ lines: request.lines, claim: request.claim, turn })
         : wiki.planUndoForget({ id: request.id, turn })
       ).pipe(Effect.mapError(forgetFailure)),
@@ -154,18 +161,20 @@ const makeMemoryForgetTools = ({
         const change = await plan(request, ctx)
         return {
           preview:
-            request.kind === "forget"
+            request.kind === FORGET_REQUEST.forget
               ? `Forget ${countOf(change.entry.removed.length, "line")} on ${countOf(removedPages(change).length, "page")}`
               : `Undo forgotten entry ${request.id}`,
           presentation: {
             title:
-              request.kind === "forget" ? "Forget this in Memory?" : "Let this back into Memory?",
+              request.kind === FORGET_REQUEST.forget
+                ? "Forget this in Memory?"
+                : "Let this back into Memory?",
             subject: change.entry.claim,
             fields:
-              request.kind === "forget"
+              request.kind === FORGET_REQUEST.forget
                 ? [{ label: "Pages per line", value: pagesPerLine(request.lines, change) }]
                 : [],
-            approve_label: request.kind === "forget" ? "Forget" : "Undo",
+            approve_label: request.kind === FORGET_REQUEST.forget ? "Forget" : "Undo",
             reject_label: "Keep as is"
           },
           diff: changeDiff(change)
@@ -175,7 +184,7 @@ const makeMemoryForgetTools = ({
         const request = requestOf(input)
         const turn = await ownerTurn(ctx)
         const change = await Effect.runPromise(
-          (request.kind === "forget"
+          (request.kind === FORGET_REQUEST.forget
             ? wiki.forget({ lines: request.lines, claim: request.claim, turn })
             : wiki.undoForget({ id: request.id, turn })
           ).pipe(Effect.mapError(forgetFailure)),
@@ -183,7 +192,7 @@ const makeMemoryForgetTools = ({
         )
         effects.applied()
         const pages = removedPages(change)
-        return request.kind === "forget"
+        return request.kind === FORGET_REQUEST.forget
           ? {
               result: `Forgot entry ${change.entry.id}: removed ${countOf(change.entry.removed.length, "line")} from ${pages.join(", ")}. A later write that would put one back is refused unless the user makes it; undo ${change.entry.id} lifts the entry.`,
               preview: "Forgotten",

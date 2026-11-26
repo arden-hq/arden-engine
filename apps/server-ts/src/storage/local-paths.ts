@@ -11,7 +11,15 @@ import type { RunQueries } from "../persistence/runs/queries.js"
 import type { ConversationArtifacts } from "../artifacts/conversation.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
 import { SANDBOX } from "../execution/authority.js"
-import { runPolicyOf } from "../execution/policy.js"
+import { RUN_EXECUTION_MODE, runPolicyOf } from "../execution/policy.js"
+import {
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_SUBJECT
+} from "@arden-hq/protocol/permissions"
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
+import { PLATFORM } from "@arden-hq/std/process"
 import { readAgentSessionMetadata } from "../sessions/agent-mode.js"
 import { isErrnoCode } from "../fs/private-store.js"
 import { gitMetadataRule } from "./git-metadata.js"
@@ -61,7 +69,7 @@ export interface SessionPathPolicy extends LocalPathPolicy {
   readonly usableRoots: ReadonlyArray<string>
 }
 
-const CASE_FOLDING_DISK = process.platform === "darwin"
+const CASE_FOLDING_DISK = process.platform === PLATFORM.darwin
 export const caseFoldingDisk = CASE_FOLDING_DISK
 
 export const pathRuleFor = (
@@ -70,14 +78,16 @@ export const pathRuleFor = (
   access: PathAccess
 ): "allow" | "never" | undefined => {
   const decision = pathDecision(policy.pathRules, target, access, CASE_FOLDING_DISK)
-  return decision === "allow" || decision === "never" ? decision : undefined
+  return decision === PERMISSION_RULE_DECISION.allow || decision === PERMISSION_RULE_DECISION.never
+    ? decision
+    : undefined
 }
 
 export const neverFoldersWithin = (policy: LocalPathPolicy, root: string): ReadonlyArray<string> =>
   policy.pathRules.rules.flatMap((rule) =>
-    rule.subject.kind === "path" &&
-    rule.decision === "never" &&
-    rule.subject.access === "read" &&
+    rule.subject.kind === PERMISSION_RULE_SUBJECT.path &&
+    rule.decision === PERMISSION_RULE_DECISION.never &&
+    rule.subject.access === PERMISSION_PATH_ACCESS.read &&
     rule.subject.path !== root &&
     within(root, rule.subject.path)
       ? [path.relative(root, rule.subject.path).split(path.sep).join("/")]
@@ -92,7 +102,7 @@ export const insideUsableFolder = (policy: SessionPathPolicy, target: string): b
 
 export const neverRuleRefusal = (target: string, access: PathAccess): ToolExecutionError =>
   toolRefusal(
-    `${target}: your rule says Arden never ${access === "change" ? "changes" : "touches"} files there.`,
+    `${target}: your rule says Arden never ${access === PERMISSION_PATH_ACCESS.change ? "changes" : "touches"} files there.`,
     "Your rule"
   )
 
@@ -133,7 +143,8 @@ export const sandboxRule = (
   homeDirectory: string = realHome(),
   platform: NodeJS.Platform = process.platform
 ): SandboxRule | undefined => {
-  if (policy.sandbox !== "code_agent" && policy.sandbox !== "approved_local") return undefined
+  if (policy.sandbox !== LOCAL_SANDBOX.codeAgent && policy.sandbox !== LOCAL_SANDBOX.approvedLocal)
+    return undefined
   const secrets = secretPaths(homeDirectory)
   const state = [policy.stateRoot]
   const writeRoot = policy.writeRoot
@@ -143,7 +154,9 @@ export const sandboxRule = (
       : gitMetadataRule(writeRoot, platform)
   const nevers = (access: PathAccess) =>
     policy.pathRules.rules.flatMap((rule) =>
-      rule.subject.kind === "path" && rule.decision === "never" && rule.subject.access === access
+      rule.subject.kind === PERMISSION_RULE_SUBJECT.path &&
+      rule.decision === PERMISSION_RULE_DECISION.never &&
+      rule.subject.access === access
         ? [rule.subject.path]
         : []
     )
@@ -206,7 +219,9 @@ export const policyPathOptions = (
 
 const allowedFolders = (rules: RunRules, access: PathAccess): ReadonlyArray<string> =>
   rules.rules.flatMap((rule) =>
-    rule.subject.kind === "path" && rule.decision === "allow" && rule.subject.access === access
+    rule.subject.kind === PERMISSION_RULE_SUBJECT.path &&
+    rule.decision === PERMISSION_RULE_DECISION.allow &&
+    rule.subject.access === access
       ? [rule.subject.path]
       : []
   )
@@ -228,7 +243,8 @@ export const sessionPathPolicy = async (
       }
     )
   ])
-  if (base.sandbox === "code_agent") return { ...base, usableRoots: base.localRoots, pathRules }
+  if (base.sandbox === LOCAL_SANDBOX.codeAgent)
+    return { ...base, usableRoots: base.localRoots, pathRules }
   const localRoots = [...new Set([...base.localRoots, ...allowedFolders(pathRules, "change")])]
   const usableRoots = [...new Set([...localRoots, ...allowedFolders(pathRules, "read")])]
   return { ...base, localRoots, usableRoots, pathRules }
@@ -257,7 +273,7 @@ const startPathPolicy = async (
       }
     )
     const header = snapshot?.header
-    const isAgent = header?.sessionType === "agent"
+    const isAgent = header?.sessionType === SESSION_TYPE.agent
     const agent = isAgent && snapshot !== null ? readAgentSessionMetadata(snapshot.metadata) : null
     if (isAgent && agent === null) {
       throw toolRefusal(
@@ -265,7 +281,7 @@ const startPathPolicy = async (
         "Agent sandbox unavailable"
       )
     }
-    if (agent?.mode === "code") {
+    if (agent?.mode === AGENT_MODE.code) {
       if (agent.workspace === null) {
         throw toolRefusal("This code agent has no pinned Local folder.", "Local folder required")
       }
@@ -309,7 +325,7 @@ const startPathPolicy = async (
           "Run authority changed"
         )
       }
-      if (captured.execution.mode === "inline") {
+      if (captured.execution.mode === RUN_EXECUTION_MODE.inline) {
         const space = await Effect.runPromise(services.spaces.get(header.spaceId), {
           signal: context.signal
         })
@@ -390,7 +406,8 @@ export const resolveLocalPath = async (
         "Protected path"
       )
     }
-    const access = options.mutation === true ? "change" : "read"
+    const access =
+      options.mutation === true ? PERMISSION_PATH_ACCESS.change : PERMISSION_PATH_ACCESS.read
     if (
       options.pathRules !== undefined &&
       pathDecision(
@@ -398,7 +415,7 @@ export const resolveLocalPath = async (
         { lexical: candidate, real: resolved },
         access,
         CASE_FOLDING_DISK
-      ) === "never"
+      ) === PERMISSION_RULE_DECISION.never
     )
       throw neverRuleRefusal(resolved, access)
     if (roots !== null && !roots.some((root) => isWithin(root, resolved))) {

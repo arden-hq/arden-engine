@@ -10,7 +10,7 @@ import { memoryPathOf, readChangeCall } from "../lib/memory-link.js"
 import { SpaceReviewStore } from "../persistence/automations/space-review-store.js"
 import type { WikiChangeRead, WikiPageChangesRead } from "../wiki/change.js"
 import type { WikiCommitSource } from "../wiki/origin.js"
-import type { WikiError } from "../wiki/errors.js"
+import { WIKI_ERROR_REASON, type WikiError } from "../wiki/errors.js"
 import { Wiki } from "../wiki/service.js"
 import { activeRunPages } from "../wiki/snapshot.js"
 
@@ -128,27 +128,27 @@ const renderChangesSince = (read: WikiPageChangesRead): string => {
 
 export const changeFailure = (error: WikiError, path: string): ToolExecutionError => {
   switch (error.reason) {
-    case "not_found":
+    case WIKI_ERROR_REASON.not_found:
       return new ToolExecutionError(
         `${error.message} List the page's changes and their times with wiki_page_history(path=${JSON.stringify(path)}), or recent changes to any page with wiki_list_changes(since=...).`,
         { preview: "Memory change not found", retryable: false }
       )
-    case "invalid":
+    case WIKI_ERROR_REASON.invalid:
       return new ToolExecutionError(
         `${error.message} Pass at exactly as a change's time is listed, or omit it for the page's latest change.`,
         { preview: "Invalid change read", retryable: false }
       )
-    case "blocked":
-    case "closed":
-    case "conflict":
-    case "corrupt":
-    case "storage":
+    case WIKI_ERROR_REASON.blocked:
+    case WIKI_ERROR_REASON.closed:
+    case WIKI_ERROR_REASON.conflict:
+    case WIKI_ERROR_REASON.corrupt:
+    case WIKI_ERROR_REASON.storage:
       return wikiFailure(error)
   }
 }
 
 const sinceFailure = (error: WikiError, path: string): ToolExecutionError =>
-  error.reason === "invalid" || error.reason === "not_found"
+  error.reason === WIKI_ERROR_REASON.invalid || error.reason === WIKI_ERROR_REASON.not_found
     ? new ToolExecutionError(
         `The changes to ${path} since the previous review could not be read: ${error.message} Read the page as it is now with wiki_read_page(path=${JSON.stringify(path)}).`,
         { preview: "Changes since review not read", retryable: false }

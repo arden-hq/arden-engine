@@ -4,6 +4,7 @@ import { Effect, Schema } from "effect"
 import { type DecisionEndpoint, postDecisionRequest } from "./endpoint.js"
 import {
   calibratedAnswer,
+  DECISION_KIND,
   type DecisionAnswer,
   type DecisionBackend,
   type DecisionInput,
@@ -19,7 +20,7 @@ export const decisionsFormatBackend = (endpoint: DecisionEndpoint): DecisionBack
   input: endpoint.input,
   classify: Effect.fn("Decisions.decisionsFormat")(function* (input: DecisionInput) {
     yield* validateDecisionInput(input)
-    if (Object.values(input.questions).some((question) => question.kind === "box")) {
+    if (Object.values(input.questions).some((question) => question.kind === DECISION_KIND.box)) {
       return yield* new DecisionsError({
         reason: "invalid_request",
         message: "This decision backend does not support boxes"
@@ -52,20 +53,27 @@ const decisionsRequest = (model: string, input: DecisionInput) => ({
   )
 })
 
+const DECISIONS_ANSWER = {
+  predicate: "predicate",
+  choice: "choice",
+  score: "score",
+  refusal: "refusal"
+} as const
+
 const decisionsQuestion = (name: string, question: DecisionQuestion) => {
   switch (question.kind) {
-    case "box":
+    case DECISION_KIND.box:
       return undefined
-    case "predicate":
+    case DECISION_KIND.predicate:
       return { type: "predicate", name, instructions: question.instructions }
-    case "choice":
+    case DECISION_KIND.choice:
       return {
         type: "choice",
         name,
         instructions: question.instructions,
         choices: question.options
       }
-    case "score":
+    case DECISION_KIND.score:
       return {
         type: "score",
         name,
@@ -82,19 +90,19 @@ const Probability = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 
 
 const DecisionsAnswerSchema = Schema.Union([
   Schema.Struct({
-    type: Schema.Literal("predicate"),
+    type: Schema.Literal(DECISIONS_ANSWER.predicate),
     name: Schema.String,
     probability: Probability
   }),
   Schema.Struct({
-    type: Schema.Literal("choice"),
+    type: Schema.Literal(DECISIONS_ANSWER.choice),
     name: Schema.String,
     choice: Schema.String,
     probabilities: Schema.Array(Schema.Struct({ value: Schema.String, probability: Probability })),
     confidence: Probability
   }),
   Schema.Struct({
-    type: Schema.Literal("score"),
+    type: Schema.Literal(DECISIONS_ANSWER.score),
     name: Schema.String,
     score: Schema.Number,
     probabilities: Schema.Array(
@@ -102,7 +110,7 @@ const DecisionsAnswerSchema = Schema.Union([
     ),
     confidence: Probability
   }),
-  Schema.Struct({ type: Schema.Literal("refusal"), name: Schema.String })
+  Schema.Struct({ type: Schema.Literal(DECISIONS_ANSWER.refusal), name: Schema.String })
 ])
 
 const DecisionsResponseSchema = Schema.Struct({ answers: Schema.Array(DecisionsAnswerSchema) })
@@ -118,7 +126,7 @@ const decisionsAnswers = Effect.fn("Decisions.decisionsAnswers")(function* (
   const answers: Record<string, DecisionAnswer> = {}
   for (const [name, question] of Object.entries(questions)) {
     const raw = byName.get(name)
-    if (raw?.type === "refusal") {
+    if (raw?.type === DECISIONS_ANSWER.refusal) {
       return yield* new DecisionsError({
         reason: "refused",
         message: `The decision model refused to answer ${name}`
@@ -135,19 +143,19 @@ const decisionsAnswers = Effect.fn("Decisions.decisionsAnswers")(function* (
 
 const decisionsAnswer = (
   question: DecisionQuestion,
-  raw: Exclude<typeof DecisionsAnswerSchema.Type, { type: "refusal" }>
+  raw: Exclude<typeof DecisionsAnswerSchema.Type, { type: typeof DECISIONS_ANSWER.refusal }>
 ): DecisionAnswer | undefined => {
   switch (raw.type) {
-    case "predicate":
-      return question.kind === "predicate"
+    case DECISIONS_ANSWER.predicate:
+      return question.kind === DECISION_KIND.predicate
         ? calibratedAnswer(question, {
             probabilities: { true: raw.probability, false: 1 - raw.probability },
             picked: undefined,
             confidence: undefined
           })
         : undefined
-    case "choice":
-      return question.kind === "choice"
+    case DECISIONS_ANSWER.choice:
+      return question.kind === DECISION_KIND.choice
         ? calibratedAnswer(question, {
             probabilities: Object.fromEntries(
               raw.probabilities.map((entry) => [entry.value, entry.probability])
@@ -156,8 +164,8 @@ const decisionsAnswer = (
             confidence: raw.confidence
           })
         : undefined
-    case "score": {
-      if (question.kind !== "score") return undefined
+    case DECISIONS_ANSWER.score: {
+      if (question.kind !== DECISION_KIND.score) return undefined
       const byLevel = raw.probabilities.map((entry) => {
         const level = question.levels[entry.value]
         return level === undefined ? undefined : ([level.value, entry.probability] as const)

@@ -1,5 +1,5 @@
 import { withCurrentSessionActivity } from "./lifecycle-presentation.js"
-import { linkedItemId } from "./event-links.js"
+import { taskWorkItemId } from "./lifecycle-task-work-item.js"
 import {
   AutomationFinishedEventSchema,
   AutomationProgressEventSchema,
@@ -16,6 +16,7 @@ import {
 } from "@arden-hq/protocol/effect/events"
 import {
   appendInTransaction as appendJournalInTransaction,
+  JOURNAL_DELIVERY,
   type JournalRecord,
   type JournalRuntime
 } from "@arden-hq/journal/effect"
@@ -164,35 +165,6 @@ const feedEventSpecs: FeedEventSpecs = {
   }
 }
 
-const taskWorkItemId = (event: LifecycleFeedEvent): string | null => {
-  switch (event.type) {
-    case "work_changed":
-    case "task_visibility_changed":
-      return event.item_id
-    case "question_changed":
-      return linkedItemId(event.task)
-    case "automation_progress":
-    case "automation_finished":
-    case "record_told":
-    case "task_proposal_changed":
-    case "focus_choice_changed":
-    case "chat_input_committed":
-    case "navigation_requested":
-    case "mcp_server_changed":
-    case "entity_changed":
-    case "run_settled":
-    case "run_fenced":
-    case "limit_crossed":
-    case "approval_waiting":
-    case "decision_route_changed":
-    case "capture_arrived":
-    case "automation_queued":
-    case "automation_changed":
-    case "task_history_added":
-      return null
-  }
-}
-
 export const makeSessionLifecycleEvents = ({
   writer,
   journal,
@@ -269,12 +241,12 @@ export const makeSessionLifecycleEvents = ({
     const stream = opened.stream.pipe(
       Stream.mapEffect(
         (delivery): Effect.Effect<SessionLifecycleDelivery, SessionLifecycleEventError> => {
-          if (delivery.kind === "overflow") {
+          if (delivery.kind === JOURNAL_DELIVERY.overflow) {
             return Effect.fail(
               lifecycleError("follow", "Session lifecycle follower buffer overflowed")
             )
           }
-          return delivery.kind === "reset"
+          return delivery.kind === JOURNAL_DELIVERY.reset
             ? Effect.succeed({ kind: "reset", reason: delivery.reason, cursor: delivery.cursor })
             : decodeRecord(delivery.record).pipe(
                 Effect.map((event): SessionLifecycleDelivery => ({

@@ -1,8 +1,11 @@
 import { nativeVisual, nativeFeedback } from "../computer/feedback.js"
 import { randomUUID } from "node:crypto"
-import { ToolExecutionError } from "@arden-hq/loop"
+import { CONTENT_BLOCK_TYPE, ToolExecutionError } from "@arden-hq/loop"
 import { Schema } from "effect"
 import {
+  NATIVE_ACTION,
+  NATIVE_DELIVERY,
+  NATIVE_DRIVER_TOOL,
   type NativeAction,
   NativeActionSchema,
   nativeDriverAction,
@@ -27,7 +30,7 @@ import {
 import { appTarget, launchedAppTarget } from "./action-targets.js"
 import { currentMillis } from "../runtime/clock.js"
 import { ownWindowIssue } from "../computer/own-windows.js"
-import { ReadSchema } from "./computer-native-schemas.js"
+import { NATIVE_READ, ReadSchema } from "./computer-native-schemas.js"
 import {
   actTarget,
   actionLabel,
@@ -82,19 +85,25 @@ export const computerNativeTools = (
               `Process ${input.target.pid}, window ${input.target.window_id}`
           },
           { label: "Action", value: actionWords(input) },
-          ...(input.action === "menu" ? [{ label: "Menu", value: input.path.join(" → ") }] : []),
+          ...(input.action === NATIVE_ACTION.menu
+            ? [{ label: "Menu", value: input.path.join(" → ") }]
+            : []),
           {
             label: "Control",
             value:
-              nativeDelivery(input) === "background"
+              nativeDelivery(input) === NATIVE_DELIVERY.background
                 ? "Background, your mouse and keyboard stay free"
                 : "Foreground, may interrupt your work"
           },
           { label: "Target", value: element },
-          ...(input.action === "key" ? [{ label: "Keys", value: keyChord(input) }] : [])
+          ...(input.action === NATIVE_ACTION.key ? [{ label: "Keys", value: keyChord(input) }] : [])
         ],
-        ...(input.action === "type" ? { body: { label: "Text to enter", text: input.text } } : {}),
-        ...(input.action === "set_value" ? { body: { label: "New value", text: input.value } } : {})
+        ...(input.action === NATIVE_ACTION.type
+          ? { body: { label: "Text to enter", text: input.text } }
+          : {}),
+        ...(input.action === NATIVE_ACTION.set_value
+          ? { body: { label: "New value", text: input.value } }
+          : {})
       },
       data: {
         target: input.target,
@@ -265,10 +274,12 @@ export const computerNativeTools = (
         const signal = control.signal(ctx.signal)
         return driver.run(signal, async (call) => {
           const finish = control.begin({
-            target: input.operation === "state" ? "App window" : "App discovery",
-            surface: input.operation === "state" ? windowSurface(input.target) : DESKTOP,
+            target: input.operation === NATIVE_READ.state ? "App window" : "App discovery",
+            surface: input.operation === NATIVE_READ.state ? windowSurface(input.target) : DESKTOP,
             operation: labelled(
-              input.operation === "state" ? "Inspecting window" : "Finding apps and windows",
+              input.operation === NATIVE_READ.state
+                ? "Inspecting window"
+                : "Finding apps and windows",
               "none"
             ),
             activity: "observing",
@@ -276,8 +287,9 @@ export const computerNativeTools = (
             sessionId: ctx.run.sessionId
           })
           try {
-            if (input.operation === "apps") return output(await call("list_apps", {}))
-            if (input.operation === "windows") {
+            if (input.operation === NATIVE_READ.apps)
+              return output(await call(NATIVE_DRIVER_TOOL.listApps, {}))
+            if (input.operation === NATIVE_READ.windows) {
               const windows = await call("list_windows", { pid: input.pid })
               const application = windows.isError
                 ? undefined
@@ -312,10 +324,10 @@ export const computerNativeTools = (
                 .join(" — ") || "App window"
             control.identify(target, application)
             const visual = nativeVisual(state)
-            const image = result.content.find((block) => block.type === "image")
+            const image = result.content.find((block) => block.type === CONTENT_BLOCK_TYPE.image)
             if (
               visual !== undefined &&
-              image?.type === "image" &&
+              image?.type === CONTENT_BLOCK_TYPE.image &&
               ["image/png", "image/jpeg", "image/webp"].includes(image.mimeType) &&
               image.data.length <= 8_000_000
             ) {
@@ -335,7 +347,7 @@ export const computerNativeTools = (
             const frame =
               input.screenshot !== true &&
               visual !== undefined &&
-              image?.type === "image" &&
+              image?.type === CONTENT_BLOCK_TYPE.image &&
               image.data.length <= 2_000_000 &&
               changed(`${ctx.run.sessionId}:${state.pid}:${state.window_id}`, image.data)
                 ? {
@@ -366,7 +378,7 @@ export const computerNativeTools = (
                 },
                 content: input.screenshot
                   ? result.content
-                  : result.content.filter((block) => block.type !== "image")
+                  : result.content.filter((block) => block.type !== CONTENT_BLOCK_TYPE.image)
               },
               reference,
               input.screenshot === true,
@@ -389,7 +401,8 @@ export const computerNativeTools = (
       impact: nativeActImpact,
       approvalPrompt: (input, ctx) => actPrompt(input, ctx.run.sessionId),
       approvalRequirement: (input, ctx) =>
-        nativeDelivery(input) === "foreground" && !control.foregroundAllowed(ctx.run.sessionId)
+        nativeDelivery(input) === NATIVE_DELIVERY.foreground &&
+        !control.foregroundAllowed(ctx.run.sessionId)
           ? foregroundCard(actPrompt(input, ctx.run.sessionId))
           : undefined,
       execute: async (input, ctx, effects) => {
@@ -410,14 +423,18 @@ export const computerNativeTools = (
           })
           try {
             if (
-              nativeDelivery(input) === "foreground" &&
-              (ctx.approval?.data?.["grant"] === "foreground" ||
+              nativeDelivery(input) === NATIVE_DELIVERY.foreground &&
+              (ctx.approval?.data?.["grant"] === NATIVE_DELIVERY.foreground ||
                 waivesRequirement(ctx.run.approvalMode, ACT_METADATA))
             )
               control.allowForeground(ctx.run.sessionId)
-            if (nativeDelivery(input) === "foreground") control.requireForeground(ctx.run.sessionId)
+            if (nativeDelivery(input) === NATIVE_DELIVERY.foreground)
+              control.requireForeground(ctx.run.sessionId)
             const action = nativeDriverAction(input)
-            if (nativeDelivery(input) === "foreground" && input.action !== "activate") {
+            if (
+              nativeDelivery(input) === NATIVE_DELIVERY.foreground &&
+              input.action !== NATIVE_ACTION.activate
+            ) {
               const windows = await call("list_windows", { pid: input.target.pid })
               if (windows.isError) return output(windows)
               requireForegroundWindow(input.target, windows.structuredContent)

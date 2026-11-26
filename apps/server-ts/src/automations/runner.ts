@@ -1,12 +1,23 @@
+import { AUTOMATION_RUN_OUTCOME } from "@arden-hq/protocol/automations"
 import type { ChatSendReceipt } from "../persistence/chat/send-contracts.js"
 import { Effect } from "effect"
 import type { ChatMessage } from "../chat/message.js"
-import { ChatMessageError, type ChatMessageFailure } from "../chat/message-errors.js"
+import {
+  CHAT_MESSAGE_FAILURE,
+  ChatMessageError,
+  type ChatMessageFailure
+} from "../chat/message-errors.js"
 import type { HandlerItemRef } from "../persistence/automations/handler-item.js"
-import type { AutomationJobLease, AutomationJobResult } from "../persistence/automations/store.js"
-import type {
-  AutomationBlockedReport,
-  TerminalAutomationChatRun
+import {
+  AUTOMATION_JOB_STATUS,
+  type AutomationJobLease,
+  type AutomationJobResult
+} from "../persistence/automations/store.js"
+import {
+  AUTOMATION_BLOCKED_KIND,
+  OBSERVED_RUN,
+  type AutomationBlockedReport,
+  type TerminalAutomationChatRun
 } from "../persistence/automations/queue.js"
 import { automationModelSelection } from "./model-selection.js"
 import { iso } from "../runtime/clock.js"
@@ -29,8 +40,12 @@ export const awaitEnded = Effect.fn("Automation.awaitEnded")(function* <
   E
 >(
   observe: Effect.Effect<
-    | { readonly status: "running" }
-    | { readonly status: "paused"; readonly sessionId: string; readonly until: string }
+    | { readonly status: typeof OBSERVED_RUN.running }
+    | {
+        readonly status: typeof OBSERVED_RUN.paused
+        readonly sessionId: string
+        readonly until: string
+      }
     | Ended
     | null,
     E
@@ -39,15 +54,15 @@ export const awaitEnded = Effect.fn("Automation.awaitEnded")(function* <
   while (true) {
     const observed = yield* observe
     if (observed === null) throw new Error("Automation Chat run disappeared")
-    if (observed.status === "paused")
+    if (observed.status === OBSERVED_RUN.paused)
       return yield* Effect.fail(new PlanLimitPause(observed.sessionId, Date.parse(observed.until)))
-    if (observed.status !== "running") return observed
+    if (observed.status !== OBSERVED_RUN.running) return observed
     yield* Effect.sleep("250 millis")
   }
 })
 
 export const isNoModelProvider = (cause: unknown): cause is ChatMessageError =>
-  cause instanceof ChatMessageError && cause.reason === "unavailable"
+  cause instanceof ChatMessageError && cause.reason === CHAT_MESSAGE_FAILURE.unavailable
 
 export type AwaitAutomationRun = (runId: string) => Effect.Effect<TerminalAutomationChatRun, Error>
 
@@ -59,17 +74,25 @@ interface JobRunRef {
 export const NO_CHAT_RUN: JobRunRef = { chatRunId: null, chatSessionId: null }
 
 export const blockedOutcome = (blocked: AutomationBlockedReport): "needs_you" | "blocked" =>
-  blocked.kind === "needs_input" ? "needs_you" : "blocked"
+  blocked.kind === AUTOMATION_BLOCKED_KIND.needs_input
+    ? AUTOMATION_RUN_OUTCOME.needs_you
+    : AUTOMATION_RUN_OUTCOME.blocked
 
 export const jobResult = {
   completed: (
     outcome: "finished" | "no_change" | "needs_you" | "blocked" | "superseded",
     result: string | null,
     run: JobRunRef
-  ): AutomationJobResult => ({ status: "ended", outcome, result, error: null, ...run }),
+  ): AutomationJobResult => ({
+    status: AUTOMATION_JOB_STATUS.ended,
+    outcome,
+    result,
+    error: null,
+    ...run
+  }),
   failed: (error: string | null, result: string | null, run: JobRunRef): AutomationJobResult => ({
-    status: "ended",
-    outcome: "failed",
+    status: AUTOMATION_JOB_STATUS.ended,
+    outcome: AUTOMATION_RUN_OUTCOME.failed,
     result,
     error,
     ...run
@@ -79,7 +102,7 @@ export const jobResult = {
     result: string | null,
     run: JobRunRef
   ): AutomationJobResult => ({
-    status: "ended",
+    status: AUTOMATION_JOB_STATUS.ended,
     outcome: blockedOutcome(blocked),
     result,
     error: blocked.reason,
@@ -89,7 +112,7 @@ export const jobResult = {
     outcome: "no_input" | "no_change" | "superseded",
     result: string
   ): AutomationJobResult => ({
-    status: "ended",
+    status: AUTOMATION_JOB_STATUS.ended,
     outcome,
     result,
     error: null,

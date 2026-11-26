@@ -1,3 +1,4 @@
+import { TASK_PROPOSAL_RETIREMENT_SOURCE, TASK_PROPOSAL_STATUS } from "@arden-hq/protocol/proposals"
 import { RetirementSourceRecordSchema } from "../work/task-record.js"
 import { assertCurrentTaskRevision } from "./work-history.js"
 import { DateTime, Effect, Schema } from "effect"
@@ -23,11 +24,11 @@ export const retireProposal = Effect.fn("TaskProposal.retireInTransaction")(func
     sources.some((source) => source.revision === null) ||
     !sources.some(
       (source) =>
-        source.kind === "chat" ||
-        source.kind === "chat_action" ||
-        source.kind === "memory" ||
-        source.kind === "task" ||
-        source.kind === "connection_item"
+        source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.chat ||
+        source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action ||
+        source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.memory ||
+        source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.task ||
+        source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.connection_item
     )
   )
     return yield* conflict(
@@ -54,13 +55,13 @@ export const retireProposal = Effect.fn("TaskProposal.retireInTransaction")(func
   const proposal = review.proposals.find((row) => row.proposal_id === input.proposalId)
   if (
     proposal === undefined ||
-    proposal.status !== "offered" ||
+    proposal.status !== TASK_PROPOSAL_STATUS.offered ||
     proposal.revision !== input.expectedRevision
   )
     return yield* conflict("The proposal changed or was already settled; review again")
   for (const source of sources) {
     switch (source.kind) {
-      case "chat_action": {
+      case TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action: {
         if (!(yield* isUserChatSession(sql, source.session_id)))
           return yield* conflict("Action evidence must come from one of your chats")
         const rows = yield* sql<ChatToolEvidenceRow>`SELECT call.rowid AS cursor, call.*,
@@ -80,7 +81,7 @@ export const retireProposal = Effect.fn("TaskProposal.retireInTransaction")(func
           )
         break
       }
-      case "task": {
+      case TASK_PROPOSAL_RETIREMENT_SOURCE.task: {
         yield* assertCurrentTaskRevision(sql, source.item_id, source.revision).pipe(
           Effect.mapError((cause) => conflict(cause.message))
         )
@@ -89,23 +90,25 @@ export const retireProposal = Effect.fn("TaskProposal.retireInTransaction")(func
         if (tasks.length === 0) return yield* conflict("Retirement must cite a live or done Task")
         break
       }
-      case "connection_item": {
+      case TASK_PROPOSAL_RETIREMENT_SOURCE.connection_item: {
         const items = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}`
         if (items.length === 0 || source.revision !== source.item_id)
           return yield* conflict("Retirement must cite a stored connection item by its item_id")
         break
       }
-      case "chat":
+      case TASK_PROPOSAL_RETIREMENT_SOURCE.chat:
         if (source.revision !== source.turn_id)
           return yield* conflict("Cite a Chat turn with revision equal to its turn_id")
         break
-      case "memory":
+      case TASK_PROPOSAL_RETIREMENT_SOURCE.memory:
         break
-      case "space":
+      case TASK_PROPOSAL_RETIREMENT_SOURCE.space:
         return yield* conflict("Retirement requires Chat, Memory, Task or item outcome evidence")
     }
   }
-  const ordinarySources = sources.filter((source) => source.kind !== "chat_action")
+  const ordinarySources = sources.filter(
+    (source) => source.kind !== TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action
+  )
   yield* assertCitedTurnsFinished(sql, ordinarySources).pipe(
     Effect.mapError((cause) => conflict(cause.message))
   )

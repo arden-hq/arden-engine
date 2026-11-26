@@ -1,3 +1,6 @@
+import type { ApprovalReviewVerdict } from "./approval-review-verdict.js"
+
+export type { ApprovalReviewVerdict }
 import { after } from "@arden-hq/std/timer"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText, foldSpace } from "@arden-hq/std/text"
@@ -13,9 +16,11 @@ import { Effect } from "effect"
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { AskReason } from "../execution/decide.js"
 import type { WordsRule } from "../execution/rules.js"
-import { RULE_DECISION_WORD } from "@arden-hq/protocol/permissions"
+import { PERMISSION_RULE_DECISION, RULE_DECISION_WORD } from "@arden-hq/protocol/permissions"
+import { PROMPT_WRITER } from "../persistence/automations/catalog.js"
 import {
   judgeAssessment,
+  REVIEW_DECISION,
   reviewBreakerTripped,
   withKnownCategory,
   type OutwardCategory,
@@ -52,16 +57,6 @@ export interface ApprovalReviewInput {
   readonly messages: ReadonlyArray<ChatMessage>
   readonly signal: AbortSignal
 }
-
-export type ApprovalReviewAsk =
-  | { readonly kind: "judged"; readonly reason: string; readonly rule?: string }
-  | { readonly kind: "timed_out" }
-  | { readonly kind: "failed" }
-  | { readonly kind: "stopped" }
-
-export type ApprovalReviewVerdict =
-  | { readonly verdict: "allow"; readonly reason: string }
-  | { readonly verdict: "ask"; readonly why: ApprovalReviewAsk }
 
 export type ApprovalReview = (input: ApprovalReviewInput) => Promise<ApprovalReviewVerdict>
 
@@ -164,7 +159,7 @@ const shownPrompt = (
 ): { readonly ownerWrote: boolean; readonly text: string } | undefined => {
   const prompt = authority.automationPrompt
   if (prompt === undefined || prompt.prompt.trim().length === 0) return undefined
-  return { ownerWrote: prompt.author === "owner", text: prompt.prompt }
+  return { ownerWrote: prompt.author === PROMPT_WRITER.owner, text: prompt.prompt }
 }
 
 const authorityShown = (
@@ -173,7 +168,7 @@ const authorityShown = (
 ): AuthorityShown => {
   const prompt = shownPrompt(authority)
   const owner =
-    rules.some((rule) => rule.decision === "allow") ||
+    rules.some((rule) => rule.decision === PERMISSION_RULE_DECISION.allow) ||
     authority.ownerRequest !== undefined ||
     authority.delegationRequests.length > 0 ||
     authority.delegationWords.some((chat) => chat.words.length > 0) ||
@@ -467,7 +462,7 @@ export const makeApprovalReview = ({
       controller.signal.throwIfAborted()
       const assessment = withKnownCategory(returned, input.category)
       const judgement = judgeAssessment(assessment)
-      if (judgement.decision === "allow" && readAuthority !== undefined) {
+      if (judgement.decision === REVIEW_DECISION.allow && readAuthority !== undefined) {
         const latest = await readTrustedAuthority(input, readAuthority, controller.signal)
         if (authorizationEvidence(latest) !== authorizationEvidence(trusted))
           throw new Error("User authorization changed during approval review")
@@ -483,7 +478,8 @@ export const makeApprovalReview = ({
         })
       )
       await keep({ ...judgement, assessment })
-      if (judgement.decision === "allow") return { verdict: "allow", reason: assessment.rationale }
+      if (judgement.decision === REVIEW_DECISION.allow)
+        return { verdict: "allow", reason: assessment.rationale }
       return {
         verdict: "ask",
         why: {

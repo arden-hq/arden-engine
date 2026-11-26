@@ -9,6 +9,7 @@ import { DataRoot } from "../runtime/data-root.js"
 import { toolFailure, toolRefusal } from "./tool-failure.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
 import { ConversationArtifactError } from "../artifacts/conversation-model.js"
@@ -21,7 +22,7 @@ import {
   type LocalPathServices
 } from "../storage/local-paths.js"
 import type { ServerRunContext } from "./run-context.js"
-import { sharedResourceSessions } from "../execution/authority.js"
+import { ACTOR, sharedResourceSessions } from "../execution/authority.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { publishNoReplace } from "@arden-hq/std/publish"
 import { displayLocalPath } from "../storage/local-directory.js"
@@ -55,7 +56,7 @@ const makeArtifactExportTool = (
       ...policyPathOptions(policy)
     })
     const lineage =
-      ctx.run.authority.actor.kind === "agent"
+      ctx.run.authority.actor.kind === ACTOR.agent
         ? await Effect.runPromise(sessionLineage(services.sessions, ctx.run.sessionId), {
             signal: ctx.signal
           })
@@ -81,7 +82,8 @@ const makeArtifactExportTool = (
         artifactFailure = cause
         if (!(cause instanceof ConversationArtifactError))
           throw toolRefusal("The artifact could not be read", "Artifact unavailable")
-        if (cause.reason !== "not_found") throw toolFailure(cause, "Artifact unavailable")
+        if (cause.reason !== STORE_REASON.not_found)
+          throw toolFailure(cause, "Artifact unavailable")
       }
     }
     if (artifact === undefined) {
@@ -148,7 +150,7 @@ const makeArtifactExportTool = (
       })
       return {
         result: `Exported ${input.artifact_ref} to ${target} (${artifact.bytes.byteLength} bytes).`,
-        preview: outcome === "no_op" ? "Already exported" : `Exported ${displayPath}`,
+        preview: outcome === EXPORT_OUTCOME.no_op ? "Already exported" : `Exported ${displayPath}`,
         data: {
           artifact_ref: input.artifact_ref,
           path: displayPath,
@@ -164,7 +166,7 @@ const makeArtifactExportTool = (
           resource: {
             kind: "file_revision",
             absolutePath: target,
-            beforeVersion: outcome === "no_op" ? artifact.manifest.sha256 : "absent",
+            beforeVersion: outcome === EXPORT_OUTCOME.no_op ? artifact.manifest.sha256 : "absent",
             afterVersion: artifact.manifest.sha256
           }
         })
@@ -173,11 +175,15 @@ const makeArtifactExportTool = (
   })
 }
 
+const EXPORT_OUTCOME = { applied: "applied", no_op: "no_op" } as const
+
+type ExportOutcome = (typeof EXPORT_OUTCOME)[keyof typeof EXPORT_OUTCOME]
+
 const publishArtifact = async (input: {
   readonly target: string
   readonly bytes: Uint8Array
   readonly sha256: string
-}): Promise<"applied" | "no_op"> => {
+}): Promise<ExportOutcome> => {
   try {
     if (await publishNoReplace(input.target, input.bytes)) return "applied"
     const existing = await open(
@@ -191,7 +197,7 @@ const publishArtifact = async (input: {
         status.size === input.bytes.byteLength &&
         sha256Hex(await existing.readFile()) === input.sha256
       )
-        return "no_op"
+        return EXPORT_OUTCOME.no_op
     } finally {
       await existing.close()
     }

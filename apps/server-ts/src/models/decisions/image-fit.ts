@@ -1,9 +1,10 @@
+import { IMAGE_MEDIA_TYPE, isImageMediaType } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 
 import { fitImageWithSips } from "../../lib/image-fit-sips.js"
 import { fitDimensions, fitPng, imageSize, type ImageSize } from "../../lib/prompt-image.js"
 import type { CompletionImage } from "../structured-completion.js"
-import { DecisionsError } from "./questions.js"
+import { DECISIONS_ERROR_REASON, DecisionsError } from "./questions.js"
 
 const JEV_MIN_SIDE = 280
 const JEV_MAX_SIDE = 1568
@@ -23,9 +24,9 @@ export const fitJevImage = Effect.fn("Decisions.fitJevImage")(function* (
   image: CompletionImage,
   signal: AbortSignal | undefined
 ): Effect.fn.Return<CompletionImage, DecisionsError> {
-  if (image.mediaType !== "image/png" && image.mediaType !== "image/jpeg") {
+  if (!isImageMediaType(image.mediaType)) {
     return yield* new DecisionsError({
-      reason: "invalid_request",
+      reason: DECISIONS_ERROR_REASON.invalidRequest,
       message: "Jev images must be PNG or JPEG"
     })
   }
@@ -33,7 +34,7 @@ export const fitJevImage = Effect.fn("Decisions.fitJevImage")(function* (
   const source = imageSize(bytes, image.mediaType)
   if (source === undefined) {
     return yield* new DecisionsError({
-      reason: "invalid_request",
+      reason: DECISIONS_ERROR_REASON.invalidRequest,
       message: "Jev could not read the image dimensions"
     })
   }
@@ -45,7 +46,7 @@ export const fitJevImage = Effect.fn("Decisions.fitJevImage")(function* (
   )
   if (!withinJevBounds(target)) {
     return yield* new DecisionsError({
-      reason: "invalid_request",
+      reason: DECISIONS_ERROR_REASON.invalidRequest,
       message: "The image cannot fit Jev's minimum and maximum dimensions"
     })
   }
@@ -55,12 +56,14 @@ export const fitJevImage = Effect.fn("Decisions.fitJevImage")(function* (
         signal === undefined ? effectSignal : AbortSignal.any([effectSignal, signal])
       const sips = await fitImageWithSips({
         source: { kind: "bytes", bytes },
-        format: image.mediaType === "image/png" ? "png" : "jpeg",
+        format: image.mediaType === IMAGE_MEDIA_TYPE.png ? "png" : "jpeg",
         limits: JEV_LIMITS,
         signal: cancellation
       })
       if (sips !== undefined) return sips
-      return image.mediaType === "image/png" ? fitPng({ bytes, limits: JEV_LIMITS }) : undefined
+      return image.mediaType === IMAGE_MEDIA_TYPE.png
+        ? fitPng({ bytes, limits: JEV_LIMITS })
+        : undefined
     },
     catch: (cause) =>
       new DecisionsError({
@@ -72,7 +75,7 @@ export const fitJevImage = Effect.fn("Decisions.fitJevImage")(function* (
   const size = fitted === undefined ? undefined : imageSize(fitted.data, fitted.mediaType)
   if (fitted === undefined || size === undefined || !withinJevBounds(size)) {
     return yield* new DecisionsError({
-      reason: "invalid_request",
+      reason: DECISIONS_ERROR_REASON.invalidRequest,
       message: "The image cannot be prepared within Jev's dimensions"
     })
   }

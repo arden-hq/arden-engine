@@ -1,3 +1,4 @@
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
 import type { Schema } from "effect"
 
 export { type AgentMode } from "@arden-hq/protocol/chat"
@@ -21,11 +22,11 @@ export const agentSessionMetadata = (
   agent: NewAgentSessionMetadata
 ): Readonly<Record<string, Schema.Json>> => {
   switch (agent.mode) {
-    case "work":
+    case AGENT_MODE.work:
       return { agent: { mode: "work" } }
-    case "research":
+    case AGENT_MODE.research:
       return { agent: { mode: "research", research_workspace_id: agent.researchWorkspaceId } }
-    case "code":
+    case AGENT_MODE.code:
       return {
         agent: { mode: "code", workspace: { root: agent.workspace.root, cwd: agent.workspace.cwd } }
       }
@@ -38,15 +39,15 @@ export const readAgentSessionMetadata = (
   const agent = metadata["agent"]
   if (typeof agent !== "object" || agent === null || Array.isArray(agent)) return null
   if (!("mode" in agent)) return null
-  if (agent.mode === "work") return { mode: "work" }
-  if (agent.mode === "research") {
+  if (agent.mode === AGENT_MODE.work) return { mode: "work" }
+  if (agent.mode === AGENT_MODE.research) {
     if ("workspace" in agent) return null
     const researchWorkspaceId =
       "research_workspace_id" in agent ? agent.research_workspace_id : null
     if (researchWorkspaceId !== null && typeof researchWorkspaceId !== "string") return null
     return { mode: "research", researchWorkspaceId }
   }
-  if (agent.mode !== "code") return null
+  if (agent.mode !== AGENT_MODE.code) return null
   if (!("workspace" in agent)) return { mode: "code", workspace: null }
   const workspace = agent.workspace
   if (typeof workspace !== "object" || workspace === null || Array.isArray(workspace)) return null

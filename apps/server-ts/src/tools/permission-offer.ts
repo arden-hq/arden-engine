@@ -6,11 +6,14 @@ import { homedir } from "node:os"
 import { canonicalRulePath, tooWide } from "../fs/protected-paths.js"
 import type { CompiledWords } from "./rule-compile.js"
 import { ruleDecision } from "../execution/rules.js"
-import { personCard, waivesRequirement } from "../execution/decide.js"
+import { PERSON_CARD, personCard, waivesRequirement } from "../execution/decide.js"
 import {
   DECISION_WORD,
   PATH_ACTION,
   PATH_DOING,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_LIST,
+  PERMISSION_RULE_SUBJECT,
   RULE_ACTION,
   RULE_DECISION_WORD,
   STANDING_DECISION_WORD,
@@ -18,6 +21,9 @@ import {
 } from "@arden-hq/protocol/permissions"
 import { parseMcpSource } from "../mcp/naming.js"
 import {
+  OFFER_SOURCE,
+  PERMISSION_CHANGE,
+  OFFER_HISTORY,
   offerChoiceList,
   type OfferHolders,
   type OfferSource,
@@ -28,16 +34,21 @@ import type { PermissionStore } from "../persistence/permissions/store.js"
 import type { WorkStore } from "../persistence/work/store.js"
 import { toolFacts } from "./approval-decision.js"
 import { toolRule, type LiveRead } from "./approval-policy.js"
-import type { RunAuthority } from "../execution/authority.js"
-import { type PermissionRule, type RuleSubject } from "../persistence/permissions/rules.js"
+import { ACTOR, type RunAuthority } from "../execution/authority.js"
+import {
+  RULE_CHANGE,
+  type PermissionRule,
+  type RuleSubject
+} from "../persistence/permissions/rules.js"
 import type { HostCommandGrantPlan } from "./bash-permissions.js"
+
 import type { ServerTool } from "./define.js"
 import { APPROVAL_MODE_LABEL } from "./onboarding.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
 import type { PermissionOffers } from "./permission-offer-types.js"
 import { LIST_WORDS } from "./permission-list-words.js"
 import { type OfferFacts, type OfferRefusal, type OfferRequest } from "./permission-offer-facts.js"
-import { planPermissionOffer, refuse, settingOf } from "./permission-offer-plan.js"
+import { OFFER_PLAN, planPermissionOffer, refuse, settingOf } from "./permission-offer-plan.js"
 
 const OFFER_REFUSAL: Record<OfferRefusal, string> = {
   always_asks: "This tool always asks the person; no permission changes that.",
@@ -71,7 +82,7 @@ const OFFER_REFUSAL: Record<OfferRefusal, string> = {
     "Only the person's own turn offers a lasting permission. Say what you need in your report."
 }
 
-const offerRaisedByPerson = (actor: RunAuthority["actor"]): boolean => actor.kind === "person"
+const offerRaisedByPerson = (actor: RunAuthority["actor"]): boolean => actor.kind === ACTOR.person
 
 const offerTarget = (
   request: OfferRequest,
@@ -83,8 +94,8 @@ const offerTarget = (
   readonly label: string
 } => {
   switch (request.kind) {
-    case "tool":
-    case "site": {
+    case PERMISSION_CHANGE.tool:
+    case PERMISSION_CHANGE.site: {
       const named = tools.filter((tool) => tool.definition.name === request.tool)
       const tool = named[0]
       return {
@@ -93,7 +104,7 @@ const offerTarget = (
         label: tool?.definition.metadata.display_name ?? tool?.definition.name ?? ""
       }
     }
-    case "connector": {
+    case PERMISSION_CHANGE.connector: {
       const serverOf = (tool: ServerTool) =>
         parseMcpSource(tool.definition.metadata.source)?.serverName
       const servers = [...new Set(tools.flatMap((tool) => serverOf(tool) ?? []))]
@@ -109,35 +120,41 @@ const offerTarget = (
         label: titles.get(server) ?? server
       }
     }
-    case "mode":
-    case "command":
-    case "words":
-    case "rule":
-    case "path":
+    case PERMISSION_CHANGE.mode:
+    case PERMISSION_CHANGE.command:
+    case PERMISSION_CHANGE.words:
+    case PERMISSION_CHANGE.rule:
+    case PERMISSION_CHANGE.path:
       return { request, tools: [], label: "" }
   }
 }
 
 const offerServer = (change: PermissionChange, tool: ServerTool | undefined): string | null => {
   switch (change.kind) {
-    case "tool":
+    case PERMISSION_CHANGE.tool:
       return parseMcpSource(tool?.definition.metadata.source)?.serverName ?? null
-    case "connector":
+    case PERMISSION_CHANGE.connector:
       return change.server
-    case "site":
-    case "mode":
-    case "command":
-    case "words":
-    case "rule":
-    case "path":
+    case PERMISSION_CHANGE.site:
+    case PERMISSION_CHANGE.mode:
+    case PERMISSION_CHANGE.command:
+    case PERMISSION_CHANGE.words:
+    case PERMISSION_CHANGE.rule:
+    case PERMISSION_CHANGE.path:
       return null
   }
 }
 
+export const OFFER_OUTCOME = { offered: "offered", refused: "refused", skipped: "skipped" } as const
+
 export type OfferOutcome =
-  | { readonly kind: "offered"; readonly questionId: string; readonly prompt: string }
-  | { readonly kind: "refused"; readonly reason: string }
-  | { readonly kind: "skipped" }
+  | {
+      readonly kind: typeof OFFER_OUTCOME.offered
+      readonly questionId: string
+      readonly prompt: string
+    }
+  | { readonly kind: typeof OFFER_OUTCOME.refused; readonly reason: string }
+  | { readonly kind: typeof OFFER_OUTCOME.skipped }
 
 const APPROVALS_BEFORE_OFFER = 3
 
@@ -153,24 +170,24 @@ const offerPrompt = (
   held: PermissionRule | undefined
 ): string => {
   switch (change.kind) {
-    case "tool":
+    case PERMISSION_CHANGE.tool:
       return TOOL_PROMPT[change.decision](label)
-    case "site":
+    case PERMISSION_CHANGE.site:
       return `${DECISION_WORD.alwaysAllow} ${label} on ${new URL(change.origin).host}?`
-    case "connector":
+    case PERMISSION_CHANGE.connector:
       return `${DECISION_WORD.alwaysAllow} ${label}?`
-    case "mode":
+    case PERMISSION_CHANGE.mode:
       return `Switch to ${APPROVAL_MODE_LABEL[change.mode]}?`
-    case "command":
+    case PERMISSION_CHANGE.command:
       return `${DECISION_WORD.alwaysAllow} ${change.rules.map((rule) => rule.display_prefix).join(", ")}?`
-    case "path":
+    case PERMISSION_CHANGE.path:
       return `${STANDING_DECISION_WORD[change.decision]} ${PATH_DOING[change.access]} ${collapseHome(change.path)}?`
-    case "words":
+    case PERMISSION_CHANGE.words:
       return `${STANDING_DECISION_WORD[change.decision]} ${quoted(change.text)}?`
-    case "rule": {
+    case PERMISSION_CHANGE.rule: {
       if (held === undefined) return ""
-      const rule = `${quoted(label)} ${held.list.kind === "space" ? "in this Space" : "everywhere"}`
-      return change.decision === "remove"
+      const rule = `${quoted(label)} ${held.list.kind === PERMISSION_RULE_LIST.space ? "in this Space" : "everywhere"}`
+      return change.decision === RULE_CHANGE.remove
         ? `Remove the rule ${rule}?`
         : `Change ${rule} from ${RULE_DECISION_WORD[held.decision]} to ${RULE_DECISION_WORD[change.decision]}?`
     }
@@ -192,21 +209,21 @@ const subjectWords = (subject: RuleSubject, tools: ReadonlyArray<ServerTool>): s
   const toolName = (name: string) =>
     tools.find((tool) => tool.definition.name === name)?.definition.metadata.display_name ?? name
   switch (subject.kind) {
-    case "tool":
+    case PERMISSION_RULE_SUBJECT.tool:
       return toolName(subject.tool)
-    case "site":
+    case PERMISSION_RULE_SUBJECT.site:
       return `${toolName(subject.tool)} on ${new URL(subject.origin).host}`
-    case "connector":
+    case PERMISSION_RULE_SUBJECT.connector:
       return `${RULE_ACTION.use} ${subject.server}`
-    case "command":
+    case PERMISSION_RULE_SUBJECT.command:
       return `${RULE_ACTION.run} ${commandWords(subject.executable, subject.argumentPrefix)}`
-    case "host_commands":
+    case PERMISSION_RULE_SUBJECT.hostCommands:
       return RULE_ACTION.hostCommands
-    case "words":
+    case PERMISSION_RULE_SUBJECT.words:
       return subject.text
-    case "path":
+    case PERMISSION_RULE_SUBJECT.path:
       return `${PATH_ACTION[subject.access]} ${collapseHome(subject.path)}`
-    case "vault_key":
+    case PERMISSION_RULE_SUBJECT.vaultKey:
       return `${RULE_ACTION.use} the ${subject.name} key`
   }
 }
@@ -239,7 +256,7 @@ export const makePermissionOffers = (services: {
     holders: OfferHolders
   ): Promise<OfferFacts | undefined> => {
     switch (request.kind) {
-      case "tool": {
+      case PERMISSION_CHANGE.tool: {
         const tool = tools[0]
         return tool === undefined
           ? undefined
@@ -251,7 +268,7 @@ export const makePermissionOffers = (services: {
               holders
             }
       }
-      case "site": {
+      case PERMISSION_CHANGE.site: {
         const tool = tools[0]
         return tool === undefined
           ? undefined
@@ -263,7 +280,7 @@ export const makePermissionOffers = (services: {
               holders
             }
       }
-      case "connector":
+      case PERMISSION_CHANGE.connector:
         return {
           kind: "connector",
           server: request.server,
@@ -271,12 +288,14 @@ export const makePermissionOffers = (services: {
           rule: settingOf(
             ruleDecision(
               live.rules,
-              (subject) => subject.kind === "connector" && subject.server === request.server
+              (subject) =>
+                subject.kind === PERMISSION_RULE_SUBJECT.connector &&
+                subject.server === request.server
             )
           ),
           holders
         }
-      case "mode": {
+      case PERMISSION_CHANGE.mode: {
         const holder = await services.modeHolder(run)
         return {
           kind: "mode",
@@ -292,7 +311,7 @@ export const makePermissionOffers = (services: {
                 }
         }
       }
-      case "command": {
+      case PERMISSION_CHANGE.command: {
         const { grant, system, alwaysAsk } = await services.commandGrant(run, request.command)
         return {
           kind: "command",
@@ -303,7 +322,7 @@ export const makePermissionOffers = (services: {
           holders
         }
       }
-      case "words":
+      case PERMISSION_CHANGE.words:
         return {
           kind: "words",
           text: request.text,
@@ -311,7 +330,7 @@ export const makePermissionOffers = (services: {
           rules: request.rules ?? [],
           holders
         }
-      case "path": {
+      case PERMISSION_CHANGE.path: {
         const path = await canonicalRulePath(request.path)
         return {
           kind: "path",
@@ -320,12 +339,12 @@ export const makePermissionOffers = (services: {
           decision: request.decision,
           tooWide:
             path !== undefined &&
-            request.decision === "allow" &&
+            request.decision === PERMISSION_RULE_DECISION.allow &&
             tooWide(path, { stateRoots: [], home: homedir() }),
           holders
         }
       }
-      case "rule":
+      case PERMISSION_CHANGE.rule:
         return {
           kind: "rule",
           rule: live.rules.rules.find((rule) => rule.id === request.ruleId),
@@ -343,19 +362,21 @@ export const makePermissionOffers = (services: {
   }): Promise<OfferOutcome> => {
     const { run, source } = input
     const refused = (reason: OfferRefusal): OfferOutcome =>
-      source.kind === "approvals"
+      source.kind === OFFER_SOURCE.approvals
         ? { kind: "skipped" }
         : { kind: "refused", reason: OFFER_REFUSAL[reason] }
     if (!offerRaisedByPerson(run.authority.actor)) return refused("not_the_person")
     const live = await services.live(run)
-    if (source.kind === "approvals" && personCard(live.mode) !== "ask") return { kind: "skipped" }
+    if (source.kind === OFFER_SOURCE.approvals && personCard(live.mode) !== PERSON_CARD.ask)
+      return { kind: "skipped" }
     const compiled =
-      input.request.kind === "words"
+      input.request.kind === PERMISSION_CHANGE.words
         ? await services.compileWords(input.request.text, run.sessionId).catch(() => undefined)
         : undefined
-    if (input.request.kind === "words" && compiled === undefined) return refused("not_compiled")
+    if (input.request.kind === PERMISSION_CHANGE.words && compiled === undefined)
+      return refused("not_compiled")
     const request: OfferRequest =
-      input.request.kind === "words" && compiled !== undefined
+      input.request.kind === PERMISSION_CHANGE.words && compiled !== undefined
         ? {
             kind: "words",
             text: input.request.text,
@@ -367,12 +388,15 @@ export const makePermissionOffers = (services: {
           }
         : input.request
     const titles =
-      input.request.kind === "connector"
+      input.request.kind === PERMISSION_CHANGE.connector
         ? await services.connectorTitles()
         : new Map<string, string>()
     const target = offerTarget(request, input.tools, titles)
     const tool =
-      target.request.kind === "tool" || target.request.kind === "site" ? target.tools[0] : undefined
+      target.request.kind === PERMISSION_CHANGE.tool ||
+      target.request.kind === PERMISSION_CHANGE.site
+        ? target.tools[0]
+        : undefined
     const holders = await Effect.runPromise(services.permissions.offerHolders(run.runId))
     const facts =
       holders === null ? undefined : await factsOf(run, target.request, target.tools, live, holders)
@@ -380,8 +404,8 @@ export const makePermissionOffers = (services: {
       facts === undefined
         ? refuse(holders === null ? "no_holder" : "no_tool")
         : planPermissionOffer(facts)
-    if (plan.kind === "refuse") return refused(plan.reason)
-    const held = facts?.kind === "rule" ? facts.rule : undefined
+    if (plan.kind === OFFER_PLAN.refuse) return refused(plan.reason)
+    const held = facts?.kind === PERMISSION_CHANGE.rule ? facts.rule : undefined
     const label = held === undefined ? target.label : subjectWords(held.subject, input.tools)
     const serverName = offerServer(plan.change, tool)
     const kept = await Promise.all(
@@ -399,11 +423,11 @@ export const makePermissionOffers = (services: {
       services.permissions.offerHistory(run.runId, plan.change)
     )
     if (
-      source.kind === "approvals" &&
-      (history.approvals < APPROVALS_BEFORE_OFFER || history.offer !== "none")
+      source.kind === OFFER_SOURCE.approvals &&
+      (history.approvals < APPROVALS_BEFORE_OFFER || history.offer !== OFFER_HISTORY.none)
     )
       return { kind: "skipped" }
-    if (source.kind === "message" && history.offer === "open")
+    if (source.kind === OFFER_SOURCE.message && history.offer === OFFER_HISTORY.open)
       return { kind: "refused", reason: "This permission is already offered; wait for the answer." }
     const question = await Effect.runPromise(
       services.work.askQuestion({
@@ -411,7 +435,10 @@ export const makePermissionOffers = (services: {
         toolCallId: input.toolCallId,
         content: {
           prompt: offerPrompt(plan.change, label, held),
-          detail: plan.change.kind === "words" ? wordsDetail(plan.change, input.tools) : null,
+          detail:
+            plan.change.kind === PERMISSION_CHANGE.words
+              ? wordsDetail(plan.change, input.tools)
+              : null,
           choices: choices.map(({ id, label: choice, detail }) => ({
             id,
             label: choice,
@@ -437,7 +464,9 @@ export const makePermissionOffers = (services: {
       rules: live.rules.rules.map((rule) => ({
         id: rule.id,
         list:
-          rule.list.kind === "space" ? `Space ${space ?? ""}`.trim() : LIST_WORDS[rule.list.kind],
+          rule.list.kind === PERMISSION_RULE_LIST.space
+            ? `Space ${space ?? ""}`.trim()
+            : LIST_WORDS[rule.list.kind],
         decision: rule.decision,
         rule: subjectWords(rule.subject, tools)
       })),

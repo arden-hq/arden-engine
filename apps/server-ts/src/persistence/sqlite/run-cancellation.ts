@@ -1,3 +1,4 @@
+import { RUN_EXECUTION_MODE } from "../../execution/policy.js"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
@@ -23,7 +24,7 @@ export const fenceRunCancellation = Effect.fn("RunCancellation.fence")(function*
     readonly mode: string | null
   }>`SELECT json_extract(metadata_json, '$.run_policy.execution.mode') AS mode
     FROM chat_runs WHERE run_id = ${runId}`
-  const cascade = roots[0]?.mode === "worker"
+  const cascade = roots[0]?.mode === RUN_EXECUTION_MODE.worker
   const tree = sql`WITH RECURSIVE ${runDescendants(sql, {
     name: "cancelled_branch",
     from: sql`SELECT ${runId} AS run_id`,

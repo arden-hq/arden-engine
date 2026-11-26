@@ -3,6 +3,7 @@ import {
   type EventAutomationTrigger,
   type McpEventSelector
 } from "@arden-hq/protocol/automations"
+import { MCP_CONNECTION_STATUS } from "@arden-hq/protocol/mcp"
 import { Effect } from "effect"
 
 import { engineOrderedJson } from "@arden-hq/std/json"
@@ -10,7 +11,7 @@ import { McpEvents, type McpEventSubscription } from "../../mcp/events/subscript
 import type { McpEventOccurrence } from "../../mcp/events/wire.js"
 import type { AutomationTriggerEvent } from "../../persistence/automations/model.js"
 import { AutomationTriggers } from "../../persistence/automations/triggers.js"
-import type { AutomationEventProducer } from "../event-producer.js"
+import { AUTOMATION_EVENT_SOURCE, type AutomationEventProducer } from "../event-producer.js"
 import { readField } from "../events.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
@@ -71,12 +72,14 @@ export const mcpEventProducer: AutomationEventProducer<
 > = {
   eventType: "mcp.event",
   available: ({ mcpServers }) =>
-    mcpServers.some((server) => server.status === "connected" && server.events.length > 0),
+    mcpServers.some(
+      (server) => server.status === MCP_CONNECTION_STATUS.connected && server.events.length > 0
+    ),
   accepts: (trigger, event) =>
     trigger.event_type === APP_EVENT &&
     readField(event.context, "app.source") === mcpEventSource(trigger.mcp_event),
   source: {
-    kind: "live",
+    kind: AUTOMATION_EVENT_SOURCE.live,
     follow: Effect.fnUntraced(function* (triggers) {
       const events = yield* McpEvents
       const store = yield* AutomationTriggers

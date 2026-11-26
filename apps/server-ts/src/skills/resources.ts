@@ -1,3 +1,4 @@
+import { isRelativePathSegment } from "@arden-hq/protocol/common"
 import { formatBytes } from "@arden-hq/std/count"
 import { Effect, Schema } from "effect"
 import { readFile, stat } from "node:fs/promises"
@@ -13,7 +14,7 @@ const SkillReferencePathSchema = Schema.String.check(
     value.startsWith("references/") &&
     value.endsWith(".md") &&
     !/[\\\u0000-\u001f\u007f]/u.test(value) &&
-    value.split("/").every((part) => part !== "" && part !== "." && part !== "..")
+    value.split("/").every((part) => part.length > 0 && !isRelativePathSegment(part))
       ? undefined
       : "must be a relative Markdown path under references/"
   )

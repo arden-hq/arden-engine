@@ -10,10 +10,15 @@ import {
   type ModelRequestMiddleware,
   type Tool
 } from "@arden-hq/loop"
-import { Effect, Predicate, Schema } from "effect"
+import { Effect, Option, Predicate, Schema } from "effect"
 
-import { BrowserClient } from "../browser/service.js"
-import { StructuredCompletion, StructuredCompletionError } from "../models/structured-completion.js"
+import { BROWSER_TOOL, BrowserClient } from "../browser/service.js"
+import {
+  STRUCTURED_COMPLETION_FAILURE,
+  StructuredCompletion,
+  StructuredCompletionError
+} from "../models/structured-completion.js"
+import { APPROVAL_CONTINUATION } from "../workflows/runtime/contract.js"
 import {
   ActParametersSchema,
   SnapshotParametersSchema,
@@ -29,6 +34,7 @@ import {
   nestedCallIds,
   PREVIEW_CHARS,
   resultPreview,
+  SCRIPT_PROGRESS_STATUS,
   trimmedArgs,
   type ScriptProgressTool
 } from "../workflows/runtime/nested-trace.js"
@@ -83,7 +89,9 @@ const makeTrail = (ctx: TaskCtx, title: string) => {
     logs: []
   })
   const report = (): void => {
-    const done = [...tools.values()].filter((tool) => tool.status !== "running").length
+    const done = [...tools.values()].filter(
+      (tool) => tool.status !== SCRIPT_PROGRESS_STATUS.running
+    ).length
     void ctx.run
       .emitToolProgress({
         toolCallId: ctx.toolCallId,
@@ -98,7 +106,8 @@ const makeTrail = (ctx: TaskCtx, title: string) => {
       tools.set(entry.tool_call_id, entry)
       report()
     },
-    refused: () => [...tools.values()].filter((tool) => tool.status === "failed").length
+    refused: () =>
+      [...tools.values()].filter((tool) => tool.status === SCRIPT_PROGRESS_STATUS.failed).length
   }
 }
 
@@ -152,7 +161,7 @@ const runNested = async (
   let facts = {}
   try {
     const result = await ctx.run.codeMode.call({
-      approvalContinuation: "caller",
+      approvalContinuation: APPROVAL_CONTINUATION.caller,
       parent: { toolCallId: ctx.toolCallId, nesting: { kind: NESTING.task } },
       toolCallId,
       name,
@@ -229,9 +238,9 @@ const stepsTool = (ctx: TaskCtx, task: TaskState): Tool<void | undefined> =>
 
 const workerArgs = (name: string, input: Readonly<Record<string, unknown>>): JsonObject => {
   const args = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))({ ...input })
-  if (name === "browser_snapshot" && args["max_chars"] === undefined)
+  if (name === BROWSER_TOOL.snapshot && args["max_chars"] === undefined)
     return { ...args, max_chars: WORKER_PAGE_CHARS }
-  if (name === "browser_act" && args["snapshot"] === undefined)
+  if (name === BROWSER_TOOL.act && args["snapshot"] === undefined)
     return { ...args, snapshot: { max_chars: WORKER_PAGE_CHARS } }
   return args
 }
@@ -251,8 +260,9 @@ const tabInfo = async (
       )
     })
   )(tabs.data)
-  const tab =
-    listed._tag === "Some" ? listed.value.tabs.find((each) => each.tab_ref === tabRef) : undefined
+  const tab = Option.isSome(listed)
+    ? listed.value.tabs.find((each) => each.tab_ref === tabRef)
+    : undefined
   const parsed = tab === undefined ? undefined : webUrl(tab.url)
   return tab === undefined || parsed === undefined
     ? undefined
@@ -411,7 +421,7 @@ const makeBrowserTaskTool = ({
           })
           .pipe(
             Effect.catchTag("StructuredCompletionError", (error: StructuredCompletionError) =>
-              error.reason === "invalid_output" ||
+              error.reason === STRUCTURED_COMPLETION_FAILURE.invalid_output ||
               halted !== undefined ||
               refusedAdmission !== undefined
                 ? Effect.succeed({

@@ -6,7 +6,7 @@ import {
   type AutomationTriggerContext,
   type EventAutomationTrigger
 } from "@arden-hq/protocol/automations"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import type { AutomationRules } from "../automations/model.js"
 import { decodeJson, encodeJson, type JsonColumnError } from "./json.js"
 import { QueueContextSchema } from "./automation-queue-context.js"
@@ -44,7 +44,7 @@ export const rematchHeldEvents = Effect.fn("AutomationTriggerArming.rematchHeld"
     WHERE task_id = ${automationId} AND source = 'event' AND ${freshRow(sql)}`
     for (const row of rows) {
       const context = yield* decodeJson(QueueContextSchema, row.context).pipe(Effect.option)
-      if (context._tag === "None") continue
+      if (Option.isNone(context)) continue
       const event = eventFromSnapshot(context.value)
       if (event === undefined) continue
       const { matched, runOnlyIf } = matchEvent(rules, options.triggers, event)

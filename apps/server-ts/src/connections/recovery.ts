@@ -15,6 +15,8 @@ import { type Effect, Schema } from "effect"
 
 const boundedString = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 
+export const CONNECTION_PAUSE_REASON = "connection"
+
 export const CONNECTION_PROVIDER = { google: "google", mcp: "mcp" } as const
 
 export type ConnectionProvider = (typeof CONNECTION_PROVIDER)[keyof typeof CONNECTION_PROVIDER]
@@ -149,7 +151,7 @@ export const requestConnection = (input: RequestConnectionInput): PauseRequested
     source: input.source ?? "recovery",
     ...(input.accountRef === undefined ? {} : { account_ref: input.accountRef })
   }
-  return new PauseRequested("connection", input.detail, {
+  return new PauseRequested(CONNECTION_PAUSE_REASON, input.detail, {
     preview: `${input.label} needs attention`,
     data
   })

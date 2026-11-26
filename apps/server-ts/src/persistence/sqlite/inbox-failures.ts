@@ -1,4 +1,4 @@
-import { providerSentence } from "@arden-hq/protocol/chat"
+import { CHAT_RUN_ERROR_CODE, providerSentence } from "@arden-hq/protocol/chat"
 import type { InboxFailureEntry } from "../inbox/store.js"
 import type { InboxFailureRun } from "@arden-hq/protocol/inbox"
 import { SPACE_ARCHIVED_PAUSE_LINE } from "./automation-auto-pause.js"
@@ -55,7 +55,7 @@ const PROVIDER_CAUSE: Readonly<Record<string, string>> = {
 export const failureCause = (error: string | null, code: string | null = null): string => {
   const said = code === null ? undefined : PROVIDER_CAUSE[code]
   if (said !== undefined) return said
-  if (code === "model_unavailable") {
+  if (code === CHAT_RUN_ERROR_CODE.modelUnavailable) {
     const sentence = providerSentence(error ?? "")
     if (sentence !== undefined) return sentence.slice(0, FAILURE_CAUSE_LIMIT)
   }

@@ -1,3 +1,4 @@
+import { SPACE_JOB_PROMPT, TASK_SPEAKS_IN } from "../persistence/automations/job-prompt.js"
 import type {
   SpaceJobPromptContext,
   SpaceReviewSnapshot,
@@ -242,7 +243,7 @@ const renderTaskWorkerPrompt = (task: TaskWorkerSnapshot | undefined): string =>
       [
         "Your final response becomes the result of this run in the Task timeline, so do not repeat it with `task_comment`.",
         "After a successful check with no meaningful change, call report with event no_change with the evidence checked. A next-check-only update does not count as a finding. An unchanged source can be quiet; inability to verify a required outcome is uncertainty, not success. Report it when it changes the plan, threatens a deadline, or needs the user. If it changes nothing actionable: set next_attempt_at if it needs another look, call report with event no_change with what you tried, and do not save a separate note for it. This run's result reaches the next run through the Task's history, not this conversation, so do not comment a baseline. Check with read-only tools (listing or reading files, reading pages, read-only commands); a command that writes, a Task comment or any Task edit other than next_attempt_at or continuation_context makes the run report as usual. Do not use no-change when a tool failed, or for questions or blockers.",
-        `${task.speaksIn === "chat" ? "The Task's chat" : "The Space chat"} shows the user only this Task's results: its Done, the criteria a run met, a question, a stop, and this final response when the run moved the Task (added Done or Decided lines to the state record). The state record itself is never shown. When part of the work needs the user (a password, a message only they can see, a choice), ask it with \`ask_user\` instead of burying it in the result.`,
+        `${task.speaksIn === TASK_SPEAKS_IN.chat ? "The Task's chat" : "The Space chat"} shows the user only this Task's results: its Done, the criteria a run met, a question, a stop, and this final response when the run moved the Task (added Done or Decided lines to the state record). The state record itself is never shown. When part of the work needs the user (a password, a message only they can see, a choice), ask it with \`ask_user\` instead of burying it in the result.`,
         "When there is something to say, write it to the user as a person would text them: one sentence of at most 140 characters, what changed for them first, then the one thing still open that needs them, if any. Never a log of what you checked or a count of records audited, and no Done: or Decided: labels. Name the thing, not the contents of the packet. Link the report or recovery destination instead of describing it (a Task the user must inspect or act on, email, report, [Chat](arden:session/<session_ref>), or [Usage settings](arden:settings/usage)); the Task's peek has the rest. Use actual references returned by tools, never placeholders. Do not report a task-edit acknowledgement or link back to this Task as the outcome unless it is the action target."
       ].join("\n")
     ),
@@ -252,9 +253,9 @@ const renderTaskWorkerPrompt = (task: TaskWorkerSnapshot | undefined): string =>
 
 export const renderSpaceJobPrompt = (context: SpaceJobPromptContext): string => {
   switch (context.kind) {
-    case "space_review":
+    case SPACE_JOB_PROMPT.spaceReview:
       return renderSpaceReviewPrompt(context.space)
-    case "task_execution":
+    case SPACE_JOB_PROMPT.taskExecution:
       return renderTaskWorkerPrompt(context.task)
   }
 }

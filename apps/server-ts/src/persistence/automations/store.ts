@@ -71,10 +71,15 @@ interface ScreenedSkip {
   readonly skip: StoredAutomationRunSkip
 }
 
+export const AUTOMATION_EVENT_SCREEN_KIND = { skip: "skip", run: "run" } as const
+
 export type AutomationEventScreenOutcome =
-  | { readonly kind: "skip"; readonly skip: StoredAutomationRunSkip }
   | {
-      readonly kind: "run"
+      readonly kind: typeof AUTOMATION_EVENT_SCREEN_KIND.skip
+      readonly skip: StoredAutomationRunSkip
+    }
+  | {
+      readonly kind: typeof AUTOMATION_EVENT_SCREEN_KIND.run
       readonly triggerContext: string
       readonly itemIds: ReadonlyArray<string>
     }

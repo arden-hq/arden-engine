@@ -73,11 +73,18 @@ export const makeObservationRegistry = (): ObservationRegistry => {
   }
 }
 
+export const BROWSER_SNAPSHOT_CLAIM = {
+  claimed: "claimed",
+  missing: "missing",
+  other: "other",
+  leased: "leased"
+} as const
+
 type BrowserSnapshotClaim =
-  | { readonly kind: "claimed"; readonly revision: number }
-  | { readonly kind: "missing" }
-  | { readonly kind: "other" }
-  | { readonly kind: "leased" }
+  | { readonly kind: typeof BROWSER_SNAPSHOT_CLAIM.claimed; readonly revision: number }
+  | { readonly kind: typeof BROWSER_SNAPSHOT_CLAIM.missing }
+  | { readonly kind: typeof BROWSER_SNAPSHOT_CLAIM.other }
+  | { readonly kind: typeof BROWSER_SNAPSHOT_CLAIM.leased }
 
 export interface BrowserObservationRegistry {
   readonly checkpoint: (tabRef: string) => BrowserObservationCheckpoint
@@ -219,13 +226,13 @@ export const makeBrowserObservationRegistry = ({
         : { ref: latest.ref, targets: latest.targets, url: latest.url }
     },
     consume: (tabRef, snapshotRef, toolCallId): BrowserSnapshotClaim => {
-      if (!mayUse(tabRef, toolCallId)) return { kind: "leased" }
+      if (!mayUse(tabRef, toolCallId)) return { kind: BROWSER_SNAPSHOT_CLAIM.leased }
       const latest = snapshots.get(tabRef)
-      if (latest === undefined) return { kind: "missing" }
-      if (latest.ref !== snapshotRef) return { kind: "other" }
+      if (latest === undefined) return { kind: BROWSER_SNAPSHOT_CLAIM.missing }
+      if (latest.ref !== snapshotRef) return { kind: BROWSER_SNAPSHOT_CLAIM.other }
       snapshots.delete(tabRef)
       bounded(spent, tabRef, latest)
-      return { kind: "claimed", revision: latest.revision }
+      return { kind: BROWSER_SNAPSHOT_CLAIM.claimed, revision: latest.revision }
     },
     view: (tabRef) => views.get(tabRef),
     remember: (tabRef, view): void => {

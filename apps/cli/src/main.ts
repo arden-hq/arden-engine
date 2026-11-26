@@ -9,6 +9,7 @@ import { macAppLauncher } from "./app-launch.js"
 import { runCli } from "./cli.js"
 import { type CliDependencies, type StdinKind } from "./command.js"
 import { errorMessage } from "@arden-hq/std/errors"
+import { isPermissionDenied } from "./cli-words.js"
 
 const readStdin = async (): Promise<string> => {
   const chunks: Array<Buffer> = []
@@ -33,7 +34,7 @@ const isProcessAlive = (pid: number): boolean => {
     process.kill(pid, 0)
     return true
   } catch (cause) {
-    return cause instanceof Error && "code" in cause && cause.code === "EPERM"
+    return isPermissionDenied(cause)
   }
 }
 

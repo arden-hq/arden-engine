@@ -1,5 +1,8 @@
-import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import { isActiveRunStatus, RUN_STATUS } from "@arden-hq/protocol/runs"
+import { TOOL_STATUS, type ToolStatus } from "./status-sets.js"
+import { RETRY_VERDICT, type RetryVerdict } from "../scripts/journal.js"
 import {
+  WORKFLOW_EFFECT,
   WORKFLOW_PREVIEW,
   type WorkflowEffectDisposition,
   type WorkflowError,
@@ -12,16 +15,25 @@ import type { ScriptResultPayload } from "../scripts/results.js"
 import { boundedSourceRefs } from "../workflows/source-refs.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-export type CallChange = "none" | "arden" | "applied" | "uncertain"
+export const CALL_CHANGE = {
+  none: "none",
+  arden: "arden",
+  applied: "applied",
+  uncertain: "uncertain"
+} as const
+export type CallChange = (typeof CALL_CHANGE)[keyof typeof CALL_CHANGE]
+
+export const NESTED_RETRY = { reuse: "reuse", rerun: "rerun", refuse: "refuse" } as const
+export type NestedRetry = (typeof NESTED_RETRY)[keyof typeof NESTED_RETRY]
 
 export const callEffect = (change: CallChange): WorkflowEffectDisposition => {
   switch (change) {
-    case "none":
-    case "arden":
+    case CALL_CHANGE.none:
+    case CALL_CHANGE.arden:
       return "none"
-    case "applied":
+    case CALL_CHANGE.applied:
       return "applied"
-    case "uncertain":
+    case CALL_CHANGE.uncertain:
       return "unknown"
   }
 }
@@ -30,16 +42,16 @@ export const mergeEffectDisposition = (
   current: WorkflowEffectDisposition,
   next: WorkflowEffectDisposition
 ): WorkflowEffectDisposition => {
-  if (current === "applied" || next === "applied") return "applied"
-  if (current === "unknown" || next === "unknown") return "unknown"
-  if (current === "no_op" || next === "no_op") return "no_op"
+  if (current === WORKFLOW_EFFECT.applied || next === WORKFLOW_EFFECT.applied) return "applied"
+  if (current === WORKFLOW_EFFECT.unknown || next === WORKFLOW_EFFECT.unknown) return "unknown"
+  if (current === WORKFLOW_EFFECT.no_op || next === WORKFLOW_EFFECT.no_op) return "no_op"
   return "none"
 }
 
 type UnsafeEffect = "applied" | "unknown"
 
 const isUnsafeEffect = (effect: WorkflowEffectDisposition): effect is UnsafeEffect =>
-  effect === "applied" || effect === "unknown"
+  effect === WORKFLOW_EFFECT.applied || effect === WORKFLOW_EFFECT.unknown
 
 export interface ScriptChildId {
   readonly key: string
@@ -49,19 +61,34 @@ export interface ScriptChildId {
 export const nextLaunch = (children: ReadonlyArray<Pick<ScriptChild, "id">>): number =>
   children.reduce((next, child) => Math.max(next, (child.id.launch ?? -1) + 1), 0)
 
+export const SCRIPT_CHILD_RUN = {
+  active: "active",
+  completed: "completed",
+  failed: "failed",
+  interrupted: "interrupted",
+  cancelled: "cancelled",
+  missing: "missing"
+} as const
+
 export type ScriptChildRun =
-  | { readonly status: "active" }
-  | { readonly status: "completed"; readonly text: string | undefined }
-  | { readonly status: "failed" | "interrupted" | "cancelled" }
-  | { readonly status: "missing" }
+  | { readonly status: typeof SCRIPT_CHILD_RUN.active }
+  | { readonly status: typeof SCRIPT_CHILD_RUN.completed; readonly text: string | undefined }
+  | {
+      readonly status:
+        | typeof SCRIPT_CHILD_RUN.failed
+        | typeof SCRIPT_CHILD_RUN.interrupted
+        | typeof SCRIPT_CHILD_RUN.cancelled
+    }
+  | { readonly status: typeof SCRIPT_CHILD_RUN.missing }
 
 export const scriptChildRun = (
   runStatus: string | undefined,
   text: string | undefined
 ): ScriptChildRun => {
   if (runStatus === undefined) return { status: "missing" }
-  if (runStatus === "completed") return { status: "completed", text }
-  if (runStatus === "interrupted" || runStatus === "cancelled") return { status: runStatus }
+  if (runStatus === RUN_STATUS.completed) return { status: "completed", text }
+  if (runStatus === RUN_STATUS.interrupted || runStatus === RUN_STATUS.cancelled)
+    return { status: runStatus }
   if (isActiveRunStatus(runStatus)) return { status: "active" }
   return { status: "failed" }
 }
@@ -78,17 +105,30 @@ export type OutputVerdict =
   | { readonly valid: true; readonly value: Schema.Json }
   | { readonly valid: false }
 
+export const AGENT_REUSE = { reuse: "reuse", launch: "launch", refuse: "refuse" } as const
+
 export type AgentReuseDecision =
-  | { readonly kind: "reuse"; readonly toolCallId: string; readonly value: Schema.Json }
-  | { readonly kind: "launch"; readonly because: "first" | "retry" | "output_missing" }
-  | { readonly kind: "refuse"; readonly toolCallId: string; readonly effect: UnsafeEffect }
+  | {
+      readonly kind: typeof AGENT_REUSE.reuse
+      readonly toolCallId: string
+      readonly value: Schema.Json
+    }
+  | {
+      readonly kind: typeof AGENT_REUSE.launch
+      readonly because: "first" | "retry" | "output_missing"
+    }
+  | {
+      readonly kind: typeof AGENT_REUSE.refuse
+      readonly toolCallId: string
+      readonly effect: UnsafeEffect
+    }
 
 export const agentReuseDecision = (
   children: ReadonlyArray<ScriptChild>,
   check: (text: string) => OutputVerdict
 ): AgentReuseDecision => {
   for (const child of [...children].reverse()) {
-    if (child.run.status !== "completed" || child.run.text === undefined) continue
+    if (child.run.status !== SCRIPT_CHILD_RUN.completed || child.run.text === undefined) continue
     const verdict = check(child.run.text)
     if (verdict.valid) return { kind: "reuse", toolCallId: child.toolCallId, value: verdict.value }
   }
@@ -98,7 +138,7 @@ export const agentReuseDecision = (
   if (unsafe !== undefined) return { kind: "refuse", ...unsafe }
   if (children.length === 0) return { kind: "launch", because: "first" }
   const outputMissing = children.some(
-    (child) => child.run.status === "completed" && child.run.text === undefined
+    (child) => child.run.status === SCRIPT_CHILD_RUN.completed && child.run.text === undefined
   )
   return { kind: "launch", because: outputMissing ? "output_missing" : "retry" }
 }
@@ -107,20 +147,20 @@ const agentRetryEffect = (children: ReadonlyArray<ScriptChild>): WorkflowEffectD
   const latest = new Map<string, ScriptChild>()
   for (const child of children) latest.set(child.id.key, child)
   return children.reduce<WorkflowEffectDisposition>((effect, child) => {
-    const reused = latest.get(child.id.key)?.run.status === "completed"
+    const reused = latest.get(child.id.key)?.run.status === SCRIPT_CHILD_RUN.completed
     return reused ? effect : mergeEffectDisposition(effect, child.effect)
   }, "none")
 }
 
 export interface NestedCall {
-  readonly status: "running" | "ready" | "completed" | "paused" | "uncertain"
+  readonly status: ToolStatus
   readonly isError: boolean
   readonly change: CallChange
 }
 
-export const nestedRetryDecision = (call: NestedCall): "reuse" | "rerun" | "refuse" => {
-  if (call.status === "completed" && !call.isError) return "reuse"
-  if (call.status === "ready" || call.status === "paused") return "rerun"
+export const nestedRetryDecision = (call: NestedCall): NestedRetry => {
+  if (call.status === TOOL_STATUS.completed && !call.isError) return "reuse"
+  if (call.status === TOOL_STATUS.ready || call.status === TOOL_STATUS.paused) return "rerun"
   return isUnsafeEffect(callEffect(call.change)) ? "refuse" : "rerun"
 }
 
@@ -159,15 +199,18 @@ export const latestNestedRuns = <A extends NestedRun>(
 export const retryVerdict = (input: {
   readonly children: ReadonlyArray<ScriptChild>
   readonly nested: ReadonlyArray<NestedCall & NestedRun & { readonly toolCallId: string }>
-}): { readonly kind: "allow" } | { readonly kind: "refuse"; readonly effect: UnsafeEffect } => {
+}): RetryVerdict => {
   const agents = agentRetryEffect(input.children)
-  if (isUnsafeEffect(agents)) return { kind: "refuse", effect: agents }
+  if (isUnsafeEffect(agents)) return { kind: RETRY_VERDICT.refuse, effect: agents }
   const refused = latestNestedRuns(input.nested).find(
-    (call) => nestedRetryDecision(call) === "refuse"
+    (call) => nestedRetryDecision(call) === NESTED_RETRY.refuse
   )
-  if (refused === undefined) return { kind: "allow" }
+  if (refused === undefined) return { kind: RETRY_VERDICT.allow }
   const effect = callEffect(refused.change)
-  return { kind: "refuse", effect: effect === "applied" ? "applied" : "unknown" }
+  return {
+    kind: RETRY_VERDICT.refuse,
+    effect: effect === WORKFLOW_EFFECT.applied ? WORKFLOW_EFFECT.applied : WORKFLOW_EFFECT.unknown
+  }
 }
 
 export interface ScriptResultInput {

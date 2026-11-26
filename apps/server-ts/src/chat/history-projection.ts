@@ -1,3 +1,4 @@
+import { isSessionHandoff as isHandoffKind } from "../persistence/transcript/model.js"
 import { pageBounds, RUNTIME_RUN } from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
@@ -242,5 +243,5 @@ export const historyToolCallIds = (records: ReadonlyArray<TranscriptMessageRecor
 
 const isSessionHandoff = (envelope: Readonly<Record<string, unknown>>): boolean => {
   const receipt = envelope.compaction
-  return Predicate.isObject(receipt) && receipt.kind === "session_handoff"
+  return Predicate.isObject(receipt) && isHandoffKind(receipt.kind)
 }

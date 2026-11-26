@@ -1,3 +1,4 @@
+import { QUERY_BOOLEAN } from "@arden-hq/protocol/common"
 import {
   WIKI_CHANGE_ACTION,
   WIKI_CHAT_NAME,
@@ -9,6 +10,7 @@ import {
   WIKI_LINK_STATUS,
   WIKI_LIST_START,
   WIKI_PAGE_LIST,
+  WIKI_RESTORE_SIDE,
   type WikiHistoryChange,
   type WikiLink,
   type WikiPage,
@@ -20,6 +22,7 @@ import type { WikiRenameRequestSchema } from "@arden-hq/protocol/effect/wiki"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { pageCameFrom } from "../../memory/discussed-in.js"
+import { STORE_REASON } from "../../persistence/errors.js"
 import { SpaceStore } from "../../persistence/spaces/store.js"
 import { SummaryStore } from "../../persistence/summaries/store.js"
 import { SessionQueries } from "../../persistence/sessions/queries.js"
@@ -110,7 +113,7 @@ const conflictError = (error: WikiError) => ({
 })
 
 const writeError = (error: WikiError) => {
-  return error.reason === "conflict" ? conflictError(error) : wikiErrorToHttp(error)
+  return error.reason === STORE_REASON.conflict ? conflictError(error) : wikiErrorToHttp(error)
 }
 
 export const WikiHandlers = HttpApiBuilder.group(
@@ -125,7 +128,7 @@ export const WikiHandlers = HttpApiBuilder.group(
       .handle("list", ({ query }) =>
         wiki
           .list({
-            includeRedirects: query.include_redirects === "true",
+            includeRedirects: query.include_redirects === QUERY_BOOLEAN.true,
             limit: query.limit,
             start:
               query.start === WIKI_LIST_START.after
@@ -229,7 +232,7 @@ export const WikiHandlers = HttpApiBuilder.group(
             expectedHead: payload.expected_head,
             authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
             commit: ownerInApp(
-              payload.side === "after"
+              payload.side === WIKI_RESTORE_SIDE.after
                 ? `restore wiki page to its version of commit ${params.commitId}`
                 : `restore Maintenance commit ${params.commitId}`,
               "desktop.restore"

@@ -8,9 +8,11 @@ import {
   MANAGED_OBJECT_HASH,
   MANAGED_REF_KIND,
   managedObjectRef,
-  readManagedObjectRef
+  readManagedObjectRef,
+  type ManagedObjectFormat
 } from "./ref.js"
 import {
+  MANAGED_OBJECT_KIND,
   isManagedObjectSource,
   managedObjectRefParts,
   readManagedObjectDescriptor,
@@ -24,7 +26,7 @@ export interface ManagedObjectStore {
   readonly publish: (input: {
     readonly sessionId: string
     readonly text: string
-    readonly format: "text" | "json"
+    readonly format: ManagedObjectFormat
     readonly source: ManagedObjectSource
   }) => Promise<ManagedObjectDescriptor>
   readonly read: (input: { readonly sessionId: string; readonly ref: string }) => Promise<string>
@@ -143,7 +145,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     const owner = sha256Hex(input.sessionId)
     const digest = sha256Hex(bytes)
     const descriptor: ManagedObjectDescriptor = {
-      kind: "managed_output",
+      kind: MANAGED_OBJECT_KIND,
       ref: managedObjectRef({ owner, digest, format: input.format }),
       sha256: digest,
       bytes: bytes.byteLength,

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { SessionForkOriginSchema } from "../sessions/fork-origin.js"
 import type { Backfill } from "./backfills/backfill.js"
@@ -31,16 +31,16 @@ export const sessionForkOriginBackfill: Backfill = {
     let converted = 0
     for (const row of rows) {
       const decoded = yield* decodeJson(JsonObjectSchema, row.metadata ?? "{}").pipe(Effect.option)
-      if (decoded._tag === "None") continue
+      if (Option.isNone(decoded)) continue
       const current = Schema.decodeUnknownOption(SessionForkOriginSchema)(decoded.value.fork_origin)
-      if (current._tag === "Some") {
+      if (Option.isSome(current)) {
         yield* sql`UPDATE sessions SET metadata = json_remove(metadata, '$.fork_of')
           WHERE session_id = ${row.session_id}`
         converted += 1
         continue
       }
       const legacy = Schema.decodeUnknownOption(LegacyForkSchema)(decoded.value.fork_of)
-      if (legacy._tag === "None") continue
+      if (Option.isNone(legacy)) continue
       const source = yield* sql<{
         readonly public_ref: string | null
         readonly message_id: string | null
@@ -55,7 +55,7 @@ export const sessionForkOriginBackfill: Backfill = {
         sourceMessageId: source[0]?.message_id ?? null,
         createdAt: row.started_at
       })
-      if (origin._tag === "None") continue
+      if (Option.isNone(origin)) continue
       yield* sql`UPDATE sessions
         SET metadata = json_set(json_remove(COALESCE(metadata, '{}'), '$.fork_of'),
           '$.fork_origin', json(${JSON.stringify(origin.value)}))

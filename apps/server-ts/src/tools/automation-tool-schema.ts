@@ -21,8 +21,6 @@ import {
   ToolTimeTriggerSchema
 } from "./automation-tool-trigger-schema.js"
 
-export const CREATE_CHAT = { current: "current", own: "own" } as const
-
 export const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 const AutomationRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200)).annotate({
   description: "Exact automation_ref returned by automation_list."
@@ -30,6 +28,10 @@ const AutomationRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200))
 const SessionRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200)).annotate({
   description: "Exact session_ref returned by session_list."
 })
+export const CREATE_CHAT = { current: "current", own: "own" } as const
+
+export type CreateChat = (typeof CREATE_CHAT)[keyof typeof CREATE_CHAT]
+
 const ChatSchema = Schema.Literals(Object.values(CREATE_CHAT)).annotate({
   description:
     "Where it lives and reports. current: this chat, for follow-ups and checking back here, including in a Space room. own: a new chat of its own, for independent recurring work."

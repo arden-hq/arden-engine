@@ -1,3 +1,5 @@
+import { CHANGE_ENTRY_OUTCOME } from "@arden-hq/protocol/chat"
+import { TOOL_STATUS } from "./status-sets.js"
 import { Effect, Option, Predicate, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql"
 import type { SqlClient } from "effect/unstable/sql"
@@ -82,17 +84,15 @@ export const decodeChatToolEvidence = Effect.fn("Chat.decodeToolEvidence")(funct
     resultJson === null
       ? null
       : yield* decodeJson(Schema.Json, resultJson).pipe(Effect.orElseSucceed(() => resultJson))
-  const result: unknown =
+  let result: unknown = rawResult
+  if (
     Predicate.isObject(rawResult) &&
     Predicate.isObject(rawResult.data) &&
     !Array.isArray(rawResult.data)
-      ? {
-          ...Object.fromEntries(Object.entries(rawResult)),
-          data: Object.fromEntries(
-            Object.entries(rawResult.data).filter(([key]) => key !== "approval")
-          )
-        }
-      : rawResult
+  ) {
+    const { approval: _approval, ...data } = rawResult.data
+    result = { ...Object.fromEntries(Object.entries(rawResult)), data }
+  }
   const revision = sha256Hex(
     engineOrderedJson({
       session_id: row.session_id,
@@ -115,7 +115,7 @@ export const decodeChatToolEvidence = Effect.fn("Chat.decodeToolEvidence")(funct
     Schema.decodeUnknownOption(PersistedToolResultSchema)(result)
   )
   const source: ChatActionRetirementSource | undefined =
-    row.status === "completed" &&
+    row.status === TOOL_STATUS.completed &&
     row.changes_state === 1 &&
     Predicate.isObject(arguments_) &&
     row.ended_at !== null &&
@@ -123,7 +123,7 @@ export const decodeChatToolEvidence = Effect.fn("Chat.decodeToolEvidence")(funct
     row.turn_id.length > 0 &&
     validResult !== undefined &&
     validResult.is_error !== true &&
-    receipt?.outcome === "applied" &&
+    receipt?.outcome === CHANGE_ENTRY_OUTCOME.applied &&
     receipt.operation_id === operationId &&
     receipt.receipt_ref === operationId
       ? {
