@@ -60,24 +60,21 @@ export const mergeTriggerInputs = (
       trigger.id === undefined ? [] : [[trigger.id, trigger] as const]
     )
   )
-  let lastId = Math.max(
-    stored.lastId,
-    ...[...byId.keys()].map(idNumber).filter((id) => id !== undefined)
-  )
+  let lastId = stored.lastId
   const seen = new Set<string>()
   const triggers: Array<AutomationTriggerInput> = []
   for (const trigger of sent) {
     if (trigger.id === undefined) {
-      lastId += 1
-      triggers.push(withoutNulls({ ...trigger, id: `t${lastId}` }))
+      do lastId += 1
+      while (byId.has(triggerId(lastId)))
+      triggers.push(withoutNulls({ ...trigger, id: triggerId(lastId) }))
       continue
     }
     if (seen.has(trigger.id)) return { kind: "duplicate_id", id: trigger.id }
     seen.add(trigger.id)
     const current = byId.get(trigger.id)
     if (current === undefined) {
-      const given = idNumber(trigger.id)
-      return given !== undefined && given <= lastId
+      return givenIds(lastId).has(trigger.id)
         ? { kind: "deleted_id", id: trigger.id }
         : { kind: "unknown_id", id: trigger.id }
     }
@@ -90,12 +87,16 @@ export const mergeTriggerInputs = (
 export const freshTriggerIds = (
   triggers: ReadonlyArray<AutomationTriggerInput>
 ): StoredTriggers<AutomationTriggerInput> => ({
-  triggers: triggers.map((trigger, index) => withoutNulls({ ...trigger, id: `t${index + 1}` })),
+  triggers: triggers.map((trigger, index) =>
+    withoutNulls({ ...trigger, id: triggerId(index + 1) })
+  ),
   lastId: triggers.length
 })
 
-const idNumber = (id: string): number | undefined =>
-  /^t[1-9][0-9]*$/.test(id) ? Number(id.slice(1)) : undefined
+const triggerId = (counter: number): string => `t${counter}`
+
+const givenIds = (lastId: number): ReadonlySet<string> =>
+  new Set(Array.from({ length: lastId }, (_, index) => triggerId(index + 1)))
 
 const droppedFields = (
   stored: ReadonlyArray<AutomationTrigger>,

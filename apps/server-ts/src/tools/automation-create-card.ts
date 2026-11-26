@@ -1,6 +1,6 @@
 import { countOf } from "@arden-hq/std/count"
 import type { ToolApprovalContext, ToolContext } from "@arden-hq/loop"
-import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
+import { EDITABLE_KIND, type ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
 import { Effect, Schema } from "effect"
 import type { PromptWriter } from "../persistence/automations/catalog.js"
@@ -183,7 +183,11 @@ export const createCardOf =
         ],
         body: { label: "Instructions", text: input.prompt },
         approve_label: "Create",
-        editable: { fields: CREATE_EDITABLE_FIELDS, arguments: jsonArguments(input) }
+        editable: {
+          kind: EDITABLE_KIND.arguments,
+          fields: CREATE_EDITABLE_FIELDS,
+          arguments: jsonArguments(input)
+        }
       }
     }
   }

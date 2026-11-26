@@ -7,6 +7,7 @@ import { CHANGE_ENTRY_PLACE_MAX, CHANGE_ENTRY_TITLE_MAX } from "@arden-hq/protoc
 
 import type { BrowserRequest } from "../browser/service.js"
 import type { EffectTarget } from "../execution/tool-effect.js"
+import { bundleName } from "../computer/bundle-id.js"
 
 const FOLDER_MAX = 80
 
@@ -263,5 +264,9 @@ export const appTarget = (input: {
     ...(input.place === undefined ? {} : { place: clipLine(input.place, CHANGE_ENTRY_PLACE_MAX) })
   }) satisfies EffectTarget
 
-export const bundleName = (bundleId: string): string =>
-  bundleId.slice(bundleId.lastIndexOf(".") + 1) || bundleId
+export const launchedAppTarget = (bundleId: string): EffectTarget =>
+  appTarget({
+    objectId: bundleId,
+    title: `Launched ${bundleName(bundleId)}`,
+    place: bundleName(bundleId)
+  })

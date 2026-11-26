@@ -237,18 +237,17 @@ export const loadMintedMessageIds = Effect.fn("SqliteChatWriteStore.loadMintedMe
   function* (
     sql: SqlClient.SqlClient,
     sessionId: string,
-    assistantMessageId: string,
+    turnId: string,
     operation: ChatWriteOperation
   ): Effect.fn.Return<ReadonlyArray<string>, ChatWriteError> {
-    const mintedPrefix = `${assistantMessageId}-`
     const rows = yield* sql<{ readonly message_id: string }>`
-      SELECT message_id
-      FROM session_messages
-      WHERE session_id = ${sessionId}
-        AND role = ${ROLE.assistant}
-        AND (message_id = ${assistantMessageId}
-          OR substr(message_id, 1, ${mintedPrefix.length}) = ${mintedPrefix})
-      ORDER BY seq
+      SELECT message.message_id
+      FROM message_turns AS turn
+      JOIN session_messages AS message ON message.message_rowid = turn.message_rowid
+      WHERE turn.turn_id = ${turnId}
+        AND message.session_id = ${sessionId}
+        AND message.role = ${ROLE.assistant}
+      ORDER BY message.seq
     `.pipe(
       Effect.mapError((cause) =>
         writeError(operation, "storage", "Could not load the run's minted message ids", {

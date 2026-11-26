@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { ToolExecutionStore } from "../tools/store.js"
 import type { PersistenceDeps } from "./deps.js"
+import { descendantCalls } from "./detached-workflow-calls.js"
 import {
   decodeIdentity,
   preserveToolError,
@@ -16,7 +17,14 @@ export const makeToolCoordinatorSuspend = ({
 }: Pick<PersistenceDeps, "writer">): ToolExecutionStore["Service"]["suspend"] =>
   Effect.fn("SqliteToolExecutionStore.suspend")(function* (input, nestedToolCallId) {
     const identity = yield* decodeIdentity(input, "pause")
-    if (identity.changesState || !nestedToolCallId.startsWith(`${identity.toolCallId}:`)) {
+    const sql = writer.sql
+    const nested = identity.changesState
+      ? []
+      : yield* sql`SELECT 1 AS present
+          WHERE ${nestedToolCallId} IN ${descendantCalls(sql, identity.runId, identity.toolCallId)}`.pipe(
+          Effect.mapError(preserveToolError("pause", identity))
+        )
+    if (nested.length === 0) {
       return yield* toolError(
         "pause",
         "invalid",
@@ -24,7 +32,6 @@ export const makeToolCoordinatorSuspend = ({
         identity
       )
     }
-    const sql = writer.sql
     yield* writer
       .transactInteractive(
         Effect.gen(function* () {
@@ -69,13 +76,12 @@ export const resumeToolCoordinator = Effect.fn("SqliteToolExecutionStore.resumeC
         identity
       )
     }
-    const prefix = `${identity.toolCallId}:`
     const decisions = yield* sql<{ readonly total: number; readonly pending: number }>`
       SELECT COUNT(*) AS total,
         COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending
       FROM tool_approvals
       WHERE run_id = ${identity.runId}
-        AND substr(tool_call_id, 1, ${prefix.length}) = ${prefix}
+        AND tool_call_id IN ${descendantCalls(sql, identity.runId, identity.toolCallId)}
     `
     if (decisions[0]?.total === 0 || decisions[0]?.pending !== 0) {
       return yield* toolError(

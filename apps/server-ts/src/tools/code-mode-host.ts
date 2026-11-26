@@ -122,6 +122,7 @@ export const makeCodeModeHost = (options: {
         : null
     },
     call: async (request: CodeModeCallRequest): Promise<Schema.Json> => {
+      options.browserObservations?.nest(request.toolCallId, request.parent.toolCallId)
       const tool = find(request.name)
       if (tool === undefined) {
         throw new ToolExecutionError(
@@ -172,7 +173,7 @@ export const makeCodeModeHost = (options: {
             args,
             changesState: metadata.changes_state,
             source: metadata.source,
-            plan: { kind: "call", toolCallId: request.parentToolCallId }
+            plan: { kind: "call", ...request.parent }
           },
           (context) =>
             Promise.resolve(

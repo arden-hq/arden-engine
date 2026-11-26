@@ -19,8 +19,7 @@ export const agentResultPresentation = Effect.fn(function* (
     FROM automation_deliveries d
     JOIN chat_runs r ON r.run_id = json_extract(d.payload, '$.runIds[0]')
     JOIN sessions child ON child.session_id = r.session_id
-    WHERE d.delivery_id = ${messageId.slice("arrival:".length)}
-      AND ${messageId} = 'arrival:' || d.delivery_id
+    WHERE d.message_id = ${messageId}
       AND json_extract(d.payload, '$.kind') = 'result'
       AND json_extract(d.payload, '$.sessionId') = ${sessionId}
       AND child.session_type = 'agent' AND child.parent_session_id = ${sessionId}
@@ -38,8 +37,7 @@ export const agentResultMessagePredicate = (
   SELECT 1 FROM automation_deliveries d
   JOIN chat_runs r ON r.run_id = json_extract(d.payload, '$.runIds[0]')
   JOIN sessions child ON child.session_id = r.session_id
-  WHERE d.delivery_id = substr(m.message_id, 9)
-    AND m.message_id = 'arrival:' || d.delivery_id
+  WHERE d.message_id = m.message_id
     AND json_extract(d.payload, '$.kind') = 'result'
     AND json_extract(d.payload, '$.sessionId') = m.session_id
     AND child.session_type = 'agent' AND child.parent_session_id = m.session_id

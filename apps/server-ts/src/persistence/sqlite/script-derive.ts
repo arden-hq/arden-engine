@@ -36,33 +36,9 @@ type UnsafeEffect = "applied" | "unknown"
 const isUnsafeEffect = (effect: WorkflowEffectDisposition): effect is UnsafeEffect =>
   effect === "applied" || effect === "unknown"
 
-export const scriptChildPrefix = (originToolCallId: string): string =>
-  `${originToolCallId}:workflow:`
-
-export type ScriptChildId =
-  | { readonly attempt: undefined; readonly key: string; readonly launch: number }
-  | { readonly attempt: number; readonly key: string; readonly launch: undefined }
-
-const DIGITS = /^\d+$/u
-
-export const parseScriptChildId = (
-  originToolCallId: string,
-  toolCallId: string
-): ScriptChildId | undefined => {
-  const prefix = scriptChildPrefix(originToolCallId)
-  if (!toolCallId.startsWith(prefix)) return undefined
-  const parts = toolCallId.slice(prefix.length).split(":")
-  const counters = parts.slice(-2)
-  const key = parts.at(-3)
-  if (key === undefined || key.length === 0 || !counters.every((part) => DIGITS.test(part))) {
-    return undefined
-  }
-  if (parts.length === 3) return { attempt: undefined, key, launch: Number(parts[2]) }
-  const attempt = parts[0]
-  if (parts.length === 4 && attempt !== undefined && DIGITS.test(attempt)) {
-    return { attempt: Number(attempt), key, launch: undefined }
-  }
-  return undefined
+export interface ScriptChildId {
+  readonly key: string
+  readonly launch: number | undefined
 }
 
 export const nextLaunch = (children: ReadonlyArray<Pick<ScriptChild, "id">>): number =>
@@ -143,34 +119,41 @@ export const nestedRetryDecision = (call: NestedCall): "reuse" | "rerun" | "refu
   return isUnsafeEffect(callEffect(call.change)) ? "refuse" : "rerun"
 }
 
-const RERUN = /^(.*):r(\d+)$/u
-
-export const nestedRun = (
-  toolCallId: string
-): { readonly base: string; readonly attempt: number } => {
-  const match = RERUN.exec(toolCallId)
-  return match === null || match[1] === undefined || match[2] === undefined
-    ? { base: toolCallId, attempt: 1 }
-    : { base: match[1], attempt: Number(match[2]) }
-}
-
 export const nestedRerunId = (base: string, attempt: number): string => `${base}:r${attempt}`
 
-export const latestNestedRuns = <A extends { readonly toolCallId: string }>(
+export interface NestedRun {
+  readonly base: string
+  readonly attempt: number
+}
+
+export const nestedRuns = <A extends { readonly toolCallId: string }>(
+  calls: ReadonlyArray<A>,
+  attempts: number
+): ReadonlyArray<A & NestedRun> => {
+  const reruns = new Map<string, NestedRun>()
+  for (const call of calls)
+    for (let attempt = 1; attempt <= attempts; attempt += 1)
+      reruns.set(nestedRerunId(call.toolCallId, attempt), { base: call.toolCallId, attempt })
+  return calls.map((call) => ({
+    ...call,
+    ...(reruns.get(call.toolCallId) ?? { base: call.toolCallId, attempt: 1 })
+  }))
+}
+
+export const latestNestedRuns = <A extends NestedRun>(
   calls: ReadonlyArray<A>
 ): ReadonlyArray<A> => {
-  const latest = new Map<string, { readonly attempt: number; readonly call: A }>()
+  const latest = new Map<string, A>()
   for (const call of calls) {
-    const run = nestedRun(call.toolCallId)
-    const prior = latest.get(run.base)
-    if (prior === undefined || run.attempt > prior.attempt) latest.set(run.base, { ...run, call })
+    const prior = latest.get(call.base)
+    if (prior === undefined || call.attempt > prior.attempt) latest.set(call.base, call)
   }
-  return [...latest.values()].map((entry) => entry.call)
+  return [...latest.values()]
 }
 
 export const retryVerdict = (input: {
   readonly children: ReadonlyArray<ScriptChild>
-  readonly nested: ReadonlyArray<NestedCall & { readonly toolCallId: string }>
+  readonly nested: ReadonlyArray<NestedCall & NestedRun & { readonly toolCallId: string }>
 }): { readonly kind: "allow" } | { readonly kind: "refuse"; readonly effect: UnsafeEffect } => {
   const agents = agentRetryEffect(input.children)
   if (isUnsafeEffect(agents)) return { kind: "refuse", effect: agents }

@@ -68,6 +68,7 @@ import { mutationReceiptHost, type MutationOperationIdentity } from "../tools/mu
 import { sha256Hex } from "@arden-hq/std/hash"
 import { insertChatKey } from "./chat-key-message.js"
 import { chatHref } from "../../sessions/chat-href.js"
+import { assistantTextStart } from "./assistant-text-start.js"
 
 interface SpawnParentRow extends RunRow {
   readonly public_ref: string
@@ -368,7 +369,7 @@ export const makeAgentSpawner = ({
             const mintedMessageIds = yield* loadMintedMessageIds(
               sql,
               existing.session_id,
-              existing.assistant_message_id,
+              existing.turn_id,
               "spawn_agent"
             )
             return {
@@ -718,11 +719,7 @@ export const makeAgentSpawner = ({
                         runId: childRunId
                       },
                       {
-                        event: {
-                          type: "TEXT_MESSAGE_START",
-                          message_id: childAssistantMessageId,
-                          role: ROLE.assistant
-                        } satisfies ChatProjectionEvent,
+                        event: assistantTextStart(childAssistantMessageId),
                         runId: childRunId
                       }
                     ]

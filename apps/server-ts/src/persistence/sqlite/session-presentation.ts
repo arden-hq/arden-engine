@@ -8,7 +8,8 @@ import type { Row } from "effect/unstable/sql/SqlConnection"
 
 export const readableConversationSql = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`(session_type = 'chat' AND parent_session_id IS NULL AND parent_message_id IS NULL
-    AND COALESCE(substr(origin_automation_id, 1, 6), '') != 'space:')`
+    AND NOT EXISTS (SELECT 1 FROM space_job_keys AS job_key
+      WHERE job_key.automation_id = origin_automation_id AND job_key.purpose = 'space_review'))`
 
 interface PresentationRow {
   readonly conversation_space_id: string | null
@@ -32,14 +33,11 @@ export const sessionPresentations = Effect.fn("Sessions.presentation")(function*
   ids: ReadonlyArray<string>
 ) {
   if (ids.length === 0) return new Map<string, SessionPresentation>()
-  const ownerSpace = sql`COALESCE(task.owner_space_id, item.space_id,
-    CASE WHEN substr(s.origin_automation_id, 1, 6) = 'space:' THEN substr(s.origin_automation_id, 7) END)`
+  const ownerSpace = sql`COALESCE(task.owner_space_id, item.space_id, job_key.space_id)`
   const rows = yield* sql<PresentationRow>`
     SELECT conversation.space_id AS conversation_space_id, s.session_id, s.session_type, s.name, s.parent_session_id, s.parent_message_id,
       parent.name AS parent_name,
-      COALESCE(task.purpose,
-        CASE WHEN substr(s.origin_automation_id, 1, 5) = 'task:' THEN 'task_execution'
-          WHEN substr(s.origin_automation_id, 1, 6) = 'space:' THEN 'space_review' END) AS purpose,
+      COALESCE(task.purpose, job_key.purpose) AS purpose,
       task.task_id, task.name AS job_name, ${ownerSpace} AS owner_space_id,
       item.item_id AS owner_task_id, space.name AS space_name, item.text AS task_name
     FROM sessions AS s

@@ -8,13 +8,13 @@ import {
   normalizeOutputItem,
   PROVIDER_STATE_KEY,
   stringValue,
-  SYNTHETIC_OUTPUT_ID_PREFIX,
   type InputItem,
   type StoredResponseItem,
   type ToolSearchCallInputItem,
   type ToolSearchOutputInputItem
 } from "./items.js"
 import { projectFunctionParameters } from "./parameter-schema.js"
+import { OUTPUT_ID_ORIGIN, outputIdOrigin } from "./output-id.js"
 import { providerNamespace } from "./tools.js"
 
 const decodeStoredItem = (value: unknown): StoredResponseItem => {
@@ -126,7 +126,7 @@ export const responseItems = (
           )
         ]
       }
-      if (item.type === "reasoning" && item.id.startsWith(SYNTHETIC_OUTPUT_ID_PREFIX)) {
+      if (item.type === "reasoning" && outputIdOrigin(item.id) === OUTPUT_ID_ORIGIN.arden) {
         return []
       }
       if (item.type === "reasoning") {
@@ -142,7 +142,7 @@ export const responseItems = (
           }
         ]
       }
-      if (item.type !== "message" || !item.id.startsWith(SYNTHETIC_OUTPUT_ID_PREFIX)) {
+      if (item.type !== "message" || outputIdOrigin(item.id) !== OUTPUT_ID_ORIGIN.arden) {
         return [item as unknown as InputItem]
       }
       return [

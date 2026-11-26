@@ -6,7 +6,11 @@ import path from "node:path"
 import { ensurePrivateDir, isErrnoCode, PrivateFileError, syncDir } from "../../fs/private-store.js"
 import {
   MANAGED_OBJECT_HASH,
-  MANAGED_OBJECT_PREFIX,
+  MANAGED_REF_KIND,
+  managedObjectRef,
+  readManagedObjectRef
+} from "./ref.js"
+import {
   isManagedObjectSource,
   managedObjectRefParts,
   readManagedObjectDescriptor,
@@ -44,7 +48,8 @@ export interface ManagedObjectStore {
   readonly collectDigest: (digest: string) => Promise<boolean>
 }
 
-export const isManagedObjectRef = (ref: string): boolean => ref.startsWith(MANAGED_OBJECT_PREFIX)
+export const isManagedObjectRef = (ref: string): boolean =>
+  readManagedObjectRef(ref).kind !== MANAGED_REF_KIND.other
 
 const objectPath = (root: string, digest: string): string =>
   path.join(root, "objects", digest.slice(0, 2), digest)
@@ -140,7 +145,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     const digest = sha256Hex(bytes)
     const descriptor: ManagedObjectDescriptor = {
       kind: "managed_output",
-      ref: `${MANAGED_OBJECT_PREFIX}${owner}/${digest}/${input.format}`,
+      ref: managedObjectRef({ owner, digest, format: input.format }),
       sha256: digest,
       bytes: bytes.byteLength,
       format: input.format,

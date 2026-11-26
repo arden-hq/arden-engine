@@ -1,3 +1,4 @@
+import { INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import type { RunContext, RunOrigin, RunTaskBinding } from "@arden-hq/protocol/runs"
 import {
   RunContextSchema,
@@ -229,6 +230,7 @@ const causedRunBelongsTo = Effect.fn("RunContext.belongsTo")(function* (
     readonly sessionId: string
     readonly cause: RunCause | undefined
     readonly senderRef: string | undefined
+    readonly workflowRef: string | undefined
   }
 ): Effect.fn.Return<RunOrigin | undefined, WorkStoreError> {
   const causingRun = causingRunSql(sql, input)
@@ -268,7 +270,10 @@ export const withCausedBelongsTo = Effect.fn("RunContext.withCausedBelongsTo")(f
     readonly sessionId: string
     readonly causingRunId: string | undefined
     readonly sender:
-      | { readonly caused_by?: RunCause; readonly from: { readonly id: string } }
+      | {
+          readonly caused_by?: RunCause
+          readonly from: { readonly source: string; readonly id: string }
+        }
       | undefined
   }
 ): Effect.fn.Return<RunContext, WorkStoreError> {
@@ -278,7 +283,9 @@ export const withCausedBelongsTo = Effect.fn("RunContext.withCausedBelongsTo")(f
     cause:
       input.sender?.caused_by ??
       (input.causingRunId === undefined ? undefined : { type: "run", id: input.causingRunId }),
-    senderRef: input.sender?.from.id
+    senderRef: input.sender?.from.id,
+    workflowRef:
+      input.sender?.from.source === INTERACTION_SOURCE.workflow ? input.sender.from.id : undefined
   })
   return belongsTo === undefined ? context : { ...context, belongs_to: belongsTo }
 })
@@ -289,6 +296,7 @@ const causingRunSql = (
     readonly sessionId: string
     readonly cause: RunCause | undefined
     readonly senderRef: string | undefined
+    readonly workflowRef: string | undefined
   }
 ): Statement.Fragment | undefined => {
   const { cause } = input
@@ -303,10 +311,10 @@ const causingRunSql = (
         WHERE call.tool_call_id = ${cause.id} AND call.session_id IN (${input.sessionId},
           (SELECT session_id FROM sessions WHERE public_ref = ${input.senderRef ?? null}))
         ORDER BY call.started_at DESC LIMIT 1)`
-    case "workflow": {
-      const scriptRef = cause.id.slice(0, cause.id.lastIndexOf(":"))
-      return sql`(SELECT origin_run_id FROM code_mode_scripts WHERE script_ref = ${scriptRef})`
-    }
+    case "workflow":
+      return input.workflowRef === undefined
+        ? undefined
+        : sql`(SELECT origin_run_id FROM code_mode_scripts WHERE script_ref = ${input.workflowRef})`
   }
 }
 

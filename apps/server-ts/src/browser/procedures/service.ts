@@ -6,7 +6,7 @@ import {
   type ToolResult,
   type ToolResultOutput
 } from "@arden-hq/loop"
-import { BrowserProcedureStore } from "../../persistence/browser-procedures/store.js"
+import { BrowserProcedureStore, procedurePlan } from "../../persistence/browser-procedures/store.js"
 import { rejectedToolResult } from "../../persistence/tools/store.js"
 import {
   StructuredCompletion,
@@ -15,7 +15,7 @@ import {
 import { ScriptStore } from "../../persistence/scripts/store.js"
 import { ScriptRunner } from "../../workflows/script-runner.js"
 import { SessionQueries } from "../../persistence/sessions/queries.js"
-import { executeCodeMode } from "../../tools/code-mode.js"
+import { executeCodeMode, nestedContext } from "../../tools/code-mode.js"
 import type { ServerRunContext } from "../../tools/run-context.js"
 import { parseSnapshotNode } from "../../persistence/browser-procedures/snapshot-line.js"
 import { pathMatches, procedureStart } from "../../persistence/browser-procedures/start.js"
@@ -460,10 +460,10 @@ export class BrowserProcedures extends Context.Service<
               args,
               changesState: false,
               source: "_code",
-              plan: { kind: "call", toolCallId: ctx.toolCallId }
+              plan: procedurePlan(ctx.toolCallId)
             },
             async () => {
-              const value = await executeCodeMode(args, { ...ctx, toolCallId }, codeMode, {
+              const value = await executeCodeMode(args, nestedContext(ctx, toolCallId), codeMode, {
                 ...(input.lifecycle === undefined ? {} : { lifecycle: input.lifecycle })
               })
               return { content: value.result, preview: value.preview, data: value.data }

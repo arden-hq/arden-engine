@@ -12,7 +12,7 @@ import { enqueue, type QueueWriter } from "./automation-enqueue.js"
 import type { JsonColumnError } from "./json.js"
 import { attemptWakeDepth, readRunCause, taskWakeDepth } from "./run-cause.js"
 
-import { spaceJobId, spaceOfJob, taskJobId } from "../space-job-id.js"
+import { spaceJobId, taskJobId } from "../space-job-id.js"
 import { hasPendingTaskApproval, hasPendingTaskQuestion } from "./task-question-state.js"
 import { haltWork } from "./automation-halt.js"
 import { nextId } from "./deps.js"
@@ -59,6 +59,8 @@ interface JobState {
   readonly purpose: "space_review" | "task_execution"
 }
 
+type ReviewJob = { readonly key: string; readonly spaceId: string }
+
 type SpaceJobWrite<A> = Effect.Effect<
   A,
   SqlError | JsonColumnError | SessionLifecycleEventError,
@@ -78,7 +80,7 @@ export interface SpaceJobSql {
     runId: string | undefined
   ) => SpaceJobWrite<void>
   readonly queueTaskChangedByHand: (itemId: string, now: string) => SpaceJobWrite<boolean>
-  readonly retryReview: (automationId: string, now: string) => SpaceJobWrite<void>
+  readonly retryReview: (review: ReviewJob, now: string) => SpaceJobWrite<void>
   readonly queueInferenceChat: (sessionId: string, now: string) => SpaceJobWrite<boolean>
   readonly linkChat: (
     spaceId: string,
@@ -315,11 +317,9 @@ export const makeSpaceJobSql = (
   })
 
   const retryReview = Effect.fn("SpaceJobSql.retryReview")(function* (
-    automationId: string,
+    { key: automationId, spaceId }: ReviewJob,
     now: string
   ) {
-    const spaceId = spaceOfJob(automationId)
-    if (spaceId === undefined) return
     const attempts = yield* sql<{
       readonly failed: number
       readonly restart_cut: number

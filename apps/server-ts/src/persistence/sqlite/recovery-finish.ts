@@ -1,4 +1,3 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { randomUUID } from "node:crypto"
 import type { RunEnding } from "./tool-receipts.js"
@@ -24,6 +23,8 @@ import { activeRunStatusList } from "./status-sets.js"
 import { appendSessionTurn } from "./turns.js"
 import type { RunTerminal } from "./run-ending.js"
 import { releaseKeyMessageCopies } from "./chat-key-message.js"
+import { assistantTextStart } from "./assistant-text-start.js"
+import type { StreamedPart } from "../transcript/minted-ids.js"
 
 interface LatestMessageRow {
   readonly message_json: string
@@ -112,10 +113,11 @@ export const runTerminal = (outcome: RecoveredSettlement, cause: RecoveryCause):
 interface StreamedMessageRow {
   readonly event_type: string
   readonly message_id: unknown
+  readonly record_id: unknown
 }
 
 interface RunStreamedMessages {
-  readonly started: ReadonlyArray<string>
+  readonly started: ReadonlyArray<StreamedPart>
   readonly openText: ReadonlyArray<string>
 }
 
@@ -124,7 +126,8 @@ export const loadRunStreamedMessages = Effect.fn("SqlitePersistence.loadRunStrea
     const rows = yield* sql<StreamedMessageRow>`
       SELECT
         record.event_type AS event_type,
-        COALESCE(retracted.value, json_extract(record.data_json, '$.message_id')) AS message_id
+        COALESCE(retracted.value, json_extract(record.data_json, '$.message_id')) AS message_id,
+        json_extract(record.data_json, '$.record.record_id') AS record_id
       FROM ${journalRecordsSql(sql)} AS record
       LEFT JOIN json_each(record.data_json, '$.message_ids') AS retracted
       WHERE record.stream_id = ${sessionId}
@@ -137,7 +140,7 @@ export const loadRunStreamedMessages = Effect.fn("SqlitePersistence.loadRunStrea
         )
       ORDER BY record.sequence, retracted.key
     `
-    const started = new Set<string>()
+    const started = new Map<string, StreamedPart>()
     const openText = new Set<string>()
     for (const row of rows) {
       if (typeof row.message_id !== "string") continue
@@ -150,10 +153,13 @@ export const loadRunStreamedMessages = Effect.fn("SqlitePersistence.loadRunStrea
         openText.delete(row.message_id)
         continue
       }
-      started.add(row.message_id)
+      started.set(row.message_id, {
+        messageId: row.message_id,
+        recordId: typeof row.record_id === "string" ? row.record_id : undefined
+      })
       if (row.event_type === "TEXT_MESSAGE_START") openText.add(row.message_id)
     }
-    return { started: [...started], openText: [...openText] } satisfies RunStreamedMessages
+    return { started: [...started.values()], openText: [...openText] } satisfies RunStreamedMessages
   }
 )
 
@@ -242,11 +248,7 @@ export const continueFinishedRunInTransaction = Effect.fn("SqlitePersistence.con
       })
     }
     events.push({
-      event: {
-        type: "TEXT_MESSAGE_START",
-        message_id: nextAssistantMessageId,
-        role: ROLE.assistant
-      },
+      event: assistantTextStart(nextAssistantMessageId),
       runId: run.run_id
     })
     const committed = yield* chatEvents.appendInTransaction({

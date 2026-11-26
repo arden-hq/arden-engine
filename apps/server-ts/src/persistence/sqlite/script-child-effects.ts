@@ -10,6 +10,7 @@ import { callChange } from "./run-effects.js"
 import { callEffect, mergeEffectDisposition, type CallChange } from "./script-derive.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { sessionDescendants } from "./tree-walk.js"
+import { scriptAgentJoin } from "./call-lineage.js"
 
 export interface ChildObservation {
   readonly effectDisposition: WorkflowEffectDisposition
@@ -105,13 +106,12 @@ export const activeScriptChildRuns = Effect.fn("ScriptJournal.activeChildRuns")(
   sql: SqlClient.SqlClient,
   origin: { readonly originRunId: string; readonly originToolCallId: string }
 ): Effect.fn.Return<ReadonlyArray<string>, SqlError.SqlError> {
-  const prefix = `${origin.originToolCallId}:workflow:`
   const rows = yield* sql<{ readonly run_id: string }>`
     WITH RECURSIVE ${sessionDescendants(sql, {
       name: "subtree",
       from: sql`SELECT child.session_id FROM sessions AS child
-        WHERE child.parent_run_id = ${origin.originRunId}
-          AND substr(child.parent_tool_call_id, 1, ${prefix.length}) = ${prefix}`
+        ${scriptAgentJoin(sql, origin.originToolCallId)}
+        WHERE child.parent_run_id = ${origin.originRunId}`
     })}
     SELECT DISTINCT run.run_id FROM chat_runs AS run
     JOIN subtree ON subtree.session_id = run.session_id

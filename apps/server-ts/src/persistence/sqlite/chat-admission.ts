@@ -64,6 +64,7 @@ import { nextId } from "./deps.js"
 import { userChatSql } from "./chat-ownership.js"
 import { claimQueued } from "./chat-queue.js"
 import { insertChatKey } from "./chat-key-message.js"
+import { assistantTextStart } from "./assistant-text-start.js"
 
 const transcriptChanged = { type: "transcript_changed" } satisfies ChatProjectionEvent
 
@@ -734,11 +735,7 @@ export const makeChatAdmission = ({
               runId
             },
             {
-              event: {
-                type: "TEXT_MESSAGE_START",
-                message_id: valid.assistantMessageId,
-                role: ROLE.assistant
-              } satisfies ChatProjectionEvent,
+              event: assistantTextStart(valid.assistantMessageId),
               runId
             },
             ...(valid.announce === true ||

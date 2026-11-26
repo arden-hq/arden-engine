@@ -21,6 +21,7 @@ import { claimObservedRevision } from "../src/tools/browser-support.js"
 import { makeBrowserObservationRegistry } from "../src/tools/run-context.js"
 import { serverRunContext } from "./kit.js"
 import { PersistedToolResultSchema } from "../src/persistence/sqlite/tool-result-storage.js"
+import { NESTING } from "../src/persistence/tools/tool-roles.js"
 
 it("invalidates browser authority when a recovered call failed before reporting its page", async () => {
   const tab = "browser-tab-4-3afbbbf5"
@@ -60,7 +61,7 @@ it("invalidates browser authority when a recovered call failed before reporting 
   await expect(
     host.call({
       toolCallId: "script:code:failed",
-      parentToolCallId: "script",
+      parent: { toolCallId: "script", nesting: { kind: NESTING.code } },
       name: "browser_act",
       args: { tab_ref: tab },
       signal: new AbortController().signal,
@@ -140,7 +141,7 @@ it.each(["snapshot", "action-page"] as const)(
     }
     const request = {
       toolCallId: "script:code:page",
-      parentToolCallId: "script",
+      parent: { toolCallId: "script", nesting: { kind: NESTING.code } },
       name: "browser_snapshot",
       args: { tab_ref: tab },
       signal: new AbortController().signal,
@@ -196,7 +197,7 @@ it.each([
     await expect(
       host.call({
         toolCallId: "script:code:lookup",
-        parentToolCallId: "script",
+        parent: { toolCallId: "script", nesting: { kind: NESTING.code } },
         name: "lookup",
         args: {},
         signal: new AbortController().signal,
@@ -274,7 +275,7 @@ it("splits the display title off a script's call before the durable row and the 
   ])
   const result = await host.call({
     toolCallId: "script-call",
-    parentToolCallId: "script",
+    parent: { toolCallId: "script", nesting: { kind: NESTING.code } },
     name: "automation_list",
     args: { [TOOL_DISPLAY_TITLE.argument]: "Listing automations", status: "active" },
     signal: new AbortController().signal,
@@ -334,7 +335,7 @@ it("retains inference admission through a running script's later nested calls", 
     parameters: Schema.toStandardSchemaV1(Schema.Struct({})),
     execute: async (_input, ctx) => {
       const request = {
-        parentToolCallId: ctx.toolCallId,
+        parent: { toolCallId: ctx.toolCallId, nesting: { kind: NESTING.code } },
         name: "lookup",
         args: {},
         signal: ctx.signal,

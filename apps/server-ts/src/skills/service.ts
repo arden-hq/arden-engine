@@ -9,7 +9,8 @@ import type {
 import {
   SkillDescriptionSchema,
   SkillNameSchema,
-  SkillVersionSchema
+  SkillVersionSchema,
+  splitMarketplaceSkillId
 } from "@arden-hq/protocol/effect/skills"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import {
@@ -33,7 +34,9 @@ import { stringify } from "yaml"
 import {
   BUILT_IN_SKILLS,
   builtInSkillByName,
+  builtInUnchangeable,
   isBuiltInSkillName,
+  reservedName,
   type BuiltInSkill
 } from "./builtin.js"
 import { SkillError, skillError, type SkillOperation } from "./errors.js"
@@ -146,12 +149,6 @@ const builtInLoaded = (skill: BuiltInSkill): SkillLoadedContent => ({
 })
 
 const BUILT_IN_LIST: ReadonlyArray<Skill> = BUILT_IN_SKILLS.map(builtInSkill)
-
-const reservedName = (operation: SkillOperation, name: string): SkillError =>
-  skillError(operation, "invalid", `Skill name ${name} is reserved for a built-in Skill`)
-
-const builtInUnchangeable = (operation: SkillOperation, name: string): SkillError =>
-  skillError(operation, "invalid", `Skill ${name} is built in and cannot be changed`)
 
 export interface SkillCatalogPromptOptions {
   readonly omit?: ReadonlySet<string>
@@ -570,7 +567,7 @@ const make = Effect.fn("Skills.make")(function* (
         )
       ),
     installMarketplace: (id) => {
-      const name = id.slice(id.lastIndexOf("/") + 1)
+      const name = splitMarketplaceSkillId(id)?.name ?? id
       if (isBuiltInSkillName(name)) return Effect.fail(reservedName("install", name))
       if (primary === null) return Effect.fail(storageUnavailable("install"))
       return requireDirectory(primary, "install").pipe(

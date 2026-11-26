@@ -41,7 +41,7 @@ const learningTables = Effect.fn(function* (sql: SqlClient.SqlClient, runId: str
   )
   yield* sql`INSERT INTO chat_runs VALUES (${runId},'chat','completed','2026-10-28T00:01:00.000Z','2026-10-28T00:02:00.000Z')`
   yield* sql.unsafe(
-    "CREATE TABLE tool_calls(run_id TEXT,tool_call_id TEXT,tool_name TEXT,arguments_json TEXT,result_json TEXT,changes_state INTEGER,status TEXT,started_at TEXT,effect TEXT)"
+    "CREATE TABLE tool_calls(run_id TEXT,tool_call_id TEXT,tool_name TEXT,arguments_json TEXT,result_json TEXT,changes_state INTEGER,status TEXT,started_at TEXT,effect TEXT,parent_tool_call_id TEXT)"
   )
   yield* sql.unsafe(
     "CREATE TABLE automation_runs(chat_run_id TEXT,item_id TEXT,task_id TEXT,purpose TEXT)"
@@ -75,7 +75,7 @@ const withLearnedRun = <A>(
       const sql = yield* SqlClient.SqlClient
       const writer = makeWriter({ sql, reader: sql, queue: yield* PersistenceWriteQueue })
       yield* learningTables(sql, "read")
-      yield* sql`INSERT INTO tool_calls VALUES ('read','inspect','browser_snapshot','{"tab_ref":"tab-1"}',${safe},0,'completed','2026-10-28T00:01:01.000Z','none')`
+      yield* sql`INSERT INTO tool_calls VALUES ('read','inspect','browser_snapshot','{"tab_ref":"tab-1"}',${safe},0,'completed','2026-10-28T00:01:01.000Z','none',NULL)`
       yield* sql`INSERT INTO browser_procedure_candidates VALUES ('read')`
       const store = makeBrowserProcedureStore({ writer })
       yield* store.enqueue()
@@ -113,7 +113,7 @@ it("admits safe read-only evidence scoped to its origin and profile", async () =
 it("drops a refused action from the evidence and keeps the safe step", async () => {
   const calls = await withLearnedRun(({ sql, store }) =>
     Effect.gen(function* () {
-      yield* sql`INSERT INTO tool_calls VALUES ('read','refused','browser_act','{"value":"never-captured"}','{"is_error":true,"host":{"mutation_receipt":{"outcome":"no_op"}}}',1,'completed','2026-10-28T00:01:00.000Z','external')`
+      yield* sql`INSERT INTO tool_calls VALUES ('read','refused','browser_act','{"value":"never-captured"}','{"is_error":true,"host":{"mutation_receipt":{"outcome":"no_op"}}}',1,'completed','2026-10-28T00:01:00.000Z','external',NULL)`
       return (yield* store.evidence("read"))?.calls.map((call) => call.id)
     })
   )
@@ -155,7 +155,7 @@ it.each([
 it("rejects the entire trace when a step carries a secret", async () => {
   const evidence = await withLearnedRun(({ sql, store }) =>
     Effect.gen(function* () {
-      yield* sql`INSERT INTO tool_calls VALUES ('read','secret','browser_act','{"tab_ref":"tab-1","secret":"login"}',${safe},1,'completed','2026-10-28T00:01:02.000Z','external')`
+      yield* sql`INSERT INTO tool_calls VALUES ('read','secret','browser_act','{"tab_ref":"tab-1","secret":"login"}',${safe},1,'completed','2026-10-28T00:01:02.000Z','external',NULL)`
       return yield* store.evidence("read")
     })
   )
@@ -279,7 +279,7 @@ it("never sends or saves a typed value, a form field value or page body text whi
       yield* Effect.forEach(
         calls,
         ([id, tool, args, output], index) =>
-          sql`INSERT INTO tool_calls VALUES ('apply',${id},${tool},${args},${output},${tool === "browser_act" ? 1 : 0},'completed',${`2026-10-28T00:01:${String(10 + index)}.000Z`},'none')`,
+          sql`INSERT INTO tool_calls VALUES ('apply',${id},${tool},${args},${output},${tool === "browser_act" ? 1 : 0},'completed',${`2026-10-28T00:01:${String(10 + index)}.000Z`},'none',NULL)`,
         { discard: true }
       )
       const seen: Array<string> = []

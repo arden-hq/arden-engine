@@ -416,8 +416,8 @@ const EXPLICIT_CACHE: {
   ])
 }
 
-const explicitCache = (id: string): boolean =>
-  EXPLICIT_CACHE.ids.has(id) || EXPLICIT_CACHE.prefixes.some((prefix) => id.startsWith(prefix))
+const explicitCache = (name: string): boolean =>
+  EXPLICIT_CACHE.ids.has(name) || EXPLICIT_CACHE.prefixes.some((prefix) => name.startsWith(prefix))
 
 /**
  * Where llama-server serves `/props`: beside `/v1`, so `baseUrl` without its

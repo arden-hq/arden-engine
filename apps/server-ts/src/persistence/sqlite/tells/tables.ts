@@ -110,6 +110,8 @@ export const tableTells = {
   session_queued_messages: { silent: transcript },
   tool_calls: { silent: run },
   tool_call_targets: { silent: run },
+  script_agent_calls: { silent: run },
+  space_job_keys: { silent: internal },
   tool_approvals: {
     tell: "run_card",
     id: "json_array({row}.run_id, {row}.tool_call_id)",

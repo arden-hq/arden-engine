@@ -250,7 +250,7 @@
   "apps/server-ts/src/persistence/events/model.ts": 7,
   "apps/server-ts/src/persistence/focus-choices/thread-location.ts": 15,
   "apps/server-ts/src/persistence/job-classification.ts": 3,
-  "apps/server-ts/src/persistence/managed-output/descriptor.ts": 7,
+  "apps/server-ts/src/persistence/managed-output/descriptor.ts": 5,
   "apps/server-ts/src/persistence/mcp/store.ts": 1,
   "apps/server-ts/src/persistence/migrations/0010_chat_handoffs.ts": 3,
   "apps/server-ts/src/persistence/migrations/0011_sent_chat_doors.ts": 1,

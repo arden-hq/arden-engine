@@ -128,6 +128,7 @@ export {
 export type {
   ApprovalPresentation,
   ApprovalPresentationBody,
+  ApprovalPresentationEditable,
   ApprovalPresentationField
 } from "./approval-presentation.js"
 export type { CapabilityCandidate, CapabilityProposal } from "./capability-proposal.js"
@@ -271,4 +272,9 @@ export const chatRoutes = {
   }
 } as const
 
-export { APPROVAL_FIELD_LABEL, canDenyApprovalByReply } from "./approval-presentation.js"
+export {
+  APPROVAL_FIELD_LABEL,
+  canDenyApprovalByReply,
+  EDITABLE_KIND
+} from "./approval-presentation.js"
+export { STREAM_RECORD, type StreamRecord } from "./events/text.js"

@@ -2,7 +2,7 @@ import type { RunApprovalWork } from "@arden-hq/protocol/runs"
 import { storedRulePlaces, workOf } from "./run-approvals.js"
 import { refreshChangeEvidence, withNestedCallFacts, withScriptState } from "./change-evidence.js"
 import { disposableForkSql } from "../schema/fork-disposition.js"
-import { CODE_MODE_TOOL, SPAWN_AGENT_TOOL, nestedCallMarker } from "../tools/tool-roles.js"
+import { CODE_MODE_TOOL, SPAWN_AGENT_TOOL, nestedCallNesting } from "../tools/tool-roles.js"
 import { sanitizeApprovalPresentation, type RuntimeApprovalSnapshot } from "@arden-hq/protocol/chat"
 import { Effect, Option, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -189,13 +189,13 @@ export const makeToolHistory = ({
             { content: "", preview: "", ...result }
           ).pipe(
             Effect.flatMap((refreshed) => {
-              const marker = nestedCallMarker(row.tool_name)
-              if (marker === undefined) return Effect.succeed(refreshed)
+              const nesting = nestedCallNesting(row.tool_name)
+              if (nesting === undefined) return Effect.succeed(refreshed)
               return withNestedCallFacts(
                 historySql,
                 { runId: row.run_id, toolCallId: row.tool_call_id },
                 refreshed.data ?? {},
-                marker
+                nesting
               ).pipe(
                 Effect.flatMap((data) =>
                   row.tool_name === CODE_MODE_TOOL

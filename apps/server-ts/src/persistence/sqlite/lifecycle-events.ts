@@ -54,7 +54,7 @@ import {
 } from "../sessions/internal-events.js"
 import { sessionBlockingWorkPredicate } from "./session-blocking-work.js"
 import { latestSessionRunQuery } from "./session-latest-run.js"
-import { sessionOriginQuery } from "./session-origin.js"
+import { sessionOriginColumns, sessionParentFields, type ParentStepRow } from "./session-origin.js"
 import { sessionPresentations } from "./session-presentation.js"
 import { pendingDecisionCards } from "./pending-decision-cards.js"
 import { decodeJsonWith } from "./json.js"
@@ -66,7 +66,7 @@ import { toldKey, UnitOfWork } from "../unit-of-work.js"
 import { touchedThrough } from "./tells/capture.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
 
-interface SessionListRow {
+interface SessionListRow extends ParentStepRow {
   readonly session_id: string
   readonly public_ref: string
   readonly started_at: string
@@ -80,7 +80,6 @@ interface SessionListRow {
   readonly origin_automation_id: string | null
   readonly parent_session_id: string | null
   readonly parent_run_id: string | null
-  readonly parent_tool_call_id: string | null
   readonly parent_message_id: string | null
   readonly has_unread: number
   readonly latest_event_seq: number
@@ -128,7 +127,7 @@ const loadSessionSnapshot = Effect.fn("SessionLifecycleEvents.loadSessionSnapsho
            (SELECT source.public_ref FROM sessions AS source
              WHERE source.session_id = json_extract(s.metadata, '$.thread.source_session_id')
            ) AS thread_source_ref,
-           ${sql.literal(sessionOriginQuery)} AS origin,
+           ${sql.literal(sessionOriginColumns)},
            COALESCE(${journalHeadSequenceSql(sql, sql.literal("s.session_id"))}, 0) AS latest_event_seq,
            COALESCE((
              SELECT checkpoint_seq FROM session_event_checkpoints
@@ -204,7 +203,7 @@ const loadSessionSnapshot = Effect.fn("SessionLifecycleEvents.loadSessionSnapsho
     origin_automation_id: row.origin_automation_id,
     parent_session_id: row.parent_session_id,
     parent_run_id: row.parent_run_id,
-    parent_tool_call_id: row.parent_tool_call_id,
+    ...sessionParentFields(row),
     parent_message_id: row.parent_message_id,
     active_run_id: isActive ? row.run_id : null,
     latest_run_id: row.run_id,

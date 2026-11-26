@@ -14,17 +14,18 @@ describe("minted message ids", () => {
 
   it("names as stale only the run's blocks whose record the transcript lacks", () => {
     const held = new Set(["a", "a-turn-1"])
+    const part = (messageId: string, recordId: string | undefined) => ({ messageId, recordId })
     expect(
-      staleStreamedIds("a", held, [
-        "a",
-        "a-reasoning",
-        "a-text-2",
-        "a-turn-1-reasoning-2",
-        "a-turn-2",
-        "a-turn-2-item-1",
-        "a-turn-2-item-1",
-        "a-turn-2-reasoning",
-        "b-reasoning"
+      staleStreamedIds(held, [
+        part("a", "a"),
+        part("a-reasoning", "a"),
+        part("a-text-2", "a"),
+        part("a-turn-1-reasoning-2", "a-turn-1"),
+        part("a-turn-2", "a-turn-2"),
+        part("a-turn-2-item-1", "a-turn-2-item-1"),
+        part("a-turn-2-item-1", "a-turn-2-item-1"),
+        part("a-turn-2-reasoning", "a-turn-2"),
+        part("b-reasoning", undefined)
       ])
     ).toEqual(["a-turn-2", "a-turn-2-item-1", "a-turn-2-reasoning"])
   })

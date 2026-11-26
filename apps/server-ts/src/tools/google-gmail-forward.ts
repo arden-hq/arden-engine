@@ -31,6 +31,7 @@ import { gmailSend } from "./google-gmail-request.js"
 import { localMessageId, recipientPresentationFields } from "./google-gmail-send.js"
 import { toolRefusal } from "./tool-failure.js"
 import { safeAttachmentName } from "./shared-file-sources.js"
+import { EDITABLE_KIND } from "@arden-hq/protocol/chat"
 
 const MAX_RECIPIENTS = 50
 const MAX_FORWARD_BYTES = MAX_EMAIL_ATTACHMENT_BYTES
@@ -216,7 +217,11 @@ export const gmailForwardTool = ({
           ],
           attachments: attachments.attachments,
           body: { label: "Message", text: input.note?.trim() ? input.note : EMPTY_NOTE },
-          editable: { fields: ["note", "omit_attachments"], arguments: jsonArguments(input) }
+          editable: {
+            kind: EDITABLE_KIND.arguments,
+            fields: ["note", "omit_attachments"],
+            arguments: jsonArguments(input)
+          }
         },
         data: { forward_original: original, forward_refs: refs, ...attachments.data }
       }

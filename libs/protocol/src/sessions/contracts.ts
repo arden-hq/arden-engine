@@ -380,8 +380,15 @@ export interface SessionThreadSource extends JsonRecord {
   readonly session_ref: string | null
 }
 
+export const SESSION_PARENT_STEP = { none: "none", step: "step" } as const
+
+export type SessionParentStep =
+  | { readonly kind: typeof SESSION_PARENT_STEP.none }
+  | { readonly kind: typeof SESSION_PARENT_STEP.step; readonly tool_call_id: string }
+
 export interface SessionListItem extends JsonRecord {
   readonly current_activity?: import("../chat/activity.js").RunActivity | null
+  readonly parent_step: SessionParentStep
   /** Initial working directory recorded for a code agent; absent for other chats. */
   readonly agent_workspace?: string | null
   readonly latest_run_id?: string | null

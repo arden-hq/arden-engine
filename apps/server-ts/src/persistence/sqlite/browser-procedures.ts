@@ -27,6 +27,7 @@ import {
 } from "./status-sets.js"
 import { fullResultJson } from "./tool-result-storage.js"
 import { makeBrowserProcedureJobs } from "./browser-procedure-jobs.js"
+import { descendantCalls, descendantCallsOfColumns } from "./detached-workflow-calls.js"
 
 const failure = (cause: unknown) =>
   new BrowserProcedureStoreError({ message: "Could not update browser procedures", cause })
@@ -44,7 +45,7 @@ const loadRejection = Effect.fn("BrowserProcedures.rejection")(function* (
   const rows = yield* sql<{ readonly result_json: string }>`
     SELECT t.result_json FROM tool_calls t
     JOIN tool_approvals a ON a.run_id=t.run_id AND a.tool_call_id=t.tool_call_id
-    WHERE t.run_id=${runId} AND substr(t.tool_call_id,1,length(${toolCallId})+1)=${toolCallId} || ':'
+    WHERE t.run_id=${runId} AND t.tool_call_id IN ${descendantCalls(sql, runId, toolCallId)}
       AND a.kind='tool_approval' AND a.status='rejected' AND t.result_json IS NOT NULL`
   for (const row of rows) {
     const parsed = Schema.decodeUnknownOption(rejectedResult)(row.result_json)
@@ -119,7 +120,7 @@ const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_procedure_j
       OR EXISTS (SELECT 1 FROM tool_calls extra WHERE extra.run_id=r.run_id
         AND extra.tool_name IN ('browser_open','browser_snapshot','browser_act','browser_wait')
         AND (extra.tool_name='browser_act' OR extra.started_at>(SELECT MIN(used.created_at) FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded'))
-        AND NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded' AND substr(extra.tool_call_id,1,length(used.tool_call_id)+1)=used.tool_call_id || ':')))
+        AND NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded' AND extra.tool_call_id IN ${descendantCallsOfColumns("used.run_id", "used.tool_call_id")})))
   ORDER BY r.ended_at DESC`
 
 /** Drops every judged run from the list: a settled run has its job by now or
@@ -142,7 +143,7 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
   ) {
     const rows = yield* reader<{ readonly changed: number }>`SELECT EXISTS (
       SELECT 1 FROM tool_calls AS call WHERE call.run_id=${runId}
-        AND substr(call.tool_call_id,1,length(${toolCallId})+1)=${toolCallId} || ':'
+        AND call.tool_call_id IN ${descendantCalls(reader, runId, toolCallId)}
         AND ${callChange(reader)} != 'none'
     ) changed`
     return rows[0]?.changed === 1
@@ -150,7 +151,7 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
   const acted = Effect.fn("BrowserProcedures.acted")(function* (runId: string, toolCallId: string) {
     const rows = yield* reader<{ readonly acted: number }>`SELECT EXISTS (
       SELECT 1 FROM tool_calls AS call WHERE call.run_id=${runId}
-        AND substr(call.tool_call_id,1,length(${toolCallId})+1)=${toolCallId} || ':'
+        AND call.tool_call_id IN ${descendantCalls(reader, runId, toolCallId)}
         AND call.tool_name='browser_act'
     ) acted`
     return rows[0]?.acted === 1
@@ -418,8 +419,8 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
       readonly replay: number
       readonly policy_json: string
       readonly tool_call_id: string
-    }>`SELECT p.origin,p.profile_ref,i.tab_ref,i.read_only,i.policy_json,i.tool_call_id,(SELECT COUNT(*) FROM tool_calls t WHERE t.run_id=i.run_id AND substr(t.tool_call_id,1,length(i.tool_call_id)+1)=i.tool_call_id || ':' AND t.tool_call_id<>${callId} AND t.tool_name IN ('browser_snapshot','browser_act','browser_wait','browser_open')) calls,EXISTS(SELECT 1 FROM tool_calls completed WHERE completed.run_id=i.run_id AND completed.tool_call_id=${callId} AND completed.status='completed') replay FROM browser_procedure_invocations i JOIN browser_procedures p ON p.id=i.procedure_id
-      WHERE i.run_id=${runId} AND (${callId}=i.tool_call_id OR substr(${callId},1,length(i.tool_call_id)+1)=i.tool_call_id || ':') ORDER BY length(i.tool_call_id) DESC LIMIT 1`
+    }>`SELECT p.origin,p.profile_ref,i.tab_ref,i.read_only,i.policy_json,i.tool_call_id,(SELECT COUNT(*) FROM tool_calls t WHERE t.run_id=i.run_id AND t.tool_call_id IN ${descendantCalls(reader, reader`i.run_id`, reader`i.tool_call_id`)} AND t.tool_call_id<>${callId} AND t.tool_name IN ('browser_snapshot','browser_act','browser_wait','browser_open')) calls,EXISTS(SELECT 1 FROM tool_calls completed WHERE completed.run_id=i.run_id AND completed.tool_call_id=${callId} AND completed.status='completed') replay FROM browser_procedure_invocations i JOIN browser_procedures p ON p.id=i.procedure_id
+      WHERE i.run_id=${runId} AND (${callId}=i.tool_call_id OR ${callId} IN ${descendantCalls(reader, reader`i.run_id`, reader`i.tool_call_id`)}) ORDER BY length(i.tool_call_id) DESC LIMIT 1`
     const row = rows[0]
     return row === undefined
       ? undefined
@@ -452,7 +453,7 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
   const readOnly = (runId: string, callId: string) =>
     writer
       .run(
-        sql`UPDATE browser_procedure_invocations SET read_only=1 WHERE run_id=${runId} AND (${callId}=tool_call_id OR substr(${callId},1,length(tool_call_id)+1)=tool_call_id || ':')`
+        sql`UPDATE browser_procedure_invocations SET read_only=1 WHERE run_id=${runId} AND (${callId}=tool_call_id OR ${callId} IN ${descendantCalls(sql, sql`browser_procedure_invocations.run_id`, sql`browser_procedure_invocations.tool_call_id`)})`
       )
       .pipe(Effect.asVoid)
   return BrowserProcedureStore.of({

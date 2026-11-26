@@ -293,8 +293,8 @@ const judged = (model: DiscoveredModel, taken: TakenModels): Judged => {
   }
 }
 
-const isTaken = (id: string, taken: TakenModels): boolean =>
-  id.startsWith(CODEX_MODEL_PREFIX) || taken.has(id)
+const isTaken = (modelName: string, taken: TakenModels): boolean =>
+  modelName.startsWith(CODEX_MODEL_PREFIX) || taken.has(modelName)
 
 /** The Check's `model_taken` for the first of `ids` that is taken. */
 export const takenFailure = (

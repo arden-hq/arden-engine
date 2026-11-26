@@ -558,7 +558,7 @@ export const makeAutomationJobs = ({
               token: `${automationRunId}|${runSnapshot.claim_count}`,
               attempt: candidate.attempt_count + 1,
               payload: {
-                automationId: owner.key,
+                ...work.jobOwner,
                 purpose: bound?.purpose ?? work.job.purpose,
                 name: work.name,
                 automationRunId,
@@ -726,7 +726,7 @@ export const makeAutomationJobs = ({
             token: input.token,
             attempt: row.attempt_count,
             payload: {
-              automationId: owner.key,
+              ...work.jobOwner,
               purpose: bound.purpose,
               name: work.name,
               automationRunId: parsed.runId,

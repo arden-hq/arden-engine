@@ -2,8 +2,6 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { SemanticResponseError } from "../kit/index.js"
 import { isRecord } from "@arden-hq/std/json"
 
-export const SYNTHETIC_OUTPUT_ID_PREFIX = "arden-synthetic-output-"
-
 type ItemStatus = "in_progress" | "completed" | "incomplete"
 type MessagePhase = "commentary" | "final_answer"
 

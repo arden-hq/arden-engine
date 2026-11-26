@@ -1,3 +1,4 @@
+import type { CallParent } from "../tools/tool-roles.js"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { canonicalJson } from "@arden-hq/std/json"
@@ -37,7 +38,7 @@ export const taskDirectionReceipt = (direction: TaskDirection): TaskDirectionRec
 
 export type ToolCallPlan =
   | { readonly kind: "turn"; readonly shown: TaskDirectionReceipt | undefined }
-  | { readonly kind: "call"; readonly toolCallId: string }
+  | ({ readonly kind: "call" } & CallParent)
 
 export const sameDirection = (a: TaskDirectionReceipt, b: TaskDirectionReceipt): boolean =>
   a.item_id === b.item_id && a.digest === b.digest

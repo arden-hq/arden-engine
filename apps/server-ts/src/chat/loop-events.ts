@@ -1,8 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { AgentEvent, StopReason } from "@arden-hq/loop"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import { chatDecoders, isEphemeralChatEvent } from "@arden-hq/protocol/chat"
-import { isRunMinted } from "../persistence/transcript/minted-ids.js"
+import { chatDecoders, isEphemeralChatEvent, STREAM_RECORD } from "@arden-hq/protocol/chat"
 
 export type ChatEventBatch = ReadonlyArray<ChatProjectionEvent>
 
@@ -49,7 +48,7 @@ interface HistoryRecord {
 
 export const answerFixInHistory = (
   messages: ReadonlyArray<HistoryRecord>,
-  assistantMessageId: string
+  runRecords: ReadonlySet<string>
 ): ReadonlyArray<string> =>
   messages.flatMap((message) => {
     const rejected = message.rejected_message_ids
@@ -58,9 +57,7 @@ export const answerFixInHistory = (
       typeof message.message_id !== "string" ||
       !Array.isArray(rejected) ||
       rejected.length === 0 ||
-      !rejected.every(
-        (id): id is string => typeof id === "string" && isRunMinted(assistantMessageId, id)
-      )
+      !rejected.every((id): id is string => typeof id === "string" && runRecords.has(id))
     )
       return []
     return [...rejected, message.message_id]
@@ -145,12 +142,13 @@ export const makeLoopEventMapper = (
   const supersededIds: Array<string> = [...priorSuperseded]
 
   const textId = (messageId: string | null): string => messageId ?? assistantMessageId
-  const textStart = (messageId: string): ChatProjectionEvent | null => {
+  const textStart = (messageId: string, recordId = messageId): ChatProjectionEvent | null => {
     if (startedTextIds.has(messageId)) return null
     startedTextIds.add(messageId)
     return {
       type: "TEXT_MESSAGE_START",
       message_id: messageId,
+      record: { kind: STREAM_RECORD.part, record_id: recordId },
       role: ROLE.assistant
     }
   }
@@ -173,7 +171,7 @@ export const makeLoopEventMapper = (
   const map = (event: AgentEvent): ReadonlyArray<ChatEventBatch> => {
     switch (event._tag) {
       case "TextStarted": {
-        const start = textStart(textId(event.message_id))
+        const start = textStart(textId(event.message_id), event.record_id)
         return start === null ? [] : [[start]]
       }
       case "TextEnded": {
@@ -210,6 +208,7 @@ export const makeLoopEventMapper = (
             {
               type: "REASONING_MESSAGE_START",
               message_id: event.message_id,
+              record: { kind: STREAM_RECORD.part, record_id: event.record_id },
               role: "reasoning"
             }
           ]

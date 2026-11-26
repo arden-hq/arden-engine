@@ -22,20 +22,18 @@ export const mintedMessageId = (
   return position.index === 0 ? record : `${record}-text-${position.index + 1}`
 }
 
-export const isRunMinted = (assistantMessageId: string, messageId: string): boolean =>
-  messageId === assistantMessageId || messageId.startsWith(`${assistantMessageId}-`)
-
-const streamedRecordId = (messageId: string): string =>
-  messageId.replace(/-(?:reasoning(?:-\d+)?|text-\d+)$/, "")
+export interface StreamedPart {
+  readonly messageId: string
+  readonly recordId: string | undefined
+}
 
 export const staleStreamedIds = (
-  assistantMessageId: string,
   heldMessageIds: ReadonlySet<string>,
-  streamedIds: ReadonlyArray<string>
+  streamed: ReadonlyArray<StreamedPart>
 ): ReadonlyArray<string> => [
   ...new Set(
-    streamedIds.filter(
-      (id) => isRunMinted(assistantMessageId, id) && !heldMessageIds.has(streamedRecordId(id))
+    streamed.flatMap((part) =>
+      part.recordId === undefined || heldMessageIds.has(part.recordId) ? [] : [part.messageId]
     )
   )
 ]

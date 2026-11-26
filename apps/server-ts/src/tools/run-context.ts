@@ -113,6 +113,7 @@ export interface BrowserObservationRegistry {
   readonly forget: (tabRef: string, toolCallId: string) => void
   readonly lease: (tabRef: string, holderToolCallId: string) => (() => void) | undefined
   readonly mayUse: (tabRef: string, toolCallId: string | undefined) => boolean
+  readonly nest: (toolCallId: string, parentToolCallId: string) => void
   readonly carryOver: (
     tabRef: string,
     snapshotRef: string,
@@ -164,12 +165,12 @@ export const makeBrowserObservationRegistry = ({
   const views = new Map<string, BrowserPageView>()
   const leases = new Map<string, string>()
   const openedTabs = new Map<string, true>()
+  const parents = new Map<string, string>()
+  const descends = (toolCallId: string | undefined, holder: string): boolean =>
+    toolCallId !== undefined && (toolCallId === holder || descends(parents.get(toolCallId), holder))
   const mayUse = (tabRef: string, toolCallId: string | undefined): boolean => {
     const holder = leases.get(tabRef)
-    return (
-      holder === undefined ||
-      (toolCallId !== undefined && (toolCallId === holder || toolCallId.startsWith(`${holder}:`)))
-    )
+    return holder === undefined || descends(toolCallId, holder)
   }
   const bounded = <V>(map: Map<string, V>, tabRef: string, value: V): void => {
     map.delete(tabRef)
@@ -246,6 +247,9 @@ export const makeBrowserObservationRegistry = ({
       }
     },
     mayUse,
+    nest: (toolCallId, parentToolCallId) => {
+      parents.set(toolCallId, parentToolCallId)
+    },
     carryOver: (tabRef, snapshotRef, nodeRef) => {
       const before = spent.get(tabRef)
       const latest = snapshots.get(tabRef)

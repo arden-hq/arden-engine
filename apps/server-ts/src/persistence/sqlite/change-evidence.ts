@@ -1,5 +1,6 @@
 import type { ToolResult } from "@arden-hq/loop"
-import { CODE_MODE_TOOL, NESTED_CALL_MARKERS } from "../tools/tool-roles.js"
+import { NESTING, type NestingKind } from "../tools/tool-roles.js"
+import { descendantCalls } from "./detached-workflow-calls.js"
 import { Effect, Option, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { projectChangeEvidence, stripChangeEvidence } from "../tools/change-evidence.js"
@@ -41,9 +42,9 @@ export const withNestedCallFacts = Effect.fn("ChangeEvidence.nestedCalls")(funct
   sql: SqlClient.SqlClient,
   script: MutationOperationIdentity,
   data: Data,
-  marker: string = NESTED_CALL_MARKERS[CODE_MODE_TOOL]
+  nesting: NestingKind = NESTING.code
 ) {
-  return withCallFacts(yield* readNestedCallFacts(sql, script, marker), data)
+  return withCallFacts(yield* readNestedCallFacts(sql, script, nesting), data)
 })
 
 export const withCallFacts = <Data extends Readonly<Record<string, unknown>>>(
@@ -81,9 +82,8 @@ const decodeObject = Schema.decodeUnknownOption(Schema.fromJsonString(JsonObject
 export const readNestedCallFacts = Effect.fn("ChangeEvidence.readNestedCallFacts")(function* (
   sql: SqlClient.SqlClient,
   script: MutationOperationIdentity,
-  marker: string = NESTED_CALL_MARKERS[CODE_MODE_TOOL]
+  nesting: NestingKind = NESTING.code
 ) {
-  const prefix = `${script.toolCallId}${marker}`
   const rows = yield* sql<{
     readonly tool_call_id: string
     readonly tool_name: string
@@ -101,7 +101,7 @@ export const readNestedCallFacts = Effect.fn("ChangeEvidence.readNestedCallFacts
         THEN json_extract(result_json, '$.data.applied_change') END AS applied_change
     FROM tool_calls
     WHERE run_id = ${script.runId}
-      AND tool_call_id > ${prefix} AND tool_call_id < ${`${prefix.slice(0, -1)};`}
+      AND tool_call_id IN ${descendantCalls(sql, script.runId, script.toolCallId, nesting)}
       AND status IN ${resultToolStatusList}
       AND result_json IS NOT NULL
       -- A row whose result will not parse names nothing; the rest still count.
