@@ -5,6 +5,9 @@ import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { TaskProposalStore } from "../persistence/proposals/store.js"
 import { PROMPTS } from "../prompts/catalog.js"
 import { clean, loadOfferSpaces, renderOfferSpaces } from "./candidates.js"
+import type { SpaceStoreError } from "../persistence/spaces/store.js"
+import type { TaskProposalStoreError } from "../persistence/proposals/store.js"
+import type { StructuredCompletionError } from "../models/structured-completion.js"
 
 const OutcomeAnswerSchema = Schema.Struct({
   offers: Schema.Array(
@@ -29,7 +32,19 @@ export interface ChatOutcomeDependencies {
   readonly completion: StructuredCompletion["Service"]
 }
 
-export const makeChatOutcomeLinker = (dependencies: ChatOutcomeDependencies) =>
+export const makeChatOutcomeLinker = (
+  dependencies: ChatOutcomeDependencies
+): ((chat: {
+  readonly sessionId: string
+  readonly spaceId: string | null
+  readonly title: string
+  readonly summary: string
+  readonly throughSequence: number
+}) => Effect.Effect<
+  void,
+  SpaceStoreError | TaskProposalStoreError | StructuredCompletionError,
+  never
+>) =>
   Effect.fn("ChatOutcomeRouter.link")(function* (chat: {
     readonly sessionId: string
     readonly spaceId: string | null

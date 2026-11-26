@@ -9,14 +9,18 @@ import type { AutomationRules, AutomationTriggerEvent } from "../automations/mod
 import { runOnlyIfSentences } from "../automations/event-words.js"
 import type { EventBatch } from "../automations/event-batch.js"
 import type { QueueContext } from "./automation-queue-context.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export const listensForEvents = (sql: SqlClient.SqlClient, table: Statement.Fragment) =>
-  sql`(${table}.enabled = 1 OR ${table}.paused_at IS NOT NULL)`
+export const listensForEvents = (
+  sql: SqlClient.SqlClient,
+  table: Statement.Fragment
+): Statement.Statement<Row> => sql`(${table}.enabled = 1 OR ${table}.paused_at IS NOT NULL)`
 
 export const queuedEventType = (
   sql: SqlClient.SqlClient,
   context: Statement.Fragment = sql`context`
-) => sql`json_extract(${context}, '$.trigger_context_snapshot.event_type')`
+): Statement.Statement<Row> =>
+  sql`json_extract(${context}, '$.trigger_context_snapshot.event_type')`
 
 export const eventBatchOf = (
   context: QueueContext,
@@ -49,7 +53,7 @@ export const matchEvent = (
   rules: AutomationRules["Service"],
   triggers: ReadonlyArray<AutomationTrigger>,
   event: AutomationTriggerEvent
-) => {
+): { matched: EventAutomationTrigger[]; runOnlyIf: readonly [string, ...string[]] | undefined } => {
   const matched = triggers.filter(
     (trigger): trigger is EventAutomationTrigger =>
       trigger.type === "event" && rules.eventMatches(trigger, event)

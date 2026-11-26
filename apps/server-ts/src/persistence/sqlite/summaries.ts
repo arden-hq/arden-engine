@@ -23,7 +23,9 @@ const failure =
   (cause: unknown): SummaryStoreError =>
     new SummaryStoreError({ operation, reason: "storage", message, cause })
 
-export const makeSummaryStore = ({ writer }: Pick<PersistenceDeps, "writer">) => {
+export const makeSummaryStore = ({
+  writer
+}: Pick<PersistenceDeps, "writer">): SummaryStore["Service"] => {
   const sql = writer.sql
   const chatSummary = Effect.fn("SqliteSummaryStore.chatRow")(function* (row: ChatSummaryRow) {
     return {

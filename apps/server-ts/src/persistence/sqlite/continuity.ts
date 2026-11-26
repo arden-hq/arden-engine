@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import type { CommunicationEnvelope } from "@arden-hq/protocol/chat"
 import { Clock, DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -7,7 +8,7 @@ import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { CommunicationStore, CommunicationStoreError } from "../continuity/store.js"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import { communicationError } from "./continuity-route.js"
-import { writeCommunicationEnvelopeInTransaction } from "./chat-transcript.js"
+import { writeCommunicationEnvelopeInTransaction } from "./chat-communication-write.js"
 import type { PersistenceDeps } from "./deps.js"
 import { nextOutboxAttemptAt } from "../../runtime/outbox.js"
 import { type CommunicationDeliveryPayload } from "./continuity-payload.js"
@@ -24,7 +25,7 @@ interface SeenRow {
 }
 
 const decodePayload = (value: string): CommunicationDeliveryPayload => {
-  const parsed: unknown = JSON.parse(value)
+  const parsed: unknown = parseJsonText(value)
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error("Communication delivery payload is not an object")
   }

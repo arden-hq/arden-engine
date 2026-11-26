@@ -148,4 +148,19 @@ describe("a trigger list written over the stored one", () => {
       ]
     })
   })
+
+  it("gives a new trigger an id no stored trigger holds", () => {
+    const stored = {
+      lastId: 0,
+      triggers: [{ id: "t1", type: "time", every: "1h" }] satisfies ReadonlyArray<AutomationTrigger>
+    }
+    const merged = mergeTriggerInputs(stored, [
+      { id: "t1", type: "time", every: "1h" },
+      { type: "time", every: "2h" }
+    ])
+    expect(merged.kind === "ok" ? merged.triggers.map((trigger) => trigger.id) : []).toEqual([
+      "t1",
+      "t2"
+    ])
+  })
 })

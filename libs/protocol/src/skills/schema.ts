@@ -9,6 +9,7 @@ import type {
   SkillToggleReceipt
 } from "./contracts.js"
 import { NonNegativeIntSchema } from "../common/schema.js"
+import { splitMarketplaceSkillId, type MarketplaceSkillAddress } from "./marketplace-id.js"
 
 const strict = { onExcessProperty: "error" } as const
 const skillsCollectionPath = "/skills"
@@ -47,15 +48,18 @@ export const MarketplaceSkillIdSchema = Schema.String.check(
   Schema.isMinLength(5),
   Schema.isMaxLength(256),
   Schema.makeFilter((value) => {
-    const separator = value.lastIndexOf("/")
-    if (separator <= 0) return "must contain a source and skill name"
-    const source = value.slice(0, separator)
-    const name = value.slice(separator + 1)
-    return isMarketplaceSkillSource(source) && isSkillName(name)
+    const address = splitMarketplaceSkillId(value)
+    if (address === undefined) return "must contain a source and skill name"
+    return isMarketplaceSkillSource(address.source) && isSkillName(address.name)
       ? undefined
       : "must be a GitHub owner/repository/skill ID"
   })
 )
+
+const isMarketplaceSkillId = Schema.is(MarketplaceSkillIdSchema)
+
+export const readMarketplaceSkillId = (value: string): MarketplaceSkillAddress | undefined =>
+  isMarketplaceSkillId(value) ? splitMarketplaceSkillId(value) : undefined
 
 export const MarketplaceSkillSearchTextSchema = Schema.String.check(
   Schema.isMinLength(2),
@@ -174,17 +178,23 @@ export const SetSkillEnabledInputSchema = Schema.Struct({
   enabled: Schema.Boolean
 })
 
-export const encodeSetSkillEnabledRequestEffect = (value: unknown) =>
+export const encodeSetSkillEnabledRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(SetSkillEnabledInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMarketplaceSkillInstallRequestEffect = (value: unknown) =>
+export const encodeMarketplaceSkillInstallRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(MarketplaceSkillInstallInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMarketplaceSkillSearchPathEffect = (value: unknown) =>
+export const encodeMarketplaceSkillSearchPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(MarketplaceSkillSearchTextSchema)(value, strict).pipe(
     Effect.map((query) => {
       const search = new URLSearchParams({ q: query })
@@ -192,10 +202,14 @@ export const encodeMarketplaceSkillSearchPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeSkillItemPathEffect = (value: unknown) =>
+export const encodeSkillItemPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(SkillNameSchema)(value).pipe(
     Effect.map((name) => `${skillsCollectionPath}/${encodeURIComponent(name)}`)
   )
 
-export const encodeSkillContentPathEffect = (value: unknown) =>
+export const encodeSkillContentPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeSkillItemPathEffect(value).pipe(Effect.map((path) => `${path}/content`))

@@ -142,7 +142,9 @@ export const HandCaptureResponseSchema = Schema.Union([
   })
 ])
 
-export const encodeHandCaptureRequestEffect = (value: unknown) =>
+export const encodeHandCaptureRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(HandCaptureRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
@@ -379,60 +381,101 @@ export const SessionTriageActionRequestSchema = Schema.Struct({
   action: Schema.Literals(["dismiss", "accept", "undo"] as const)
 })
 
-export const decodeSessionListQueryEffect = (value: unknown) =>
+const resolveSessionListQuery = (query: typeof SessionListQuerySchema.Type) => ({
+  ...query,
+  scope: query.scope ?? "all",
+  live: query.live === true || query.live === "true",
+  limit: query.limit ?? 100,
+  ...(query.offset === undefined ? {} : { offset: query.offset }),
+  sort: query.sort ?? "activity"
+})
+
+export const decodeSessionListQueryEffect = (
+  value: unknown
+): Effect.Effect<ReturnType<typeof resolveSessionListQuery>, Schema.SchemaError> =>
   Schema.decodeUnknownEffect(SessionListQuerySchema)(value).pipe(
-    Effect.map((query) => ({
-      ...query,
-      scope: query.scope ?? "all",
-      live: query.live === true || query.live === "true",
-      limit: query.limit ?? 100,
-      ...(query.offset === undefined ? {} : { offset: query.offset }),
-      sort: query.sort ?? "activity"
-    }))
+    Effect.map(resolveSessionListQuery)
   )
 
-export const decodeCreateSessionRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(CreateSessionRequestSchema)(value, strict)
+export const decodeCreateSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<
+  Schema.Schema.Type<typeof CreateSessionRequestSchema>,
+  Schema.SchemaError,
+  never
+> => Schema.decodeUnknownEffect(CreateSessionRequestSchema)(value, strict)
 
-export const decodeBranchSessionRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(BranchSessionRequestSchema)(value, strict)
+export const decodeBranchSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<
+  Schema.Schema.Type<typeof BranchSessionRequestSchema>,
+  Schema.SchemaError,
+  never
+> => Schema.decodeUnknownEffect(BranchSessionRequestSchema)(value, strict)
 
-export const decodeRenameSessionRequestEffect = (value: unknown) =>
+export const decodeRenameSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<{ readonly name: string }, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(RenameSessionRequestSchema)(value, strict)
 
-export const decodeUpdateSessionModelRequestEffect = (value: unknown) =>
+export const decodeUpdateSessionModelRequestEffect = (
+  value: unknown
+): Effect.Effect<{ readonly chat_model: string | null }, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(UpdateSessionModelRequestSchema)(value, strict)
 
-export const decodeClearSessionRequestEffect = (value: unknown) =>
+export const decodeClearSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<Schema.Schema.Type<typeof ClearSessionRequestSchema>, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ClearSessionRequestSchema)(value, strict)
 
-export const decodeRevertSessionRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(RevertSessionRequestSchema)(value, strict)
+export const decodeRevertSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<
+  Schema.Schema.Type<typeof RevertSessionRequestSchema>,
+  Schema.SchemaError,
+  never
+> => Schema.decodeUnknownEffect(RevertSessionRequestSchema)(value, strict)
 
-export const encodeCreateSessionRequestEffect = (value: unknown) =>
+export const encodeCreateSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeCreateSessionRequestEffect(value).pipe(Effect.map(JSON.stringify))
 
-export const encodeBranchSessionRequestEffect = (value: unknown) =>
+export const encodeBranchSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeBranchSessionRequestEffect(value).pipe(Effect.map(JSON.stringify))
 
-export const encodeRenameSessionRequestEffect = (value: unknown) =>
+export const encodeRenameSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeRenameSessionRequestEffect(value).pipe(Effect.map(JSON.stringify))
 
-export const encodeUpdateSessionModelRequestEffect = (value: unknown) =>
+export const encodeUpdateSessionModelRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeUpdateSessionModelRequestEffect(value).pipe(Effect.map(JSON.stringify))
 
-export const encodeClearSessionRequestEffect = (value: unknown) =>
+export const encodeClearSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeClearSessionRequestEffect(value).pipe(Effect.map(JSON.stringify))
 
-export const encodeRevertSessionRequestEffect = (value: unknown) =>
+export const encodeRevertSessionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeRevertSessionRequestEffect(value).pipe(Effect.map(JSON.stringify))
 
-export const encodeSessionTriageActionRequestEffect = (value: unknown) =>
+export const encodeSessionTriageActionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(SessionTriageActionRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMoveSessionToSpaceRequestEffect = (value: unknown) =>
+export const encodeMoveSessionToSpaceRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(MoveSessionToSpaceRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )

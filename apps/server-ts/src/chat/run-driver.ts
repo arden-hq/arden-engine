@@ -131,7 +131,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
     const mapper = makeLoopEventMapper(
       input.assistantMessageId,
       input.runId,
-      answerFixInHistory(input.storedMessages, input.assistantMessageId)
+      answerFixInHistory(input.storedMessages, new Set(input.mintedMessageIds))
     )
     const projector = makeResultHistoryProjector({
       initialMessages: input.storedMessages,

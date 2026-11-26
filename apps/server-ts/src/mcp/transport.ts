@@ -1,3 +1,4 @@
+import { after } from "@arden-hq/std/timer"
 import { formatBytes } from "@arden-hq/std/count"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import type {
@@ -154,13 +155,13 @@ const withRequestHeaders =
 const waitForClose = (child: ChildProcess, timeoutMs: number): Promise<void> =>
   new Promise((resolve) => {
     const onClose = () => {
-      clearTimeout(timer)
+      timer.cancel()
       resolve()
     }
-    const timer = setTimeout(() => {
+    const timer = after(timeoutMs, () => {
       child.off("close", onClose)
       resolve()
-    }, timeoutMs)
+    })
     child.once("close", onClose)
   })
 

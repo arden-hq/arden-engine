@@ -39,8 +39,21 @@ type Reader = keyof typeof READERS
 type PositionOf<R extends Reader> = (typeof READERS)[R]["value"]["Type"]
 type PositionError = ReaderPositionError | SqlError.SqlError
 
+interface ReaderPositionStore<R extends Reader> {
+  readonly start: (
+    sql: SqlClient.SqlClient,
+    initial: PositionOf<R>
+  ) => Effect.Effect<PositionOf<R>, PositionError, UnitOfWork>
+  readonly read: (sql: SqlClient.SqlClient) => Effect.Effect<PositionOf<R>, PositionError>
+  readonly advance: (
+    sql: SqlClient.SqlClient,
+    input: { readonly expected: PositionOf<R>; readonly next: PositionOf<R> }
+  ) => Effect.Effect<PositionAdvance, PositionError, UnitOfWork>
+  readonly on: (writer: Writer) => ReaderPosition<PositionOf<R>>
+}
+
 /** One reader's position: a `monitor_state` row holding `{ [field]: position }`. */
-export const readerPosition = <R extends Reader>(reader: R) => {
+export const readerPosition = <R extends Reader>(reader: R): ReaderPositionStore<R> => {
   const { name, namespace, field } = READERS[reader]
   const Position = READERS[reader].value as Schema.Codec<PositionOf<R>>
   const State = Schema.fromJsonString(Schema.Record(Schema.String, Position))
@@ -128,7 +141,14 @@ export const readerPosition = <R extends Reader>(reader: R) => {
   return { start, read, advance, on }
 }
 
-export const makeReaderPositions = ({ writer }: { readonly writer: Writer }) =>
+export const makeReaderPositions = ({
+  writer
+}: {
+  readonly writer: Writer
+}): {
+  readonly maintenance: ReaderPosition<string | null>
+  readonly dailySummary: ReaderPosition<string>
+} =>
   ReaderPositions.of({
     maintenance: readerPosition("maintenance").on(writer),
     dailySummary: readerPosition("dailySummary").on(writer)

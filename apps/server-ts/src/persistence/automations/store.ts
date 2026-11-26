@@ -21,6 +21,7 @@ export type AutomationQueueSource = (typeof AUTOMATION_QUEUE_SOURCES)[number]
 interface AutomationJobPayloadFields<Prompt> {
   readonly purpose: JobPurpose
   readonly automationId: AutomationId
+  readonly taskItemId: string | null
   readonly name: string
   readonly automationRunId: number
   readonly sessionId: string | null

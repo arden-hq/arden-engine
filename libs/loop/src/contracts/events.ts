@@ -34,6 +34,7 @@ export interface EventBase {
 export interface TextStarted extends EventBase {
   readonly _tag: "TextStarted"
   readonly message_id: string
+  readonly record_id: string
 }
 
 export interface TextEnded extends EventBase {
@@ -57,6 +58,7 @@ export interface TextDelta extends EventBase {
 export interface ReasoningStarted extends EventBase {
   readonly _tag: "ReasoningStarted"
   readonly message_id: string
+  readonly record_id: string
 }
 
 export interface ReasoningDelta extends EventBase {

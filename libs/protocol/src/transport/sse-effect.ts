@@ -1,5 +1,12 @@
 import { Channel, Data, Effect, Option, Schema, Stream } from "effect"
-import * as Sse from "effect/unstable/encoding/Sse"
+import {
+  type AnyEvent,
+  encoder as sseEncoder,
+  EventEncoded,
+  makeParser,
+  type SseError,
+  type Retry
+} from "effect/unstable/encoding/Sse"
 import { ServerEventSchema, isKnownServerEventType } from "../events/schema.js"
 import type { EncodeServerEventOptions, SseDecodeOptions } from "./contracts.js"
 import type { ServerEvent } from "../events/contracts.js"
@@ -22,6 +29,12 @@ class InvalidSseId extends Data.TaggedError("InvalidSseId")<{
 class StreamInputError extends Data.TaggedError("StreamInputError")<{
   readonly cause: unknown
 }> {}
+
+type SseFrame = Schema.Schema.Type<typeof EventEncoded>
+type SseFrameFailure = StreamInputError | SseError | Schema.SchemaError
+type ServerEventFrame =
+  | { readonly event: ServerEvent["type"]; readonly data: ServerEvent }
+  | { readonly id: string; readonly event: ServerEvent["type"]; readonly data: ServerEvent }
 
 const validateServerEventFrame = Effect.fn("validateServerEventFrame")(function* (input: {
   readonly id?: string
@@ -89,9 +102,9 @@ export const decodeSseFramesEffect = Effect.fn("decodeSseFramesEffect")(function
   input: string,
   options?: SseDecodeOptions
 ) {
-  const parsed: Array<Sse.EventEncoded> = []
-  const retries: Array<Sse.Retry> = []
-  const parser = Sse.makeParser((value) => {
+  const parsed: Array<EventEncoded> = []
+  const retries: Array<Retry> = []
+  const parser = makeParser((value) => {
     if (value._tag === "Retry") {
       retries.push(value)
     } else {
@@ -108,9 +121,9 @@ export const decodeSseFramesEffect = Effect.fn("decodeSseFramesEffect")(function
   }
   for (const retry of retries) yield* notifyRetry(options, retry)
 
-  const frames: Array<Schema.Schema.Type<typeof Sse.EventEncoded>> = []
+  const frames: Array<Schema.Schema.Type<typeof EventEncoded>> = []
   for (const value of parsed) {
-    frames.push(yield* Schema.decodeUnknownEffect(Sse.EventEncoded)(value))
+    frames.push(yield* Schema.decodeUnknownEffect(EventEncoded)(value))
   }
   return frames
 })
@@ -142,7 +155,7 @@ export const encodeServerEventFrameEffect = Effect.fn("encodeServerEventFrameEff
   }
   const eventData = yield* Schema.decodeUnknownEffect(ServerEventSchema)(eventValue)
   const data = JSON.stringify(eventData)
-  return Sse.encoder.write({
+  return sseEncoder.write({
     _tag: "Event",
     id,
     event: eventData.type,
@@ -154,7 +167,7 @@ export const encodeServerEventFrameEffect = Effect.fn("encodeServerEventFrameEff
 export const decodeSseFrameStreamEffect = (
   input: AsyncIterable<string | Uint8Array>,
   options?: SseDecodeOptions
-) => {
+): Stream.Stream<SseFrame, SseFrameFailure> => {
   const encoder = new TextEncoder()
   const bytes = Stream.concat(
     Stream.fromAsyncIterable(input, (cause) => new StreamInputError({ cause })).pipe(
@@ -164,8 +177,8 @@ export const decodeSseFrameStreamEffect = (
   )
   const text = bytes.pipe(Stream.pipeThroughChannel(Channel.decodeText()))
   return Stream.suspend(() => {
-    const pending: Array<Sse.AnyEvent> = []
-    const parser = Sse.makeParser((value) => pending.push(value), parserOptions(options))
+    const pending: Array<AnyEvent> = []
+    const parser = makeParser((value) => pending.push(value), parserOptions(options))
     return text.pipe(
       Stream.mapEffect(
         Effect.fn("SseFrameStream.chunk")(function* (chunk) {
@@ -179,7 +192,7 @@ export const decodeSseFrameStreamEffect = (
         if (value._tag === "Retry") {
           return Stream.fromEffect(notifyRetry(options, value)).pipe(Stream.drain)
         }
-        return Stream.fromEffect(Schema.decodeUnknownEffect(Sse.EventEncoded)(value))
+        return Stream.fromEffect(Schema.decodeUnknownEffect(EventEncoded)(value))
       })
     )
   })
@@ -189,7 +202,7 @@ export const decodeSseFrameStreamEffect = (
 export const decodeServerEventStreamEffect = (
   input: AsyncIterable<string | Uint8Array>,
   options?: SseDecodeOptions
-) =>
+): Stream.Stream<ServerEventFrame, SseFrameFailure | EventTypeMismatch | EventSequenceMismatch> =>
   decodeSseFrameStreamEffect(input, options).pipe(
     Stream.flatMap((frame) =>
       Stream.fromEffect(decodeServerEventFrame(frame, options)).pipe(

@@ -7,7 +7,7 @@ import { CapabilityOfferStoreError, type CapabilityOfferStore } from "../capabil
 import { currentIso } from "../../runtime/clock.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
-import { enqueueRunDelivery } from "./work-deliveries.js"
+import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
 const CandidatesSchema = Schema.Array(
   Schema.Union([

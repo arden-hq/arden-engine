@@ -99,7 +99,9 @@ export const mapCompactionOutcome = (
   }
 }
 
-export const encodeContextCompactionRequestEffect = (value: unknown) =>
+export const encodeContextCompactionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(OptionalSessionIdSchema)(value, strict).pipe(
     Effect.map((sessionId) =>
       JSON.stringify(sessionId === undefined ? {} : { session_id: sessionId })

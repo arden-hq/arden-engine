@@ -48,7 +48,9 @@ const shownOwner = (
 export const makeAutomationDiagnostics = ({
   writer,
   reader
-}: Pick<PersistenceDeps, "writer" | "reader">) =>
+}: Pick<PersistenceDeps, "writer" | "reader">): ((
+  automationRef?: string | undefined
+) => Effect.Effect<AutomationDiagnostics, AutomationStoreError, never>) =>
   Effect.fn("SqliteAutomationStore.diagnostics")(function* (
     automationRef?: string
   ): Effect.fn.Return<AutomationDiagnostics, AutomationStoreError> {

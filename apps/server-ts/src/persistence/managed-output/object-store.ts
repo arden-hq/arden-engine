@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { realpathSync } from "node:fs"
 import { chmod, lstat, readFile, readdir, rm, unlink } from "node:fs/promises"
 import path from "node:path"
@@ -5,7 +6,11 @@ import path from "node:path"
 import { ensurePrivateDir, isErrnoCode, PrivateFileError, syncDir } from "../../fs/private-store.js"
 import {
   MANAGED_OBJECT_HASH,
-  MANAGED_OBJECT_PREFIX,
+  MANAGED_REF_KIND,
+  managedObjectRef,
+  readManagedObjectRef
+} from "./ref.js"
+import {
   isManagedObjectSource,
   managedObjectRefParts,
   readManagedObjectDescriptor,
@@ -43,7 +48,8 @@ export interface ManagedObjectStore {
   readonly collectDigest: (digest: string) => Promise<boolean>
 }
 
-export const isManagedObjectRef = (ref: string): boolean => ref.startsWith(MANAGED_OBJECT_PREFIX)
+export const isManagedObjectRef = (ref: string): boolean =>
+  readManagedObjectRef(ref).kind !== MANAGED_REF_KIND.other
 
 const objectPath = (root: string, digest: string): string =>
   path.join(root, "objects", digest.slice(0, 2), digest)
@@ -114,7 +120,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     const refInfo = await lstat(refFile)
     if (refInfo.isSymbolicLink() || !refInfo.isFile())
       throw new Error("Unsafe managed-output owner ref")
-    const saved: unknown = JSON.parse(await readFile(refFile, "utf8"))
+    const saved: unknown = parseJsonText(await readFile(refFile, "utf8"))
     if (JSON.stringify(saved) !== JSON.stringify(record)) {
       throw new Error("Managed-output owner ref differs")
     }
@@ -139,7 +145,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     const digest = sha256Hex(bytes)
     const descriptor: ManagedObjectDescriptor = {
       kind: "managed_output",
-      ref: `${MANAGED_OBJECT_PREFIX}${owner}/${digest}/${input.format}`,
+      ref: managedObjectRef({ owner, digest, format: input.format }),
       sha256: digest,
       bytes: bytes.byteLength,
       format: input.format,
@@ -186,7 +192,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     const refInfo = await lstat(refFile)
     if (refInfo.isSymbolicLink() || !refInfo.isFile())
       throw new Error("Unsafe managed-output owner ref")
-    const saved: unknown = JSON.parse(await readFile(refFile, "utf8"))
+    const saved: unknown = parseJsonText(await readFile(refFile, "utf8"))
     if (
       typeof saved !== "object" ||
       saved === null ||
@@ -252,7 +258,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     try {
       const info = await lstat(refFile)
       if (info.isSymbolicLink() || !info.isFile()) return undefined
-      const saved: unknown = JSON.parse(await readFile(refFile, "utf8"))
+      const saved: unknown = parseJsonText(await readFile(refFile, "utf8"))
       return typeof saved === "object" &&
         saved !== null &&
         "bytes" in saved &&

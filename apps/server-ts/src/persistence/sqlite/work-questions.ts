@@ -4,11 +4,10 @@ import {
 } from "@arden-hq/protocol/effect/runs"
 import { DateTime, Effect, Schema } from "effect"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
-import { WorkStore, WorkStoreError } from "../work/store.js"
+import { WorkStore, WorkStoreError, type FocusQuestionTargetInput } from "../work/store.js"
 import { makeRunQuestionReader } from "./run-question-read.js"
 import { workError } from "./work-records.js"
 import { assertRunTaskAuthority } from "./run-task-authority.js"
-import { enqueueRunDelivery } from "./work-deliveries.js"
 import { holdQuestionTask } from "./work-holds.js"
 import { readOpenTaskQuestionIds } from "./question-events.js"
 import { journalAskChange } from "./ask-changes.js"
@@ -27,8 +26,17 @@ import { stoppedRunSql } from "./status-sets.js"
 import { decodeJson } from "./json.js"
 import { answerMisfit, questionAnswerBody } from "./question-answer.js"
 import { focusOpenLabel, type FocusChoiceTarget } from "@arden-hq/protocol/sessions/focus-choices"
-import type { RunQuestionContent } from "@arden-hq/protocol/runs"
+import type {
+  RunQuestionContent,
+  RunQuestion,
+  ResolveRunQuestionInput,
+  RunQuestionListOptions,
+  RunQuestionList
+} from "@arden-hq/protocol/runs"
 import { sha256Hex } from "@arden-hq/std/hash"
+import type { PermissionOfferRecord } from "../permissions/offer.js"
+import type { ContractProposalRecord } from "../work/contract.js"
+import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
 const focusChoices = [
   { id: "continue_here", label: "Continue here" },
@@ -57,10 +65,31 @@ const sameAsked = (
 const runQuestionId = (runId: string, toolCallId: string): string =>
   `question:${sha256Hex(JSON.stringify([runId, toolCallId]))}`
 
+export interface WorkQuestionSql {
+  readonly askQuestion: (options: {
+    readonly runId: string
+    readonly toolCallId: string
+    readonly content: RunQuestionContent
+    readonly reuseOpenTaskQuestion?: true
+    readonly timeout?: { readonly seconds: number; readonly fallbackChoiceId: string }
+    readonly focusTarget?: FocusQuestionTargetInput
+    readonly permissionOffer?: PermissionOfferRecord
+    readonly contractProposal?: ContractProposalRecord
+  }) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly resolveQuestion: (options: {
+    readonly questionId: string
+    readonly input: ResolveRunQuestionInput
+  }) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly questions: (
+    options: RunQuestionListOptions
+  ) => Effect.Effect<RunQuestionList, WorkStoreError>
+  readonly expireQuestions: () => Effect.Effect<void, WorkStoreError>
+}
+
 export const makeWorkQuestionSql = (options: {
   readonly writer: Writer
   readonly sessionEvents: SessionLifecycleEvents["Service"]
-}) => {
+}): WorkQuestionSql => {
   const { writer, sessionEvents } = options
   const sql = writer.sql
   const { get, questions } = makeRunQuestionReader(sql)

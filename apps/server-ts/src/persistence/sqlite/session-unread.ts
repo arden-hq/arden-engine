@@ -4,12 +4,14 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { messageTurnIdSql } from "./message-turns.js"
 import { readableConversationSql } from "./session-presentation.js"
-import { conversationMessagePredicate } from "./transcript.js"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
+import { conversationMessagePredicate } from "./transcript-predicates.js"
 
 export const turnTouchesRecencySql = (
   sql: SqlClient.SqlClient,
   options: { readonly sessionId: string; readonly turnId: string }
-) => sql`(
+): Statement<Row> => sql`(
   NOT EXISTS (SELECT 1 FROM session_messages AS update_input
     WHERE update_input.session_id = ${options.sessionId} AND update_input.message_id = ${options.turnId}
       AND json_type(update_input.message_json, '$.update') = 'object')

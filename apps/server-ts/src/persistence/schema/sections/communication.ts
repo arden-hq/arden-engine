@@ -1,5 +1,9 @@
 import type { OperationalSchemaSection } from "../section.js"
 import { ENTITY_EVENTS_RUN_INDEX, ENTITY_EVENTS_TABLE } from "../../migrations/0183_main_space.js"
+import {
+  DELIVERY_MESSAGE_ID_COLUMN,
+  DELIVERY_MESSAGE_INDEX
+} from "../../migrations/0186_delivery_message_id.js"
 
 /** SQLite splices this column's text into the stored `automation_deliveries` DDL,
  *  so the schema and the communication conversion share one spelling. */
@@ -24,11 +28,14 @@ export const communicationSchemaSection = {
     "idx_entity_events_run",
     "idx_run_endings_undecided",
     "idx_automation_deliveries_answer",
+    "idx_automation_deliveries_message",
     "idx_run_endings_status_at"
   ],
   triggers: [],
   statements: [
     communicationSequenceColumnSql,
+    DELIVERY_MESSAGE_ID_COLUMN,
+    DELIVERY_MESSAGE_INDEX,
     `CREATE UNIQUE INDEX idx_automation_deliveries_communication_sequence
       ON automation_deliveries(communication_sequence)
       WHERE communication_sequence IS NOT NULL`,

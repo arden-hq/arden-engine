@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { formatBytes } from "@arden-hq/std/count"
 import { randomUUID } from "node:crypto"
 import { VISUALIZATION_RUNTIME_VERSION, type ArtifactRole } from "@arden-hq/protocol"
@@ -244,8 +245,7 @@ const writeArtifact = Effect.fn("ConversationArtifacts.writeArtifact")(function*
     )
     if (existing !== null) {
       const previous = yield* Effect.try({
-        try: () =>
-          JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(existing)) as unknown,
+        try: () => parseJsonText(new TextDecoder("utf-8", { fatal: true }).decode(existing)),
         catch: (cause) =>
           artifactError("corrupt", "Visualization manifest is not valid UTF-8 JSON", cause)
       }).pipe(Effect.flatMap(decodeManifest))
@@ -412,8 +412,7 @@ const make = Effect.fn("ConversationArtifacts.make")(function* (root: string) {
     const directory = artifactDirectory(owner, artifact)
     const manifestBytes = yield* readArtifactFile(join(directory, "manifest.json"), 16 * 1024)
     const manifest = yield* Effect.try({
-      try: () =>
-        JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes)) as unknown,
+      try: () => parseJsonText(new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes)),
       catch: (cause) =>
         artifactError("corrupt", "Visualization manifest is not valid UTF-8 JSON", cause)
     }).pipe(Effect.flatMap(decodeManifest))

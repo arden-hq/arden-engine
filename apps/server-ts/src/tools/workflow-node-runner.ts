@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import { ToolExecutionError, type ToolResult, type Toolset } from "@arden-hq/loop"
@@ -21,7 +22,7 @@ import {
 } from "../workflows/runtime/contract.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
 import type { ServerTool } from "./define.js"
-import { SPAWN_AGENT_TOOL } from "../persistence/tools/tool-roles.js"
+import { NESTING, SPAWN_AGENT_TOOL } from "../persistence/tools/tool-roles.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 interface WorkflowNodeRunnerOptions {
@@ -279,7 +280,15 @@ export const makeWorkflowNodeRunner = (
               changesState: true,
               effect: "arden_db",
               source: "_agents",
-              plan: { kind: "call", toolCallId: request.parentToolCallId }
+              plan: {
+                kind: "call",
+                toolCallId: request.parentToolCallId,
+                nesting: {
+                  kind: NESTING.workflow,
+                  agentKey: callKey,
+                  launch: request.launch + restart
+                }
+              }
             },
             (context) =>
               toolset.execute({
@@ -387,10 +396,8 @@ export const makeWorkflowNodeRunner = (
         })
         return completed.text
       }
-      let value: unknown
-      try {
-        value = JSON.parse(completed.text)
-      } catch {
+      const value = parseJsonTextOrUndefined(completed.text)
+      if (value === undefined) {
         correction = "the response was not valid JSON"
         await observer.recordChildAttempt({
           ...completedAttempt,

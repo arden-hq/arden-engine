@@ -27,11 +27,24 @@ const stateOf = (row: BackfillRow): BackfillState => ({
 
 const failed = (message: string) => (cause: unknown) => new BackfillStoreError({ message, cause })
 
+export interface BackfillChunks {
+  readonly states: () => Effect.Effect<BackfillState[], BackfillStoreError>
+  readonly runChunk: (
+    backfill: AnyBackfill,
+    limit: number
+  ) => Effect.Effect<
+    { state: BackfillState; previousCursor: string | undefined; cursor: string | undefined },
+    BackfillStoreError
+  >
+  readonly remaining: (backfill: AnyBackfill) => Effect.Effect<number, BackfillStoreError>
+  readonly runActive: () => Effect.Effect<boolean, BackfillStoreError>
+}
+
 export const makeBackfillChunks = ({
   writer,
   reader,
   sessionEvents
-}: Pick<PersistenceDeps, "writer" | "reader" | "sessionEvents">) => {
+}: Pick<PersistenceDeps, "writer" | "reader" | "sessionEvents">): BackfillChunks => {
   const sql = writer.sql
   const runChunk = Effect.fn("BackfillStore.runChunk")(function* (
     backfill: AnyBackfill,

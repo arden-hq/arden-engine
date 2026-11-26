@@ -2,8 +2,6 @@ import { ToolExecutionError } from "@arden-hq/loop"
 import { Schema } from "effect"
 
 import {
-  displayLocalPath,
-  LocalRevisionConflict,
   type LocalPathPolicy,
   type LocalPathServices,
   policyPathOptions,
@@ -13,6 +11,9 @@ import {
 import { RipgrepSearchError } from "./ripgrep.js"
 import type { ServerRunContext } from "./run-context.js"
 import { toolFault, toolRefusal } from "./tool-failure.js"
+import type { SessionPathPolicy } from "../storage/local-paths.js"
+import { LocalRevisionConflict } from "../storage/local-revision.js"
+import { displayLocalPath } from "../storage/local-directory.js"
 
 export const PathSchema = Schema.String.check(
   Schema.isMinLength(1),
@@ -55,7 +56,7 @@ export const filesystemError = (
 export const cwdFor = (
   services: LocalPathServices,
   ctx: { readonly run: ServerRunContext; readonly signal: AbortSignal }
-) =>
+): Promise<SessionPathPolicy> =>
   sessionPathPolicy(services, {
     sessionId: ctx.run.sessionId,
     runId: ctx.run.runId,
@@ -66,7 +67,8 @@ export const resolveFor = (
   policy: LocalPathPolicy,
   target: string,
   options: { readonly allowMissing?: boolean; readonly mutation?: boolean } = {}
-) => resolveLocalPath(target, policy.cwd, { ...options, ...policyPathOptions(policy) })
+): Promise<string> =>
+  resolveLocalPath(target, policy.cwd, { ...options, ...policyPathOptions(policy) })
 
 export const displayFor = (policy: LocalPathPolicy, target: string): string =>
   displayLocalPath(target, policy.cwd)

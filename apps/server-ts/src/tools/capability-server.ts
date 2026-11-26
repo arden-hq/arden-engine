@@ -59,7 +59,7 @@ export const vetServerRequest = (input: {
 
 export const refusalText = (
   reason: Extract<ServerRequestVerdict, { kind: "refused" }>["reason"]
-) => {
+): string => {
   switch (reason) {
     case "child_agent":
       return "Only the main conversation can offer a server. Ask your parent agent to do it."

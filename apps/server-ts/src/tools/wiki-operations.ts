@@ -14,9 +14,6 @@ import { boundedDiff } from "./bounded-diff.js"
 import { STANDING_LIMIT_NOTE } from "../memory/core-memory.js"
 import { activeRunPages, type PageRecord } from "../wiki/snapshot.js"
 import {
-  MAX_WIKI_CONTENT_CHARS,
-  WIKI_PAGE_BUDGET_CHARS,
-  WikiPathSchema,
   activePage,
   changePages,
   keptPage,
@@ -33,6 +30,8 @@ import { MergedWikiPathSchema, makeWikiPageHistoryTools } from "./wiki-page-hist
 import { MAX_PAGE_SOURCES, directoryReceipt, pageSource, requireObserved } from "./wiki-records.js"
 import { searchPages } from "./wiki-search.js"
 import { readChangeCall } from "../lib/memory-link.js"
+import { MAX_WIKI_CONTENT_CHARS, WIKI_PAGE_BUDGET_CHARS } from "./wiki-schemas.js"
+import { WikiPathSchema } from "./wiki-schemas.js"
 
 const MAX_LINKS = 500
 const MAX_SEARCH_RESULTS = 20

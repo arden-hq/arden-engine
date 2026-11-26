@@ -1,5 +1,6 @@
 import { formatBytes } from "@arden-hq/std/count"
 import { utf8Bytes } from "./fence.js"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 /** The one Query tool a block may name. It only reads; nothing runs. */
 export const TOOL_RESULT_QUERY = "tool_result"
@@ -77,7 +78,7 @@ const isList = (value: object): value is ReadonlyArray<JsonValue> => Array.isArr
 
 function parseJson(text: string): JsonValue | undefined {
   try {
-    return JSON.parse(text) as JsonValue
+    return parseJsonText(text) as JsonValue
   } catch {
     return undefined
   }

@@ -170,16 +170,14 @@ interface MigrationRunFailure {
   readonly cause: unknown
 }
 
-const flushHostPort = Effect.callback<void>((resume) => {
-  let immediate: NodeJS.Immediate | undefined
-  const timer = setTimeout(() => {
-    immediate = setImmediate(() => resume(Effect.void))
-  }, 0)
-  return Effect.sync(() => {
-    clearTimeout(timer)
-    if (immediate !== undefined) clearImmediate(immediate)
-  })
-})
+const flushHostPort = Effect.sleep(0).pipe(
+  Effect.andThen(
+    Effect.callback<void>((resume) => {
+      const immediate = setImmediate(() => resume(Effect.void))
+      return Effect.sync(() => clearImmediate(immediate))
+    })
+  )
+)
 
 type MigrationOutcome =
   | { readonly kind: "done"; readonly plan: MigrationPlan }

@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import { accountReadyFor } from "@arden-hq/protocol/google"
 import type {
   GoogleClientConfigured,
@@ -264,11 +265,10 @@ const makeGoogleConnections = (options: GoogleServiceOptions): GoogleConnections
           value =
             response.ok && responseMode?.kind === "binary"
               ? await googleBinaryResponse(response, responseMode.maxBytes)
-              : await response.json()
+              : await parseJsonBody(response)
         } catch (cause) {
           if (signal?.aborted === true) throw cause
-          if (!response.ok) value = null
-          else {
+          if (response.ok) {
             throw new GoogleConnectionError({
               reason: "invalid_response",
               message:

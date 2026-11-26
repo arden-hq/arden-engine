@@ -213,14 +213,30 @@ export const DismissInboxRequestSchema = Schema.Union([
   DismissInboxItemsRequestSchema
 ]).pipe(Schema.toTaggedUnion("scope"))
 
-export const decodeMarkInboxReadRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(MarkInboxReadRequestSchema)(value, { onExcessProperty: "error" })
+export const decodeMarkInboxReadRequestEffect = (
+  value: unknown
+): Effect.Effect<
+  { readonly scope: "all" } | { readonly scope: "items"; readonly keys: readonly string[] },
+  Schema.SchemaError,
+  never
+> => Schema.decodeUnknownEffect(MarkInboxReadRequestSchema)(value, { onExcessProperty: "error" })
 
-export const encodeMarkInboxReadRequestEffect = (value: unknown) =>
+export const encodeMarkInboxReadRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeMarkInboxReadRequestEffect(value).pipe(Effect.map(JSON.stringify))
 
-export const decodeDismissInboxRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(DismissInboxRequestSchema)(value, { onExcessProperty: "error" })
+export const decodeDismissInboxRequestEffect = (
+  value: unknown
+): Effect.Effect<
+  | { readonly scope: "all" }
+  | { readonly scope: "group"; readonly group_key: string }
+  | { readonly scope: "items"; readonly keys: readonly string[] },
+  Schema.SchemaError,
+  never
+> => Schema.decodeUnknownEffect(DismissInboxRequestSchema)(value, { onExcessProperty: "error" })
 
-export const encodeDismissInboxRequestEffect = (value: unknown) =>
+export const encodeDismissInboxRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeDismissInboxRequestEffect(value).pipe(Effect.map(JSON.stringify))

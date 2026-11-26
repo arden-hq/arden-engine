@@ -613,7 +613,7 @@ export const makeSessionBranch = ({
           "branch",
           "storage",
           "Could not list preparing forks",
-          childSessionId ?? "",
+          childSessionId ?? undefined,
           cause
         )
       )

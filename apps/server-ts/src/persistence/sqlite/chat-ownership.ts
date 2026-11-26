@@ -4,6 +4,7 @@ import { Statement, type SqlClient } from "effect/unstable/sql"
 import { keyMessageJson } from "./chat-key-message.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { delegatedLinkSql, sessionAncestors, sessionDescendants } from "./tree-walk.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export const userChatSql = (alias?: string): Statement.Fragment => {
   const prefix = alias === undefined ? "" : `${alias}.`
@@ -68,8 +69,24 @@ export interface ChatSettledState {
   readonly settled: boolean
 }
 
-export const readChatSettled = (sql: SqlClient.SqlClient, spaceId: string) =>
-  chatSettled(sql, { kind: "space", spaceId })
+export const readChatSettled = (
+  sql: SqlClient.SqlClient,
+  spaceId: string
+): Effect.Effect<
+  {
+    settled: boolean
+    session_id: string
+    run_id: string | null
+    turn_id: string | null
+    pending: number
+    status: string | null
+    session_ref: string
+    title: string | null
+    owner_turn_id: string | null
+  }[],
+  SqlError,
+  never
+> => chatSettled(sql, { kind: "space", spaceId })
 
 const chatSettled = Effect.fn("Chat.settled")(function* (
   sql: SqlClient.SqlClient,
@@ -104,7 +121,9 @@ const chatSettled = Effect.fn("Chat.settled")(function* (
 /** What the Space review's snapshot holds of each chat: what the owner said, and what waits to be
  * said. A Task or helper result landing in the chat leaves it unchanged; a new owner turn does
  * not, so an offer is refused until the worker has read it. */
-export const ownerTurnFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
+export const ownerTurnFingerprint = (
+  chats: ReadonlyArray<ChatSettledState>
+): { session_id: string; owner_turn_id: string | null; pending: number }[] =>
   chats.map((chat) => ({
     session_id: chat.session_id,
     owner_turn_id: chat.owner_turn_id,
@@ -112,7 +131,9 @@ export const ownerTurnFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
   }))
 
 /** What the Space review's wake fingerprint holds of each chat: its latest run and state. */
-export const settledFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
+export const settledFingerprint = (
+  chats: ReadonlyArray<ChatSettledState>
+): { session_id: string; run_id: string | null; state: string | null; pending: number }[] =>
   chats.map((chat) => ({
     session_id: chat.session_id,
     run_id: chat.run_id,

@@ -1,7 +1,9 @@
 import fc from "fast-check"
 import { describe, expect, it } from "vitest"
 
+import { McpChannel } from "../src/mcp/channel.js"
 import {
+  EVENTS_PROTOCOL_VERSION,
   decodeEventsPage,
   decodePollResult,
   decodeStreamSignal,
@@ -95,5 +97,17 @@ describe("MCP Events wire", () => {
       }),
       { numRuns: 200 }
     )
+  })
+
+  it("passes a body that is not JSON through to fetch even when it names the protocol version", async () => {
+    const seen: Array<RequestInit | undefined> = []
+    const wrapped = new McpChannel("http").wrapFetch(async (_url, init) => {
+      seen.push(init)
+      return new Response("ok")
+    })
+    const init = { method: "POST", body: `not json ${EVENTS_PROTOCOL_VERSION}` }
+    const response = await wrapped("http://localhost/mcp", init)
+    expect(await response.text()).toBe("ok")
+    expect(seen).toEqual([init])
   })
 })

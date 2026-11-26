@@ -66,7 +66,16 @@ export const ToolDestinationSchema = Schema.Union([
 
 export type ToolDestination = typeof ToolDestinationSchema.Type
 
-export const placeResource = (destination: ToolDestination, label: string) => {
+export const placeResource = (
+  destination: ToolDestination,
+  label: string
+): {
+  kind: "target"
+  resourceRef: string
+  domain: "automation" | "space" | "memory" | "task" | "session" | "other"
+  title: string
+  href: string
+} => {
   const href = placeHref(destination)
   return {
     kind: "target" as const,

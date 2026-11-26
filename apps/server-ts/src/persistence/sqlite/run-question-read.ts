@@ -6,7 +6,10 @@ import {
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
-import type { WorkStore } from "../work/store.js"
+import type { WorkStore, WorkStoreError } from "../work/store.js"
+import type { RunQuestion } from "@arden-hq/protocol/runs"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import { decodeJson } from "./json.js"
 import { questionVisiblePredicate } from "./question-events.js"
@@ -36,7 +39,15 @@ export interface QuestionRow {
 }
 const CursorSchema = Schema.Struct({ at: Schema.String, id: Schema.String })
 
-export const makeRunQuestionReader = (sql: SqlClient.SqlClient) => {
+export interface RunQuestionReader {
+  readonly get: (id: string) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly questions: WorkStore["Service"]["questions"]
+  readonly select: Statement<Row>
+  readonly openSelect: Statement<Row>
+  readonly decode: (row: QuestionRow) => Effect.Effect<RunQuestion, WorkStoreError>
+}
+
+export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionReader => {
   const decode = Effect.fn(
     function* (row: QuestionRow) {
       const context = yield* decodeJson(RunContextSchema, row.context)
@@ -141,7 +152,7 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient) => {
       AND json_extract(delivery.payload, '$.kind') = 'answer'
     LEFT JOIN chat_idempotency_keys AS answer_receipt
       ON answer_receipt.session_id = json_extract(delivery.payload, '$.sessionId')
-      AND answer_receipt.client_id = 'arrival:' || delivery.delivery_id
+      AND answer_receipt.client_id = delivery.message_id
     LEFT JOIN sessions AS asking ON asking.session_id = COALESCE(
       json_extract(r.metadata_json, '$.run_context.origin.session_id'), r.session_id)
     LEFT JOIN sessions AS asking_parent ON asking_parent.session_id = asking.parent_session_id

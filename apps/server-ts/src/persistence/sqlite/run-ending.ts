@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import type { CommunicationDoor } from "@arden-hq/protocol/chat"
 import type { RunContext, RunOrigin } from "@arden-hq/protocol/runs"
 import { automationRepeats } from "@arden-hq/protocol/automations"
@@ -15,11 +16,11 @@ import { addressOfRun, chatRow, type Place, type RunAddress } from "./run-destin
 import { changedRunOutcome, newsRunOutcome, quietRunOutcome } from "./run-outcomes.js"
 import { readTaskState } from "../work/task-state.js"
 import { activeRunStatusList } from "./status-sets.js"
-import { enqueueRunDelivery } from "./work-deliveries.js"
 import type { EndingRecord, EndingStatus, PlaceKind, Purpose } from "../runs/ending.js"
 import { parentCompletion } from "../runs/parent-completion.js"
 import type { ChatRunRecord } from "../runs/model.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
 export type ToldOutcome = "finished" | "needs_you" | "blocked" | "failed"
 
@@ -223,17 +224,10 @@ const automationRunRepeats = Effect.fn("RunEnding.repeats")(function* (
   const row = rows[0]
   if (row === undefined || row.source === "manual") return false
   return (
-    row.again === 1 || (row.triggers !== null && automationRepeats(storedTriggers(row.triggers)))
+    row.again === 1 ||
+    (row.triggers !== null && automationRepeats(parseJsonTextOrUndefined(row.triggers)))
   )
 })
-
-const storedTriggers = (text: string): unknown => {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
 
 const entityTwinAt = Effect.fn("RunEnding.twin")(function* (
   sql: SqlClient.SqlClient,

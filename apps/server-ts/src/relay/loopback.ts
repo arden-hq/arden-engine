@@ -1,19 +1,14 @@
 import { decodeSseFrameStream } from "@arden-hq/protocol"
 import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
-import type { Schema } from "effect"
+import { Option, Schema } from "effect"
 import type { HttpServer } from "effect/unstable/http"
 import type { LocalAccess } from "../http/middleware/local-only.js"
 import type { Loopback } from "./ports.js"
 
-const parseBody = (text: string): Schema.Json => {
-  if (text === "") return null
-  try {
-    const value: Schema.Json = JSON.parse(text)
-    return value
-  } catch {
-    return null
-  }
-}
+const decodeBody = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+const parseBody = (text: string): Schema.Json =>
+  text === "" ? null : Option.getOrElse(decodeBody(text), () => null)
 
 export const relayLoopback = (
   address: HttpServer.Address,

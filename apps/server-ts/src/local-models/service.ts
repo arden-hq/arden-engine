@@ -342,7 +342,9 @@ export const installedPresetModels = (root: string): Effect.Effect<ReadonlyArray
 export const isInstalled = (root: string, manifest: ModelManifest): Effect.Effect<boolean> =>
   installedState({ manifest, root }).pipe(Effect.map((state) => state === "installed"))
 
-export const localDecisionEndpointLayer = (root: string) =>
+export const localDecisionEndpointLayer = (
+  root: string
+): Layer.Layer<LocalDecisionEndpoint, never, LlamaServer> =>
   Layer.effect(
     LocalDecisionEndpoint,
     Effect.gen(function* () {

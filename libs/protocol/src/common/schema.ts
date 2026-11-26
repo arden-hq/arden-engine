@@ -3,7 +3,7 @@ import type { ApiErrorEnvelope } from "./errors.js"
 import type { AppSettingsTabId } from "./navigation.js"
 import type { Agrees, Assert } from "./type-agreement.js"
 import type { ConnectionState, RuntimeRunStatus } from "../chat/runtime.js"
-import type { SessionTriageDecision } from "../sessions/contracts.js"
+import { SESSION_PARENT_STEP, type SessionTriageDecision } from "../sessions/contracts.js"
 
 /** Shared schema helpers. All public object schemas retain additive fields. */
 export const extraFields = [Schema.Record(Schema.String, Schema.Unknown)] as const
@@ -37,8 +37,14 @@ export const optionalNonNegativeInt = Schema.optionalKey(NonNegativeIntSchema)
 export const optionalBoolean = Schema.optionalKey(Schema.Boolean)
 export const optionalUnknown = Schema.optionalKey(Schema.Unknown)
 
-export const withExtras = <Fields extends Schema.Struct.Fields>(fields: Fields) =>
-  Schema.StructWithRest(Schema.Struct(fields), extraFields)
+type WithExtras<Fields extends Schema.Struct.Fields> = Schema.StructWithRest<
+  Schema.Struct<Fields>,
+  readonly [Schema.$Record<Schema.String, Schema.Unknown>]
+>
+
+export const withExtras = <Fields extends Schema.Struct.Fields>(
+  fields: Fields
+): WithExtras<Fields> => Schema.StructWithRest(Schema.Struct(fields), extraFields)
 
 const eventCommon = <const Type extends string>(type: Type) => ({
   type: Schema.Literal(type),
@@ -47,10 +53,12 @@ const eventCommon = <const Type extends string>(type: Type) => ({
   replay: optionalBoolean
 })
 
+type EventFields<Type extends string> = ReturnType<typeof eventCommon<Type>>
+
 export const event = <const Type extends string, Fields extends Schema.Struct.Fields>(
   type: Type,
   fields: Fields
-) =>
+): WithExtras<EventFields<Type> & { session_id: typeof optionalString } & Fields> =>
   withExtras({
     ...eventCommon(type),
     session_id: optionalString,
@@ -66,7 +74,7 @@ export const sessionEvent = <
   type: Type,
   sessionId: SessionId,
   fields: Fields
-) =>
+): WithExtras<EventFields<Type> & { session_id: SessionId } & Fields> =>
   withExtras({
     ...eventCommon(type),
     session_id: sessionId,
@@ -288,7 +296,16 @@ const SessionThreadSourceSchema = withExtras({
   session_ref: Schema.NullOr(Schema.NonEmptyString)
 })
 
+const SessionParentStepSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(SESSION_PARENT_STEP.none) }),
+  Schema.Struct({
+    kind: Schema.Literal(SESSION_PARENT_STEP.step),
+    tool_call_id: Schema.NonEmptyString
+  })
+])
+
 export const SessionListItemSchema = withExtras({
+  parent_step: SessionParentStepSchema,
   current_activity: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({

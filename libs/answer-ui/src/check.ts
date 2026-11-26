@@ -59,8 +59,8 @@ export function checkAnswerBlock(
   const { parsed, statements } = read
   if (now() - started > MAX_PARSE_MS || JSON.stringify(parsed.root ?? null).length > MAX_TREE_BYTES)
     return [{ line: undefined, message: "The block is too large to draw. Show less in it." }]
-  const lineOf = (id: string | undefined) =>
-    id === undefined ? undefined : statements.find((statement) => statement.id === id)?.line
+  const lineOf = (name: string | undefined) =>
+    name === undefined ? undefined : statements.find((statement) => statement.name === name)?.line
   return [
     ...(parsed.root === null
       ? [{ line: undefined, message: "The block has no `root = Stack([...])` line." }]
@@ -75,13 +75,13 @@ export function checkAnswerBlock(
     })),
     ...statements
       .filter((statement) => statement.computed)
-      .map(({ id, line }) => ({
+      .map(({ name, line }) => ({
         line,
-        message: `\`${id}\` is state set from an expression. State starts as a literal; write a derived value as a plain statement (\`${id.slice(1)} = …\`) instead.`
+        message: `\`${name}\` is state set from an expression. State starts as a literal; write a derived value as a plain statement (\`${name.slice(1)} = …\`) instead.`
       })),
     ...usedBeforeDeclared(statements).map(({ statement, state }) => ({
       line: statement.line,
-      message: `\`${statement.id}\` uses \`${state}\` before \`${state} = …\` is declared. Put every $state line first, right after root.`
+      message: `\`${statement.name}\` uses \`${state}\` before \`${state} = …\` is declared. Put every $state line first, right after root.`
     })),
     ...parsed.mutationStatements.map((mutation) => ({
       line: lineOf(mutation.statementId),
@@ -145,10 +145,10 @@ function usedBeforeDeclared(
   statements: ReadonlyArray<Statement>
 ): ReadonlyArray<{ readonly statement: Statement; readonly state: string }> {
   return statements.flatMap((statement, index) =>
-    statement.isState || statement.id === "root"
+    statement.isState || statement.name === "root"
       ? []
       : [...new Set(statement.states)].flatMap((state) => {
-          const declared = statements.findIndex((other) => other.id === state)
+          const declared = statements.findIndex((other) => other.name === state)
           return declared > index ? [{ statement, state }] : []
         })
   )

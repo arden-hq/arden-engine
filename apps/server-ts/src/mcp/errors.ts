@@ -38,7 +38,7 @@ export const mcpError = (
   reason: McpConnectionError["reason"],
   message: string,
   cause?: unknown
-) =>
+): McpConnectionError =>
   new McpConnectionError({
     operation,
     reason,

@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import { Predicate } from "effect"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
@@ -31,6 +32,58 @@ interface RunRow {
   readonly session_metadata: string | null
 }
 
+const AGENT_SESSION = "agent"
+const MEMORY_CAPTURE_HANDLER = "memory_capture"
+const HOST_APPROVED_SANDBOX = "host_approved"
+
+const CAPABILITY = {
+  none: "none",
+  readOnly: "read_only",
+  reports: "reports",
+  browser: "browser",
+  all: "all",
+  desk: "desk",
+  memoryCapture: "memory_capture",
+  chatSummary: "chat_summary",
+  agentResearch: "agent_research",
+  agentCode: "agent_code"
+} as const
+type Capability = (typeof CAPABILITY)[keyof typeof CAPABILITY]
+
+const AUTOMATION_PURPOSE = {
+  userAutomation: "user_automation",
+  deskReview: "desk_review",
+  taskExecution: "task_execution",
+  system: "system"
+} as const
+type AutomationPurpose = (typeof AUTOMATION_PURPOSE)[keyof typeof AUTOMATION_PURPOSE]
+
+const AGENT_MODE = { code: "code", research: "research", work: "work" } as const
+type AgentMode = (typeof AGENT_MODE)[keyof typeof AGENT_MODE]
+
+const ORIGIN_KIND = {
+  unrecorded: "unrecorded",
+  chat: "chat",
+  automation: "automation",
+  task: "task",
+  desk: "desk"
+} as const
+type OriginKind = (typeof ORIGIN_KIND)[keyof typeof ORIGIN_KIND]
+const isOriginKind = (value: unknown): value is OriginKind =>
+  Object.values<unknown>(ORIGIN_KIND).includes(value)
+
+const ACTOR_KIND = {
+  person: "person",
+  automation: "automation",
+  taskWorker: "task_worker",
+  deskReview: "desk_review",
+  agent: "agent",
+  unrecorded: "unrecorded"
+} as const
+type ActorKind = (typeof ACTOR_KIND)[keyof typeof ACTOR_KIND]
+const isActorKind = (value: unknown): value is ActorKind =>
+  Object.values<unknown>(ACTOR_KIND).includes(value)
+
 interface Automation {
   readonly purpose: string
   readonly handler: string | null
@@ -47,7 +100,7 @@ const backfill = (database: DatabaseSync): void => {
     const id = text(row["task_id"])
     if (id === undefined) continue
     automations.set(id, {
-      purpose: text(row["purpose"]) ?? "user_automation",
+      purpose: text(row["purpose"]) ?? AUTOMATION_PURPOSE.userAutomation,
       handler: text(row["handler"]) ?? null,
       owner_desk_id: text(row["owner_desk_id"]) ?? null
     })
@@ -88,7 +141,7 @@ const backfill = (database: DatabaseSync): void => {
   const backfilled = new Set(rows.map((row) => row.run_id))
   let agents: Array<RunRow> = []
   for (const row of rows) {
-    if (row.session_type === "agent") agents.push(row)
+    if (row.session_type === AGENT_SESSION) agents.push(row)
     else store(row, rootAuthority(row, automations))
   }
   while (agents.length > 0) {
@@ -108,24 +161,13 @@ const backfill = (database: DatabaseSync): void => {
   }
 }
 
-const CAPABILITIES = new Set([
-  "none",
-  "read_only",
-  "reports",
-  "browser",
-  "all",
-  "desk",
-  "memory_capture",
-  "chat_summary",
-  "agent_research",
-  "agent_code"
-])
-const PURPOSES = new Set(["user_automation", "desk_review", "task_execution", "system"])
-const AGENT_CAPABILITY: Readonly<Record<string, string>> = {
-  code: "agent_code",
-  research: "agent_research",
-  work: "all"
-}
+const CAPABILITIES: ReadonlySet<string> = new Set<Capability>(Object.values(CAPABILITY))
+const PURPOSES: ReadonlySet<string> = new Set<AutomationPurpose>(Object.values(AUTOMATION_PURPOSE))
+const AGENT_CAPABILITY: Readonly<Record<string, unknown>> = {
+  [AGENT_MODE.code]: CAPABILITY.agentCode,
+  [AGENT_MODE.research]: CAPABILITY.agentResearch,
+  [AGENT_MODE.work]: CAPABILITY.all
+} satisfies Readonly<Record<AgentMode, Capability>>
 
 const rootAuthority = (row: RunRow, automations: ReadonlyMap<string, Automation>): Json => {
   const context = object(parse(row.context))
@@ -136,19 +178,20 @@ const rootAuthority = (row: RunRow, automations: ReadonlyMap<string, Automation>
     return capability !== undefined && CAPABILITIES.has(capability) ? [capability] : []
   })
   const execution = object(policy?.["execution"])
-  const kind = text(origin?.["kind"])
+  const kind = origin?.["kind"]
   if (
     policy === undefined ||
     capabilities === undefined ||
     capabilities.length === 0 ||
     typeof execution?.["observe"] !== "boolean" ||
-    kind === undefined ||
-    kind === "unrecorded"
+    !isOriginKind(kind) ||
+    kind === ORIGIN_KIND.unrecorded
   )
     return unrecorded(row.session_id)
   const deskId = text(object(policy["desk"])?.["desk_id"]) ?? null
   const taskItemId = text(object(context?.["task"])?.["item_id"]) ?? null
-  const originAutomationId = kind === "automation" ? text(origin?.["automation_id"]) : undefined
+  const originAutomationId =
+    kind === ORIGIN_KIND.automation ? text(origin?.["automation_id"]) : undefined
   const originAutomation =
     originAutomationId === undefined ? undefined : automations.get(originAutomationId)
   const chatAutomation =
@@ -168,7 +211,7 @@ const rootAuthority = (row: RunRow, automations: ReadonlyMap<string, Automation>
     row.session_id,
     text(policy["authority_session_id"]) ?? row.session_id
   )
-  const person = actor["kind"] === "person"
+  const person = actor["kind"] === ACTOR_KIND.person
   return {
     version: 1,
     actor,
@@ -180,7 +223,7 @@ const rootAuthority = (row: RunRow, automations: ReadonlyMap<string, Automation>
     },
     reach: { capabilities, observe: execution["observe"] },
     approval: { follows },
-    sandbox: { kind: "host_approved" },
+    sandbox: { kind: HOST_APPROVED_SANDBOX },
     memory: memoryOf(actor, deskId),
     delegation: { depth: 0, chain: [] },
     unattended: !person
@@ -198,27 +241,28 @@ const approvalSource = (
   authoritySession: string
 ): Json => {
   if (owner === undefined) return { kind: "chat", session_id: sessionId }
-  if (owner.purpose === "user_automation") return { kind: "chat", session_id: authoritySession }
+  if (owner.purpose === AUTOMATION_PURPOSE.userAutomation)
+    return { kind: "chat", session_id: authoritySession }
   if (owner.owner_desk_id !== null) return { kind: "desk_thread", desk_id: owner.owner_desk_id }
   return { kind: "automation", automation_id: owner.id }
 }
 
 const rootActor = (
-  kind: string,
+  kind: Exclude<OriginKind, typeof ORIGIN_KIND.unrecorded>,
   origin: Json,
   deskId: string | null,
   automationId: string | undefined,
   automation: Automation | undefined
 ): Json | undefined => {
   switch (kind) {
-    case "chat": {
+    case ORIGIN_KIND.chat: {
       const sessionId = text(origin["session_id"])
       const turnId = text(origin["turn_id"])
       return sessionId === undefined || turnId === undefined
         ? undefined
         : { kind: "person", session_id: sessionId, turn_id: turnId }
     }
-    case "automation":
+    case ORIGIN_KIND.automation:
       return automationId === undefined
         ? undefined
         : {
@@ -227,35 +271,36 @@ const rootActor = (
             purpose:
               automation !== undefined && PURPOSES.has(automation.purpose)
                 ? automation.purpose
-                : "user_automation",
+                : AUTOMATION_PURPOSE.userAutomation,
             handler: automation?.handler ?? null
           }
-    case "task": {
+    case ORIGIN_KIND.task: {
       const itemId = text(origin["item_id"])
       return itemId === undefined
         ? undefined
         : { kind: "task_worker", item_id: itemId, desk_id: deskId }
     }
-    case "desk": {
+    case ORIGIN_KIND.desk: {
       const desk = text(origin["desk_id"])
       return desk === undefined ? undefined : { kind: "desk_review", desk_id: desk }
     }
-    default:
-      return undefined
   }
 }
 
 const memoryOf = (actor: Json, deskId: string | null): Json => {
-  switch (actor["kind"]) {
-    case "person":
+  const kind = actor["kind"]
+  if (!isActorKind(kind)) return { _tag: "None" }
+  switch (kind) {
+    case ACTOR_KIND.person:
       return { _tag: "Global" }
-    case "automation":
-      return actor["handler"] === "memory_capture" ? { _tag: "Capture" } : { _tag: "Global" }
-    case "desk_review":
+    case ACTOR_KIND.automation:
+      return actor["handler"] === MEMORY_CAPTURE_HANDLER ? { _tag: "Capture" } : { _tag: "Global" }
+    case ACTOR_KIND.deskReview:
       return { _tag: "Desk", desk_id: actor["desk_id"] }
-    case "task_worker":
+    case ACTOR_KIND.taskWorker:
       return deskId === null ? { _tag: "None" } : { _tag: "Desk", desk_id: deskId }
-    default:
+    case ACTOR_KIND.agent:
+    case ACTOR_KIND.unrecorded:
       return { _tag: "None" }
   }
 }
@@ -278,14 +323,14 @@ const agentAuthority = (row: RunRow, derived: ReadonlyMap<string, Json>): Json =
   const delegation = object(parent["delegation"]) ?? {}
   const requested = AGENT_CAPABILITY[mode]
   const inherited = (array(reach["capabilities"]) ?? []).flatMap((value) => text(value) ?? [])
-  const parentSandbox = object(parent["sandbox"]) ?? { kind: "host_approved" }
+  const parentSandbox = object(parent["sandbox"]) ?? { kind: HOST_APPROVED_SANDBOX }
   return {
     version: 1,
     actor: {
       kind: "agent",
       mode,
       parent_run_id: parentRunId,
-      root: parentActor["kind"] === "agent" ? parentActor["root"] : parentActor["kind"]
+      root: parentActor["kind"] === ACTOR_KIND.agent ? parentActor["root"] : parentActor["kind"]
     },
     owns: {
       session_id: row.session_id,
@@ -297,14 +342,16 @@ const agentAuthority = (row: RunRow, derived: ReadonlyMap<string, Json>): Json =
       capabilities: [
         requested,
         ...inherited.filter(
-          (capability) => capability !== requested && (requested === "all" || capability !== "all")
+          (capability) =>
+            capability !== requested &&
+            (requested === CAPABILITY.all || capability !== CAPABILITY.all)
         )
       ],
       observe: false
     },
     approval: parent["approval"],
     sandbox:
-      mode === "code" && parentSandbox["kind"] === "host_approved"
+      mode === AGENT_MODE.code && parentSandbox["kind"] === HOST_APPROVED_SANDBOX
         ? { kind: "code_agent", root }
         : parentSandbox,
     memory: parent["memory"],
@@ -328,7 +375,8 @@ const orphan = (
   owns: { session_id: sessionId, desk_id: null, automation_id: null, task_item_id: taskItemId },
   reach: { capabilities: ["read_only"], observe: false },
   approval: { follows: { kind: "chat", session_id: sessionId } },
-  sandbox: mode === "code" ? { kind: "code_agent", root } : { kind: "host_approved" },
+  sandbox:
+    mode === AGENT_MODE.code ? { kind: "code_agent", root } : { kind: HOST_APPROVED_SANDBOX },
   memory: { _tag: "None" },
   delegation: { depth: 1, chain: [parentRunId] },
   unattended: true
@@ -349,7 +397,7 @@ const unrecorded = (sessionId: string): Json => ({
 const parse = (value: string | null): unknown => {
   if (value === null) return undefined
   try {
-    return JSON.parse(value)
+    return parseMigrationJson(value)
   } catch {
     return undefined
   }

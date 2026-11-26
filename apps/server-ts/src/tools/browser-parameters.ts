@@ -12,7 +12,9 @@ import { textSelectFields } from "./text-select.js"
 
 export const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 
-export const nodeRefSchema = (description: string) =>
+export const nodeRefSchema = (
+  description: string
+): Schema.decodeTo<Schema.String, Schema.String, never, never> =>
   Schema.String.check(Schema.isPattern(/^@?e[1-9][0-9]*$/u))
     .annotate({ description })
     .pipe(

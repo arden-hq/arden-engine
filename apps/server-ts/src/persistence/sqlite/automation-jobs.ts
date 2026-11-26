@@ -51,30 +51,29 @@ import {
 import { encodeJson } from "./json.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import { readSpaceReviewContext, readTaskWorkerContext } from "./space-job-context.js"
-import type { AutomationStoreDeps } from "./automation-rows.js"
-import { makeAutomationJobSettlement, makeFencedOccurrences } from "./automation-job-settlement.js"
 import {
   type QueueClaim,
   type QueueEntry,
-  type WorkOwner,
   boundAttemptJson,
   storeError,
   decodeOwnedAttempt,
   decodeOwner,
-  decodeQueueContext,
-  encodeQueueContext,
+  queueColumns,
+  type WorkOwner,
   hasOwner,
   ownerJoin,
   ownerJson,
-  queueColumns,
   reviewMayRunSql
 } from "./automation-rows.js"
+import { makeAutomationJobSettlement, type SettlementDeps } from "./automation-job-settlement.js"
 import { makeOwnerChats } from "./owner-chat.js"
 import { taskStandsSql } from "./task-wake.js"
 import { iso } from "../../runtime/clock.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { pendingDecisionCards } from "./pending-decision-cards.js"
 import { causingAutomation } from "./run-cause.js"
+import { decodeQueueContext, encodeQueueContext } from "./automation-queue-context.js"
+import { makeFencedOccurrences } from "./automation-fenced-occurrence.js"
 
 const nextLeaseStamp = (epochMs: number, previous: string | null): string => {
   const previousMs = previous === null ? Number.NEGATIVE_INFINITY : Date.parse(previous)
@@ -86,10 +85,7 @@ export const makeAutomationJobs = ({
   sessionEvents,
   rules,
   diagnostics
-}: Pick<
-  AutomationStoreDeps,
-  "writer" | "sessionEvents" | "rules" | "diagnostics"
->): AutomationQueue["Service"]["jobs"] => {
+}: SettlementDeps): AutomationQueue["Service"]["jobs"] => {
   const sql = writer.sql
   const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
   const { loadFenced, settleFenced } = makeFencedOccurrences({ writer, sessionEvents, rules })
@@ -562,7 +558,7 @@ export const makeAutomationJobs = ({
               token: `${automationRunId}|${runSnapshot.claim_count}`,
               attempt: candidate.attempt_count + 1,
               payload: {
-                automationId: owner.key,
+                ...work.jobOwner,
                 purpose: bound?.purpose ?? work.job.purpose,
                 name: work.name,
                 automationRunId,
@@ -730,7 +726,7 @@ export const makeAutomationJobs = ({
             token: input.token,
             attempt: row.attempt_count,
             payload: {
-              automationId: owner.key,
+              ...work.jobOwner,
               purpose: bound.purpose,
               name: work.name,
               automationRunId: parsed.runId,

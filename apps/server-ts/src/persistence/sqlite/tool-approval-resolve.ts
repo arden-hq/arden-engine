@@ -1,4 +1,4 @@
-import { DateTime, Effect, Predicate, Schema } from "effect"
+import { DateTime, Effect, Predicate } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
 import {
@@ -6,13 +6,12 @@ import {
   rejectedToolResult,
   ToolExecutionStore,
   ToolExecutionStoreError,
-  type ApprovalAlternativeInput,
   type ApprovalEditsInput,
   type ResolveToolApprovalInput,
   type ResolveToolApprovalResult
 } from "../tools/store.js"
 import { spaceFolderGrantOf } from "../permissions/space-folder-approval.js"
-import { ardenStateRoot, resolveLocalDirectory } from "../../storage/local-paths.js"
+import { resolveLocalDirectory } from "../../storage/local-paths.js"
 import { decodeJson, encodeJson } from "./json.js"
 import {
   cardRuleList,
@@ -49,108 +48,11 @@ import { recordCommandResult } from "./relay.js"
 import { noApprovalForRun } from "./approval-policy.js"
 import { detachedWorkflowCalls, requireLiveWorkflowOwner } from "./detached-workflow-calls.js"
 import { readRunAuthority } from "./run-context.js"
-
-const ResolveToolApprovalInputSchema = Schema.Struct({
-  runId: Schema.NonEmptyString,
-  toolCallId: Schema.NonEmptyString,
-  approved: Schema.optionalKey(Schema.Boolean),
-  feedback: Schema.optionalKey(Schema.String),
-  grantStanding: Schema.optionalKey(Schema.Boolean),
-  grantList: Schema.optionalKey(Schema.Literals(["space", "global"])),
-  attachFolderToSpace: Schema.optionalKey(Schema.Boolean),
-  askedAt: Schema.optionalKey(Schema.NonEmptyString),
-  commandId: Schema.optionalKey(Schema.NonEmptyString)
-})
-
-const decodeResolveInput = Effect.fn("SqliteToolExecutionStore.decodeResolveInput")(function* (
-  input: ResolveToolApprovalInput
-): Effect.fn.Return<
-  Required<Pick<ResolveToolApprovalInput, "runId" | "toolCallId" | "approved">> & {
-    readonly feedback: string | null
-    readonly grantStanding: boolean
-    readonly grantList: StandingRuleList | undefined
-    readonly attachFolderToSpace: boolean
-    readonly edits: ApprovalEditsInput | null
-    readonly alternative: ApprovalAlternativeInput | null
-    readonly askedAt: string | undefined
-    readonly commandId?: string
-  },
-  ToolExecutionStoreError
-> {
-  const { edits, alternative, ...fields } = input
-  const decoded = yield* Schema.decodeUnknownEffect(ResolveToolApprovalInputSchema)(fields, {
-    onExcessProperty: "error"
-  }).pipe(
-    Effect.mapError((cause) =>
-      toolError("resolve", "invalid", "Invalid tool approval decision", input, cause)
-    )
-  )
-  if (decoded.approved === undefined) {
-    return yield* toolError("resolve", "invalid", "Tool approval decision is required", decoded)
-  }
-  if (decoded.grantStanding === true && decoded.approved !== true) {
-    return yield* toolError(
-      "resolve",
-      "invalid",
-      "A standing permission requires approval",
-      decoded
-    )
-  }
-  if (decoded.grantList !== undefined && decoded.grantStanding !== true) {
-    return yield* toolError(
-      "resolve",
-      "invalid",
-      "Where to save names a standing permission",
-      decoded
-    )
-  }
-  if (decoded.attachFolderToSpace === true && decoded.approved !== true) {
-    return yield* toolError(
-      "resolve",
-      "invalid",
-      "Attaching a Local folder requires approval",
-      decoded
-    )
-  }
-  if (decoded.attachFolderToSpace === true && decoded.grantStanding === true) {
-    return yield* toolError(
-      "resolve",
-      "invalid",
-      "One approval cannot create two persistent grants",
-      decoded
-    )
-  }
-  if (edits !== undefined && decoded.approved !== true) {
-    return yield* toolError("resolve", "invalid", "Edits on the card require approval", decoded)
-  }
-  if (
-    alternative !== undefined &&
-    (decoded.approved !== true ||
-      decoded.grantStanding === true ||
-      decoded.attachFolderToSpace === true)
-  ) {
-    return yield* toolError(
-      "resolve",
-      "invalid",
-      "Save as draft is its own answer: it approves the draft and grants nothing",
-      decoded
-    )
-  }
-  const feedback = decoded.feedback?.trim() || null
-  return {
-    runId: decoded.runId,
-    toolCallId: decoded.toolCallId,
-    approved: decoded.approved,
-    feedback,
-    grantStanding: decoded.grantStanding === true,
-    grantList: decoded.grantList,
-    attachFolderToSpace: decoded.attachFolderToSpace === true,
-    edits: edits ?? null,
-    alternative: alternative ?? null,
-    askedAt: decoded.askedAt,
-    ...(decoded.commandId === undefined ? {} : { commandId: decoded.commandId })
-  }
-})
+import { decodeResolveInput, type ToolApprovalResolveInput } from "./tool-approval-input.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { SessionLifecycleEventError } from "../sessions/events.js"
+import type { UnitOfWork } from "../unit-of-work.js"
+import { ardenStateRoot } from "../../storage/local-paths.js"
 
 const resolveApprovalFolders = Effect.fn("SqliteToolExecutionStore.resolveApprovalFolders")(
   function* (
@@ -217,7 +119,7 @@ export const makeToolApprovalResolve = ({
 export const keepCommandResult = (
   sql: SqlClient.SqlClient,
   decision: { readonly runId: string; readonly toolCallId: string; readonly commandId?: string }
-) =>
+): Effect.Effect<void, ToolExecutionStoreError, never> =>
   decision.commandId === undefined
     ? Effect.void
     : recordCommandResult(sql, {
@@ -249,22 +151,26 @@ export const keepCommandResult = (
         )
       )
 
+type ToolApprovalResolveInTransaction = (
+  input: ToolApprovalResolveInput
+) => Effect.Effect<
+  { readonly runId: string; readonly ready: boolean },
+  ToolExecutionStoreError | SqlError | SessionLifecycleEventError,
+  UnitOfWork
+>
+
 export const makeToolApprovalResolveInTransaction = ({
   sql,
   sessionEvents
 }: {
   readonly sql: SqlClient.SqlClient
   readonly sessionEvents: PersistenceDeps["sessionEvents"]
-}) =>
+}): ToolApprovalResolveInTransaction =>
   Effect.fn("SqliteToolExecutionStore.resolveInTransaction")(function* ({
     decision,
     timestamp,
     approvedFolders
-  }: {
-    readonly decision: Effect.Success<ReturnType<typeof decodeResolveInput>>
-    readonly timestamp: string
-    readonly approvedFolders: ApprovalFolderResolutions
-  }) {
+  }: ToolApprovalResolveInput) {
     const approval = yield* loadApprovalRow(sql, decision.runId, decision.toolCallId, "resolve")
     if (approval === null) {
       return yield* toolError(

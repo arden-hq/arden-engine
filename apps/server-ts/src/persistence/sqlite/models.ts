@@ -129,7 +129,11 @@ const seedDefaults = Effect.fn("SqliteModelStore.seedDefaults")(function* ({
     .pipe(Effect.mapError(preserve("settings", "Could not initialize model settings")))
 })
 
-export const makeModelDefaultsSeed = ({ writer }: Pick<PersistenceDeps, "writer">) => {
+export const makeModelDefaultsSeed = ({
+  writer
+}: Pick<PersistenceDeps, "writer">): ((
+  runtime: ModelSettingsRuntime
+) => Effect.Effect<void, ModelCatalogError, never>) => {
   let seeded = false
   return Effect.fn("SqliteModelStore.seed")(function* (runtime: ModelSettingsRuntime) {
     if (seeded) return

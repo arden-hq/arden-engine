@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 import { timerSleep } from "../lib/timer-sleep.js"
 import { formatDurationFine } from "@arden-hq/std/time"
 import { Effect, FiberSet, Layer } from "effect"
@@ -44,7 +45,7 @@ export const TerminalNoticesRuntime: Layer.Layer<
     const persist = (): void => writeRunning(file, store.all().filter(isRunningDetached))
     persist()
 
-    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+    const timers = new Map<string, Timer>()
     yield* Effect.forkScoped(
       timerSleep("1 minute").pipe(
         Effect.andThen(
@@ -79,7 +80,7 @@ export const TerminalNoticesRuntime: Layer.Layer<
         `terminal-exit:${event.terminal.toolCallId}`
       ])
       if (timers.has(key)) return
-      const timer = setTimeout(() => {
+      const timer = after(EXIT_NOTICE_DELAY_MS, () => {
         timers.delete(key)
         const notice = store.takeExitNotice(id)
         if (notice !== undefined) runFork(send(exitNotice(notice)))
@@ -89,13 +90,13 @@ export const TerminalNoticesRuntime: Layer.Layer<
             event.terminal.sessionId,
             `terminal-exit:${event.terminal.toolCallId}`
           )
-      }, EXIT_NOTICE_DELAY_MS)
+      })
       timers.set(key, timer)
     })
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         unsubscribe()
-        for (const timer of timers.values()) clearTimeout(timer)
+        for (const timer of timers.values()) timer.cancel()
       })
     )
   })

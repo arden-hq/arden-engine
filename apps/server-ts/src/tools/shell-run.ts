@@ -1,3 +1,4 @@
+import { after } from "@arden-hq/std/timer"
 import { makeToolOutputStream, type ToolOutputFrame } from "./output-stream.js"
 import { BoundedCapture } from "./bash-capture.js"
 import {
@@ -84,7 +85,7 @@ export const runCommandUntil = (
     const finish = (effect: () => void): void => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      timer.cancel()
       signal.removeEventListener("abort", onAbort)
       stopData()
       stopExit()
@@ -100,9 +101,8 @@ export const runCommandUntil = (
     }
     const onAbort = (): void =>
       uncertain("The command was cancelled after it started; its side effects may have landed.")
-    const timer = setTimeout(
-      () => finish(() => resolve({ state: "running", output: formatOutput(stdout, stderr) })),
-      options.yieldMs
+    const timer = after(options.yieldMs, () =>
+      finish(() => resolve({ state: "running", output: formatOutput(stdout, stderr) }))
     )
 
     signal.addEventListener("abort", onAbort, { once: true })

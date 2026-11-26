@@ -1,4 +1,4 @@
-import type { Schema } from "effect"
+import { Option, Schema } from "effect"
 import type { ScriptFields } from "../workflows/runtime/contract.js"
 
 export const bodyFields = (
@@ -9,15 +9,13 @@ export const bodyFields = (
   return json === undefined ? { text } : { text, json }
 }
 
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
 const parseJsonBody = (text: string, declaredJson: boolean): Schema.Json | undefined => {
   const trimmed = text.trim()
   if (trimmed === "") return undefined
   if (!declaredJson && trimmed[0] !== "{" && trimmed[0] !== "[") return undefined
-  try {
-    return JSON.parse(trimmed) as Schema.Json
-  } catch {
-    return undefined
-  }
+  return Option.getOrUndefined(decodeJson(trimmed))
 }
 
 export type ScriptToolDescription = {

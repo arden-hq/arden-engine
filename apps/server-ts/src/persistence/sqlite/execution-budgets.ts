@@ -3,6 +3,7 @@ import type { SqlClient, Statement } from "effect/unstable/sql"
 import { WorkStoreError } from "../work/store.js"
 import { runCancellationRequested } from "./run-cancellation.js"
 import { modelTurnRunStatusList } from "./status-sets.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const failure = (message: string) => new WorkStoreError({ reason: "conflict", message })
 
@@ -17,7 +18,7 @@ export const createExecutionBudget = Effect.fn("ExecutionBudget.create")(functio
 export const executionBudgetExpired = (
   sql: SqlClient.SqlClient,
   metadata: Statement.Fragment
-) => sql`(
+): Statement.Statement<Row> => sql`(
   ${runCancellationRequested(sql, metadata)} OR NOT EXISTS (
   SELECT 1 FROM execution_budgets AS budget
   WHERE budget.budget_id = json_extract(${metadata}, '$.run_policy.budget_id')
@@ -27,7 +28,7 @@ export const executionBudgetExpired = (
 export const executionBudgetMissing = (
   sql: SqlClient.SqlClient,
   metadata: Statement.Fragment
-) => sql`NOT EXISTS (
+): Statement.Statement<Row> => sql`NOT EXISTS (
   SELECT 1 FROM execution_budgets AS budget
   WHERE budget.budget_id = json_extract(${metadata}, '$.run_policy.budget_id'))`
 

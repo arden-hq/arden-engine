@@ -5,6 +5,9 @@ import { cutText } from "@arden-hq/std/text"
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
+import type { SessionQueryFailure } from "../persistence/sessions/queries.js"
+import type { StructuredCompletionError } from "../models/structured-completion.js"
+import type { SpaceStoreError } from "../persistence/spaces/store.js"
 
 const LETTER_SUBJECT_INPUT_MAX_CHARS = 8_000
 
@@ -21,7 +24,15 @@ export interface LetterSubjectDependencies {
   readonly spaces: SpaceStore["Service"]
 }
 
-export const makeLetterSubject = (dependencies: LetterSubjectDependencies) =>
+export const makeLetterSubject = (
+  dependencies: LetterSubjectDependencies
+): ((
+  input: LetterSubjectInput
+) => Effect.Effect<
+  boolean,
+  SessionQueryFailure | StructuredCompletionError | SpaceStoreError,
+  never
+>) =>
   Effect.fn("LetterSubject.generate")(function* (input: LetterSubjectInput) {
     const text = input.text.trim()
     if (text.length === 0) return false

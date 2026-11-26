@@ -1,5 +1,6 @@
 import { errorMessage, redactedFailureText } from "@arden-hq/std/errors"
 import { retryAfterHints } from "@arden-hq/std/retry"
+import { abortAfter } from "@arden-hq/std/timer"
 
 import type { ModelStreamItem } from "../../contracts/provider.js"
 import type { ProviderErrorCode } from "../../errors.js"
@@ -277,8 +278,7 @@ const readErrorDetail = async (
 ): Promise<string | undefined> => {
   if (body === null) return undefined
   const reader = body.getReader()
-  const timeout = new AbortController()
-  const timer = setTimeout(() => timeout.abort(), Math.min(idleTimeoutMs, MAX_ERROR_DETAIL_WAIT_MS))
+  const timeout = abortAfter(Math.min(idleTimeoutMs, MAX_ERROR_DETAIL_WAIT_MS))
   const readSignal = AbortSignal.any([signal, timeout.signal])
   const decoder = new TextDecoder()
   let detail = ""
@@ -297,7 +297,7 @@ const readErrorDetail = async (
     if (signal.aborted) throw abortReason(signal)
     return detail || undefined
   } finally {
-    clearTimeout(timer)
+    timeout.cancel()
     void reader.cancel().catch(() => {})
   }
 }

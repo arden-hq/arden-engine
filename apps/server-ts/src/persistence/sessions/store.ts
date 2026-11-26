@@ -2,7 +2,7 @@ import type { MutationOperationIdentity } from "../tools/mutation-receipt.js"
 import type { RecordedHistoryInput, RecordedHistoryPage, RecordedHistoryError } from "../history.js"
 import { storeErrorFields } from "../errors.js"
 import type { RuntimeRunStatus, SessionPresentation } from "@arden-hq/protocol"
-import type { SessionType } from "@arden-hq/protocol/sessions"
+import type { SessionParentStep, SessionType } from "@arden-hq/protocol/sessions"
 import { Context, Effect, Schema } from "effect"
 import type { StoredFork } from "./fork.js"
 import type { SessionForkOrigin } from "./fork-origin.js"
@@ -73,6 +73,7 @@ export interface StoredSession {
 }
 
 export interface SessionListEntry extends StoredSession {
+  readonly parentStep: SessionParentStep
   readonly currentActivity?: import("@arden-hq/protocol/chat").RunActivity | undefined
   readonly agentWorkspace?: string | undefined
   readonly latestRunId?: string | undefined

@@ -28,6 +28,10 @@ import { approvalPermissionContext } from "./permissions.js"
 import { keepCommandResult, saveCardRule } from "./tool-approval-resolve.js"
 import { followUpRecordableStatusList } from "./status-sets.js"
 import { readCallPlan } from "./task-direction.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { ToolExecutionStoreError } from "../tools/store.js"
+import type { SessionLifecycleEventError } from "../sessions/events.js"
+import type { UnitOfWork } from "../unit-of-work.js"
 
 interface DeferredRow {
   readonly run_id: string
@@ -283,7 +287,15 @@ export const makeDeferredDecisionInTransaction = ({
 }: {
   readonly sql: PersistenceDeps["writer"]["sql"]
   readonly sessionEvents: PersistenceDeps["sessionEvents"]
-}) =>
+}): ((
+  input: DeferredDecisionInput
+) => Effect.Effect<
+  | { kind: "not_deferred"; call?: never }
+  | { kind: "settled"; call?: never }
+  | { kind: "approved"; call: DeferredToolCall },
+  SqlError | ToolExecutionStoreError | SessionLifecycleEventError,
+  UnitOfWork
+>) =>
   Effect.fn("DeferredToolCalls.decideInTransaction")(function* (input: DeferredDecisionInput) {
     const identity = { runId: input.runId, toolCallId: input.toolCallId }
     const at = DateTime.formatIso(yield* DateTime.now)

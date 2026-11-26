@@ -203,7 +203,7 @@ export const makeChatRecovery = ({
           const mintedMessageIds = yield* loadMintedMessageIds(
             sql,
             run.session_id,
-            run.assistant_message_id,
+            run.turn_id,
             "claim_resume"
           )
           const assistantMessagePersisted = mintedMessageIds.includes(run.assistant_message_id)
@@ -219,7 +219,7 @@ export const makeChatRecovery = ({
           const staleIds = [
             ...new Set([
               ...(assistantMessagePersisted ? [] : [run.assistant_message_id]),
-              ...staleStreamedIds(run.assistant_message_id, new Set(mintedMessageIds), started)
+              ...staleStreamedIds(new Set(mintedMessageIds), started)
             ])
           ]
           const reset =

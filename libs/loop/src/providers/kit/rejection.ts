@@ -4,6 +4,7 @@ import { clipLine } from "@arden-hq/std/text"
 
 import type { ProviderErrorCode } from "../../errors.js"
 import { HttpStatusError } from "./errors.js"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 /** How much of a rejection body is worth carrying into the error message. */
 export const MAX_STATUS_DETAIL_CHARS = 600
@@ -169,7 +170,7 @@ export const httpRejection = (status: number, detail: string | undefined): Rejec
 const parseJson = (text: string | undefined): unknown => {
   if (text === undefined) return undefined
   try {
-    return JSON.parse(text)
+    return parseJsonText(text)
   } catch {
     return undefined
   }

@@ -34,6 +34,8 @@ import { taskOpenSql } from "./task-status-sql.js"
 import { defaultModeSql } from "./default-approval-mode.js"
 import { ownerIsOn, ownerPolicy, readWorkOwner } from "./automation-rows.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
+import { intersectGoogleAccounts, intersectResourceSessions } from "./run-policy-intersect.js"
 
 export const workerScopes = { code: "agent_code", research: "agent_research", work: "all" } as const
 
@@ -45,7 +47,7 @@ export const runPolicyRevoked = (
   metadata: Statement.Fragment,
   sessionId: Statement.Fragment,
   workerOnly = true
-) => sql`(
+): Statement.Statement<Row> => sql`(
   (json_type(${metadata}, '$.run_policy') = 'object'
     AND NOT EXISTS (SELECT 1 FROM sessions AS authority_session
       WHERE authority_session.session_id = ${runAuthorityChatSql(sql, metadata, sessionId)}
@@ -488,38 +490,3 @@ const runBudget = Effect.fn("RunPolicy.budget")(function* (
       WHERE budget_id = ${budgetId}`
   return budgetId
 })
-
-const intersectGoogleAccounts = (
-  left: RunPolicy["google_accounts"],
-  right: RunPolicy["google_accounts"]
-): RunPolicy["google_accounts"] => {
-  if (left === null) return right
-  if (right === null) return left
-  return left.filter((grant) =>
-    right.some(
-      (allowed) => allowed.account_id === grant.account_id && allowed.service === grant.service
-    )
-  )
-}
-
-const intersectResourceSessions = (
-  current: ReadonlyArray<SessionResourceReach>,
-  previous: ReadonlyArray<SessionResourceReach>
-): ReadonlyArray<SessionResourceReach> =>
-  current.flatMap((resource) => {
-    const held = previous.find(
-      (candidate) =>
-        candidate.session_id === resource.session_id &&
-        candidate.generation === resource.generation &&
-        candidate.authority_session_id === resource.authority_session_id &&
-        candidate.authority_generation === resource.authority_generation
-    )
-    return held === undefined
-      ? []
-      : [
-          {
-            ...resource,
-            capabilities: meetCapabilities(resource.capabilities, held.capabilities)
-          }
-        ]
-  })

@@ -34,12 +34,13 @@ import { decodeJson, encodeJson } from "./json.js"
 import { JsonObjectSchema } from "../json.js"
 import { settleTerminalToolsInTransaction } from "./tool-terminal.js"
 import { supersedeMessagesInTransaction } from "./superseded-messages.js"
-import { conversationMessagePredicate } from "./transcript.js"
 import { nextId, type PersistenceDeps } from "./deps.js"
 import { appendRunSettledInTransaction } from "./run-settled.js"
 import { isTerminalRunStatus } from "@arden-hq/protocol/runs"
 import { messageTurnIdSql } from "./message-turns.js"
 import { turnTouchesRecencySql } from "./session-unread.js"
+import { conversationMessagePredicate } from "./transcript-predicates.js"
+import { assistantTextStart } from "./assistant-text-start.js"
 
 const finishUsageSchema = Schema.Struct({
   prompt: Schema.optionalKey(Schema.Natural),
@@ -313,11 +314,7 @@ export const makeChatTerminal = ({
                       ]),
                   ...replacedEvents,
                   {
-                    event: {
-                      type: "TEXT_MESSAGE_START",
-                      message_id: nextAssistantMessageId,
-                      role: ROLE.assistant
-                    } satisfies ChatProjectionEvent,
+                    event: assistantTextStart(nextAssistantMessageId),
                     runId: run.run_id
                   }
                 ]

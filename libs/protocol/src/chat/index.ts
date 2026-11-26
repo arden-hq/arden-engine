@@ -34,21 +34,15 @@ import {
 } from "./schema.js"
 import {
   CancelResponseSchema,
-  mapCancelResponse,
   ChatAcknowledgementSchema,
-  mapChatAcknowledgement,
   ChatReceiptResponseSchema,
   ConnectionResumeResponseSchema,
-  mapChatReceipt,
   encodeToolCallPathEffect,
   encodeToolResultValuePathEffect,
   QueuedCancelResponseSchema,
-  mapQueuedCancelResponse,
   QueuedChatMessageSchema,
   QueuedChatMessagesSchema,
-  mapReadResponse,
   RunsStatusSchema,
-  mapRunsStatus,
   encodeCancelRequestEffect,
   encodeChatMessageRequestEffect,
   encodeConnectionResultRequestEffect,
@@ -63,6 +57,14 @@ import {
   encodeReadPathEffect,
   encodeToolResultRequestEffect
 } from "./facade-schema.js"
+import {
+  mapCancelResponse,
+  mapChatAcknowledgement,
+  mapChatReceipt,
+  mapQueuedCancelResponse,
+  mapReadResponse,
+  mapRunsStatus
+} from "./facade-mappers.js"
 import {
   PersistedChildAgentMetadataSchema,
   ToolResultCostSchema,
@@ -126,6 +128,7 @@ export {
 export type {
   ApprovalPresentation,
   ApprovalPresentationBody,
+  ApprovalPresentationEditable,
   ApprovalPresentationField
 } from "./approval-presentation.js"
 export type { CapabilityCandidate, CapabilityProposal } from "./capability-proposal.js"
@@ -269,4 +272,9 @@ export const chatRoutes = {
   }
 } as const
 
-export { APPROVAL_FIELD_LABEL, canDenyApprovalByReply } from "./approval-presentation.js"
+export {
+  APPROVAL_FIELD_LABEL,
+  canDenyApprovalByReply,
+  EDITABLE_KIND
+} from "./approval-presentation.js"
+export { STREAM_RECORD, type StreamRecord } from "./events/text.js"

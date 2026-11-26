@@ -5,10 +5,8 @@ import { readFile, stat } from "node:fs/promises"
 
 import { mutationReceiptHost } from "../persistence/tools/mutation-receipt.js"
 import {
-  atomicCompareAndSwap,
   insideLocalFolder,
   pathRuleFor,
-  LocalRevisionConflict,
   type LocalPathPolicy,
   type LocalPathServices,
   type SessionPathPolicy
@@ -20,6 +18,7 @@ import { cwdFor, displayFor, filesystemError, PathSchema, resolveFor } from "./f
 import { grantData, offerFolderGrant } from "./folder-grant.js"
 import type { ServerRunContext } from "./run-context.js"
 import { toolRefusal } from "./tool-failure.js"
+import { atomicCompareAndSwap, LocalRevisionConflict } from "../storage/local-revision.js"
 
 const MAX_MUTATION_FILE_BYTES = 8 * 1024 * 1024
 

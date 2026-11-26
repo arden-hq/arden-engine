@@ -2,6 +2,7 @@ import type { CompletionResponse, ModelProvider, ResponseFormat } from "@arden-h
 import { Context, Effect, Layer, Stream, SubscriptionRef } from "effect"
 import type { PlanLimitsSource } from "./plan-limits.js"
 import type { StructuredOutputDialect } from "./structured-output.js"
+import type { PlanReading } from "./plan-limits.js"
 
 export interface ApprovalReviewSource {
   readonly modelId: string
@@ -44,7 +45,10 @@ export interface ModelRouteInput {
 }
 
 /** The plan reading that applies to a request to `model`, if any. */
-export const planReadingFor = (route: ModelRoute | undefined, model: string) =>
+export const planReadingFor = (
+  route: ModelRoute | undefined,
+  model: string
+): PlanReading | undefined =>
   route !== undefined && route.planMeters(model) ? route.planLimits?.latest() : undefined
 
 export class ModelProviderService extends Context.Service<

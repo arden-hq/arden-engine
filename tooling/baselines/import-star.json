@@ -1,12 +1,1 @@
-{
-  "apps/server-ts/src/chat/events.ts": 1,
-  "apps/server-ts/src/http/automations/api.ts": 1,
-  "apps/server-ts/src/http/automations/handlers.ts": 1,
-  "apps/server-ts/src/http/chat/api.ts": 1,
-  "apps/server-ts/src/models/structured-output.ts": 1,
-  "apps/server-ts/src/providers/openai-codex/runtime.ts": 2,
-  "apps/server-ts/src/runtime/layers.ts": 1,
-  "libs/protocol/src/transport/sse-effect.ts": 1,
-  "libs/revisions/src/storage/files.ts": 1,
-  "libs/revisions/src/storage/node.ts": 1
-}
+{}

@@ -1,3 +1,5 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
+import { after } from "@arden-hq/std/timer"
 import { WebSocket } from "ws"
 import { retryAfterHints } from "@arden-hq/std/retry"
 import { HttpStatusError, RetryableProviderError } from "@arden-hq/loop/provider-kit"
@@ -39,7 +41,7 @@ export const connectResponsesWebSocket = async ({
   signal.addEventListener("abort", abort, { once: true })
   socket.on("message", (data) => {
     try {
-      const parsed: unknown = JSON.parse(data.toString())
+      const parsed = parseJsonText(data.toString())
       observeEvent?.(parsed)
       queue.push(parsed)
     } catch (cause) {
@@ -70,11 +72,11 @@ export const connectResponsesWebSocket = async ({
     wake()
   })
   if (signal.aborted) socket.terminate()
-  const deadline = setTimeout(() => {
+  const deadline = after(10_000, () => {
     failure = new RetryableProviderError("OpenAI WebSocket connection timed out")
     socket.terminate()
     wake()
-  }, 10_000)
+  })
   try {
     await new Promise<void>((resolve, reject) => {
       socket.once("open", resolve)
@@ -92,7 +94,7 @@ export const connectResponsesWebSocket = async ({
       )
     })
   } finally {
-    clearTimeout(deadline)
+    deadline.cancel()
   }
   return {
     isClosed: () => socket.readyState !== WebSocket.OPEN || failure !== undefined,

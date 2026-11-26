@@ -22,9 +22,6 @@ export const NESTED_CALL_MARKERS = {
   [COMPUTER_TOOL]: ":computer:"
 } as const
 
-export const nestedCallMarker = (toolName: string): string | undefined =>
-  Object.entries(NESTED_CALL_MARKERS).find(([name]) => name === toolName)?.[1]
-
 export const DETACHED_WORKFLOW_OWNER_TOOLS = [
   CODE_MODE_TOOL,
   RETIRED_DYNAMIC_WORKFLOW_TOOL,
@@ -35,3 +32,37 @@ export const REPLAYABLE_CONTROL_TOOLS = [
   ...DETACHED_WORKFLOW_OWNER_TOOLS,
   WORKFLOW_CANCEL_TOOL
 ] as const
+
+export const NESTING = {
+  code: "code",
+  task: "task",
+  computer: "computer",
+  workflow: "workflow",
+  approved: "approved"
+} as const
+
+export type NestingKind = (typeof NESTING)[keyof typeof NESTING]
+
+export const SCRIPT_NESTINGS: ReadonlyArray<NestingKind> = [NESTING.code, NESTING.workflow]
+
+type ToolCallNesting =
+  | { readonly kind: Exclude<NestingKind, typeof NESTING.workflow> }
+  | {
+      readonly kind: typeof NESTING.workflow
+      readonly agentKey: string
+      readonly launch: number
+    }
+
+export interface CallParent {
+  readonly toolCallId: string
+  readonly nesting: ToolCallNesting
+}
+
+const NESTED_CALL_NESTING = {
+  [CODE_MODE_TOOL]: NESTING.code,
+  [BROWSER_TASK_TOOL]: NESTING.task,
+  [COMPUTER_TOOL]: NESTING.computer
+} as const
+
+export const nestedCallNesting = (toolName: string): NestingKind | undefined =>
+  Object.entries(NESTED_CALL_NESTING).find(([name]) => name === toolName)?.[1]

@@ -258,14 +258,16 @@ const mapRun = (run: StorageCleanupRunWire): StorageCleanupRun => ({
 export const getStoragePlanId = (plan: StorageCleanupPlan): string | undefined =>
   storagePlanIds.get(plan)
 
-export const decodeStorageCleanupPlanEffect = (value: unknown) =>
+export const decodeStorageCleanupPlanEffect = (
+  value: unknown
+): Effect.Effect<StorageCleanupPlan, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(StorageCleanupPlanResponseSchema)(value).pipe(Effect.map(mapPlan))
 
 export const decodeStorageCleanupRunForPlanEffect = (
   value: unknown,
   expectedPlanId: string,
   maxActions: number
-) =>
+): Effect.Effect<StorageCleanupRun, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(
     StorageCleanupRunResponseSchema.check(
       Schema.makeFilter((run) => {
@@ -280,7 +282,9 @@ export const decodeStorageCleanupRunForPlanEffect = (
     )
   )(value).pipe(Effect.map(mapRun))
 
-export const encodeStorageSettingsPatchEffect = (value: unknown) =>
+export const encodeStorageSettingsPatchEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(StorageSettingsPatchInputSchema)(value, strict).pipe(
     Effect.map((settings) =>
       JSON.stringify({
@@ -293,7 +297,9 @@ export const encodeStorageSettingsPatchEffect = (value: unknown) =>
     )
   )
 
-export const encodeStorageCleanupContextEffect = (value: unknown) =>
+export const encodeStorageCleanupContextEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(StorageCleanupContextInputSchema)(value, strict).pipe(
     Effect.map((context) =>
       JSON.stringify({
@@ -306,7 +312,7 @@ export const encodeStorageCleanupContextEffect = (value: unknown) =>
 export const encodeStorageCleanupRequestEffect = (
   planId: unknown,
   context: StorageCleanupContext
-) =>
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(StoragePlanIdSchema)(planId).pipe(
     Effect.flatMap((validPlanId) =>
       Schema.decodeUnknownEffect(StorageCleanupContextInputSchema)(context, strict).pipe(

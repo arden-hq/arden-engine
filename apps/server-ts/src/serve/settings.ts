@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { APPROVAL_MODES } from "@arden-hq/protocol/permissions"
 import { errorMessage } from "@arden-hq/std/errors"
 import { baseUrlIssue, type BaseUrlIssue } from "@arden-hq/std/url"
@@ -276,11 +277,7 @@ export const readSettings = async (path: string): Promise<Settings> => {
   } catch {
     throw new SettingsError(`Cannot read the settings file: ${path}`)
   }
-  let value: unknown
-  try {
-    value = JSON.parse(content)
-  } catch {
-    throw new SettingsError(`The settings file is not JSON: ${path}`)
-  }
+  const value = parseJsonTextOrUndefined(content)
+  if (value === undefined) throw new SettingsError(`The settings file is not JSON: ${path}`)
   return parseSettings(value)
 }

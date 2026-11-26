@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { quoted } from "@arden-hq/std/count"
 import { Schema } from "effect"
 import type { JsonObject } from "../persistence/json.js"
@@ -34,13 +35,8 @@ export const targetLabel = (
   const space = described.indexOf(" ")
   const role = space < 0 ? described : described.slice(0, space)
   const rest = space < 0 ? "" : described.slice(space + 1)
-  let name = ""
-  try {
-    const parsed: unknown = JSON.parse(rest)
-    if (typeof parsed === "string") name = parsed
-  } catch {
-    name = ""
-  }
+  const parsed = parseJsonTextOrUndefined(rest)
+  const name = typeof parsed === "string" ? parsed : ""
   return { role, name: name.trim() }
 }
 
@@ -76,11 +72,29 @@ const actApprovalTitle = (
   }
 }
 
+export type ActApprovalPresentation = {
+  readonly image?: {
+    readonly width: number
+    readonly height: number
+    readonly src: string
+    readonly ring?: {
+      readonly x: number
+      readonly y: number
+      readonly width: number
+      readonly height: number
+    }
+  }
+  readonly body?: { readonly label: string; readonly text: string }
+  readonly title: string
+  readonly subject: string
+  readonly fields: { label: string; value: string }[]
+}
+
 export const actApprovalPresentation = (
   input: ActInput,
   label: { readonly role: string; readonly name: string } | undefined,
   seen: TargetSeen | undefined
-) => {
+): ActApprovalPresentation => {
   const body = withheldTextNotice(input)
   const crop = seen?.crop ?? undefined
   const near = seen?.context ?? undefined

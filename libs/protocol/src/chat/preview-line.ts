@@ -1,3 +1,4 @@
+import { parseJsonText } from "../common/json-text.js"
 /** One readable line from an assistant message, for a row that glances at it.
  *
  *  Rows never render Markdown: they show words. So this takes the message
@@ -22,7 +23,7 @@ const visualizationTitle = (line: string): string | undefined => {
   const match = VISUALIZATION_REFERENCE.exec(line)
   if (!match?.[1]) return undefined
   try {
-    const value = JSON.parse(match[1]) as unknown
+    const value = parseJsonText(match[1])
     if (typeof value !== "object" || value === null || !("title" in value)) return ""
     return typeof value.title === "string" ? oneLine(value.title) : ""
   } catch {
@@ -56,7 +57,7 @@ export const splitLeadingJson = (
       if (depth === 0) {
         const json = trimmed.slice(0, index + 1)
         try {
-          return { json, value: JSON.parse(json), rest: trimmed.slice(index + 1) }
+          return { json, value: parseJsonText(json), rest: trimmed.slice(index + 1) }
         } catch {
           return null
         }

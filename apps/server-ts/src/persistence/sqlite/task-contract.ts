@@ -20,6 +20,7 @@ import type { Writer } from "./deps.js"
 import { ownMessageThisTurn } from "./permission-offers.js"
 import { workError } from "./work-records.js"
 import { taskUnfinishedSql } from "./task-status-sql.js"
+import type { Statement } from "effect/unstable/sql/Statement"
 
 const fail = (message: string) => (cause: unknown) => workError("storage", message, cause)
 
@@ -72,7 +73,10 @@ export const readTaskContract = Effect.fn("TaskContract.read")(function* (
   } satisfies TaskContract
 })
 
-export const unmetCriteria = (sql: SqlClient.SqlClient, itemId: string) =>
+export const unmetCriteria = (
+  sql: SqlClient.SqlClient,
+  itemId: string
+): Statement<{ readonly line_id: number; readonly text: string }> =>
   sql<{ readonly line_id: number; readonly text: string }>`SELECT line_id, text
     FROM task_contract_lines
     WHERE item_id = ${itemId} AND kind = 'criterion' AND retired_at IS NULL
@@ -162,7 +166,10 @@ export const recordContractProposalInTransaction = Effect.fn("TaskContract.recor
 const targetOf = (change: ContractChange): number | undefined =>
   change.kind === "add" ? change.replaces : change.line_id
 
-export const isContractProposal = (sql: SqlClient.SqlClient, questionId: string) =>
+export const isContractProposal = (
+  sql: SqlClient.SqlClient,
+  questionId: string
+): Effect.Effect<boolean, WorkStoreError, never> =>
   sql`SELECT 1 FROM task_contract_proposals WHERE question_id = ${questionId}`.pipe(
     Effect.map((rows) => rows.length > 0),
     Effect.mapError(fail("Could not read the proposal"))

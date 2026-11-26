@@ -7,6 +7,9 @@ import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { SessionNameImage } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import type { SessionStore } from "../persistence/sessions/store.js"
+import type { SessionQueryFailure } from "../persistence/sessions/queries.js"
+import type { StructuredCompletionError } from "../models/structured-completion.js"
+import type { SessionStoreError } from "../persistence/sessions/store.js"
 
 const SESSION_NAMING_INPUT_MAX_CHARS = 8_000
 const SESSION_NAMING_MAX_IMAGES = 1
@@ -24,7 +27,15 @@ export interface SessionNamingDependencies {
   readonly store: SessionStore["Service"]
 }
 
-export const makeSessionNaming = (dependencies: SessionNamingDependencies) =>
+export const makeSessionNaming = (
+  dependencies: SessionNamingDependencies
+): ((
+  input: SessionNamingInput
+) => Effect.Effect<
+  boolean,
+  SessionQueryFailure | StructuredCompletionError | SessionStoreError,
+  never
+>) =>
   Effect.fn("SessionNaming.generate")(function* (input: SessionNamingInput) {
     const header = yield* dependencies.sessions.loadHistoryHeader(input.sessionId)
     if (

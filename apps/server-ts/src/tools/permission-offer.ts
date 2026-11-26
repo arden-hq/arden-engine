@@ -5,7 +5,7 @@ import { collapseHome } from "@arden-hq/std/paths"
 import { homedir } from "node:os"
 import { canonicalRulePath, tooWide } from "../fs/protected-paths.js"
 import type { CompiledWords } from "./rule-compile.js"
-import type { PathAccess } from "../execution/rules.js"
+import { type PathAccess, ruleDecision } from "../execution/rules.js"
 import { personCard, waivesRequirement, type ToolFacts } from "../execution/decide.js"
 import {
   DECISION_WORD,
@@ -34,7 +34,6 @@ import type { PermissionStore } from "../persistence/permissions/store.js"
 import type { WorkStore } from "../persistence/work/store.js"
 import { toolFacts } from "./approval-decision.js"
 import { toolRule, type LiveRead } from "./approval-policy.js"
-import { ruleDecision } from "../execution/rules.js"
 import type { RunAuthority } from "../execution/authority.js"
 import {
   settingOfRule,
@@ -46,6 +45,7 @@ import type { HostCommandGrantPlan } from "./bash-permissions.js"
 import type { ServerTool } from "./define.js"
 import { APPROVAL_MODE_LABEL } from "./onboarding.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
+import { type PermissionOffers } from "./permission-offer-types.js"
 
 export type OfferRequest =
   | { readonly kind: "tool"; readonly tool: string; readonly decision: ToolApprovalDecision }
@@ -548,7 +548,7 @@ export const makePermissionOffers = (services: {
   }>
   readonly connectorTitles: () => Promise<ReadonlyMap<string, string>>
   readonly compileWords: (text: string, sessionId: string) => Promise<CompiledWords>
-}) => {
+}): PermissionOffers => {
   const factsOf = async (
     run: ServerToolRun,
     request: OfferRequest,

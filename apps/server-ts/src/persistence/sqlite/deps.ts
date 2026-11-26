@@ -53,6 +53,8 @@ export interface PersistenceDeps {
   readonly diagnostics: DiagnosticsService
 }
 
+export type WriterDeps = Pick<PersistenceDeps, "writer">
+
 export const makeWriter = (options: {
   readonly sql: SqlClient.SqlClient
   readonly reader: SqlClient.SqlClient

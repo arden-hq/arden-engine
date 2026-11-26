@@ -82,11 +82,41 @@ export const meetLink = (item: CalendarEvent): string | null =>
   item.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri ??
   null
 
+export type EventData = {
+  readonly event_ref: string
+  readonly calendar_id: string
+  readonly title: string
+  readonly description: string
+  readonly location: string
+  readonly start: string
+  readonly end: string
+  readonly all_day: boolean
+  readonly status: string
+  readonly url: string | null
+  readonly recurring_event_id: string | null
+  readonly recurrence: readonly string[]
+  readonly meet_link: string | null
+  readonly organizer: string | null
+  readonly attachments: {
+    attachment_ref: string
+    file_ref: string | null
+    title: string
+    mime_type: string
+    url: string
+  }[]
+  readonly my_response: string | null
+  readonly attendees: { email: string; response_status: string | null }[]
+}
+
 /**
  * An all-day event reads as dates with `end` the last day, inclusive (Google
  * stores the day after); a timed one keeps its date-times.
  */
-export const eventData = (item: CalendarEvent, account: string, calendarId = "primary") => {
+export const eventData = (
+  item: CalendarEvent,
+  account: string,
+  calendarId = "primary"
+): EventData => {
   const day = item.start?.date
   const allDay = day !== undefined && item.start?.dateTime === undefined
   const days = allDay ? allDayDays(day, item.end?.date) : undefined
@@ -131,7 +161,17 @@ export const eventSource = (
   item: CalendarEvent,
   data: ReturnType<typeof eventData>,
   use: "read" | "found"
-) => {
+): {
+  excerpt?: string
+  at?: string
+  by?: string
+  href?: string
+  provider: string
+  kind: string
+  ref: string
+  title: string
+  use: "read" | "found"
+} => {
   const excerpt = use === "read" ? passage(data.description) : undefined
   return {
     provider: "calendar",

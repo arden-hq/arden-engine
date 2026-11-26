@@ -28,11 +28,6 @@ const FOLLOW_UP_SUFFIX = ":approved"
 
 export const deferredFollowUpId = (toolCallId: string): string => `${toolCallId}${FOLLOW_UP_SUFFIX}`
 
-export const deferredCallOf = (toolCallId: string): string | undefined =>
-  toolCallId.endsWith(FOLLOW_UP_SUFFIX) && toolCallId.length > FOLLOW_UP_SUFFIX.length
-    ? toolCallId.slice(0, -FOLLOW_UP_SUFFIX.length)
-    : undefined
-
 export class DeferredToolCalls extends Context.Service<
   DeferredToolCalls,
   {

@@ -19,9 +19,9 @@ import { requiredAccountRefDescription } from "./google-accounts.js"
 import {
   bodyProblem,
   REPLY_APPROVAL_EDITS,
-  REPLY_EDITABLE_FIELDS,
+  replyEditable,
   SEND_APPROVAL_EDITS,
-  SEND_EDITABLE_FIELDS
+  sendEditable
 } from "./google-gmail-edits.js"
 import { gmailSend } from "./google-gmail-request.js"
 import {
@@ -403,9 +403,7 @@ export const gmailSendTools = ({
             ],
             attachments: attachments.attachments,
             body: { label: envelope.html ? "HTML body" : "Message", text: envelope.body },
-            ...(envelope.html
-              ? {}
-              : { editable: { fields: SEND_EDITABLE_FIELDS, arguments: jsonArguments(input) } })
+            ...(envelope.html ? {} : { editable: sendEditable(input, envelope.account) })
           },
           data: attachments.data
         }
@@ -546,7 +544,7 @@ export const gmailSendTools = ({
             ],
             attachments: attachments.attachments,
             body: { label: "Message", text: input.body },
-            editable: { fields: REPLY_EDITABLE_FIELDS, arguments: jsonArguments(input) }
+            editable: replyEditable(input, envelope.account)
           },
           data: { ...approvalReplyData(input, envelope), ...attachments.data }
         }

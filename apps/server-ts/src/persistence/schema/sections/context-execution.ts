@@ -1,5 +1,12 @@
 import type { OperationalSchemaSection } from "../section.js"
 import { decisionVisibilityStatements } from "../decision-visibility.js"
+import {
+  SCRIPT_AGENT_CALLS_TABLE,
+  TOOL_CALL_NESTING_COLUMN,
+  TOOL_CALL_PARENT_COLUMN,
+  TOOL_CALL_PARENT_INDEX,
+  TOOL_CALL_SCRIPT_COLUMN
+} from "../../migrations/0188_tool_call_parents.js"
 
 export const contextExecutionSchemaSection = {
   name: "context.execution",
@@ -12,6 +19,7 @@ export const contextExecutionSchemaSection = {
     "session_queued_messages",
     "tool_calls",
     "tool_call_targets",
+    "script_agent_calls",
     "tool_approvals",
     "deferred_tool_calls",
     "pending_decision_visibility",
@@ -58,7 +66,8 @@ export const contextExecutionSchemaSection = {
     "idx_chat_runs_result_at",
     "idx_chat_runs_started",
     "idx_chat_runs_worker_result",
-    "idx_trace_trim_due_kind_ended"
+    "idx_trace_trim_due_kind_ended",
+    "idx_tool_calls_parent"
   ],
   triggers: [
     "chat_runs_delete_budget",
@@ -167,6 +176,11 @@ export const contextExecutionSchemaSection = {
       WHERE status IN ('running', 'ready', 'paused', 'uncertain')`,
     "ALTER TABLE tool_calls ADD COLUMN effect TEXT CHECK(effect IS NULL OR effect IN ('none', 'run_record', 'arden_db', 'local_files', 'external'))",
     "ALTER TABLE tool_calls ADD COLUMN planned_from_json TEXT CHECK(planned_from_json IS NULL OR (json_valid(planned_from_json) AND json_type(planned_from_json) = 'object'))",
+    TOOL_CALL_PARENT_COLUMN,
+    TOOL_CALL_NESTING_COLUMN,
+    TOOL_CALL_SCRIPT_COLUMN,
+    TOOL_CALL_PARENT_INDEX,
+    SCRIPT_AGENT_CALLS_TABLE,
     `CREATE TABLE tool_call_targets (
       run_id TEXT NOT NULL,
       tool_call_id TEXT NOT NULL,

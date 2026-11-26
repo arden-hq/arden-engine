@@ -8,6 +8,7 @@ import type { SourceRunRow } from "./continuity-route.js"
 import { decodeJson } from "./json.js"
 import { scriptOwnsRun } from "./run-owner.js"
 import { taskConversationSql } from "./task-conversation.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 export interface RunColumns {
   readonly runId: Statement.Fragment
@@ -25,7 +26,10 @@ export const runColumns = (
   metadata: sql`${sql(alias)}.metadata_json`
 })
 
-export const runDestinationSessionId = (sql: SqlClient.SqlClient, run: RunColumns) => {
+export const runDestinationSessionId = (
+  sql: SqlClient.SqlClient,
+  run: RunColumns
+): Statement.Statement<Row> => {
   const owner = sql`COALESCE(json_extract(${run.metadata}, '$.run_context.belongs_to'),
     json_extract(${run.metadata}, '$.run_context.origin'))`
   const origin = (field: string) => sql`json_extract(${owner}, ${sql.literal(`'$.${field}'`)})`

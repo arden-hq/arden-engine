@@ -141,10 +141,22 @@ export class ModelOutputProjection {
     if (kind === "text") {
       this.lastTextId = id
       if (partIndex !== undefined) this.textMessageIdsByPartIndex.set(partIndex, id)
-      await this.emit({ _tag: "TextStarted", depth: 0, parent_id: null, message_id: id })
+      await this.emit({
+        _tag: "TextStarted",
+        depth: 0,
+        parent_id: null,
+        message_id: id,
+        record_id: this.fragmentId
+      })
       return
     }
-    await this.emit({ _tag: "ReasoningStarted", depth: 0, parent_id: null, message_id: id })
+    await this.emit({
+      _tag: "ReasoningStarted",
+      depth: 0,
+      parent_id: null,
+      message_id: id,
+      record_id: this.fragmentId
+    })
   }
 
   private async append(content: string): Promise<void> {

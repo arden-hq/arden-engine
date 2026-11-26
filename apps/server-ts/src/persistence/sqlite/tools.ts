@@ -6,6 +6,7 @@ import { makeCalledTool } from "./tool-called.js"
 import { makeToolExecutions } from "./tool-executions.js"
 import { makeToolHistory } from "./tool-history.js"
 import { makeToolCoordinatorSuspend } from "./tool-coordinator.js"
+import { makeToolDescends } from "./call-lineage.js"
 
 export const makeToolStores = (
   deps: Pick<PersistenceDeps, "reader" | "writer" | "chatEvents" | "sessionEvents"> & {
@@ -20,6 +21,7 @@ export const makeToolStores = (
   const executions = ToolExecutionStore.of({
     ...makeToolExecutions(deps),
     suspend: makeToolCoordinatorSuspend(deps),
+    descends: makeToolDescends(deps),
     resolve: makeToolApprovalResolve(deps),
     priorResults,
     pendingConnection,

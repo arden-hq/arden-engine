@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 const FRAME_BYTES = 8 * 1024
 
 const FLUSH_INTERVAL_MS = 50
@@ -44,14 +45,12 @@ export const makeToolOutputStream = (
   const pending = new Map<ToolOutputStreamName, Buffer>()
   let budget = quotaBytes
   let closed = false
-  let timer: ReturnType<typeof setTimeout> | undefined
+  let timer: Timer | undefined
   let settled: Promise<void> = Promise.resolve()
 
   const drain = (final: boolean): void => {
-    if (timer !== undefined) {
-      clearTimeout(timer)
-      timer = undefined
-    }
+    timer?.cancel()
+    timer = undefined
     for (const [stream, buffered] of pending) {
       let rest = buffered
       while (budget > 0 && rest.byteLength > 0) {
@@ -74,7 +73,7 @@ export const makeToolOutputStream = (
       const buffered = Buffer.concat([pending.get(stream) ?? EMPTY, chunk])
       pending.set(stream, buffered)
       if (buffered.byteLength >= FRAME_BYTES) drain(false)
-      else if (timer === undefined) timer = setTimeout(() => drain(false), FLUSH_INTERVAL_MS)
+      else if (timer === undefined) timer = after(FLUSH_INTERVAL_MS, () => drain(false))
     },
     close: () => {
       drain(true)

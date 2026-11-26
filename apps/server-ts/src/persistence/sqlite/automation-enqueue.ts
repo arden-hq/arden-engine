@@ -11,6 +11,9 @@ import { triggerContextForClaim } from "./automation-occurrence.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { decodeJson, encodeJson } from "./json.js"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
+import { reviewSpaceIdSql } from "./automation-owner.js"
 
 export interface QueueWriter {
   readonly sql: SqlClient.SqlClient
@@ -52,7 +55,7 @@ const runsAtOnce = (source: AutomationQueueSource): boolean =>
 const firedByTrigger = (source: AutomationQueueSource): boolean =>
   source === "event" || source === "idle" || source === "count"
 
-export const freshRow = (sql: SqlClient.SqlClient) =>
+export const freshRow = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`claimed_at IS NULL AND attempt_count = 0
     AND json_extract(context, '$.automation_run_id') IS NULL`
 
@@ -65,8 +68,7 @@ export const cooldownEnd = Effect.fn("AutomationQueue.cooldownEnd")(function* (
         (SELECT task.cooldown_minutes FROM scheduled_tasks AS task
           WHERE task.task_id = ${automationId} AND task.purpose IN ('user_automation', 'system')),
         (SELECT setting.cooldown_minutes FROM space_review_settings AS setting
-          WHERE substr(${automationId}, 1, 6) = 'space:'
-            AND setting.space_id = substr(${automationId}, 7))) AS minutes,
+          WHERE setting.space_id = ${reviewSpaceIdSql(sql, sql`${automationId}`)})) AS minutes,
       -- Newest first through idx_automation_runs_task_ended, stopping at the
       -- first run that counts, instead of reading every run of the Automation.
       (SELECT run.ended_at FROM automation_runs AS run
@@ -112,8 +114,7 @@ export const enqueue = Effect.fn("AutomationQueue.enqueue")(function* (
     WHERE task_id = ${entry.automationId} AND purpose IN ('user_automation', 'system')
     UNION ALL
     SELECT 'space_review', NULL FROM spaces
-    WHERE substr(${entry.automationId}, 1, 6) = 'space:'
-      AND space_id = substr(${entry.automationId}, 7)`
+    WHERE space_id = ${reviewSpaceIdSql(sql, sql`${entry.automationId}`)}`
   const job = jobs[0]
   const window =
     job === undefined || runsAtOnce(entry.source) || entry.dueAt !== undefined

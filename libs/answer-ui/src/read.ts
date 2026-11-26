@@ -13,7 +13,7 @@ const COLON = 8
 const LITERAL_TOKENS: ReadonlySet<number> = new Set([3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, NUM, 0])
 
 export interface Statement {
-  readonly id: string
+  readonly name: string
   readonly line: number
   readonly isState: boolean
   /** A `$state` line whose value is not a literal (it names another
@@ -99,19 +99,18 @@ function readStatements(source: string): ReadonlyArray<Statement> | undefined {
     const lines = source.split("\n")
     let cursor = 0
     return split(tokenize(source)).map((raw) => {
-      const start = lines.findIndex(
-        (text, index) => index >= cursor && startsStatement(text, raw.id)
-      )
+      const name = raw.id
+      const start = lines.findIndex((text, index) => index >= cursor && startsStatement(text, name))
       if (start >= 0) cursor = start + 1
       const values = (kind: number) =>
         raw.tokens.flatMap((token) =>
           token.t === kind && typeof token.v === "string" ? [token.v] : []
         )
       return {
-        id: raw.id,
-        computed: raw.id.startsWith("$") && !isLiteralValue(raw.tokens),
+        name,
+        computed: name.startsWith("$") && !isLiteralValue(raw.tokens),
         line: start >= 0 ? start + 1 : cursor,
-        isState: raw.id.startsWith("$"),
+        isState: name.startsWith("$"),
         idents: values(IDENT),
         states: values(STATE_VAR),
         size: raw.tokens.length,
@@ -133,25 +132,25 @@ function isLiteralValue(tokens: ReadonlyArray<{ readonly t: number }>): boolean 
   )
 }
 
-function startsStatement(text: string, id: string): boolean {
+function startsStatement(text: string, name: string): boolean {
   const rest = text.trimStart()
-  if (!rest.startsWith(id)) return false
-  const after = rest.slice(id.length).trimStart()
+  if (!rest.startsWith(name)) return false
+  const after = rest.slice(name.length).trimStart()
   return after.startsWith("=") && !after.startsWith("==")
 }
 
 function expandedSize(statements: ReadonlyArray<Statement>): number {
-  const byId = new Map(statements.map((statement) => [statement.id, statement]))
+  const byName = new Map(statements.map((statement) => [statement.name, statement]))
   const sizes = new Map<string, number>()
   const sizeOf = (statement: Statement): number => {
-    const known = sizes.get(statement.id)
+    const known = sizes.get(statement.name)
     if (known !== undefined) return known
-    sizes.set(statement.id, statement.size)
+    sizes.set(statement.name, statement.size)
     const total = statement.idents.reduce((sum, name) => {
-      const target = byId.get(name)
+      const target = byName.get(name)
       return target === undefined ? sum : sum + sizeOf(target)
     }, statement.size)
-    sizes.set(statement.id, total)
+    sizes.set(statement.name, total)
     return total
   }
   return Math.max(0, ...statements.map(sizeOf))

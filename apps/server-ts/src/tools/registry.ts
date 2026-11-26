@@ -704,13 +704,10 @@ export class ServerToolRegistry extends Context.Service<
           ...observed,
           mayUseBrowserTab: async (tabRef, toolCallId) => {
             const owner = await Effect.runPromise(procedureStore.tabOwner(tabRef))
-            return (
-              owner === undefined ||
-              (owner.runId === run.runId &&
-                toolCallId !== undefined &&
-                (toolCallId === owner.parentToolCallId ||
-                  toolCallId.startsWith(`${owner.parentToolCallId}:`)))
-            )
+            if (owner === undefined) return true
+            if (owner.runId !== run.runId || toolCallId === undefined) return false
+            const call = { runId: run.runId, toolCallId }
+            return Effect.runPromise(executions.descends(call, owner.parentToolCallId))
           },
           codeMode,
           scriptHost,

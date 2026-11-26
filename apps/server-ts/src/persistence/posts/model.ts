@@ -46,7 +46,17 @@ export const PostDeliveryPayloadSchema = Schema.Struct({
 })
 export type PostDeliveryPayload = typeof PostDeliveryPayloadSchema.Type
 
-export const postTaskParts = (payload: PostDeliveryPayload, task: PostTask) => ({
+export const postTaskParts = (
+  payload: PostDeliveryPayload,
+  task: PostTask
+): {
+  input: { text: string; body: string }
+  taskSources: (
+    | { kind: "connection_item"; item_id: string; revision: string }
+    | { kind: "chat"; session_id: string; turn_id: string; revision: string }
+  )[]
+  capture: { basis: "explicit"; reason: string }
+} => ({
   input: { text: task.title, body: task.brief },
   taskSources: [
     {

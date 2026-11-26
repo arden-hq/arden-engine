@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import { clipLine } from "@arden-hq/std/text"
 import { DateTime, Effect, Schema } from "effect"
 import {
@@ -89,7 +90,7 @@ export const fetchGitHub = Effect.fn("ConnectionItems.fetchGitHub")(function* (i
         message: `GitHub answered ${response.status} for notifications`
       })
     const body = yield* Effect.tryPromise({
-      try: () => response.json(),
+      try: () => parseJsonBody(response),
       catch: (cause) =>
         new FetchError({ source: "github", message: "GitHub sent invalid data", cause })
     })

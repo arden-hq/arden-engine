@@ -11,6 +11,9 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import type { RunRow } from "./chat-run.js"
 import { writeError, type ChatWriteOperation } from "./chat-write-errors.js"
 import { keyMessageJson } from "./chat-key-message.js"
+import type { SessionLifecycleEventError } from "../sessions/events.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { UnitOfWork } from "../unit-of-work.js"
 
 interface PendingMessageRow {
   readonly client_id: string
@@ -128,7 +131,7 @@ export const announceAnswers = (options: {
   readonly sql: SqlClient.SqlClient
   readonly sessionEvents: SessionLifecycleEvents["Service"]
   readonly messages: ReadonlyArray<StoredMessageEnvelope>
-}) =>
+}): Effect.Effect<void, SessionLifecycleEventError | SqlError, UnitOfWork> =>
   appendQuestionChanges({
     sql: options.sql,
     sessionEvents: options.sessionEvents,

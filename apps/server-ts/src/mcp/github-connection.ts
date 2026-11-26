@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import type { GitHubConnectionState, GitHubConnectRequest } from "@arden-hq/protocol/mcp"
 import { Schema } from "effect"
 
@@ -29,7 +30,7 @@ export class GitHubTokenRejected extends Error {
   }
 }
 
-export interface GitHubChoice {
+interface GitHubChoice {
   readonly token: string
   readonly readOnly: boolean
 }
@@ -83,13 +84,23 @@ const fetchGitHubLogin = async (token: string): Promise<GitHubUserCheck> => {
     })
     if (response.status === 401) return { kind: "rejected" }
     if (!response.ok) return { kind: "unavailable" }
-    const body: unknown = await response.json()
+    const body: unknown = await parseJsonBody(response)
     return Schema.is(GitHubUserSchema)(body)
       ? { kind: "ok", login: body.login }
       : { kind: "unavailable" }
   } catch {
     return { kind: "unavailable" }
   }
+}
+
+export interface GitHubConnection {
+  readonly auth: McpTokenAuth
+  readonly token: () => Promise<string | undefined>
+  readonly state: () => Promise<GitHubConnectionState>
+  readonly connect: (request: GitHubConnectRequest) => Promise<void>
+  readonly setReadOnly: (readOnly: boolean) => Promise<void>
+  readonly useApp: () => Promise<void>
+  readonly forget: () => Promise<void>
 }
 
 export const makeGitHubConnection = ({
@@ -102,7 +113,7 @@ export const makeGitHubConnection = ({
     readonly hasGrant: () => Promise<boolean>
     readonly clear: () => Promise<void>
   }
-}) => {
+}): GitHubConnection => {
   let loaded: { readonly choice: GitHubChoice | undefined } | undefined
 
   const readChoice = async (): Promise<GitHubChoice | undefined> => {

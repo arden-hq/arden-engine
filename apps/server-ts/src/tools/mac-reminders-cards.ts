@@ -52,7 +52,26 @@ const priorityWords = (priority: string | undefined): string | undefined =>
 const optionalField = (label: string, value: string | undefined) =>
   value === undefined || value === "" ? [] : [{ label, value }]
 
-export const makeMacRemindersCards = (apps: MacApps) => {
+export interface MacRemindersCards {
+  readonly createCard: (
+    input: typeof ReminderCreateSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly editCard: (
+    input: typeof ReminderEditSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly completeCard: (
+    input: typeof ReminderCompleteSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly deleteCard: (
+    input: typeof ReminderDeleteSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+}
+
+export const makeMacRemindersCards = (apps: MacApps): MacRemindersCards => {
   const { words } = apps
   /** The reminder as it is now: what a card names before it is finished or deleted. */
   const context = (current: MacReminderRecord) => [

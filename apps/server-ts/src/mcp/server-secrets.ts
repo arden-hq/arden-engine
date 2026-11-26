@@ -58,7 +58,26 @@ const storedSecretKeys = (transport: McpStoredTransport): ReadonlyArray<string> 
 const inputSecretPatch = (transport: McpTransportInput) =>
   transport.type === "stdio" ? transport.environment : transport.headers
 
-export const makeMcpServerSecrets = (vault: McpOAuthVault | undefined) => {
+export interface McpServerSecrets {
+  readonly read: (config: McpStoredServer) => Promise<Readonly<Record<string, string>>>
+  readonly next: (
+    name: string,
+    input: McpTransportInput,
+    existing: McpStoredServer | undefined,
+    operation: "create" | "update"
+  ) => Promise<{
+    readonly transport: McpStoredTransport
+    readonly secrets: Readonly<Record<string, string>>
+    readonly previousSecrets: Readonly<Record<string, string>>
+  }>
+  readonly save: (
+    config: McpStoredServer,
+    secrets: Readonly<Record<string, string>>
+  ) => Promise<void>
+  readonly clear: (config: McpStoredServer) => Promise<void>
+}
+
+export const makeMcpServerSecrets = (vault: McpOAuthVault | undefined): McpServerSecrets => {
   const read = (config: McpStoredServer) =>
     readMcpTransportSecrets(
       vault,

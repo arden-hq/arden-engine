@@ -22,7 +22,16 @@ const historyWords = (history: Automation["history"]): string =>
 const cooldownWords = (minutes: number | null): string =>
   minutes === null ? "None" : `${minutes} min`
 
-export const updateCard = (current: Automation, changes: Changes) => {
+export const updateCard = (
+  current: Automation,
+  changes: Changes
+): {
+  approve_label: string
+  body?: { before?: string; label: string; text: string }
+  title: string
+  subject: string
+  fields: ApprovalPresentationField[]
+} => {
   const fields: Array<ApprovalPresentationField> = []
   if (changes.reset_to_default !== undefined) {
     fields.push({ label: "Reset", value: `${changes.reset_to_default} to its default` })

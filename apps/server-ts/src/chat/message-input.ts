@@ -23,7 +23,8 @@ import type {
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
 import { storedSender } from "../persistence/transcript/interaction.js"
 import {
-  isWorkflowDeliveryClientId,
+  CLIENT_ID_NAMESPACE,
+  clientIdNamespace,
   workflowDeliveryClientId
 } from "../persistence/chat/workflow-delivery.js"
 import { chatReplyContexts } from "@arden-hq/protocol/chat"
@@ -239,7 +240,7 @@ export const validateInput = Effect.fn("ChatMessage.validateInput")(function* (
   }
   const workflowDelivery = input.workflowDelivery
   if (workflowDelivery === undefined) {
-    if (isWorkflowDeliveryClientId(input.clientId)) {
+    if (clientIdNamespace(input.clientId) === CLIENT_ID_NAMESPACE.workflowDelivery) {
       return yield* new ChatMessageError({
         reason: "invalid",
         message: "This Chat client id is reserved for Workflow result delivery",

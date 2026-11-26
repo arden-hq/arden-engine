@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { tableTells, type TableTell, type TellKind } from "./tables.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export interface Touch {
   readonly kind: TellKind
@@ -64,14 +65,18 @@ export const captureStatements: ReadonlyArray<string> = [
   ...toldTables.flatMap(({ table, spec }) => triggers(table, spec))
 ]
 
-export const installCapture = (sql: SqlClient.SqlClient) =>
+export const installCapture = (sql: SqlClient.SqlClient): Effect.Effect<void, SqlError, never> =>
   Effect.forEach(captureStatements, (statement) => sql.unsafe(statement), { discard: true })
 
-export const touch = (sql: SqlClient.SqlClient, kind: TellKind, id: string) =>
+export const touch = (
+  sql: SqlClient.SqlClient,
+  kind: TellKind,
+  id: string
+): Effect.Effect<void, SqlError, never> =>
   sql`INSERT INTO temp.told_touches (kind, id, scope, source, renamed, unlisted)
     VALUES (${kind}, ${id}, NULL, 'told', 0, 0)`.pipe(Effect.asVoid)
 
-export const touchedThrough = (sql: SqlClient.SqlClient) =>
+export const touchedThrough = (sql: SqlClient.SqlClient): Effect.Effect<number, never, never> =>
   sql<{ readonly seq: number }>`SELECT COALESCE(MAX(rowid), 0) AS seq FROM temp.told_touches`.pipe(
     Effect.map((rows) => rows[0]?.seq ?? 0),
     Effect.orElseSucceed(() => Number.POSITIVE_INFINITY)

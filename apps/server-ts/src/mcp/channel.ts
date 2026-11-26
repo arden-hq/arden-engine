@@ -1,3 +1,5 @@
+import { parseJsonBody, parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { after } from "@arden-hq/std/timer"
 import type {
   FetchLike,
   Transport,
@@ -25,8 +27,7 @@ import {
   type McpEventError,
   type McpStreamSignal
 } from "./events/wire.js"
-
-const OWN_ID_PREFIX = "arden-mcp-"
+import { ownRequestId, RESPONSE_OWNER, responseOwner } from "./own-request-id.js"
 
 const DISCOVER_TIMEOUT_MS = 5_000
 
@@ -187,10 +188,10 @@ export class McpChannel {
     if (this.closed) {
       return Promise.reject(new McpEventRequestError(`MCP ${method} failed: closed`, undefined))
     }
-    const id = `${OWN_ID_PREFIX}${this.nextId++}`
+    const id = ownRequestId(this.nextId++)
     return new Promise<unknown>((resolve, reject) => {
       const settle = () => {
-        clearTimeout(timer)
+        timer.cancel()
         signal?.removeEventListener("abort", aborted)
         this.requests.delete(id)
       }
@@ -199,9 +200,8 @@ export class McpChannel {
         reject(error)
       }
       const aborted = () => fail(new McpEventRequestError(`MCP ${method} was cancelled`, undefined))
-      const timer = setTimeout(
-        () => fail(new McpEventRequestError(`MCP ${method} timed out`, undefined)),
-        timeoutMs
+      const timer = after(timeoutMs, () =>
+        fail(new McpEventRequestError(`MCP ${method} timed out`, undefined))
       )
       if (signal?.aborted === true) {
         aborted()
@@ -291,7 +291,7 @@ export class McpChannel {
   }
 
   openStream(request: McpEventStreamRequest, handlers: McpEventStreamHandlers): McpEventStream {
-    const id = `${OWN_ID_PREFIX}${this.nextId++}`
+    const id = ownRequestId(this.nextId++)
     const cancel = () => this.cancel(id)
     if (this.closed) {
       handlers.onEnd({ kind: "ended" })
@@ -404,8 +404,9 @@ export class McpChannel {
       return
     }
     if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
-      if (typeof message.id === "string" && message.id.startsWith(OWN_ID_PREFIX)) {
-        const request = this.requests.get(message.id)
+      const owner = responseOwner(message.id)
+      if (owner.kind === RESPONSE_OWNER.channel) {
+        const request = this.requests.get(owner.id)
         if (request !== undefined) {
           if (isJSONRPCResultResponse(message)) request.resolve(message.result)
           else {
@@ -414,7 +415,7 @@ export class McpChannel {
           return
         }
         this.finish(
-          message.id,
+          owner.id,
           isJSONRPCErrorResponse(message)
             ? {
                 kind: "refused",
@@ -437,7 +438,7 @@ interface StatelessRequest {
 
 const statelessRequest = (body: RequestInit["body"]): StatelessRequest | undefined => {
   if (typeof body !== "string" || !body.includes(EVENTS_PROTOCOL_VERSION)) return undefined
-  const message: unknown = JSON.parse(body)
+  const message = parseJsonTextOrUndefined(body)
   if (!Predicate.isObject(message)) return undefined
   const { id, method, params } = message
   if ((typeof id !== "string" && typeof id !== "number") || typeof method !== "string") {
@@ -490,7 +491,7 @@ const statelessResponse = async (response: Response, id: string | number): Promi
     headers.delete("mcp-session-id")
     return new Response(response.body, { status: response.status, headers })
   }
-  const body: unknown = await response.json().catch(() => undefined)
+  const body: unknown = await parseJsonBody(response).catch(() => undefined)
   const error =
     Predicate.isObject(body) && Predicate.isObject(body["error"]) ? body["error"] : undefined
   const statusCode = refusalCode(response.status)

@@ -119,6 +119,12 @@ const seed = (sql: SqlClient.SqlClient) =>
           VALUES ('${run}', '${session}', 'completed', '${T}', '${ENDED}', '${ENDED}',
             '${metadata}', 'am-${run}', ${client === undefined ? "NULL" : `'${client}'`})`
       ),
+      `INSERT INTO tool_calls (run_id, session_id, tool_call_id, tool_name, arguments_json,
+          changes_state, status, started_at, parent_tool_call_id, nesting, script_tool_call_id)
+        VALUES ('r-own', 'owner-chat', 'call-script:workflow:key:0:0', 'spawn_agent', '{}', 1,
+          'running', '${T}', 'call-script', 'workflow', 'call-script')`,
+      `INSERT INTO script_agent_calls (run_id, tool_call_id, agent_key, launch)
+        VALUES ('r-own', 'call-script:workflow:key:0:0', 'key', 0)`,
       `INSERT INTO automation_runs (id, task_id, automation_ref, started_at, ended_at, status,
           outcome, trigger_json)
         VALUES (1, 'auto-repeat', 'ref-auto-repeat', '${T}', '${T}', 'completed', 'finished',

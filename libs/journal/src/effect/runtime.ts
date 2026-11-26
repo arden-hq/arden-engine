@@ -24,11 +24,14 @@ const PAGE_SIZE = 512
 const DEFAULT_SUBSCRIBER_CAPACITY = 4_096
 const DEFAULT_SUBSCRIBER_BYTES = 8 * 1024 * 1024
 
+const decodeJsonData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+const JsonAttributes = Schema.Record(Schema.String, Schema.Json)
+const decodeJsonAttributes = Schema.decodeUnknownSync(Schema.fromJsonString(JsonAttributes))
 const NonEmptyText = Schema.String.check(Schema.isMinLength(1))
 const EventSchema = Schema.Struct({
   type: NonEmptyText,
   data: Schema.Json,
-  attributes: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
+  attributes: Schema.optionalKey(JsonAttributes),
   durable: Schema.optionalKey(Schema.Boolean)
 })
 const EventBatchSchema = Schema.Array(EventSchema).check(
@@ -249,13 +252,10 @@ const decodeRow = (
 ): Effect.Effect<JournalRecord, JournalError> =>
   Effect.try({
     try: () => {
-      const data = Schema.decodeUnknownSync(Schema.Json)(JSON.parse(row.data_json))
-      const attributes = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))(
-        JSON.parse(row.attributes_json)
-      ) as Readonly<Record<string, JsonValue>>
-      if (!Number.isSafeInteger(row.sequence) || row.sequence < 1 || row.event_type.length === 0) {
+      const data = decodeJsonData(row.data_json)
+      const attributes = decodeJsonAttributes(row.attributes_json)
+      if (!Number.isSafeInteger(row.sequence) || row.sequence < 1 || row.event_type.length === 0)
         throw new Error("Invalid journal record fields")
-      }
       if (Number.isNaN(Date.parse(row.created_at))) throw new Error("Invalid journal timestamp")
       return freezeRecord({
         streamId: row.stream_id,
@@ -321,8 +321,8 @@ export const appendInTransaction = Effect.fn("Journal.appendInTransaction")(func
       streamId: validStreamId,
       sequence: current.headSequence + index + 1,
       type: event.type,
-      data: JSON.parse(event.dataJson) as JsonValue,
-      attributes: JSON.parse(event.attributesJson) as Readonly<Record<string, JsonValue>>,
+      data: decodeJsonData(event.dataJson),
+      attributes: decodeJsonAttributes(event.attributesJson),
       durable: event.durable,
       createdAt
     })

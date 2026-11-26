@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import { Effect, Layer, Schema } from "effect"
 
 import { EndpointCallError, failureForStatus } from "../models/endpoints/failure.js"
@@ -90,7 +91,7 @@ const requestEmbeddings = (
     Effect.flatMap((response) =>
       response.ok
         ? Effect.tryPromise({
-            try: (): Promise<unknown> => response.json(),
+            try: (): Promise<unknown> => parseJsonBody(response),
             catch: (cause) => wrongFormat("The endpoint answered with no JSON", cause)
           })
         : Effect.fail(

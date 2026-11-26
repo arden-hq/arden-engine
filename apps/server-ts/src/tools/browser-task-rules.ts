@@ -56,7 +56,14 @@ const containsRun = (whole: ReadonlyArray<string>, part: ReadonlyArray<string>):
   part.length > 0 &&
   whole.some((_, start) => part.every((word, offset) => whole[start + offset] === word))
 
-export const typingRule = (brief: string, values: string) => {
+export const typingRule = (
+  brief: string,
+  values: string
+): {
+  given: (typed: string) => boolean
+  named: (choice: string) => boolean
+  answers: (choice: string) => boolean
+} => {
   const candidates = values
     .split("\n")
     .flatMap((line) => {

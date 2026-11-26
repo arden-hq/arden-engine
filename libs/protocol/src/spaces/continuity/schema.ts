@@ -49,7 +49,9 @@ export const AcknowledgeSpaceContinuityRequestSchema = Schema.Struct({
   )
 })
 
-export const encodeAcknowledgeSpaceContinuityRequestEffect = (value: unknown) =>
+export const encodeAcknowledgeSpaceContinuityRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(AcknowledgeSpaceContinuityRequestSchema)(value, {
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))

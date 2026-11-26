@@ -135,7 +135,10 @@ export const toolError = (
   })
 
 export const preserveToolError =
-  (operation: ToolOperation, identity?: Pick<ToolExecutionIdentity, "runId" | "toolCallId">) =>
+  (
+    operation: ToolOperation,
+    identity?: Pick<ToolExecutionIdentity, "runId" | "toolCallId">
+  ): ((cause: unknown) => ToolExecutionStoreError) =>
   (cause: unknown): ToolExecutionStoreError =>
     cause instanceof ToolExecutionStoreError
       ? cause

@@ -6,6 +6,7 @@ import { createParser, type EventSourceParser } from "eventsource-parser"
 import { isAbortError, raceAbort } from "../../abort.js"
 import { RetryableProviderError } from "./errors.js"
 import { errorMessage } from "@arden-hq/std/errors"
+import { after } from "@arden-hq/std/timer"
 
 export interface SseEvent {
   readonly event: string
@@ -45,17 +46,16 @@ const asTransportError = (cause: unknown, streamName: string): unknown =>
 
 const raceIdle = <A>(promise: Promise<A>, idleTimeoutMs: number, streamName: string): Promise<A> =>
   new Promise<A>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new RetryableProviderError(`${streamName} became idle`)),
-      idleTimeoutMs
+    const timer = after(idleTimeoutMs, () =>
+      reject(new RetryableProviderError(`${streamName} became idle`))
     )
     promise.then(
       (value) => {
-        clearTimeout(timer)
+        timer.cancel()
         resolve(value)
       },
       (cause) => {
-        clearTimeout(timer)
+        timer.cancel()
         reject(cause)
       }
     )

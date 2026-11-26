@@ -450,7 +450,7 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          CASE e.n
            WHEN 0 THEN json_object('type', 'RUN_STARTED', 'run_id', r.run_id, 'session_id', r.session_id,
              'turn_id', r.run_id || '-u')
-           WHEN 1 THEN json_object('type', 'TEXT_MESSAGE_START', 'message_id', r.run_id || '-a2')
+           WHEN 1 THEN json_object('type', 'TEXT_MESSAGE_START', 'message_id', r.run_id || '-a2', 'record', json_object('kind', 'part', 'record_id', r.run_id || '-a2'))
            WHEN 2 THEN json_object('type', 'TEXT_MESSAGE_CONTENT', 'message_id', r.run_id || '-a2',
              'delta', 'Done with item ' || r.run_id || '. ' || ${text(300)})
            WHEN 3 THEN json_object('type', 'TEXT_MESSAGE_END', 'message_id', r.run_id || '-a2')

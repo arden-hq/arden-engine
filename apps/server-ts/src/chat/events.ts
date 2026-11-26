@@ -21,7 +21,7 @@ import {
   Scope,
   Stream
 } from "effect"
-import * as Sse from "effect/unstable/encoding/Sse"
+import { Event as SseEvent } from "effect/unstable/encoding/Sse"
 import type { SessionEventRecord } from "../persistence/events/model.js"
 import {
   ChatEventStore,
@@ -61,7 +61,7 @@ interface ChatEventStreamOptions {
 }
 
 interface ChatEventStreamOpenResult {
-  readonly stream: Stream.Stream<Sse.Event, ChatStreamError>
+  readonly stream: Stream.Stream<SseEvent, ChatStreamError>
   readonly timings?: Readonly<Partial<Record<ChatOpenTimingPhase, number>>> | undefined
 }
 
@@ -215,7 +215,7 @@ const resumeSnapshotRetry = {
  */
 const openResumeStream = Effect.fn("ChatEventStream.openResume")(function* (
   options: OpenResumeStreamInput
-): Effect.fn.Return<Stream.Stream<Sse.Event, ChatStreamError>, ChatStreamError, Scope.Scope> {
+): Effect.fn.Return<Stream.Stream<SseEvent, ChatStreamError>, ChatStreamError, Scope.Scope> {
   const opened = yield* options.events
     .openFollow({
       sessionId: options.input.sessionId,
@@ -482,7 +482,7 @@ const resumeDeliveryToSse = (
   delivery: ChatEventDelivery,
   sessionId: string,
   appliedSequence: number
-): Result.Result<Sse.Event, void> => {
+): Result.Result<SseEvent, void> => {
   if (delivery.kind === "record") {
     return delivery.record.sequence <= appliedSequence
       ? Result.fail(undefined)
@@ -498,11 +498,11 @@ const parseSequence = (id: string | undefined): number | undefined => {
 }
 
 export const withKeepalives = <E>(
-  source: Stream.Stream<Sse.Event, E>,
+  source: Stream.Stream<SseEvent, E>,
   sessionId: string,
   initialSequence: number,
   interval: Duration.Input = KEEPALIVE_INTERVAL
-): Stream.Stream<Sse.Event, E> =>
+): Stream.Stream<SseEvent, E> =>
   Stream.unwrap(
     Ref.make(initialSequence).pipe(
       Effect.map((lastSequence) =>
@@ -532,7 +532,7 @@ export const withKeepalives = <E>(
     )
   )
 
-const eventRecordToSse = (record: SessionEventRecord, replay = false): Sse.Event => {
+const eventRecordToSse = (record: SessionEventRecord, replay = false): SseEvent => {
   const payload = {
     ...record.event,
     session_id: record.sessionId,
@@ -548,7 +548,7 @@ const eventRecordToSse = (record: SessionEventRecord, replay = false): Sse.Event
   }
 }
 
-const snapshotEvent = (appliedSequence: number, data: string): Sse.Event => ({
+const snapshotEvent = (appliedSequence: number, data: string): SseEvent => ({
   _tag: "Event",
   id: String(appliedSequence),
   event: "stream_snapshot",
@@ -572,7 +572,7 @@ const snapshotProtocolEvent = (
   }
 })
 
-const liveEvent = (sessionId: string, caughtUpThrough: number): Sse.Event =>
+const liveEvent = (sessionId: string, caughtUpThrough: number): SseEvent =>
   protocolEventToSse({
     type: "stream_live",
     session_id: sessionId,
@@ -584,7 +584,7 @@ const overflowEvent = (
   sessionId: string,
   cursor: number,
   reason: StreamOverflowEvent["reason"]
-): Sse.Event =>
+): SseEvent =>
   protocolEventToSse({
     type: "stream_overflow",
     session_id: sessionId,
@@ -595,14 +595,14 @@ const overflowEvent = (
 
 const protocolEventToSse = (
   event: StreamSnapshotEvent | StreamLiveEvent | StreamOverflowEvent
-): Sse.Event => ({
+): SseEvent => ({
   _tag: "Event",
   id: String(event.seq),
   event: event.type,
   data: JSON.stringify(event)
 })
 
-const keepaliveEvent = (sessionId: string, sequence: number): Sse.Event => ({
+const keepaliveEvent = (sessionId: string, sequence: number): SseEvent => ({
   _tag: "Event",
   id: String(sequence),
   event: "stream_keepalive",

@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 import { errorMessage } from "@arden-hq/std/errors"
 import { execFile } from "node:child_process"
 import { access, mkdtemp, rm } from "node:fs/promises"
@@ -36,7 +37,7 @@ export class NativeDriver {
   #connection: DriverConnection | undefined
   #epoch = new AbortController()
   #closed = false
-  #idle: ReturnType<typeof setTimeout> | undefined
+  #idle: Timer | undefined
   #permissions: ComputerSetup["permissions"] = { kind: "idle" }
   #permissionJob: Promise<void> | undefined
 
@@ -62,7 +63,7 @@ export class NativeDriver {
 
   setupPermissions(): void {
     if (this.#permissionJob !== undefined || this.#closed) return
-    if (this.#idle !== undefined) clearTimeout(this.#idle)
+    this.#idle?.cancel()
     this.#idle = undefined
     const signal = this.#epoch.signal
     this.#permissions = { kind: "running" }
@@ -121,7 +122,7 @@ export class NativeDriver {
       const active = AbortSignal.any([signal, epoch])
       active.throwIfAborted()
       if (this.#closed) throw new Error("Computer control is closed")
-      if (this.#idle !== undefined) clearTimeout(this.#idle)
+      this.#idle?.cancel()
       try {
         const connection = await this.#connect(active, app)
         active.throwIfAborted()
@@ -155,10 +156,13 @@ export class NativeDriver {
         })
       } finally {
         if (!this.#closed) {
-          this.#idle = setTimeout(() => {
-            void this.stop()
-          }, 15 * 60_000)
-          this.#idle.unref()
+          this.#idle = after(
+            15 * 60_000,
+            () => {
+              void this.stop()
+            },
+            { unref: true }
+          )
         }
       }
     })
@@ -191,7 +195,7 @@ export class NativeDriver {
   }
 
   async stop(): Promise<void> {
-    if (this.#idle !== undefined) clearTimeout(this.#idle)
+    this.#idle?.cancel()
     this.#epoch.abort(new Error("Computer control stopped; reacquire targets and observe again"))
     this.observations.clear()
     await this.#queue.run("desktop", () => this.#disconnect())

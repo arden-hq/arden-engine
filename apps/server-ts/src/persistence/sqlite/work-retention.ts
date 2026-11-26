@@ -8,6 +8,7 @@ import { countsAsRun } from "./automation-skip-record.js"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { taskUnfinishedSql } from "./task-status-sql.js"
 import { sessionAncestors } from "./tree-walk.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const hasRetainedWork = (sql: SqlClient.SqlClient, sessionId: Statement.Fragment) => sql`(
   EXISTS (
@@ -70,7 +71,10 @@ const hasRetainedWork = (sql: SqlClient.SqlClient, sessionId: Statement.Fragment
         AND run.run_id = json_extract(source.value, '$.run_ref')))
 )`
 
-export const sessionActiveWorkSql = (sql: SqlClient.SqlClient, alias: string) => {
+export const sessionActiveWorkSql = (
+  sql: SqlClient.SqlClient,
+  alias: string
+): Statement.Statement<Row> => {
   const session = sql.literal(alias)
   return sql`(EXISTS (
         SELECT 1 FROM code_mode_scripts AS script

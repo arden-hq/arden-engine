@@ -1,8 +1,23 @@
+import { EDITABLE_KIND, type ApprovalPresentationEditable } from "@arden-hq/protocol/chat"
 import type { ApprovalEditLine, ServerApprovalEdits } from "./approval-edits.js"
+import { jsonArguments } from "./automation-create-card.js"
 
-export const SEND_EDITABLE_FIELDS = ["subject", "body", "omit_attachments"] as const
+const SEND_EDITABLE_FIELDS = ["subject", "body", "omit_attachments"] as const
 
-export const REPLY_EDITABLE_FIELDS = ["body", "omit_attachments"] as const
+const REPLY_EDITABLE_FIELDS = ["body", "omit_attachments"] as const
+
+const mailEditable =
+  (fields: ReadonlyArray<string>) =>
+  (input: unknown, account: string): ApprovalPresentationEditable => ({
+    kind: EDITABLE_KIND.mailDraft,
+    fields,
+    arguments: jsonArguments(input),
+    account
+  })
+
+export const sendEditable = mailEditable(SEND_EDITABLE_FIELDS)
+
+export const replyEditable = mailEditable(REPLY_EDITABLE_FIELDS)
 
 interface MailWords {
   readonly subject?: string

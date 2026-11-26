@@ -2,13 +2,14 @@ import type { ChatMessage, ToolCallRequest, ToolResult } from "@arden-hq/loop"
 import type { Schema } from "effect"
 
 import type { AgentMode } from "../../sessions/agent-mode.js"
+import type { CallParent } from "../../persistence/tools/tool-roles.js"
 
 export interface CodeModeCallRequest {
   readonly approvalContinuation?: "caller"
   readonly beforeExecute?: ToolCallRequest["beforeExecute"]
   readonly onResult?: (result: ToolResult) => void
   readonly onSettled?: (facts: NestedCallFacts) => void
-  readonly parentToolCallId: string
+  readonly parent: CallParent
   readonly toolCallId: string
   readonly name: string
   readonly args: Readonly<Record<string, unknown>>

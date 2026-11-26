@@ -89,6 +89,7 @@ export const listedSession = (messageCount: number): ListedSession => ({
   origin_automation_id: null,
   parent_session_id: null,
   parent_tool_call_id: null,
+  parent_step: { kind: "none" },
   parent_message_id: null,
   parent_run_id: null,
   active_run_id: null,

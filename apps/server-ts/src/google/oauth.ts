@@ -1,3 +1,5 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
+import { after, type Timer } from "@arden-hq/std/timer"
 import type {
   GoogleOAuthClient,
   GoogleOAuthStartResponse,
@@ -19,6 +21,7 @@ import type { createGoogleClientConfiguration } from "./client-configuration.js"
 import { currentMillis, iso } from "../runtime/clock.js"
 import { GoogleConnectionError } from "./errors.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
+import { type GoogleOAuth } from "./oauth-types.js"
 
 const CALLBACK_PATH = "/oauth/callback"
 const CALLBACK_TIMEOUT_MS = 10 * 60 * 1_000
@@ -92,7 +95,7 @@ interface PendingAuthorization {
   readonly verifier: string
   readonly redirectUri: string
   readonly listener: LoopbackListener
-  readonly timer: ReturnType<typeof setTimeout>
+  readonly timer: Timer
 }
 
 const codeChallenge = (verifier: string): string => sha256Base64Url(verifier)
@@ -129,7 +132,7 @@ const requestJson = async (
   }
   let body: unknown
   try {
-    body = await response.json()
+    body = await parseJsonBody(response)
   } catch (cause) {
     throw new GoogleConnectionError({
       reason: "invalid_response",
@@ -163,7 +166,7 @@ export const makeGoogleOAuth = ({
   readonly fetcher: typeof globalThis.fetch
   readonly endpoints: GoogleEndpoints
   readonly now: () => number
-}) => {
+}): GoogleOAuth => {
   const pending = new Map<GoogleServiceId, PendingAuthorization>()
 
   const closePending = async (service: GoogleServiceId): Promise<void> => {
@@ -171,7 +174,7 @@ export const makeGoogleOAuth = ({
     if (authorization === undefined) return
     pending.delete(service)
     authorization.controller.abort()
-    clearTimeout(authorization.timer)
+    authorization.timer.cancel()
     await authorization.listener.close()
   }
 
@@ -379,7 +382,7 @@ export const makeGoogleOAuth = ({
       })
     }
     const redirectUri = listener.redirectUri
-    const timer = setTimeout(() => void closePending(service), CALLBACK_TIMEOUT_MS)
+    const timer = after(CALLBACK_TIMEOUT_MS, () => void closePending(service))
     const parameters = authorizationParameters({ service, incremental })
     const authorization: PendingAuthorization = {
       controller: new AbortController(),

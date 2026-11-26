@@ -4,6 +4,7 @@ import { Effect } from "effect"
 
 import { readAuthoredFile } from "../prompts/catalog.js"
 import { parseSkillMetadata } from "./metadata.js"
+import { type SkillError, skillError, type SkillOperation } from "./errors.js"
 
 export interface BuiltInSkill {
   readonly name: BuiltInSkillName
@@ -92,3 +93,9 @@ const byName = new Map<string, BuiltInSkill>(BUILT_IN_SKILLS.map((skill) => [ski
 export const builtInSkillByName = (name: string): BuiltInSkill | undefined => byName.get(name)
 
 export const isBuiltInSkillName = (name: string): boolean => byName.has(name)
+
+export const reservedName = (operation: SkillOperation, name: string): SkillError =>
+  skillError(operation, "invalid", `Skill name ${name} is reserved for a built-in Skill`)
+
+export const builtInUnchangeable = (operation: SkillOperation, name: string): SkillError =>
+  skillError(operation, "invalid", `Skill ${name} is built in and cannot be changed`)

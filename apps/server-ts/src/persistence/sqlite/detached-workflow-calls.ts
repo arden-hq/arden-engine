@@ -1,16 +1,31 @@
 import { Effect } from "effect"
-import type { SqlClient, SqlError } from "effect/unstable/sql"
+import type { SqlClient, SqlError, Statement } from "effect/unstable/sql"
 
-import { DETACHED_WORKFLOW_OWNER_TOOLS } from "../tools/tool-roles.js"
-import { workflowParentToolCallId } from "../tools/workflow-parent.js"
+import { DETACHED_WORKFLOW_OWNER_TOOLS, type NestingKind } from "../tools/tool-roles.js"
 import { preserveToolError, toolError, type ToolOperation } from "./tool-rows.js"
+
+const storedScripts = (
+  sql: SqlClient.SqlClient,
+  runId: string,
+  toolCallIds: ReadonlyArray<string>
+) =>
+  sql<{ readonly tool_call_id: string; readonly script_tool_call_id: string }>`
+    SELECT tool_call_id, script_tool_call_id FROM tool_calls
+    WHERE run_id = ${runId} AND tool_call_id IN ${sql.in(toolCallIds)}
+      AND script_tool_call_id IS NOT NULL`
 
 export const requireLiveWorkflowOwner = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   identity: { readonly runId: string; readonly toolCallId: string },
-  operation: ToolOperation
+  operation: ToolOperation,
+  planned?: { readonly script: string | undefined }
 ) {
-  const owner = workflowParentToolCallId(identity.toolCallId)
+  const owner =
+    planned === undefined
+      ? (yield* storedScripts(sql, identity.runId, [identity.toolCallId]).pipe(
+          Effect.mapError(preserveToolError(operation, identity))
+        ))[0]?.script_tool_call_id
+      : planned.script
   if (owner === undefined) return
   const rows = yield* sql<{ readonly status: string }>`
     SELECT status FROM code_mode_scripts
@@ -20,17 +35,11 @@ export const requireLiveWorkflowOwner = Effect.fnUntraced(function* (
     return yield* toolError(operation, "conflict", "The owning script has stopped", identity)
 })
 
-export const detachedWorkflowCalls = Effect.fnUntraced(function* (
+export const detachedOwnedCalls = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   runId: string,
-  toolCallIds: ReadonlyArray<string>
+  owners: ReadonlyMap<string, string>
 ): Effect.fn.Return<ReadonlySet<string>, SqlError.SqlError> {
-  const owners = new Map(
-    toolCallIds.flatMap((id) => {
-      const owner = workflowParentToolCallId(id)
-      return owner === undefined ? [] : [[id, owner] as const]
-    })
-  )
   if (owners.size === 0) return new Set()
   const rows = yield* sql<{ readonly tool_call_id: string }>`
     SELECT tool_call_id FROM tool_calls
@@ -51,3 +60,44 @@ export const detachedWorkflowCalls = Effect.fnUntraced(function* (
   const completed = new Set(rows.map((row) => row.tool_call_id))
   return new Set([...owners].flatMap(([id, owner]) => (completed.has(owner) ? [id] : [])))
 })
+
+export const detachedWorkflowCalls = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  runId: string,
+  toolCallIds: ReadonlyArray<string>
+): Effect.fn.Return<ReadonlySet<string>, SqlError.SqlError> {
+  if (toolCallIds.length === 0) return new Set()
+  const rows = yield* storedScripts(sql, runId, toolCallIds)
+  return yield* detachedOwnedCalls(
+    sql,
+    runId,
+    new Map(rows.map((row) => [row.tool_call_id, row.script_tool_call_id]))
+  )
+})
+
+export const descendantCalls = (
+  sql: SqlClient.SqlClient,
+  runId: string | Statement.Fragment,
+  ancestor: string | Statement.Fragment,
+  firstNesting?: NestingKind
+): Statement.Fragment => sql`(
+  WITH RECURSIVE descendant(tool_call_id) AS (
+    SELECT tool_call_id FROM tool_calls
+    WHERE run_id = ${runId} AND parent_tool_call_id = ${ancestor}
+      ${firstNesting === undefined ? sql`` : sql`AND nesting = ${firstNesting}`}
+    UNION
+    SELECT child.tool_call_id FROM tool_calls AS child
+    JOIN descendant ON child.parent_tool_call_id = descendant.tool_call_id
+    WHERE child.run_id = ${runId}
+  )
+  SELECT tool_call_id FROM descendant)`
+
+export const descendantCallsOfColumns = (runId: string, ancestor: string): string => `(
+  WITH RECURSIVE descendant(tool_call_id) AS (
+    SELECT tool_call_id FROM tool_calls WHERE run_id = ${runId} AND parent_tool_call_id = ${ancestor}
+    UNION
+    SELECT child.tool_call_id FROM tool_calls AS child
+    JOIN descendant ON child.parent_tool_call_id = descendant.tool_call_id
+    WHERE child.run_id = ${runId}
+  )
+  SELECT tool_call_id FROM descendant)`

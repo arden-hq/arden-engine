@@ -1,3 +1,4 @@
+import { every } from "@arden-hq/std/timer"
 import { Effect, Schema } from "effect"
 import { ToolExecutionError, type ModelContentBlock } from "@arden-hq/loop"
 import { ComputerKernel } from "../computer/kernel.js"
@@ -9,7 +10,7 @@ import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { computerNativeTools } from "./computer-native.js"
 import { isComputerStep, type ComputerStep } from "@arden-hq/protocol/computer"
 import { scriptStep } from "../computer/step.js"
-import { COMPUTER_TOOL, NESTED_CALL_MARKERS } from "../persistence/tools/tool-roles.js"
+import { COMPUTER_TOOL, NESTED_CALL_MARKERS, NESTING } from "../persistence/tools/tool-roles.js"
 import { currentMillis } from "../runtime/clock.js"
 
 const OPERATIONS = new Set([
@@ -48,13 +49,11 @@ export const computerTools = Effect.gen(function* () {
   }
   yield* Effect.acquireRelease(
     Effect.sync(() => {
-      const timer = setInterval(expire, 60_000)
-      timer.unref()
-      return timer
+      return every(60_000, expire, { unref: true })
     }),
     (timer) =>
       Effect.promise(async () => {
-        clearInterval(timer)
+        timer.cancel()
         for (const session of sessions.values()) session.kernel.close()
         sessions.clear()
       })
@@ -120,7 +119,7 @@ export const computerTools = Effect.gen(function* () {
                   name,
                   args,
                   signal,
-                  parentToolCallId: ctx.toolCallId,
+                  parent: { toolCallId: ctx.toolCallId, nesting: { kind: NESTING.computer } },
                   toolCallId: `${ctx.toolCallId}${NESTED_CALL_MARKERS[COMPUTER_TOOL]}${index}`,
                   detached: false,
                   messages: ctx.messages,

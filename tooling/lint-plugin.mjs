@@ -116,12 +116,43 @@ const sources = "{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
 const testFiles = [`**/{test,tests}/**/*.${sources}`, `**/*.test.${sources}`]
 
 const idName = /(^id$|Id$|_id$|^ref$|Ref$)/
+const sqlId = String.raw`(?:[\w.]*_(?:id|ref)\b|\$\{[^}]*(?:Id|Ref|Key|_id|_ref)\b[^}]*\})`
+const sqlIdReads = [
+  new RegExp(String.raw`\b(?:substr|instr)\(\s*` + sqlId, "i"),
+  new RegExp(sqlId + String.raw`\s+(?:NOT\s+)?(?:LIKE|GLOB)\s+(?:'[^'%*]*[^'%*\s][%*]'|\$\{[^}]*\}\s*\|\|\s*'[%*]')`, "i"),
+  new RegExp(String.raw`\|\|\s*'[^'\s]*[:~]'\s*\)?\s*(?:AND|OR|$|\))`, "i"),
+  new RegExp(sqlId + String.raw`\s*[<>]=?\s*\$\{[^}]*(?:prefix|Prefix)[^}]*\}`, "i")
+]
+const idEdges = [
+  "apps/server-ts/src/computer/bundle-id.ts",
+  "apps/server-ts/src/persistence/managed-output/ref.ts",
+  "apps/server-ts/src/tools/google-gmail-refs.ts",
+  "libs/protocol/src/skills/marketplace-id.ts",
+  "libs/loop/src/providers/openai-responses/output-id.ts",
+  "apps/server-ts/src/mcp/own-request-id.ts",
+  "apps/server-ts/src/persistence/chat/workflow-delivery.ts",
+  "apps/server-ts/src/persistence/migrations/**"
+]
 const idLikeName = /(^id$|Id$|_id$|^ref$|Ref$|^key$|Key$|^index$|Index$)/
 const objectName = (node) => {
   const target = unwrap(node)
   if (target.type === "Identifier") return target.name
   if (target.type === "MemberExpression" && !target.computed) return target.property.name
   return undefined
+}
+const isNumberLiteral = (wrapped) => {
+  const node = unwrap(wrapped)
+  return node.type === "Literal" && typeof node.value === "number"
+}
+const cutsToLength = (method, args) =>
+  ["slice", "substring", "substr"].includes(method) &&
+  args.length === 2 &&
+  isNumberLiteral(args[0]) &&
+  unwrap(args[0]).value === 0 &&
+  isNumberLiteral(args[1])
+const cleansCharacters = (method, args) => {
+  const pattern = args.length === 2 ? unwrap(args[0]) : undefined
+  return method === "replace" && pattern?.type === "Literal" && pattern.regex?.flags.includes("g") === true
 }
 const idMethods = new Set(["startsWith", "endsWith", "split", "slice", "substring", "substr", "indexOf", "lastIndexOf", "match", "replace"])
 const isMadeUpDefault = (node) => {
@@ -143,6 +174,26 @@ const testRoot = (node) => {
   if (target.type === "MemberExpression") return testRoot(target.object)
   if (target.type === "CallExpression") return testRoot(target.callee)
   return false
+}
+const platformGates = new Set(["skipIf", "runIf"])
+const isProcessPlatform = (wrapped) => {
+  const node = unwrap(wrapped)
+  return node.type === "MemberExpression" && !node.computed && objectName(node.object) === "process" && node.property.name === "platform"
+}
+const isPlatformCheck = (wrapped) => {
+  const node = unwrap(wrapped)
+  if (node.type !== "BinaryExpression" || (node.operator !== "===" && node.operator !== "!==")) return false
+  return (isProcessPlatform(node.left) && isStringLiteral(node.right)) || (isProcessPlatform(node.right) && isStringLiteral(node.left))
+}
+const isPlatformGate = (node) => {
+  const call = node.parent
+  return (
+    platformGates.has(memberName(node)) &&
+    call?.type === "CallExpression" &&
+    call.callee === node &&
+    call.arguments.length === 1 &&
+    isPlatformCheck(call.arguments[0])
+  )
 }
 const longFileLines = 500
 const optionalSchemas = new Set(["optional", "optionalKey", "optionalWith", "NullOr", "UndefinedOr"])
@@ -205,7 +256,7 @@ export const baselinedRules = [
   {
     rule: "no-raw-json",
     files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
-    ignores: ["apps/server-ts/src/persistence/sqlite/json.ts", ...testFiles],
+    ignores: ["apps/server-ts/src/persistence/sqlite/json.ts", "libs/std/src/json-text.ts", ...testFiles],
     baseline: "tooling/baselines/raw-json.json",
     message: "Outside data is decoded once, at the edge, with a Schema: decodeJson (persistence/sqlite/json.ts) or Schema.decodeUnknownSync(Schema.fromJsonString(schema))",
     description: "Outside data is parsed once, at the edge.",
@@ -222,21 +273,25 @@ export const baselinedRules = [
   {
     rule: "no-id-parsing",
     files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
-    ignores: [],
+    ignores: idEdges,
     baseline: "tooling/baselines/id-parsing.json",
     message: "Ids carry no meaning: never read a prefix or a part out of an id or ref. Keep the fact in its own typed field",
     description: "No reading parts out of ids.",
-    collect: (_context, found) => ({
+    collect: (context, found) => ({
       CallExpression: (node) => {
         const callee = node.callee
         if (callee.type !== "MemberExpression" || callee.computed || !idMethods.has(callee.property.name)) return
+        if (cutsToLength(callee.property.name, node.arguments) || cleansCharacters(callee.property.name, node.arguments)) return
         const name = objectName(callee.object)
         if (name !== undefined && idName.test(name)) found.push({ node })
       },
-      MemberExpression: (node) => {
-        if (!node.computed || unwrap(node.property).type !== "Literal" || typeof unwrap(node.property).value !== "number") return
-        const name = objectName(node.object)
-        if (name !== undefined && idName.test(name)) found.push({ node })
+      TemplateLiteral: (node) => {
+        const text = node.quasis
+          .map((quasi, index) =>
+            index < node.expressions.length ? `${quasi.value.raw}\${${context.sourceCode.getText(node.expressions[index])}}` : quasi.value.raw
+          )
+          .join("")
+        if (sqlIdReads.some((pattern) => pattern.test(text))) found.push({ node })
       }
     })
   },
@@ -333,11 +388,11 @@ export const baselinedRules = [
     files: testFiles,
     ignores: [],
     baseline: "tooling/baselines/test-escapes.json",
-    message: "No skipped, focused or retried tests: fix the cause, or delete the test and say why in the commit",
+    message: "No skipped, focused or retried tests: fix the cause, or delete the test and say why in the commit. Only a test of a platform-only feature may gate on `process.platform === \"<os>\"` (skipIf or runIf)",
     description: "No test escape hatches.",
     collect: (_context, found) => ({
       MemberExpression: (node) => {
-        if (testEscapes.has(memberName(node)) && testRoot(node.object)) found.push({ node })
+        if (testEscapes.has(memberName(node)) && testRoot(node.object) && !isPlatformGate(node)) found.push({ node })
       },
       CallExpression: (node) => {
         if (!testRoot(node.callee)) return

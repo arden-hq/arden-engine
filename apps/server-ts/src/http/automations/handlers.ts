@@ -1,6 +1,6 @@
 import type { AutomationEvent } from "@arden-hq/protocol"
 import { Effect, Schema, Stream } from "effect"
-import * as Sse from "effect/unstable/encoding/Sse"
+import { Event as SseEvent } from "effect/unstable/encoding/Sse"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { AutomationRuntime } from "../../automations/runtime.js"
 import { availableAutomationEvents } from "../../automations/event-producers.js"
@@ -52,7 +52,7 @@ type AppDelivery =
 const forApp = (delivery: SessionLifecycleDelivery): delivery is AppDelivery =>
   delivery.kind === "reset" || !isInternalLifecycleEvent(delivery.event)
 
-const lifecycleSse = (delivery: AppDelivery): Sse.Event => {
+const lifecycleSse = (delivery: AppDelivery): SseEvent => {
   if (delivery.kind === "reset") {
     return {
       _tag: "Event",

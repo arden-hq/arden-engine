@@ -50,5 +50,7 @@ export const TodoLifecycleResponseSchema: Schema.Codec<TodoLifecycleResponse> = 
 const decodeSetTodoOverrideRequestEffect = (value: unknown) =>
   Schema.decodeUnknownEffect(SetTodoOverrideRequestSchema)(value, strict)
 
-export const encodeSetTodoOverrideRequestEffect = (value: unknown) =>
+export const encodeSetTodoOverrideRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   decodeSetTodoOverrideRequestEffect(value).pipe(Effect.map(JSON.stringify))

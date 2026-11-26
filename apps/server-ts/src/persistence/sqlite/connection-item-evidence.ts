@@ -2,6 +2,7 @@ import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { workError } from "./work-records.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export const assertItemEvidence = Effect.fn("Work.assertItemEvidence")(function* (
   sql: SqlClient.SqlClient,
@@ -38,7 +39,7 @@ export const assertItemEvidence = Effect.fn("Work.assertItemEvidence")(function*
 export const threadTaken = (
   sql: SqlClient.SqlClient,
   options: { readonly itemIds: ReadonlyArray<string>; readonly exceptProposal: string | undefined }
-) =>
+): Effect.Effect<boolean, SqlError, never> =>
   sql`
     WITH cited_threads AS (
       SELECT DISTINCT item.source, item.account, item.thread_key FROM connection_item_threads AS item

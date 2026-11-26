@@ -1,8 +1,15 @@
+import { parseMigrationJson } from "./json.js"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
 const SEND_PREFIX = "session-send:"
 const CHOICE_LABEL_MAX = 160
+const OPEN_TARGET_CHOICE = "open_target"
+
+const DOOR_KIND = { existing: "existing", create: "create" } as const
+type DoorKind = (typeof DOOR_KIND)[keyof typeof DOOR_KIND]
+const isDoorKind = (value: unknown): value is DoorKind =>
+  Object.values<unknown>(DOOR_KIND).includes(value)
 
 interface FromChat {
   readonly session_id: string
@@ -13,7 +20,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 const withFromChat = (json: string, fromChat: FromChat): string | undefined => {
-  const parsed: unknown = JSON.parse(json)
+  const parsed: unknown = parseMigrationJson(json)
   if (!isRecord(parsed) || parsed["from_chat"] !== undefined) return undefined
   return JSON.stringify({ ...parsed, from_chat: fromChat })
 }
@@ -72,7 +79,7 @@ const stampHandoffs = (database: DatabaseSync): void => {
   for (const [sessionId, byMessage] of stamped) {
     const messages = readProjection.get(sessionId)?.messages
     if (typeof messages !== "string") continue
-    const parsed: unknown = JSON.parse(messages)
+    const parsed: unknown = parseMigrationJson(messages)
     if (!Array.isArray(parsed)) continue
     let changed = false
     const next = parsed.map((message: unknown) => {
@@ -87,11 +94,14 @@ const stampHandoffs = (database: DatabaseSync): void => {
 }
 
 const doorWords = (target: Record<string, unknown>): string | undefined => {
-  if (target["kind"] === "existing" && typeof target["label"] === "string")
-    return `Continue in ${target["label"]}`
-  if (target["kind"] === "create" && typeof target["name"] === "string")
-    return `Open a new chat: ${target["name"]}`
-  return undefined
+  const kind = target["kind"]
+  if (!isDoorKind(kind)) return undefined
+  switch (kind) {
+    case DOOR_KIND.existing:
+      return typeof target["label"] === "string" ? `Continue in ${target["label"]}` : undefined
+    case DOOR_KIND.create:
+      return typeof target["name"] === "string" ? `Open a new chat: ${target["name"]}` : undefined
+  }
 }
 
 const openLabel = (target: Record<string, unknown>): string | undefined => {
@@ -115,14 +125,14 @@ const nameFocusDoors = (database: DatabaseSync): void => {
     }))
   const update = database.prepare("UPDATE run_questions SET content = ? WHERE question_id = ?")
   for (const row of rows) {
-    const content: unknown = JSON.parse(row.content)
-    const target: unknown = JSON.parse(row.target_json)
+    const content: unknown = parseMigrationJson(row.content)
+    const target: unknown = parseMigrationJson(row.target_json)
     if (!isRecord(content) || !isRecord(target) || !Array.isArray(content["choices"])) continue
     const label = openLabel(target)
     if (label === undefined) continue
     let changed = false
     const choices = content["choices"].map((choice: unknown) => {
-      if (!isRecord(choice) || choice["id"] !== "open_target" || choice["label"] === label)
+      if (!isRecord(choice) || choice["id"] !== OPEN_TARGET_CHOICE || choice["label"] === label)
         return choice
       changed = true
       return { ...choice, label }

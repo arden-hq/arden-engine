@@ -2,7 +2,11 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { TranscriptMessageRecord } from "../transcript/model.js"
-import { TranscriptQueryError, type TranscriptQueryFailure } from "../transcript/queries.js"
+import {
+  TranscriptQueryError,
+  type TranscriptQueries,
+  type TranscriptQueryFailure
+} from "../transcript/queries.js"
 
 export interface TranscriptRow {
   readonly session_id: string
@@ -17,7 +21,7 @@ export interface TranscriptRow {
 export const makeToolResultInSession = (
   sql: SqlClient.SqlClient,
   decodeRow: (row: TranscriptRow) => Effect.Effect<TranscriptMessageRecord, TranscriptQueryFailure>
-) =>
+): TranscriptQueries["Service"]["toolResultInSession"] =>
   Effect.fn("SqliteTranscriptQueries.toolResultInSession")(function* (
     sessionId: string,
     toolCallId: string

@@ -1,6 +1,7 @@
 import { concat, fromUtf8, utf8 } from "./encoding.js"
 import type { ClientHeader, RelayHeader } from "./headers.js"
 import { isRecord } from "@arden-hq/std/json"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 export const FRAME_VERSION = 1
 export const MAX_FRAME_BYTES = 256 * 1024
@@ -49,7 +50,7 @@ export const decodeFrame = (frame: Uint8Array): DecodedFrame | FrameError => {
 
 const parseJsonObject = (bytes: Uint8Array): Record<string, unknown> | undefined => {
   try {
-    const value: unknown = JSON.parse(fromUtf8(bytes))
+    const value: unknown = parseJsonText(fromUtf8(bytes))
     return isRecord(value) ? value : undefined
   } catch {
     return undefined

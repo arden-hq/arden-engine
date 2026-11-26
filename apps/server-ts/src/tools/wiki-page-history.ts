@@ -11,7 +11,6 @@ import { chatLinkOf } from "./call-receipt.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
 import {
-  WikiPathSchema,
   changePages,
   loadSnapshot,
   pageNotFound,
@@ -23,6 +22,7 @@ import { changeFailure, ChangeTimeSchema } from "./wiki-change.js"
 import { writeIdentity } from "./wiki-identity.js"
 import { wikiOriginChat, wikiOriginSource } from "../wiki/commit.js"
 import { pageSource, requireObserved } from "./wiki-records.js"
+import { WikiPathSchema } from "./wiki-schemas.js"
 
 const MAX_HISTORY_ENTRIES = 100
 const MAX_LINE_CHARS = 4_096

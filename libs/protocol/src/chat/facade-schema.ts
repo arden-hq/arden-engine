@@ -7,24 +7,12 @@ import {
 } from "../common/schema.js"
 import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
 import { CHAT_QUEUE_LIMIT, CHAT_REPLY_QUOTES_MAX, chatReplyContexts } from "./contracts.js"
-import type {
-  ActiveRunSummary,
-  CancelResponse,
-  ChatAcknowledgement,
-  ChatReceipt,
-  PreparedChatMessage,
-  QueuedCancelResponse,
-  QueuedChatMessage,
-  QueuedChatMessages,
-  ReadResponse,
-  RunsStatus
-} from "./contracts.js"
+import type { PreparedChatMessage, QueuedChatMessage, QueuedChatMessages } from "./contracts.js"
 import {
   ChatCaptureViaSchema,
   ChatImageSchema,
   ChatReceiptStatusSchema,
   ChatSentFromSchema,
-  MarkSessionReadResponseSchema,
   TurnWorkViewSchema
 } from "./schema.js"
 import {
@@ -34,6 +22,8 @@ import {
   ImageMediaTypeSchema
 } from "./schema-fields.js"
 import { APPROVAL_MODES } from "../permissions/modes.js"
+
+type EncodedText = Effect.Effect<string, Schema.SchemaError>
 
 const strict = { onExcessProperty: "error" } as const
 const chatResult = Schema.String.check(Schema.isMaxLength(100_000))
@@ -295,7 +285,7 @@ const QueueOrderSchema = Schema.Array(chatIdentifier).check(
 
 export const ReorderChatQueueRequestSchema = Schema.Struct({ client_ids: QueueOrderSchema })
 
-export const encodeReorderChatQueueRequestEffect = (value: unknown) =>
+export const encodeReorderChatQueueRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(
     Schema.Struct({
       sessionId: chatIdentifier,
@@ -338,7 +328,9 @@ export const EnqueueChatMessageInputSchema = Schema.Struct({
   sentFrom: Schema.optionalKey(ChatSentFromSchema)
 }).check(queuedMessageContent)
 
-export const encodeChatMessageRequestEffect = (value: unknown) =>
+export const encodeChatMessageRequestEffect = (
+  value: unknown
+): Effect.Effect<PreparedChatMessage, Schema.SchemaError> =>
   Schema.decodeUnknownEffect(ChatMessageInputSchema)(value, strict).pipe(
     Effect.map((input): PreparedChatMessage => {
       const clientId = input.clientId ?? globalThis.crypto.randomUUID()
@@ -383,7 +375,7 @@ export const encodeChatMessageRequestEffect = (value: unknown) =>
     })
   )
 
-export const encodeEnqueueChatMessageRequestEffect = (value: unknown) =>
+export const encodeEnqueueChatMessageRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(EnqueueChatMessageInputSchema)(value, strict).pipe(
     Effect.map((input) =>
       JSON.stringify({
@@ -403,7 +395,7 @@ export const encodeEnqueueChatMessageRequestEffect = (value: unknown) =>
     )
   )
 
-export const encodeToolResultRequestEffect = (value: unknown) =>
+export const encodeToolResultRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(ToolResultInputSchema)(value, strict).pipe(
     Effect.map((input) =>
       JSON.stringify({
@@ -424,7 +416,7 @@ export const encodeToolResultRequestEffect = (value: unknown) =>
     )
   )
 
-export const encodeConnectionResultRequestEffect = (value: unknown) =>
+export const encodeConnectionResultRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(ConnectionResultInputSchema)(value, strict).pipe(
     Effect.map((input) =>
       JSON.stringify({
@@ -437,7 +429,7 @@ export const encodeConnectionResultRequestEffect = (value: unknown) =>
     )
   )
 
-export const encodeCancelRequestEffect = (value: unknown) =>
+export const encodeCancelRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(CancelInputSchema)(value, strict).pipe(
     Effect.map((input) =>
       input.runId !== undefined
@@ -449,7 +441,7 @@ export const encodeCancelRequestEffect = (value: unknown) =>
     )
   )
 
-export const encodeHistoryPathEffect = (value: unknown) =>
+export const encodeHistoryPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(HistoryRouteOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
       const query = new URLSearchParams()
@@ -464,7 +456,7 @@ export const encodeHistoryPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeTurnWorkPathEffect = (value: unknown) =>
+export const encodeTurnWorkPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(TurnWorkRouteOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
       const query = new URLSearchParams({
@@ -479,7 +471,7 @@ export const encodeTurnWorkPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeTurnDetailsPathEffect = (value: unknown) =>
+export const encodeTurnDetailsPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(TurnDetailsRouteOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
       const query = new URLSearchParams({
@@ -490,7 +482,7 @@ export const encodeTurnDetailsPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeToolCallPathEffect = (value: unknown) =>
+export const encodeToolCallPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(ToolCallRouteOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
       const query = new URLSearchParams({
@@ -508,7 +500,7 @@ const ToolResultValueRouteOptionsSchema = Schema.Struct({
   path: Schema.String.check(Schema.isMaxLength(500))
 })
 
-export const encodeToolResultValuePathEffect = (value: unknown) =>
+export const encodeToolResultValuePathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(ToolResultValueRouteOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
       const query = new URLSearchParams({ path: options.path })
@@ -516,152 +508,25 @@ export const encodeToolResultValuePathEffect = (value: unknown) =>
     })
   )
 
-export const encodeReadPathEffect = (value: unknown) =>
+export const encodeReadPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(ReadPathInputSchema)(value, strict).pipe(
     Effect.map(({ sessionId }) => `/sessions/${encodeURIComponent(sessionId)}/read`)
   )
 
-export const encodeEventPathEffect = (value: unknown) =>
+export const encodeEventPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(EventPathInputSchema)(value, strict).pipe(
     Effect.map(({ sessionId }) => `/chat/events/${encodeURIComponent(sessionId)}`)
   )
 
-export const encodeQueuePathEffect = (value: unknown) =>
+export const encodeQueuePathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(QueuePathInputSchema)(value, strict).pipe(
     Effect.map(({ sessionId }) => `/sessions/${encodeURIComponent(sessionId)}/queue`)
   )
 
-export const encodeQueuedMessagePathEffect = (value: unknown) =>
+export const encodeQueuedMessagePathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(QueuedMessagePathInputSchema)(value, strict).pipe(
     Effect.map(
       ({ clientId, sessionId }) =>
         `/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(clientId)}`
     )
   )
-
-type ChatReceiptWire = Schema.Schema.Type<typeof ChatReceiptResponseSchema>
-type CancelResponseWire = Schema.Schema.Type<typeof CancelResponseSchema>
-type QueuedCancelResponseWire = Schema.Schema.Type<typeof QueuedCancelResponseSchema>
-type ChatAcknowledgementWire = Schema.Schema.Type<typeof ChatAcknowledgementSchema>
-type ReadResponseWire = Schema.Schema.Type<typeof MarkSessionReadResponseSchema>
-type ActiveRunSummaryWire = Schema.Schema.Type<typeof ActiveRunSummarySchema>
-type RunsStatusWire = Schema.Schema.Type<typeof RunsStatusSchema>
-
-const mapActiveRunSummary = (run: ActiveRunSummaryWire): ActiveRunSummary => {
-  const {
-    run_id,
-    turn_id,
-    session_id,
-    status,
-    created_at,
-    updated_at,
-    age_seconds,
-    idle_seconds,
-    message_count,
-    pending_injections,
-    approvals_pending,
-    runId: _runId,
-    turnId: _turnId,
-    sessionId: _sessionId,
-    createdAt: _createdAt,
-    updatedAt: _updatedAt,
-    ageSeconds: _ageSeconds,
-    idleSeconds: _idleSeconds,
-    messageCount: _messageCount,
-    pendingInjections: _pendingInjections,
-    approvalsPending: _approvalsPending,
-    ...extras
-  } = run
-  return {
-    ...extras,
-    runId: run_id,
-    turnId: turn_id,
-    sessionId: session_id,
-    status,
-    createdAt: created_at,
-    updatedAt: updated_at,
-    ageSeconds: age_seconds,
-    idleSeconds: idle_seconds,
-    messageCount: message_count,
-    pendingInjections: pending_injections,
-    approvalsPending: approvals_pending
-  }
-}
-
-export const mapRunsStatus = (response: RunsStatusWire): RunsStatus => {
-  const {
-    observed_at,
-    total_retained,
-    active_runs,
-    observedAt: _observedAt,
-    totalRetained: _totalRetained,
-    activeRuns: _activeRuns,
-    ...extras
-  } = response
-  return {
-    ...extras,
-    observedAt: observed_at,
-    totalRetained: total_retained,
-    activeRuns: active_runs.map(mapActiveRunSummary)
-  }
-}
-
-export const mapChatReceipt = (receipt: ChatReceiptWire): ChatReceipt => {
-  const {
-    run_id,
-    session_id,
-    status,
-    client_id,
-    runId: _runId,
-    sessionId: _sessionId,
-    clientId: _clientId,
-    ...extras
-  } = receipt
-  return {
-    ...extras,
-    runId: run_id,
-    sessionId: session_id,
-    status,
-    ...(client_id === undefined ? {} : { clientId: client_id })
-  }
-}
-
-export const mapCancelResponse = (response: CancelResponseWire): CancelResponse => {
-  const {
-    run_id,
-    cancel_requested,
-    status,
-    runId: _runId,
-    cancelRequested: _cancelRequested,
-    found: _found,
-    ...extras
-  } = response
-  return { ...extras, status, runId: run_id, cancelRequested: cancel_requested }
-}
-
-export const mapQueuedCancelResponse = (
-  response: QueuedCancelResponseWire
-): QueuedCancelResponse => {
-  const { client_id, status, clientId: _clientId, ...extras } = response
-  return { ...extras, status, clientId: client_id }
-}
-
-export const mapChatAcknowledgement = (response: ChatAcknowledgementWire): ChatAcknowledgement => {
-  const { status, ...extras } = response
-  return { ...extras, status }
-}
-
-export const mapReadResponse = (response: ReadResponseWire): ReadResponse => {
-  const {
-    session_id,
-    has_unread,
-    sessionId: _sessionId,
-    hasUnread: _hasUnread,
-    ...extras
-  } = response
-  return {
-    ...extras,
-    sessionId: session_id,
-    hasUnread: has_unread
-  }
-}

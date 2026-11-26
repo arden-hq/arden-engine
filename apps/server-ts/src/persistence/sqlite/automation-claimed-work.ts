@@ -66,7 +66,7 @@ const JobHandlerIdSchema = Schema.NullOr(Schema.Literals(SYSTEM_HANDLER_IDS))
 
 export const isJobHandlerId = Schema.is(JobHandlerIdSchema)
 
-export const unknownHandlerMessage = (handler: string | null) =>
+export const unknownHandlerMessage = (handler: string | null): string =>
   `Unknown Automation handler: ${handler}`
 
 export const readJobHandler = Effect.fn("AutomationJob.readHandler")(function* (
@@ -119,9 +119,10 @@ export interface ClaimedWork {
   readonly cooldownMinutes: number | null
   readonly instructionRevisionId: number | null
   readonly heldSince: string | null
+  readonly jobOwner: Pick<AutomationJobPayload, "automationId" | "taskItemId">
 }
 
-export const claimedWork = (owner: WorkOwner): ClaimedWork => {
+const workOf = (owner: WorkOwner): Omit<ClaimedWork, "jobOwner"> => {
   switch (owner.kind) {
     case "task":
       return {
@@ -178,3 +179,8 @@ export const claimedWork = (owner: WorkOwner): ClaimedWork => {
     }
   }
 }
+
+export const claimedWork = (owner: WorkOwner): ClaimedWork => ({
+  ...workOf(owner),
+  jobOwner: { automationId: owner.key, taskItemId: "itemId" in owner ? owner.itemId : null }
+})

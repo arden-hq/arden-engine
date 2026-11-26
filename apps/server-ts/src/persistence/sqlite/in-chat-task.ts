@@ -83,8 +83,10 @@ export const ensureTaskBudget = Effect.fn("InChatTask.ensureBudget")(function* (
   )
 })
 
-export const liftsBudgetStop = (tokensUsed: number | undefined, tokenLimit: number | null) =>
-  tokensUsed !== undefined && (tokenLimit === null || tokenLimit > tokensUsed)
+export const liftsBudgetStop = (
+  tokensUsed: number | undefined,
+  tokenLimit: number | null
+): boolean => tokensUsed !== undefined && (tokenLimit === null || tokenLimit > tokensUsed)
 
 const spentScopeSql = (sql: SqlClient.SqlClient, scope: SpentScope) => {
   if ("runId" in scope)

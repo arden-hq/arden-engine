@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
@@ -27,7 +28,7 @@ const renameToolSettings = (database: DatabaseSync): void => {
     .get()
   const stored = row?.["overrides_json"]
   if (typeof stored !== "string") return
-  const overrides: unknown = JSON.parse(stored)
+  const overrides: unknown = parseMigrationJson(stored)
   if (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)) return
   const next: Record<string, unknown> = { ...overrides }
   for (const [old, names] of Object.entries(RENAMED)) {

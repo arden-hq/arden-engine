@@ -5,9 +5,11 @@ import path from "node:path"
 import { Effect } from "effect"
 
 import type { SpaceFolderApprovalData } from "../persistence/permissions/space-folder-approval.js"
-import { ardenStateRoot, realHome, type LocalPathServices } from "../storage/local-paths.js"
+import { type LocalPathServices } from "../storage/local-paths.js"
 import type { ServerRunContext } from "./run-context.js"
 import { tooWide } from "../fs/protected-paths.js"
+import { realHome } from "../storage/local-directory.js"
+import { ardenStateRoot } from "../storage/local-paths.js"
 
 export interface FolderGrant {
   readonly place: "space"
@@ -84,7 +86,9 @@ export const folderGrantFor = async (
     : undefined
 }
 
-export const grantData = (grant: FolderGrant) =>
+export const grantData = (
+  grant: FolderGrant
+): { space_folder_grant: { _tag: "SpaceFolderGrant"; space_id: string; local_folder: string } } =>
   ({
     space_folder_grant: {
       _tag: "SpaceFolderGrant",

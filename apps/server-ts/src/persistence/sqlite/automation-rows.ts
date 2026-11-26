@@ -1,42 +1,29 @@
-import { jobHeldSince, openRunSince } from "./automation-running.js"
-import { taskStandsSql } from "./task-wake.js"
-import { countsAsRun } from "./automation-skip-record.js"
-import { outcomeSql, shownRunStatus } from "./automation-run-outcome.js"
-import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
-import type {
-  Automation,
-  AutomationContextMode,
-  AutomationToolScope
-} from "@arden-hq/protocol/automations"
-import { AutomationSchema, AutomationToolScopeSchema } from "@arden-hq/protocol/effect/automations"
+import type { AutomationContextMode, AutomationToolScope } from "@arden-hq/protocol/automations"
 import { RunOriginSchema } from "@arden-hq/protocol/effect/runs"
 import { Effect, Result, Schema } from "effect"
-import { freshRow } from "./automation-enqueue.js"
-import { pendingDecisionCards } from "./pending-decision-cards.js"
-import { causingAutomation } from "./run-cause.js"
-import {
-  AutomationId,
-  type AutomationRules,
-  type SystemAutomationSpec
-} from "../automations/model.js"
-import { changedSystemSettings, systemSettable } from "../automations/system-settings.js"
+import { type AutomationRules, type SystemAutomationSpec } from "../automations/model.js"
 import { AutomationStoreError, type AutomationQueueSource } from "../automations/store.js"
 import { JobPurposeSchema, type JobClassification } from "../job-classification.js"
-import {
-  AutomationSubjectSchema,
-  SpaceId,
-  SpaceReviewSubjectSchema,
-  TaskItemId,
-  TaskSubjectSchema,
-  spaceJobId,
-  taskJobId
-} from "../space-job-id.js"
-import { decodeJson, encodeJson } from "./json.js"
-import { AutomationTriggersSchema } from "./automation-schedule.js"
+import { TaskItemId, spaceJobId, taskJobId } from "../space-job-id.js"
 import type { PersistenceDeps } from "./deps.js"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import { inArdenWords } from "../restart-notice.js"
-import { oldConditions } from "../automations/event-words.js"
+import {
+  ownerJson,
+  type DefinitionOwner,
+  type WorkOwner,
+  ContextModeSchema,
+  WorkOwnerSchema,
+  ownerJoin
+} from "./automation-owner.js"
+export {
+  hasOwner,
+  ownerJoin,
+  ownerJson,
+  reviewMayRunSql,
+  reviewNameSql,
+  reviewSpaceIdSql
+} from "./automation-owner.js"
+export type { DefinitionOwner, WorkOwner } from "./automation-owner.js"
 
 export type StoreOperation = AutomationStoreError["operation"]
 
@@ -91,8 +78,6 @@ export const queueColumns = (sql: SqlClient.SqlClient): Statement.Fragment => sq
   queue.claimed_at, queue.hold_started_at, queue.lease_expires_at, queue.attempt_count,
   queue.next_attempt_at`
 
-const ContextModeSchema = Schema.Literals(["fresh", "continue", "fork"])
-
 const BoundAttemptSchema = Schema.Struct({
   purpose: JobPurposeSchema,
   origin: Schema.fromJsonString(RunOriginSchema),
@@ -110,97 +95,6 @@ export const boundAttemptJson = (sql: SqlClient.SqlClient, attempt: string): Sta
     'generation', ${run}.task_generation, 'handler', ${run}.handler,
     'contextMode', ${run}.context_mode)`
 }
-
-const AuthoredConfigSchema = Schema.Struct({
-  ref: Schema.String,
-  name: Schema.String,
-  prompt: Schema.String,
-  model: Schema.NullOr(Schema.String),
-  contextMode: ContextModeSchema,
-  chatId: Schema.NullOr(Schema.String),
-  chatOrigin: Schema.NullOr(Schema.String),
-  handler: Schema.NullOr(Schema.String),
-  triggers: Schema.String,
-  cooldownMinutes: Schema.NullOr(Schema.Number),
-  instructionRevisionId: Schema.NullOr(Schema.Number)
-})
-
-const DefinitionPolicySchema = Schema.Struct({
-  toolScope: AutomationToolScopeSchema,
-  autoApprove: Schema.Boolean
-})
-
-const DefinitionStateSchema = Schema.Struct({
-  enabled: Schema.Boolean,
-  heldSince: Schema.NullOr(Schema.String),
-  nextRunAt: Schema.NullOr(Schema.String),
-  lastRunAt: Schema.NullOr(Schema.String),
-  lastResult: Schema.NullOr(Schema.String)
-})
-
-const AutomationOwnerSchema = Schema.Struct({
-  ...AutomationSubjectSchema.fields,
-  key: AutomationId,
-  purpose: Schema.Literals(["user_automation", "system"]),
-  authored: AuthoredConfigSchema,
-  policy: DefinitionPolicySchema,
-  state: DefinitionStateSchema
-})
-
-const ReviewSettingsSchema = Schema.Struct({
-  model: Schema.NullOr(Schema.String),
-  contextMode: ContextModeSchema,
-  cooldownMinutes: Schema.NullOr(Schema.Number)
-})
-
-const SpaceReviewOwnerSchema = Schema.Struct({
-  ...SpaceReviewSubjectSchema.fields,
-  key: AutomationId,
-  name: Schema.String,
-  settings: ReviewSettingsSchema,
-  chatId: Schema.NullOr(Schema.String),
-  mayRun: Schema.Boolean
-})
-
-const TaskOwnerSchema = Schema.Struct({
-  ...TaskSubjectSchema.fields,
-  key: AutomationId,
-  spaceId: Schema.NullOr(SpaceId),
-  text: Schema.String,
-  stands: Schema.Boolean,
-  chatId: Schema.NullOr(Schema.String)
-})
-
-const WorkOwnerSchema = Schema.Union([
-  AutomationOwnerSchema,
-  SpaceReviewOwnerSchema,
-  TaskOwnerSchema
-])
-export type WorkOwner = typeof WorkOwnerSchema.Type
-export type DefinitionOwner = Extract<WorkOwner, { readonly kind: "automation" }>
-
-export const ownerJoin = (
-  sql: SqlClient.SqlClient,
-  key: Statement.Fragment = sql`queue.task_id`
-): Statement.Fragment => sql`
-  LEFT JOIN scheduled_tasks AS task
-    ON task.task_id = ${key} AND task.purpose IN ('user_automation', 'system')
-  LEFT JOIN space_tasks AS item
-    ON task.task_id IS NULL AND substr(${key}, 1, 5) = 'task:'
-      AND item.item_id = substr(${key}, 6)
-  LEFT JOIN spaces AS review_space
-    ON task.task_id IS NULL AND review_space.space_id = ${reviewSpaceIdSql(sql, key)}`
-
-export const hasOwner = (sql: SqlClient.SqlClient): Statement.Fragment =>
-  sql`(task.task_id IS NOT NULL OR item.item_id IS NOT NULL OR review_space.space_id IS NOT NULL)`
-
-export const reviewSpaceIdSql = (
-  sql: SqlClient.SqlClient,
-  key: Statement.Fragment
-): Statement.Fragment => sql`CASE WHEN substr(${key}, 1, 6) = 'space:' THEN substr(${key}, 7) END`
-
-export const reviewNameSql = (sql: SqlClient.SqlClient, space: string): Statement.Fragment =>
-  sql`${sql.literal(space)}.name || ' worker'`
 
 type OwnerApproval =
   | { readonly kind: "own"; readonly autoApprove: boolean }
@@ -226,57 +120,6 @@ export const ownerPolicy = (owner: WorkOwner): OwnerPolicy => {
         approval: owner.spaceId === null ? { kind: "own", autoApprove: false } : { kind: "space" }
       }
   }
-}
-
-export const reviewMayRunSql = (sql: SqlClient.SqlClient, space: string): Statement.Fragment => {
-  const row = sql.literal(space)
-  return sql`(json_extract(${row}.inference_policy, '$.enabled') = 1
-    AND ${row}.page_path IS NOT NULL AND ${row}.archived_at IS NULL)`
-}
-
-const jsonBool = (sql: SqlClient.SqlClient, value: Statement.Fragment): Statement.Fragment =>
-  sql`json(CASE WHEN ${value} THEN 'true' ELSE 'false' END)`
-
-export const ownerJson = (
-  sql: SqlClient.SqlClient,
-  key: Statement.Fragment = sql`queue.task_id`
-): Statement.Fragment => {
-  return sql`CASE
-  WHEN task.task_id IS NOT NULL THEN json_object(
-    'kind', 'automation', 'key', task.task_id, 'automationId', task.task_id,
-    'purpose', task.purpose,
-    'authored', json_object(
-      'ref', task.automation_ref, 'name', task.name, 'prompt', task.prompt, 'model', task.model,
-      'contextMode', task.context_mode, 'chatId', task.thread_id,
-      'chatOrigin', (SELECT set_chat.origin_automation_id FROM sessions AS set_chat
-        WHERE set_chat.session_id = task.thread_id),
-      'handler', task.handler, 'triggers', task.triggers,
-      'cooldownMinutes', task.cooldown_minutes,
-      'instructionRevisionId', task.instruction_revision_id),
-    'policy', json_object('toolScope', task.tool_scope,
-      'autoApprove', ${jsonBool(sql, sql`task.auto_approve = 1`)}),
-    'state', json_object('enabled', ${jsonBool(sql, sql`task.enabled = 1`)},
-      'heldSince', ${jobHeldSince(sql, "task")}, 'nextRunAt', task.next_run_at,
-      'lastRunAt', task.last_run_at, 'lastResult', task.last_result))
-  WHEN item.item_id IS NOT NULL THEN json_object(
-    'kind', 'task', 'key', ${key}, 'itemId', item.item_id, 'spaceId', item.space_id,
-    'text', item.text, 'stands', ${jsonBool(sql, taskStandsSql(sql, "item"))},
-    'chatId', (SELECT own.session_id FROM sessions AS own
-      WHERE own.origin_automation_id = ${key} AND own.session_type = 'channel'
-        AND own.archived_at IS NULL
-      ORDER BY own.started_at, own.session_id LIMIT 1))
-  WHEN review_space.space_id IS NOT NULL THEN json_object(
-    'kind', 'space_review', 'key', ${key}, 'spaceId', review_space.space_id,
-    'name', ${reviewNameSql(sql, "review_space")},
-    'settings', json((SELECT json_object('model', set_review.model,
-        'contextMode', COALESCE(set_review.context_mode, 'fresh'),
-        'cooldownMinutes', set_review.cooldown_minutes)
-      FROM (SELECT 1) LEFT JOIN space_review_settings AS set_review
-        ON set_review.space_id = review_space.space_id)),
-    'chatId', (SELECT review_chat.session_id FROM space_review_chats AS review_chat
-      WHERE review_chat.space_id = review_space.space_id),
-    'mayRun', ${jsonBool(sql, reviewMayRunSql(sql, "review_space"))})
-END`
 }
 
 const decodeOwnerJson = Schema.decodeUnknownEffect(Schema.fromJsonString(WorkOwnerSchema))
@@ -415,7 +258,7 @@ export const storeError = (
   message: string,
   automationId?: string,
   cause?: unknown
-) =>
+): AutomationStoreError =>
   new AutomationStoreError({
     operation,
     reason,
@@ -424,7 +267,10 @@ export const storeError = (
     ...(cause === undefined ? {} : { cause })
   })
 
-export const automationIdEffect = (automationId: string, operation: StoreOperation) =>
+export const automationIdEffect = (
+  automationId: string,
+  operation: StoreOperation
+): Effect.Effect<string, AutomationStoreError> =>
   Schema.decodeUnknownEffect(Schema.Trim.check(Schema.isMinLength(1)))(automationId).pipe(
     Effect.mapError((cause) =>
       storeError(operation, "invalid", "Automation id must not be empty", undefined, cause)
@@ -451,70 +297,6 @@ export const skipCorrupt = <Row, A, R>(options: {
     )
   )
 
-const automationChat = (row: AutomationRow): Automation["chat"] => {
-  if (row.thread_id === null) return null
-  return row.thread_origin_automation_id === row.task_id
-    ? { kind: "own", session_id: row.thread_id }
-    : { kind: "yours", session_id: row.thread_id, own_session_id: row.own_chat_id }
-}
-
-const automationHistory = (row: AutomationRow): Automation["history"] => {
-  if (row.purpose === "system") return null
-  return row.context_mode === "continue" ? "chat" : "fresh"
-}
-
-const scopeLabel = (scope: AutomationToolScope): string => {
-  switch (scope) {
-    case "read_only":
-      return "Read only"
-    case "reports":
-      return "Read + save reports"
-    case "browser":
-      return "Browser on this Mac"
-    case "all":
-      return "All tools"
-    case "space":
-      return "Space tools"
-    case "memory_capture":
-      return "Memory capture"
-    case "chat_summary":
-      return "Chat summary"
-  }
-}
-
-export const decodeQueueContext = (
-  row: Pick<QueueEntry, "context" | "task_id">,
-  operation: StoreOperation
-) =>
-  decodeJson(QueueContextSchema, row.context).pipe(
-    Effect.mapError((cause) =>
-      storeError(
-        operation,
-        "corrupt",
-        "Stored Automation job context is corrupt",
-        row.task_id,
-        cause
-      )
-    )
-  )
-
-export const encodeQueueContext = (
-  context: QueueContext,
-  operation: StoreOperation,
-  automationId: string
-) =>
-  encodeJson(QueueContextSchema, context).pipe(
-    Effect.mapError((cause) =>
-      storeError(
-        operation,
-        "storage",
-        "Could not encode the Automation job context",
-        automationId,
-        cause
-      )
-    )
-  )
-
 export const systemSpecOf = (
   rules: Pick<AutomationRules["Service"], "systemSpec">,
   row: Pick<AutomationRow, "task_id" | "handler">,
@@ -531,234 +313,6 @@ export const systemSpecOf = (
         )
       )
     : Effect.succeed(spec)
-}
-
-/** An Automation's stored row, as both the list and the single read show it. */
-export const automationRowSelect = (sql: SqlClient.SqlClient) => sql`
-  SELECT task_id, automation_ref, name, description, description_source,
-         prompt, model, context_mode, triggers, trigger_last_id, enabled, created_at, last_run_at,
-         next_run_at, last_result, ${openRunSince(sql, sql`scheduled_tasks.task_id`)} AS running_since,
-         auto_approve, handler, builtin, cooldown_minutes, thread_id, tool_scope, triggers_source,
-         prompt_author, instruction_revision_id,
-         purpose, owner_space_id, owner_task_id,
-         (SELECT origin_automation_id FROM sessions WHERE session_id = scheduled_tasks.thread_id)
-           AS thread_origin_automation_id,
-         -- Its own chat: one lookup in idx_sessions_automation_channel, whose
-         -- condition this repeats word for word.
-         (SELECT session_id FROM sessions WHERE origin_automation_id = scheduled_tasks.task_id
-           AND session_type = 'channel' AND archived_at IS NULL
-           ORDER BY started_at DESC LIMIT 1) AS own_chat_id
-  FROM scheduled_tasks`
-
-export const makeAutomationRowReads = ({
-  writer,
-  rules
-}: Pick<PersistenceDeps, "writer"> & {
-  readonly rules: Pick<AutomationRules["Service"], "systemSpec">
-}) => {
-  const sql = writer.sql
-  const project = Effect.fn("SqliteAutomationStore.project")(function* (
-    row: AutomationRow,
-    operation: StoreOperation
-  ): Effect.fn.Return<Automation, AutomationStoreError> {
-    const triggers = yield* decodeJson(AutomationTriggersSchema, row.triggers).pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          operation,
-          "corrupt",
-          "Stored Automation triggers are corrupt",
-          row.task_id,
-          cause
-        )
-      )
-    )
-    const statusRows = yield* sql<{ readonly id: number; readonly outcome: string | null }>`
-      SELECT run.id, ${outcomeSql(sql, sql`run`)} AS outcome FROM automation_runs AS run
-      WHERE run.task_id = ${row.task_id} AND ${countsAsRun(sql, sql`run`)}
-      ORDER BY run.id DESC
-      LIMIT 7
-    `.pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          operation,
-          "storage",
-          "Could not load recent Automation outcomes",
-          row.task_id,
-          cause
-        )
-      )
-    )
-    const recentStatuses = yield* skipCorrupt({
-      rows: statusRows,
-      decode: (statusRow) =>
-        shownRunStatus(statusRow.outcome).pipe(
-          Effect.mapError((cause) =>
-            storeError(
-              operation,
-              "corrupt",
-              "Stored Automation outcome is corrupt",
-              row.task_id,
-              cause
-            )
-          )
-        ),
-      skipped: (statusRow) => ({ automation_id: row.task_id, run_id: statusRow.id }),
-      what: "an Automation run"
-    })
-    const waitingRows = yield* sql<{ readonly waiting_on: "approval" | "connection" }>`
-      SELECT CASE WHEN approval.action = 'connection' THEN 'connection' ELSE 'approval' END AS waiting_on
-      FROM automation_runs AS run
-      JOIN tool_approvals AS approval ON approval.run_id = run.chat_run_id
-      WHERE run.task_id = ${row.task_id}
-        AND run.status = 'running'
-        AND approval.status = 'pending'
-      ORDER BY run.id DESC, approval.requested_at
-      LIMIT 1
-    `.pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          operation,
-          "storage",
-          "Could not load pending Automation attention",
-          row.task_id,
-          cause
-        )
-      )
-    )
-    const waitingEventRows = yield* sql<{ readonly count: number }>`
-      SELECT COUNT(*) AS count FROM automation_event_queue AS queue
-      WHERE queue.task_id = ${row.task_id} AND queue.source = 'event' AND ${freshRow(sql)}
-    `.pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          operation,
-          "storage",
-          "Could not count waiting Automation events",
-          row.task_id,
-          cause
-        )
-      )
-    )
-    const pendingRows = yield* sql<{
-      readonly count: number
-      readonly run_id: string
-      readonly tool_call_id: string
-      readonly session_id: string
-      readonly destination_session_id: string
-    }>`
-      SELECT COUNT(*) OVER () AS count, card.run_id, card.tool_call_id, card.session_id,
-        card.destination_session_id
-      FROM (${pendingDecisionCards(sql)}) AS card
-      JOIN chat_runs AS run ON run.run_id = card.run_id
-      WHERE ${causingAutomation(sql, "run")} = ${row.task_id}
-      ORDER BY card.requested_at, card.run_id, card.tool_call_id
-      LIMIT 1
-    `.pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          operation,
-          "storage",
-          "Could not load pending Automation cards",
-          row.task_id,
-          cause
-        )
-      )
-    )
-    const scope = yield* Schema.decodeUnknownEffect(AutomationToolScopeSchema)(row.tool_scope).pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          operation,
-          "corrupt",
-          "Stored Automation tool scope is corrupt",
-          row.task_id,
-          cause
-        )
-      )
-    )
-    const spec = row.purpose === "system" ? yield* systemSpecOf(rules, row, operation) : null
-    return yield* Schema.decodeUnknownEffect(AutomationSchema)({
-      task_id: row.task_id,
-      automation_ref: row.automation_ref,
-      name: row.name,
-      description: row.description,
-      description_source: row.description_source,
-      prompt: row.prompt,
-      model: row.model,
-      chat: automationChat(row),
-      history: automationHistory(row),
-      triggers,
-      enabled: row.enabled === 1,
-      created_at: row.created_at,
-      last_run_at: row.last_run_at,
-      next_run_at: row.next_run_at,
-      recent_statuses: recentStatuses,
-      latest_run_id: statusRows[0]?.id ?? null,
-      last_result: inArdenWords(row.last_result),
-      auto_approve: row.auto_approve === 1,
-      running_since: row.running_since,
-      waiting_on: waitingRows[0]?.waiting_on ?? null,
-      waiting_events: waitingEventRows[0]?.count ?? 0,
-      pending_approvals:
-        pendingRows[0] === undefined
-          ? null
-          : {
-              count: pendingRows[0].count,
-              first: {
-                run_id: pendingRows[0].run_id,
-                tool_call_id: pendingRows[0].tool_call_id,
-                session_id: pendingRows[0].session_id,
-                destination_session_id: pendingRows[0].destination_session_id
-              }
-            },
-      handler: row.handler,
-      builtin: row.builtin === 1,
-      cooldown_minutes: row.cooldown_minutes,
-      old_conditions: oldConditions(triggers),
-      tool_scope: scope,
-      tool_scope_label: scopeLabel(scope),
-      manual_run: spec?.manualRun ?? true,
-      system:
-        spec === null
-          ? null
-          : {
-              default_triggers: spec.triggers,
-              settable: systemSettable({
-                contextMode: row.context_mode,
-                promptEdit: spec.promptEdit
-              }),
-              changed: changedSystemSettings(row, spec)
-            }
-    }).pipe(
-      Effect.mapError((cause) =>
-        storeError(operation, "corrupt", "Stored Automation is corrupt", row.task_id, cause)
-      )
-    )
-  })
-
-  const findAutomationRow = Effect.fn("SqliteAutomationStore.findAutomationRow")(function* (
-    automationId: string,
-    operation: StoreOperation
-  ) {
-    const rows = yield* sql<AutomationRow>`
-      ${automationRowSelect(sql)}
-      WHERE task_id = ${automationId}
-        AND purpose IN ('user_automation', 'system')
-      LIMIT 1
-    `.pipe(
-      Effect.mapError((cause) =>
-        storeError(operation, "storage", "Could not load Automation", automationId, cause)
-      )
-    )
-    return rows[0] ?? null
-  })
-
-  const get = Effect.fn("SqliteAutomationStore.get")(function* (automationId: string) {
-    const validAutomationId = yield* automationIdEffect(automationId, "get")
-    const row = yield* findAutomationRow(validAutomationId, "get")
-    return row === null ? null : yield* project(row, "get")
-  })
-
-  return { project, findAutomationRow, get }
 }
 
 export type AutomationStoreDeps = Pick<

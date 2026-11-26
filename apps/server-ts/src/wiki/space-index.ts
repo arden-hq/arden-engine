@@ -11,6 +11,7 @@ import type {
 import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
 import { activeRunPages, type RunPage } from "./snapshot.js"
+import type { SpaceStoreError } from "../persistence/spaces/store.js"
 
 const spaceFolder = (pagePath: string): string => {
   if (isReadme(pagePath)) return posix.dirname(pagePath)
@@ -82,20 +83,35 @@ const isBoundPage = (
 
 type ActiveBindings = Pick<SpaceStore["Service"], "activeBindings">
 
-export const activeSpaceBindings = (spaces: ActiveBindings) =>
+export const activeSpaceBindings = (
+  spaces: ActiveBindings
+): Effect.Effect<SpaceBinding[], SpaceStoreError, never> =>
   spaces.activeBindings().pipe(Effect.map((rows) => rows.map(spaceBinding)))
 
-export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
+export const spaceOwnsWikiPath = (
+  spaces: ActiveBindings,
+  path: string
+): Effect.Effect<boolean, SpaceStoreError, never> =>
   activeSpaceBindings(spaces).pipe(
     Effect.map((bindings) => bindings.some((binding) => bindingOwnsPath(binding, path)))
   )
 
 /** Whether the page is an active Space's own page. */
-export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string) =>
+export const isSpacePage = (
+  spaces: ActiveBindings,
+  pageId: string,
+  path: string
+): Effect.Effect<boolean, SpaceStoreError, never> =>
   activeSpaceBindings(spaces).pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))
 
 /** `isSpacePage` for many pages, with the bindings read at most once, when first asked for. */
-export const spacePageCheck = (spaces: ActiveBindings) =>
+export const spacePageCheck = (
+  spaces: ActiveBindings
+): Effect.Effect<
+  (pageId: string, path: string) => Effect.Effect<boolean, SpaceStoreError, never>,
+  never,
+  never
+> =>
   Effect.cached(Effect.suspend(() => activeSpaceBindings(spaces))).pipe(
     Effect.map(
       (bindings) => (pageId: string, path: string) =>

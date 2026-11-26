@@ -1,10 +1,8 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import { collapseHome, expandHome, isWithin } from "@arden-hq/std/paths"
-import { randomUUID } from "node:crypto"
-import { realpathSync } from "node:fs"
-import { homedir } from "node:os"
+import { expandHome, isWithin } from "@arden-hq/std/paths"
 import path from "node:path"
-import { chmod, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
+import { realpathSync } from "node:fs"
+import { realpath, stat } from "node:fs/promises"
 import { Effect } from "effect"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
@@ -17,7 +15,6 @@ import { readAgentSessionMetadata } from "../sessions/agent-mode.js"
 import { isErrnoCode } from "../fs/private-store.js"
 import { gitMetadataRule } from "./git-metadata.js"
 import { PERSISTENCE_HOME_PATHS, secretPaths } from "../fs/protected-paths.js"
-import { sha256Hex } from "@arden-hq/std/hash"
 import { toolFault, toolRefusal } from "../tools/tool-failure.js"
 import type { PermissionRules } from "../persistence/permissions/rules.js"
 import {
@@ -27,6 +24,7 @@ import {
   type PathTarget,
   type RunRules
 } from "../execution/rules.js"
+import { asPinnedDirectory, realHome } from "./local-directory.js"
 
 export interface LocalPathServices {
   readonly spaces: SpaceStore["Service"]
@@ -89,7 +87,7 @@ const within = (root: string, target: string): boolean =>
 export const insideUsableFolder = (policy: SessionPathPolicy, target: string): boolean =>
   policy.usableRoots.some((root) => isWithin(root, target))
 
-export const neverRuleRefusal = (target: string, access: PathAccess) =>
+export const neverRuleRefusal = (target: string, access: PathAccess): ToolExecutionError =>
   toolRefusal(
     `${target}: your rule says Arden never ${access === "change" ? "changes" : "touches"} files there.`,
     "Your rule"
@@ -98,45 +96,6 @@ export const neverRuleRefusal = (target: string, access: PathAccess) =>
 export const insideLocalFolder = (policy: SessionPathPolicy, target: string): boolean => {
   const roots = [...policy.localRoots, ...(policy.writeRoot === null ? [] : [policy.writeRoot])]
   return roots.some((root) => isWithin(root, target))
-}
-
-export class LocalRevisionConflict extends Error {
-  constructor() {
-    super("The file changed after it was reviewed")
-    this.name = "LocalRevisionConflict"
-  }
-}
-
-const asDirectory = async (value: string): Promise<string> => {
-  const expanded = expandHome(value)
-  if (!path.isAbsolute(expanded)) {
-    throw toolRefusal(
-      "The Local folder must be an absolute path or start with '~'.",
-      "Invalid Local folder"
-    )
-  }
-  try {
-    const resolved = await realpath(expanded)
-    if (!(await stat(resolved)).isDirectory()) {
-      throw toolRefusal(`${resolved} is not a directory.`, "Not a directory")
-    }
-    return resolved
-  } catch (cause) {
-    if (cause instanceof ToolExecutionError) throw cause
-    throw toolFault(`The Local folder is unavailable: ${expanded}.`, "Local folder unavailable")
-  }
-}
-
-const asPinnedDirectory = async (value: string): Promise<string> => {
-  const expected = path.resolve(expandHome(value))
-  const resolved = await asDirectory(value)
-  if (resolved !== expected) {
-    throw toolRefusal(
-      `The pinned Local folder now resolves somewhere else: ${expected}.`,
-      "Local folder changed"
-    )
-  }
-  return resolved
 }
 
 const PROTECTED_ROOT_METADATA = [".agents", ".codex"] as const
@@ -233,43 +192,21 @@ const sandboxMayRead = (rule: SandboxRule, target: string): boolean =>
   rule.reopened.some((root) => isWithin(root, target)) ||
   !rule.hidden.some((root) => isWithin(root, target))
 
-export const realHome = (): string => {
-  try {
-    return realpathSync(homedir())
-  } catch {
-    return homedir()
-  }
-}
-
-export const policyPathOptions = (policy: LocalPathPolicy) => ({
+export const policyPathOptions = (
+  policy: LocalPathPolicy
+): {
+  pathRules: RunRules
+  readRoots: readonly string[] | null
+  writeRoot: string | null
+  stateRoot: string
+  sandboxRule: SandboxRule | undefined
+} => ({
   pathRules: policy.pathRules,
   readRoots: policy.readRoots,
   writeRoot: policy.writeRoot,
   stateRoot: policy.stateRoot,
   sandboxRule: sandboxRule(policy)
 })
-
-export const resolveLocalDirectory = async (
-  rawPath: string,
-  cwd: string | null,
-  stateRoot: string | null,
-  pathRules?: RunRules
-): Promise<string> => {
-  const resolved = await resolveLocalPath(rawPath, cwd, {
-    mutation: true,
-    stateRoot,
-    ...(pathRules === undefined ? {} : { pathRules })
-  })
-  try {
-    if (!(await stat(resolved)).isDirectory()) {
-      throw toolRefusal(`${resolved} is not a directory.`, "Not a directory")
-    }
-    return resolved
-  } catch (cause) {
-    if (cause instanceof ToolExecutionError) throw cause
-    throw toolFault(`Local folder is unavailable: ${resolved}.`, "Local folder unavailable")
-  }
-}
 
 const allowedFolders = (rules: RunRules, access: PathAccess): ReadonlyArray<string> =>
   rules.rules.flatMap((rule) =>
@@ -401,15 +338,6 @@ const startPathPolicy = async (
   }
 }
 
-export const ardenStateRoot = (dataDir: string): string => {
-  const configured = path.resolve(dataDir)
-  try {
-    return realpathSync(configured)
-  } catch {
-    return configured
-  }
-}
-
 export const resolveLocalPath = async (
   rawPath: string,
   cwd: string | null,
@@ -511,53 +439,33 @@ export const resolveLocalPath = async (
   }
 }
 
-export const displayLocalPath = (target: string, cwd: string | null): string => {
-  if (cwd === null) return collapseHome(target)
-  const relative = path.relative(cwd, target)
-  return relative.length > 0 && isWithin(cwd, target)
-    ? relative.split(path.sep).join("/")
-    : collapseHome(target)
-}
-
-const revisionOrAbsent = async (target: string): Promise<string> => {
+export const resolveLocalDirectory = async (
+  rawPath: string,
+  cwd: string | null,
+  stateRoot: string | null,
+  pathRules?: RunRules
+): Promise<string> => {
+  const resolved = await resolveLocalPath(rawPath, cwd, {
+    mutation: true,
+    stateRoot,
+    ...(pathRules === undefined ? {} : { pathRules })
+  })
   try {
-    return sha256Hex(await readFile(target))
-  } catch (cause) {
-    if (isErrnoCode(cause, "ENOENT")) return "absent"
-    throw cause
-  }
-}
-
-export const atomicCompareAndSwap = async (
-  target: string,
-  content: string,
-  expectedRevision: string
-): Promise<{ readonly revision: string; readonly bytes: number }> => {
-  if ((await revisionOrAbsent(target)) !== expectedRevision) throw new LocalRevisionConflict()
-  const encoded = Buffer.from(content, "utf8")
-  const temporary = path.join(
-    path.dirname(target),
-    `.${path.basename(target)}.arden-${randomUUID()}.tmp`
-  )
-  let mode: number | null = null
-  try {
-    mode = (await stat(target)).mode & 0o777
-  } catch (cause) {
-    if (!isErrnoCode(cause, "ENOENT")) throw cause
-  }
-  try {
-    const handle = await open(temporary, "wx", mode ?? 0o666)
-    try {
-      await handle.writeFile(encoded)
-      await handle.sync()
-    } finally {
-      await handle.close()
+    if (!(await stat(resolved)).isDirectory()) {
+      throw toolRefusal(`${resolved} is not a directory.`, "Not a directory")
     }
-    if ((await revisionOrAbsent(target)) !== expectedRevision) throw new LocalRevisionConflict()
-    await rename(temporary, target)
-    if (mode !== null) await chmod(target, mode)
-  } finally {
-    await rm(temporary, { force: true })
+    return resolved
+  } catch (cause) {
+    if (cause instanceof ToolExecutionError) throw cause
+    throw toolFault(`Local folder is unavailable: ${resolved}.`, "Local folder unavailable")
   }
-  return { revision: sha256Hex(encoded), bytes: encoded.byteLength }
+}
+
+export const ardenStateRoot = (dataDir: string): string => {
+  const configured = path.resolve(dataDir)
+  try {
+    return realpathSync(configured)
+  } catch {
+    return configured
+  }
 }

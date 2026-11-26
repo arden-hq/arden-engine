@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isRecord } from "@arden-hq/std/json"
 import { Effect } from "effect"
@@ -6,14 +7,6 @@ import { messageAuthor } from "../transcript/model.js"
 import type { Backfill } from "./backfills/backfill.js"
 
 const MESSAGE_AUTHORS_BACKFILL = "message_authors"
-
-const parsed = (json: string): unknown => {
-  try {
-    return JSON.parse(json)
-  } catch {
-    return undefined
-  }
-}
 
 /**
  * Stores the author of each user message that has none: every message saved before the column
@@ -47,7 +40,7 @@ export const messageAuthorsBackfill: Backfill = {
         AND role = ${ROLE.user} AND author IS NULL`
     const proofs = new Map<string, ReadonlySet<string>>()
     for (const row of unset) {
-      const message = parsed(row.message_json)
+      const message = parseJsonTextOrUndefined(row.message_json)
       const marked = (isRecord(message) ? messageAuthor(message) : null) ?? "unknown"
       let author = marked
       if (isRecord(message) && (marked === "owner" || marked === "answer")) {

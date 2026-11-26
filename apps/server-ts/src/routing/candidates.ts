@@ -5,6 +5,10 @@ import type { TaskProposalStore } from "../persistence/proposals/store.js"
 import type { SessionStore } from "../persistence/sessions/store.js"
 import type { SummaryStore } from "../persistence/summaries/store.js"
 import type { WorkStore } from "../persistence/work/store.js"
+import type { SpaceStoreError } from "../persistence/spaces/store.js"
+import type { WorkStoreError } from "../persistence/work/store.js"
+import type { SessionStoreError } from "../persistence/sessions/store.js"
+import type { SummaryStoreError } from "../persistence/summaries/store.js"
 
 const RECENT_CHAT_DAYS = 14
 const MAX_CHATS = 30
@@ -68,7 +72,9 @@ export const loadOfferSpaces = Effect.fn("Router.offerSpaces")(function* (
   return listed
 })
 
-export const renderOfferSpaces = (spaces: ReadonlyArray<OfferSpace>) => {
+export const renderOfferSpaces = (
+  spaces: ReadonlyArray<OfferSpace>
+): { text: string; ids: { readonly id: string; readonly spaceId: string }[] } => {
   const ids: Array<{ readonly id: string; readonly spaceId: string }> = []
   const text = spaces
     .flatMap((space) => [
@@ -108,7 +114,12 @@ const makeRouterSpaces = (dependencies: Pick<RouterCandidateDependencies, "space
   })
 }
 
-export const makeRouterCandidates = (dependencies: RouterCandidateDependencies) => {
+export const makeRouterCandidates = (
+  dependencies: RouterCandidateDependencies
+): (() => Effect.Effect<
+  RouterCandidates,
+  SpaceStoreError | WorkStoreError | SessionStoreError | SummaryStoreError
+>) => {
   const spacesOf = makeRouterSpaces(dependencies)
   return Effect.fn("Router.candidates")(function* () {
     const spaces = yield* dependencies.spaces.list()

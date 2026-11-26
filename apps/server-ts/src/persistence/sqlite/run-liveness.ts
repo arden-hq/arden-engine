@@ -5,11 +5,15 @@ import { runColumns } from "./run-destination.js"
 import { runPolicyRevoked } from "./run-policy.js"
 import { RUN_LIVENESS, runMayAct, type RunLiveness } from "../runs/liveness.js"
 import { activeRunStatusList, openDeferredCallStatusList } from "./status-sets.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const [TURN, BACKGROUND, ENDED, REVOKED] = RUN_LIVENESS
 const ACTING = RUN_LIVENESS.filter(runMayAct)
 
-export const runOwnsLiveWork = (sql: SqlClient.SqlClient, runId: Statement.Fragment) => sql`(
+export const runOwnsLiveWork = (
+  sql: SqlClient.SqlClient,
+  runId: Statement.Fragment
+): Statement.Statement<Row> => sql`(
   EXISTS (SELECT 1 FROM code_mode_scripts AS script
     WHERE script.origin_run_id = ${runId} AND script.status = 'running')
   OR EXISTS (SELECT 1 FROM deferred_tool_calls AS card

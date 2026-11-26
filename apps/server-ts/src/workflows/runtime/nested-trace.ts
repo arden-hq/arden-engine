@@ -18,7 +18,10 @@ export interface ScriptProgressTool extends NestedCallFacts {
   readonly preview: string | null
 }
 
-export const nestedCallIds = (parentToolCallId: string, marker: string) => {
+export const nestedCallIds = (
+  parentToolCallId: string,
+  marker: string
+): ((name: string, args: Schema.Json) => string) => {
   const occurrences = new Map<string, number>()
   return (name: string, args: Schema.Json): string => {
     const contentKey = workflowHash({ name, args }).slice(0, 24)

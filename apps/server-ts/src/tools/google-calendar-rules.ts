@@ -54,25 +54,30 @@ export const parseCalendarEventRef = (
   calendarId?: string
 ): { readonly account: string; readonly calendarId: string; readonly id: string } | undefined => {
   const parts = value.split(":")
-  const valid = (account: string | undefined, id: string | undefined) =>
+  const checked = (
+    account: string | undefined,
+    id: string | undefined
+  ): { readonly account: string; readonly id: string } | undefined =>
     account !== undefined &&
     id !== undefined &&
     account.includes("@") &&
     id !== "" &&
     !/\s/u.test(id)
+      ? { account, id }
+      : undefined
   if (parts.length === 2) {
     const [account, id] = parts
-    return valid(account, id)
-      ? { account: account ?? "", calendarId: calendarId ?? PRIMARY, id: id ?? "" }
-      : undefined
+    const found = checked(account, id)
+    return found === undefined ? undefined : { ...found, calendarId: calendarId ?? PRIMARY }
   }
   if (parts.length === 3) {
     const [account, calendar, id] = parts
-    if (!valid(account, id) || calendar === undefined || calendar === "") return undefined
+    const found = checked(account, id)
+    if (found === undefined || calendar === undefined || calendar === "") return undefined
     try {
       const decoded = decodeURIComponent(calendar)
       if (calendarId !== undefined && calendarId !== decoded) return undefined
-      return { account: account ?? "", calendarId: decoded, id: id ?? "" }
+      return { ...found, calendarId: decoded }
     } catch {
       return undefined
     }

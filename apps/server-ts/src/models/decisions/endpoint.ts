@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import type { CompletionResponse } from "@arden-hq/loop"
 import { Effect, Redacted, Schema } from "effect"
 
@@ -83,7 +84,7 @@ export const postDecisionRequest = Effect.fn("Decisions.post")(function* (
     })
   }
   const body = yield* Effect.tryPromise({
-    try: (): Promise<unknown> => response.json(),
+    try: (): Promise<unknown> => parseJsonBody(response),
     catch: (cause) =>
       new DecisionsError({
         reason: "invalid_output",

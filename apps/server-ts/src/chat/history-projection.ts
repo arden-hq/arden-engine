@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import {
   INTERACTION_KIND,
   INTERACTION_OUTCOME,
@@ -194,12 +195,7 @@ const COMPACT_TEXT_CHARS = TRANSCRIPT_RESULT_PREVIEW_CHARS
 const compactText = (text: string): string => cutText(text, COMPACT_TEXT_CHARS)
 
 const compactArguments = (raw: string): { readonly text: string; readonly changed: boolean } => {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    parsed = undefined
-  }
+  const parsed = parseJsonTextOrUndefined(raw)
   if (!Predicate.isObject(parsed) || Array.isArray(parsed)) {
     return raw.length <= COMPACT_TEXT_CHARS
       ? { text: raw, changed: false }

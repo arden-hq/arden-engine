@@ -8,7 +8,7 @@ export const nonRelativePathSegment = Schema.makeFilter((value: string) =>
 )
 
 /** A bounded, already-trimmed identifier that is safe to encode as one path segment. */
-export const routeSegment = (maximum = 512) =>
+export const routeSegment = (maximum = 512): Schema.Trimmed =>
   Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(maximum), nonRelativePathSegment)
 
 /** Decode semantic route input with Effect, then render it with web-platform URL APIs. */
@@ -16,7 +16,8 @@ export const encodeRouteEffect = <S extends Schema.Constraint>(
   schema: S,
   value: unknown,
   render: (decoded: S["Type"]) => string
-) => Schema.decodeUnknownEffect(schema)(value, strictRoute).pipe(Effect.map(render))
+): Effect.Effect<string, Schema.SchemaError, S["DecodingServices"]> =>
+  Schema.decodeUnknownEffect(schema)(value, strictRoute).pipe(Effect.map(render))
 
 export const encodeSegment = (value: string): string => encodeURIComponent(value)
 

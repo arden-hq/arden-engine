@@ -11,6 +11,7 @@ import type { ToolDisplayTitle, ToolMeta } from "../contracts/tools.js"
 import type { AgentEvent } from "../contracts/events.js"
 import { sanitizeToolDisplayTitle, splitToolArguments } from "../tools/display-title.js"
 import { isRecord } from "@arden-hq/std/json"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 export interface ToolStartSnapshot {
   readonly timestamp: number
@@ -97,7 +98,7 @@ const tryProjectArguments = (
   | { args: string; displayTitle: ReturnType<typeof splitToolArguments>["displayTitle"] }
   | undefined => {
   try {
-    const decoded: unknown = JSON.parse(rawArguments)
+    const decoded: unknown = parseJsonText(rawArguments)
     if (!isRecord(decoded)) return undefined
     const projected = splitToolArguments(decoded, rawDisplayTitle, displayTitleArgument)
     return { args: JSON.stringify(projected.args), displayTitle: projected.displayTitle }

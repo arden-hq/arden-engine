@@ -22,6 +22,7 @@ import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import { decodeJson } from "./json.js"
 import { writeError } from "./chat-write-errors.js"
 import { readWorkOwner } from "./automation-rows.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export const readRunAuthority = Effect.fn("RunAuthority.read")(function* (
   sql: SqlClient.SqlClient,
@@ -61,7 +62,10 @@ const executionOwner = Effect.fn("RunAuthority.executionOwner")(function* (
   }
 })
 
-export const spawnerRun = (sql: SqlClient.SqlClient, sessionId: string) =>
+export const spawnerRun = (
+  sql: SqlClient.SqlClient,
+  sessionId: string
+): Effect.Effect<string | undefined, SqlError, never> =>
   sql<{ readonly parent_run_id: string | null }>`
     SELECT parent_run_id FROM sessions WHERE session_id = ${sessionId}`.pipe(
     Effect.map((rows) => rows[0]?.parent_run_id ?? undefined)

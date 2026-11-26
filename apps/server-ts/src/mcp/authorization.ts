@@ -2,7 +2,7 @@ import { auth } from "@modelcontextprotocol/sdk/client/auth.js"
 
 import { closeMcpClient } from "./client.js"
 import { McpOAuthCallbacks, McpOAuthProvider } from "./oauth.js"
-import { cancelRetry, type McpRuntime, type RuntimeEntry } from "./runtime.js"
+import { cancelRetry, type RuntimeEntry } from "./runtime.js"
 import type { KeyedSerialQueue } from "./serial.js"
 import {
   assertMcpSignInSetUp,
@@ -11,6 +11,7 @@ import {
   mcpStaticOAuth
 } from "./transport.js"
 import type { McpOAuthVault } from "./vault.js"
+import { type McpRuntime } from "./runtime-types.js"
 
 interface PendingOAuth {
   readonly provider: McpOAuthProvider
@@ -35,7 +36,11 @@ export const makeMcpAuthorization = ({
   readonly credentials: KeyedSerialQueue
   readonly operations: KeyedSerialQueue
   readonly callbacks?: McpOAuthCallbacks
-}) => {
+}): {
+  start: (current: RuntimeEntry, url: string) => Promise<McpAuthorizationStart>
+  cancel: (name: string) => Promise<void>
+  close: () => Promise<void>
+} => {
   const pendingOAuth = new Map<string, PendingOAuth>()
 
   const cancel = async (name: string): Promise<void> => {

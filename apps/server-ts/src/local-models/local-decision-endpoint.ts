@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { Effect, Predicate } from "effect"
 
 import type { DecisionManifest } from "./catalog.js"
@@ -15,12 +16,8 @@ const routerRequest = (
 ):
   | { readonly kind: "ok"; readonly body: Readonly<Record<string, unknown>> }
   | { readonly kind: "refused"; readonly message: string } => {
-  let body: unknown
-  try {
-    body = JSON.parse(text)
-  } catch {
-    return { kind: "refused", message: "The body is not JSON" }
-  }
+  const body = parseJsonTextOrUndefined(text)
+  if (body === undefined) return { kind: "refused", message: "The body is not JSON" }
   if (!Predicate.isObject(body) || Array.isArray(body)) {
     return { kind: "refused", message: "Expected { model, state, questions }" }
   }

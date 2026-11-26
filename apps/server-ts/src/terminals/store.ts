@@ -1,3 +1,4 @@
+import { after } from "@arden-hq/std/timer"
 import { StringDecoder } from "node:string_decoder"
 
 import type { LiveProcess, OutputStream, ProcessExit, ProcessInput } from "./live-process.js"
@@ -239,12 +240,12 @@ export const makeTerminalStore = (): TerminalStore => {
           return
         }
         const done = (): void => {
-          clearTimeout(timer)
+          timer.cancel()
           stopExit()
           signal.removeEventListener("abort", done)
           resolve()
         }
-        const timer = setTimeout(done, ms)
+        const timer = after(ms, done)
         const stopExit = entry.process.onExit(() => queueMicrotask(done))
         signal.addEventListener("abort", done, { once: true })
       }),

@@ -19,13 +19,22 @@ export interface ApprovalPresentationBody {
   readonly before?: string
 }
 
+export const EDITABLE_KIND = { arguments: "arguments", mailDraft: "mail_draft" } as const
+
 /** The call's arguments a card may change in place before approving. */
-export interface ApprovalPresentationEditable {
+interface EditableArguments {
   /** Top-level arguments the person may change; the rest stay as asked. */
   readonly fields: ReadonlyArray<string>
   /** Every argument as the model asked for it. */
   readonly arguments: { readonly [key: string]: JsonValue }
 }
+
+export type ApprovalPresentationEditable =
+  | (EditableArguments & { readonly kind: typeof EDITABLE_KIND.arguments })
+  | (EditableArguments & {
+      readonly kind: typeof EDITABLE_KIND.mailDraft
+      readonly account: string
+    })
 
 /** A picture of what the call acts on (a browser action's element on its
  *  page): an inline PNG or JPEG only, never a URL the app would fetch.
@@ -309,8 +318,15 @@ const sanitizeEditable = (value: unknown): ApprovalPresentationEditable | undefi
   }
   const encoded = JSON.stringify(value.arguments)
   if (encoded.length > APPROVAL_PRESENTATION_LIMITS.editableArguments) return undefined
-  const decoded = Schema.decodeUnknownOption(EditableArgumentsSchema)(JSON.parse(encoded))
-  return decoded._tag === "Some" ? { fields, arguments: decoded.value } : undefined
+  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(EditableArgumentsSchema))(
+    encoded
+  )
+  if (decoded._tag !== "Some") return undefined
+  const edit = { fields, arguments: decoded.value }
+  const account = sanitizeInline(value.account, APPROVAL_PRESENTATION_LIMITS.fieldValue)
+  return account === undefined
+    ? { kind: EDITABLE_KIND.arguments, ...edit }
+    : { kind: EDITABLE_KIND.mailDraft, ...edit, account }
 }
 
 const EditableArgumentsSchema = Schema.Record(Schema.String, Schema.Json)
@@ -322,6 +338,13 @@ const imageSide = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: APPROVAL_PRESENTATION_LIMITS.imageSide })
 )
 const fraction = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+
+const editableFields = {
+  fields: Schema.Array(boundedText(APPROVAL_PRESENTATION_LIMITS.fieldLabel)).check(
+    Schema.isMaxLength(APPROVAL_PRESENTATION_LIMITS.editableFields)
+  ),
+  arguments: EditableArgumentsSchema
+}
 
 export const ApprovalPresentationSchema = Schema.Struct({
   attachments: Schema.optionalKey(AttachmentsSchema),
@@ -354,12 +377,14 @@ export const ApprovalPresentationSchema = Schema.Struct({
     })
   ),
   editable: Schema.optionalKey(
-    Schema.Struct({
-      fields: Schema.Array(boundedText(APPROVAL_PRESENTATION_LIMITS.fieldLabel)).check(
-        Schema.isMaxLength(APPROVAL_PRESENTATION_LIMITS.editableFields)
-      ),
-      arguments: EditableArgumentsSchema
-    })
+    Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(EDITABLE_KIND.arguments), ...editableFields }),
+      Schema.Struct({
+        kind: Schema.Literal(EDITABLE_KIND.mailDraft),
+        ...editableFields,
+        account: boundedText(APPROVAL_PRESENTATION_LIMITS.fieldValue)
+      })
+    ])
   ),
   image: Schema.optionalKey(
     Schema.Struct({

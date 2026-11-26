@@ -38,7 +38,17 @@ const forkSource = (run: {
     : trigger.value.context.chat.session_id
 }
 
-export const makeForkSessions = ({ writer }: Pick<AutomationStoreDeps, "writer">) => {
+export const makeForkSessions = ({
+  writer
+}: Pick<AutomationStoreDeps, "writer">): {
+  prepareForkSession: (
+    lease: AutomationJobLeaseRef
+  ) => Effect.Effect<
+    { sessionId: string; sourceSessionId: string } | null,
+    AutomationStoreError,
+    never
+  >
+} => {
   const sql = writer.sql
   const prepareForkSession = Effect.fn("SqliteAutomationStore.prepareForkSession")(function* (
     lease: AutomationJobLeaseRef

@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { cutText } from "@arden-hq/std/text"
 import { Predicate } from "effect"
 
@@ -20,12 +21,8 @@ const questionAnswerFields = (
 ): Readonly<Record<string, unknown>> | undefined => {
   const match = QUESTION_ANSWER.exec(typedText(message.content).trim())
   if (match === null) return undefined
-  try {
-    const body: unknown = JSON.parse(match[1] ?? "")
-    return Predicate.isObject(body) ? body : undefined
-  } catch {
-    return undefined
-  }
+  const body = parseJsonTextOrUndefined(match[1] ?? "")
+  return Predicate.isObject(body) ? body : undefined
 }
 
 const MAX_ASKED_CHARS = 300

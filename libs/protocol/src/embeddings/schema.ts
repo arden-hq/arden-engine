@@ -179,7 +179,9 @@ export const EmbeddingModelChoiceRequestSchema = Schema.Union([
 
 const strict = { onExcessProperty: "error" } as const
 
-export const decodeEmbeddingModelChoiceRequestEffect = (value: unknown) =>
+export const decodeEmbeddingModelChoiceRequestEffect = (
+  value: unknown
+): Effect.Effect<EmbeddingModelChoice, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(EmbeddingModelChoiceRequestSchema)(value, strict).pipe(
     Effect.map((choice): EmbeddingModelChoice =>
       "keep_index" in choice
@@ -188,7 +190,9 @@ export const decodeEmbeddingModelChoiceRequestEffect = (value: unknown) =>
     )
   )
 
-export const encodeEmbeddingModelChoiceEffect = (value: EmbeddingModelChoice) =>
+export const encodeEmbeddingModelChoiceEffect = (
+  value: EmbeddingModelChoice
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(EmbeddingModelChoiceRequestSchema)(
     value.kind === "off"
       ? { model_id: null, keep_index: value.keepIndex }

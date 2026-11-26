@@ -2,8 +2,9 @@ import { Schema } from "effect"
 import { RunQueries } from "../persistence/runs/queries.js"
 import type { Wiki } from "../wiki/service.js"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { WikiPathSchema, changePages, writtenPageData } from "./wiki.js"
+import { changePages, writtenPageData } from "./wiki.js"
 import { requireObserved } from "./wiki-records.js"
+import { WikiPathSchema } from "./wiki-schemas.js"
 const ActiveWikiPathSchema = WikiPathSchema.annotate({
   description: "Exact relative POSIX .md path of an active page returned by Wiki search or listing."
 })

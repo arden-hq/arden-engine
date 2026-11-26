@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import { Effect, Option, Schema } from "effect"
@@ -21,11 +22,10 @@ import {
   latestNestedRuns,
   nestedRerunId,
   nestedRetryDecision,
-  nestedRun,
+  nestedRuns,
+  type NestedRun,
   nextLaunch,
-  parseScriptChildId,
   retryVerdict,
-  scriptChildPrefix,
   scriptChildRun,
   type CallChange,
   type NestedCall,
@@ -34,11 +34,16 @@ import {
   type ScriptChildId
 } from "./script-derive.js"
 import { readScriptExecutions } from "./script-executions.js"
+import { scriptAgentJoin } from "./call-lineage.js"
+import { descendantCalls } from "./detached-workflow-calls.js"
+import { NESTING } from "../tools/tool-roles.js"
 import { readNestedCallFacts, withCallFacts } from "./change-evidence.js"
 import { activeScriptChildRuns, observeChildRunEffects } from "./script-child-effects.js"
 
 interface ChildRow {
   readonly parent_tool_call_id: string
+  readonly agent_key: string
+  readonly launch: number | null
   readonly run_id: string | null
   readonly run_status: string | null
   readonly content: string | null
@@ -52,7 +57,8 @@ interface NestedRow {
   readonly change: CallChange
 }
 
-type JournalCall = NestedCall & { readonly toolCallId: string; readonly rejected: boolean }
+type JournalCall = NestedCall &
+  NestedRun & { readonly toolCallId: string; readonly rejected: boolean }
 
 const journalError = (message: string) => (cause: unknown) =>
   new ScriptJournalError({ message, cause })
@@ -67,12 +73,8 @@ const outputCheck = (
   if (schema === undefined) return (text) => ({ valid: true, value: text })
   const validate = new AjvJsonSchemaValidator().getValidator<Schema.Json>(schema)
   return (text) => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return { valid: false }
-    }
+    const parsed = parseJsonTextOrUndefined(text)
+    if (parsed === undefined) return { valid: false }
     const checked = validate(parsed)
     return checked.valid ? { valid: true, value: checked.data } : { valid: false }
   }
@@ -83,9 +85,9 @@ const readScriptChildren = Effect.fn("ScriptJournal.children")(function* (
   origin: ScriptOrigin,
   include: (id: ScriptChildId) => boolean = () => true
 ) {
-  const prefix = scriptChildPrefix(origin.originToolCallId)
   const rows = yield* sql<ChildRow>`
-    SELECT child.parent_tool_call_id, run.run_id, run.status AS run_status,
+    SELECT child.parent_tool_call_id, agent.agent_key, agent.launch, run.run_id,
+      run.status AS run_status,
       (SELECT CASE WHEN json_type(message.message_json, '$.content') = 'text'
                    THEN json_extract(message.message_json, '$.content') END
        FROM session_messages AS message
@@ -93,6 +95,7 @@ const readScriptChildren = Effect.fn("ScriptJournal.children")(function* (
        ORDER BY message.seq DESC
        LIMIT 1) AS content
     FROM sessions AS child
+    ${scriptAgentJoin(sql, origin.originToolCallId)}
     LEFT JOIN chat_runs AS run ON run.run_id = (
       SELECT first.run_id FROM chat_runs AS first
       WHERE first.session_id = child.session_id
@@ -101,12 +104,11 @@ const readScriptChildren = Effect.fn("ScriptJournal.children")(function* (
     )
     WHERE child.parent_run_id = ${origin.originRunId}
       AND child.session_type = 'agent'
-      AND substr(child.parent_tool_call_id, 1, ${prefix.length}) = ${prefix}
     ORDER BY child.started_at, child.session_id
   `.pipe(Effect.mapError(journalError("Could not read the script's agents")))
   const matched = rows.flatMap((row) => {
-    const id = parseScriptChildId(origin.originToolCallId, row.parent_tool_call_id)
-    return id !== undefined && include(id) ? [{ row, id }] : []
+    const id = { key: row.agent_key, launch: row.launch ?? undefined }
+    return include(id) ? [{ row, id }] : []
   })
   return yield* Effect.forEach(
     matched,
@@ -131,9 +133,20 @@ const readScriptChildren = Effect.fn("ScriptJournal.children")(function* (
 const readNestedCalls = Effect.fn("ScriptJournal.nested")(function* (
   sql: SqlClient.SqlClient,
   origin: ScriptOrigin,
-  base?: string
+  step?: { readonly base: string; readonly attempt: number }
 ) {
-  const prefix = base ?? `${origin.originToolCallId}:code:`
+  const scripts = yield* sql<{ readonly attempt: number }>`
+    SELECT attempt FROM code_mode_scripts
+    WHERE origin_run_id = ${origin.originRunId} AND origin_tool_call_id = ${origin.originToolCallId}
+  `.pipe(Effect.mapError(journalError("Could not read the script's attempt")))
+  const attempts = Math.max(step?.attempt ?? 1, ...scripts.map((script) => script.attempt))
+  const scope =
+    step === undefined
+      ? descendantCalls(sql, origin.originRunId, origin.originToolCallId, NESTING.code)
+      : sql.in([
+          step.base,
+          ...Array.from({ length: attempts }, (_, index) => nestedRerunId(step.base, index + 1))
+        ])
   const rows = yield* sql<NestedRow>`
     SELECT call.tool_call_id, call.status,
            json_extract(call.result_json, '$.is_error') AS is_error,
@@ -142,22 +155,24 @@ const readNestedCalls = Effect.fn("ScriptJournal.nested")(function* (
                AND decision.status = 'rejected') AS rejected,
            ${callChange(sql)} AS change
     FROM tool_calls AS call
-    WHERE call.run_id = ${origin.originRunId}
-      AND substr(call.tool_call_id, 1, ${prefix.length}) = ${prefix}
+    WHERE call.run_id = ${origin.originRunId} AND call.tool_call_id IN ${scope}
   `.pipe(Effect.mapError(journalError("Could not read the script's nested calls")))
-  return rows.flatMap((row): ReadonlyArray<JournalCall> => {
-    if (!isNestedStatus(row.status)) return []
-    if (base !== undefined && nestedRun(row.tool_call_id).base !== base) return []
-    return [
-      {
-        toolCallId: row.tool_call_id,
-        status: row.status,
-        isError: row.is_error === 1,
-        rejected: row.rejected === 1,
-        change: row.change
-      }
-    ]
-  })
+  const calls = rows.flatMap((row) =>
+    isNestedStatus(row.status)
+      ? [
+          {
+            toolCallId: row.tool_call_id,
+            status: row.status,
+            isError: row.is_error === 1,
+            rejected: row.rejected === 1,
+            change: row.change
+          }
+        ]
+      : []
+  )
+  return nestedRuns(calls, attempts).filter(
+    (call): call is JournalCall => step === undefined || call.base === step.base
+  )
 })
 
 const scriptAgentDecision = Effect.fn("ScriptJournal.agentDecision")(function* (
@@ -184,7 +199,9 @@ const scriptNestedCall = Effect.fn("ScriptJournal.nestedCall")(function* (
   sql: SqlClient.SqlClient,
   input: Parameters<ScriptJournal["Service"]["nestedCall"]>[0]
 ): Effect.fn.Return<NestedResolution, ScriptJournalError> {
-  const latest = latestNestedRuns(yield* readNestedCalls(sql, input, input.toolCallId))[0]
+  const latest = latestNestedRuns(
+    yield* readNestedCalls(sql, input, { base: input.toolCallId, attempt: input.attempt })
+  )[0]
   if (latest === undefined) return { kind: "run", toolCallId: input.toolCallId }
   if (latest.rejected) return { kind: "run", toolCallId: latest.toolCallId }
   switch (nestedRetryDecision(latest)) {
@@ -216,6 +233,7 @@ const scriptRetryVerdict = Effect.fn("ScriptJournal.retryVerdict")(function* (
 interface AgentRow {
   readonly run_id: string | null
   readonly parent_tool_call_id: string
+  readonly agent_key: string
   readonly public_ref: string
   readonly name: string | null
   readonly mode: string | null
@@ -245,11 +263,11 @@ const readAgents = Effect.fn("ScriptJournal.agents")(function* (
   sql: SqlClient.SqlClient,
   origin: ScriptOrigin
 ) {
-  const prefix = scriptChildPrefix(origin.originToolCallId)
   const rows = yield* sql<AgentRow>`
-    SELECT child.parent_tool_call_id, child.public_ref, child.name,
+    SELECT child.parent_tool_call_id, agent.agent_key, child.public_ref, child.name,
            json_extract(child.metadata, '$.agent.mode') AS mode, run.status AS run_status, run.run_id
     FROM sessions AS child
+    ${scriptAgentJoin(sql, origin.originToolCallId)}
     LEFT JOIN chat_runs AS run ON run.run_id = (
       SELECT first.run_id FROM chat_runs AS first
       WHERE first.session_id = child.session_id
@@ -258,17 +276,14 @@ const readAgents = Effect.fn("ScriptJournal.agents")(function* (
     )
     WHERE child.parent_run_id = ${origin.originRunId}
       AND child.session_type = 'agent'
-      AND substr(child.parent_tool_call_id, 1, ${prefix.length}) = ${prefix}
     ORDER BY child.started_at, child.session_id
   `.pipe(Effect.mapError(journalError("Could not read the script's agents")))
   const byKey = new Map<string, ScriptAgentView>()
   for (const row of rows) {
-    const id = parseScriptChildId(origin.originToolCallId, row.parent_tool_call_id)
-    if (id === undefined) continue
-    byKey.set(id.key, {
-      key: id.key,
+    byKey.set(row.agent_key, {
+      key: row.agent_key,
       attempts: [
-        ...(byKey.get(id.key)?.attempts ?? []),
+        ...(byKey.get(row.agent_key)?.attempts ?? []),
         {
           session_ref: row.public_ref,
           run_id: row.run_id,
@@ -321,10 +336,9 @@ export const makeScriptJournal = ({
     nestedCall: (input) => scriptNestedCall(reader, input),
     retryVerdict: (origin) => scriptRetryVerdict(reader, origin),
     awaitingDecision: (origin) => {
-      const prefix = `${origin.originToolCallId}:`
       return reader<{ readonly present: number }>`SELECT 1 AS present FROM tool_approvals
         WHERE run_id = ${origin.originRunId} AND status = 'pending'
-          AND substr(tool_call_id, 1, ${prefix.length}) = ${prefix}
+          AND tool_call_id IN ${descendantCalls(reader, origin.originRunId, origin.originToolCallId)}
         LIMIT 1`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.mapError(journalError("Could not read the script's pending decisions"))

@@ -71,8 +71,11 @@ const choicesNamed = (schema: unknown, description: string): boolean =>
 const described = (schema: unknown, definitions: Readonly<Record<string, unknown>>): boolean => {
   if (!Predicate.isObject(schema)) return false
   if (typeof schema["description"] === "string" && schema["description"].trim() !== "") return true
-  const ref = schema["$ref"]
-  if (typeof ref === "string" && described(definitions[ref.replace("#/$defs/", "")], definitions))
+  const pointer = schema["$ref"]
+  if (
+    typeof pointer === "string" &&
+    described(definitions[pointer.replace("#/$defs/", "")], definitions)
+  )
     return true
   return ["allOf", "anyOf"].some(
     (key) => Array.isArray(schema[key]) && schema[key].some((part) => described(part, definitions))
@@ -168,8 +171,8 @@ export const hashInputPaths = (
   const visit = (schema: unknown, path: string, name: string | undefined): void => {
     if (!Predicate.isObject(schema) || seen.has(schema)) return
     seen.add(schema)
-    const ref = schema["$ref"]
-    if (typeof ref === "string") visit(definitions[ref.replace("#/$defs/", "")], path, name)
+    const pointer = schema["$ref"]
+    if (typeof pointer === "string") visit(definitions[pointer.replace("#/$defs/", "")], path, name)
     if (name !== undefined && takesText(schema) && namesHash(name, schema)) found.add(path)
     for (const key of ["allOf", "anyOf", "oneOf"])
       if (Array.isArray(schema[key])) for (const part of schema[key]) visit(part, path, name)

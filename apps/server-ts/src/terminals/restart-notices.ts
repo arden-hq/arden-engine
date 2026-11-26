@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
@@ -117,7 +118,7 @@ const readManifest = (file: string): Manifest => {
       return { running: [], pending: [] }
     throw cause
   }
-  const value: unknown = JSON.parse(text)
+  const value = parseJsonText(text)
   return Array.isArray(value)
     ? { running: decodeRunning(value), pending: [] }
     : decodeManifest(value)

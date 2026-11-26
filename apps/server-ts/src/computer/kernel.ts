@@ -1,3 +1,5 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
+import { after } from "@arden-hq/std/timer"
 import { formatBytes } from "@arden-hq/std/count"
 import { getQuickJS, type QuickJSContext, type QuickJSDeferredPromise } from "quickjs-emscripten"
 import { Schema } from "effect"
@@ -119,9 +121,8 @@ export class ComputerKernel {
     this.#active = active
     const abort = (): void => controller.abort(input.signal.reason)
     input.signal.addEventListener("abort", abort, { once: true })
-    const timer = setTimeout(
-      () => controller.abort(new Error("Computer cell timed out; observe before acting again")),
-      timeoutMs
+    const timer = after(timeoutMs, () =>
+      controller.abort(new Error("Computer cell timed out; observe before acting again"))
     )
     let onAbort: (() => void) | undefined
     try {
@@ -155,7 +156,7 @@ export class ComputerKernel {
         throw new Error("Await every computer operation; unfinished operations reset the session")
       if (Buffer.byteLength(json) > MAX_BYTES)
         throw new Error(`Computer result exceeds ${formatBytes(MAX_BYTES)}`)
-      const value: unknown = JSON.parse(json)
+      const value = parseJsonText(json)
       if (!isJson(value)) throw new Error("Computer result is not JSON")
       return value
     } catch (cause) {
@@ -171,7 +172,7 @@ export class ComputerKernel {
       }
       throw cause
     } finally {
-      clearTimeout(timer)
+      timer.cancel()
       input.signal.removeEventListener("abort", abort)
       if (onAbort !== undefined) controller.signal.removeEventListener("abort", onAbort)
       this.#active = undefined
@@ -194,7 +195,7 @@ export class ComputerKernel {
       if (++active.calls > 32) throw new Error("Computer cells allow at most 32 operations")
       if (Buffer.byteLength(encoded) > MAX_ARGUMENT_BYTES)
         throw new Error(`Computer arguments exceed ${formatBytes(MAX_ARGUMENT_BYTES)}`)
-      const args: unknown = JSON.parse(encoded)
+      const args = parseJsonText(encoded)
       if (!isJsonObject(args)) throw new Error("Computer arguments must be a JSON object")
       const result = await active.input.call(name, args, active.calls, active.controller.signal)
       active.controller.signal.throwIfAborted()

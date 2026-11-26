@@ -44,7 +44,7 @@ import {
  * | unreadable                            | -              | `set_aside`                              |
  * | not in history, a `.md` file          | not yet        | `notInMemory`: listed, never added       |
  */
-export type OutsideEdit =
+type OutsideEdit =
   | { readonly kind: "take_in"; readonly change: AdoptableWorkingChange }
   | {
       readonly kind: "set_aside"
@@ -54,7 +54,7 @@ export type OutsideEdit =
       readonly detail: string
     }
 
-export type SetAside = Extract<OutsideEdit, { readonly kind: "set_aside" }>
+type SetAside = Extract<OutsideEdit, { readonly kind: "set_aside" }>
 
 /**
  * Where a page whose file differs from its history stands, as of the last check: `set_aside`
@@ -148,7 +148,11 @@ export const makeOutsideEdits = (input: {
   readonly repository: ManagedFileRepositoryShape
   readonly spaces: SpaceStore["Service"]
   readonly snapshot: () => Effect.Effect<Snapshot, WikiError>
-}) => {
+}): {
+  check: () => Effect.Effect<OutsideEditCheck, WikiError, never>
+  state: (path: string) => OutsideEditState | undefined
+  explain: (error: WikiError) => WikiError
+} => {
   const { repository, spaces } = input
 
   const decide = Effect.fn("Wiki.decideOutsideEdit")(function* (

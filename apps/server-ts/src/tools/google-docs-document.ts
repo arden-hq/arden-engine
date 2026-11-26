@@ -243,13 +243,13 @@ const collectTabs = (
     readonly path: ReadonlyArray<string>
   }
 ): ReadonlyArray<DocumentTab> =>
-  values.flatMap((source) => {
+  values.flatMap((source, position) => {
     const { tabId: id, title } = source.tabProperties
     const path = [...parent.path, title]
     const current: DocumentTab = {
       id,
       title,
-      index: source.tabProperties.index ?? 0,
+      index: source.tabProperties.index ?? position,
       parentId: parent.id,
       depth: parent.depth,
       path,

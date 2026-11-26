@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { openRunSince } from "./automation-running.js"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql"
@@ -39,7 +40,7 @@ const withQuestionDestinations = (text: unknown): unknown => {
       : record
   }
   try {
-    return JSON.stringify(fill(JSON.parse(text)))
+    return JSON.stringify(fill(parseJsonText(text)))
   } catch {
     return text
   }

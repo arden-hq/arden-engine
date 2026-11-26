@@ -427,9 +427,7 @@ const appendRuntimeContext = (
       }))
     ),
     current: context,
-    endNoteDue: !records.some((record) =>
-      record.message_id?.startsWith(`${input.runId}:context:runtime:`)
-    )
+    endNoteDue: !records.some((record) => record.arden_context_run_id === input.runId)
   })
   if (update === undefined) return request
   const messages: ReadonlyArray<ChatMessage> = [
@@ -440,6 +438,7 @@ const appendRuntimeContext = (
       created_at: currentIso(),
       turn_id: input.turnId,
       arden_context_source: "runtime",
+      arden_context_run_id: input.runId,
       arden_context_update: update.kind,
       arden_context_state: update.state,
       content: update.text
@@ -745,7 +744,7 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
             isWrittenByPerson(message) && !("sent_from" in message && message.sent_from === "cli"),
           holdBackgroundCalls: (calls) => input.tools.holdBackground(calls),
           claimBackgroundCalls: (toolCallIds) => input.tools.claimBackground(toolCallIds),
-          ...(answerFixInHistory(input.messages, input.assistantMessageId).length > 0
+          ...(answerFixInHistory(input.messages, new Set(input.mintedMessageIds)).length > 0
             ? {}
             : {
                 checkFinalText: (text: string) =>
