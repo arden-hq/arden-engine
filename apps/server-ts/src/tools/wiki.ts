@@ -14,11 +14,13 @@ import { outsideEditNotice } from "../wiki/outside-edits.js"
 import { nameKeys, namesTakenAt, normal, reviseWikiPage } from "../wiki/page.js"
 import { loadPageAges, PAGE_AGE_RULE } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
+import type { WikiPage } from "@arden-hq/protocol/wiki"
 import {
   activeRunPages,
   redirectTargetAt,
   type PageRecord,
-  type Snapshot
+  type Snapshot,
+  pageLifecycle
 } from "../wiki/snapshot.js"
 import { bodyFields } from "./code-mode-result.js"
 import { readTextPage } from "./read-text.js"
@@ -132,12 +134,12 @@ export const writtenPageData = (page: {
   readonly path: string
   readonly title: string
   readonly aliases: ReadonlyArray<string>
-  readonly lifecycle: string
+  readonly lifecycle: WikiPage["lifecycle"]
 }): { path: string; title: string; aliases: string[]; lifecycle: string } => ({
   path: page.path,
   title: page.title,
   aliases: [...page.aliases],
-  lifecycle: page.lifecycle
+  lifecycle: page.lifecycle.kind
 })
 
 interface ListingEntry {
@@ -281,24 +283,16 @@ export interface WikiToolServices {
 /** A page as this run found it, saved by a change that did not need to write it. */
 export const keptPage = (
   record: PageRecord
-): {
-  page: {
-    pageId: string
-    path: string
-    title: string
-    version: string
-    aliases: readonly string[]
-    lifecycle: "active" | "redirect"
-  }
-  before: string
-} => ({
+): SavedPage<
+  Pick<WikiPage, "pageId" | "path" | "title" | "version" | "aliases" | "lifecycle">
+> => ({
   page: {
     pageId: record.page.pageId,
     path: record.resource.path,
     title: record.page.title,
     version: record.resource.versionId,
     aliases: record.page.aliases,
-    lifecycle: record.page.lifecycle
+    lifecycle: pageLifecycle(record.page)
   },
   before: record.resource.versionId
 })

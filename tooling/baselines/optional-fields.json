@@ -25,8 +25,6 @@
   "libs/protocol/src/events/contracts.ts": 11,
   "libs/protocol/src/events/schema.ts": 8,
   "libs/protocol/src/history/schema.ts": 11,
-  "libs/protocol/src/inbox/contracts.ts": 2,
-  "libs/protocol/src/inbox/schema.ts": 14,
   "libs/protocol/src/proposals/contracts.ts": 2,
   "libs/protocol/src/proposals/schema.ts": 22,
   "libs/protocol/src/runs/approval-schema.ts": 12,
@@ -44,16 +42,9 @@
   "libs/protocol/src/sessions/schema.ts": 59,
   "libs/protocol/src/sessions/todos/contracts.ts": 4,
   "libs/protocol/src/sessions/todos/schema.ts": 4,
-  "libs/protocol/src/settings/limits.ts": 28,
-  "libs/protocol/src/settings/schema.ts": 14,
   "libs/protocol/src/spaces/continuity/schema.ts": 1,
   "libs/protocol/src/spaces/contracts.ts": 13,
   "libs/protocol/src/spaces/schema.ts": 41,
   "libs/protocol/src/spaces/work/contracts.ts": 35,
-  "libs/protocol/src/spaces/work/schema.ts": 25,
-  "libs/protocol/src/wiki/contracts.ts": 16,
-  "libs/protocol/src/wiki/schema/requests.ts": 8,
-  "libs/protocol/src/wiki/schema/responses.ts": 11,
-  "libs/protocol/src/wiki/schema/routes.ts": 20,
-  "libs/protocol/src/wiki/schema/shared.ts": 8
+  "libs/protocol/src/spaces/work/schema.ts": 25
 }

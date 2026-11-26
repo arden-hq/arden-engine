@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect"
 import { readFile, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { expect, it } from "vitest"
+import { WIKI_HISTORY_DEFAULT_LIMIT } from "@arden-hq/protocol/wiki"
 
 import { rulesMoveLayer, rulesPage } from "../src/context/global-instructions.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
@@ -64,7 +65,9 @@ it("keeps each writer of the rules in page history, takes in outside edits, plai
     }
     expect(await takenIn()).toEqual(["AGENTS.md"])
     const { pageId, at } = await current()
-    const commitId = (await run(wiki.history(pageId))).commits.at(-1)?.commitId ?? ""
+    const commitId =
+      (await run(wiki.history(pageId, { limit: WIKI_HISTORY_DEFAULT_LIMIT }))).commits.at(-1)
+        ?.commitId ?? ""
     const version = { commitId, side: "after" } as const
     await run(
       wiki.restore({
@@ -75,7 +78,9 @@ it("keeps each writer of the rules in page history, takes in outside edits, plai
         commit: by(OWNER_TURN)
       })
     )
-    const origins = (await run(wiki.history(pageId))).commits.map((entry) => entry.origin)
+    const origins = (
+      await run(wiki.history(pageId, { limit: WIKI_HISTORY_DEFAULT_LIMIT }))
+    ).commits.map((entry) => entry.origin)
     const [chat, inFile] = ["memory.rules@session-1", "filesystem"]
     expect(origins).toEqual([chat, inFile, chat, inFile])
     expect((await current()).page.body).toBe("Rule one.\n")

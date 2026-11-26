@@ -4,16 +4,20 @@ import type {
   ManagedFileRepositoryShape,
   ResourceVersion
 } from "@arden-hq/revisions/effect"
-import type {
-  WikiDiffRouteOptions,
-  WikiHistoryRouteOptions,
-  WikiLink,
-  WikiPageDiff,
-  WikiPageHistoryResponse,
-  WikiPageLinks,
-  WikiRestoreSide,
-  WikiVersionDiff,
-  WikiVersionDiffRouteOptions
+import {
+  WIKI_DIFF_BASE,
+  WIKI_LINK_ANCHOR,
+  WIKI_LINK_LABEL,
+  WIKI_LINK_STATUS,
+  type WikiDiffRouteOptions,
+  type WikiHistoryRouteOptions,
+  type WikiLink,
+  type WikiPageDiff,
+  type WikiPageHistoryResponse,
+  type WikiPageLinks,
+  type WikiRestoreSide,
+  type WikiVersionDiff,
+  type WikiVersionDiffRouteOptions
 } from "@arden-hq/protocol/wiki"
 import { diffLines } from "diff"
 import { Effect } from "effect"
@@ -38,11 +42,11 @@ export interface WikiHistoryMethods {
   }) => Effect.Effect<CollectionReport, WikiError>
   readonly history: (
     pageId: string,
-    options?: WikiHistoryRouteOptions
+    options: WikiHistoryRouteOptions
   ) => Effect.Effect<WikiPageHistoryResponse, WikiError>
   readonly diff: (
     pageId: string,
-    options?: WikiDiffRouteOptions
+    options: WikiDiffRouteOptions
   ) => Effect.Effect<WikiPageDiff, WikiError>
   readonly versionDiff: (
     pageId: string,
@@ -102,7 +106,7 @@ export const makeWikiHistoryMethods = (
 
   const history = Effect.fn("Wiki.history")(function* (
     pageId: string,
-    options: WikiHistoryRouteOptions = {}
+    options: WikiHistoryRouteOptions
   ) {
     const head = yield* repository.currentRevision.pipe(
       Effect.mapError(mapRevisionError("history", pageId))
@@ -119,7 +123,7 @@ export const makeWikiHistoryMethods = (
       .history({
         resourceId: pageId,
         start: head,
-        limit: options.limit ?? 50
+        limit: options.limit
       })
       .pipe(Effect.mapError(mapRevisionError("history", pageId)))
     const readText = (version: ResourceVersion | null) =>
@@ -164,24 +168,19 @@ export const makeWikiHistoryMethods = (
     return { pageId, repositoryHead: head, commits: summaries }
   })
 
-  const diff = Effect.fn("Wiki.diff")(function* (
-    pageId: string,
-    options: WikiDiffRouteOptions = {}
-  ) {
-    const head = yield* repository.currentRevision.pipe(Effect.mapError(mapRevisionError("diff")))
-    const target = options.target ?? head
-    if (target === null) return yield* notFound("diff", pageId)
+  const diff = Effect.fn("Wiki.diff")(function* (pageId: string, options: WikiDiffRouteOptions) {
+    const { base, target } = options
     const page = yield* repository
-      .diffPage(options.base ?? null, target, pageId, {
-        offset: options.offset ?? 0,
-        limit: options.limit ?? 65_536,
-        tail: options.tail ?? false
+      .diffPage(base.kind === WIKI_DIFF_BASE.version ? base.version : null, target, pageId, {
+        offset: options.offset,
+        limit: options.limit,
+        tail: false
       })
       .pipe(Effect.mapError(mapRevisionError("diff", pageId)))
     return {
       offset: page.offset,
       endOffset: page.endOffset,
-      base: options.base ?? null,
+      base,
       target,
       hasMore: page.hasMore,
       unifiedDiff: page.unifiedDiff
@@ -221,22 +220,30 @@ export const makeWikiHistoryMethods = (
     const names = pageNameIndex(current.wholeSet)
     const reference = (sourcePageId: string, token: WikiLinkToken): WikiLink => {
       const targetPageId = resolveWikiLinkTarget(byId, names, sourcePageId, token)
-      return {
+      const fields = {
         sourcePageId,
         target:
           token.fragment === null ? (token.page ?? "") : `${token.page ?? ""}#${token.fragment}`,
-        alias: token.alias,
-        heading: token.fragment,
-        status: targetPageId === null ? "unresolved" : "resolved",
-        targetPageId
+        anchor:
+          token.fragment === null
+            ? { kind: WIKI_LINK_ANCHOR.page }
+            : { kind: WIKI_LINK_ANCHOR.heading, heading: token.fragment },
+        label:
+          token.alias === null
+            ? { kind: WIKI_LINK_LABEL.target }
+            : { kind: WIKI_LINK_LABEL.alias, alias: token.alias }
       }
+      return targetPageId === null
+        ? { ...fields, status: WIKI_LINK_STATUS.unresolved }
+        : { ...fields, status: WIKI_LINK_STATUS.resolved, targetPageId }
     }
     const outgoing = pageWikiLinks(record).map((token) => reference(pageId, token))
     const backlinks: WikiLink[] = []
     for (const source of current.wholeSet) {
       for (const token of pageWikiLinks(source)) {
         const item = reference(source.page.pageId, token)
-        if (item.targetPageId === pageId) backlinks.push(item)
+        if (item.status === WIKI_LINK_STATUS.resolved && item.targetPageId === pageId)
+          backlinks.push(item)
       }
     }
     return {

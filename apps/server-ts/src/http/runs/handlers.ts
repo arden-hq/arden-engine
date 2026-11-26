@@ -7,7 +7,7 @@ import {
 import type { RunDetail, SessionUsageReport } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
-import { currentPlanReading, planLimitsReport } from "../../models/plan-limits.js"
+import { currentPlanReading, planLimitsReport, stopPercent } from "../../models/plan-limits.js"
 import { LimitSettingsStore } from "../../persistence/settings/store.js"
 import { ModelStore } from "../../persistence/models/store.js"
 import { ModelProviderService } from "../../models/provider.js"
@@ -216,7 +216,7 @@ export const RunHandlers = HttpApiBuilder.group(
           return planLimitsReport(
             reading,
             source?.history() ?? [],
-            settings.ardenLimitPercent ?? 100,
+            stopPercent(settings.ardenLimit) ?? 100,
             now
           )
         }).pipe(Effect.catch(failInternal("Runs")))

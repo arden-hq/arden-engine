@@ -14,6 +14,12 @@ import { boundedDiff } from "./bounded-diff.js"
 import { STANDING_LIMIT_NOTE } from "../memory/core-memory.js"
 import { activeRunPages, type PageRecord } from "../wiki/snapshot.js"
 import {
+  WIKI_LINK_ANCHOR,
+  WIKI_LINK_LABEL,
+  WIKI_LINK_STATUS,
+  type WikiLink
+} from "@arden-hq/protocol/wiki"
+import {
   activePage,
   changePages,
   keptPage,
@@ -164,26 +170,19 @@ const directoryOutcome = (
   }
 }
 
-const linkData = (
-  link: {
-    readonly sourcePageId: string
-    readonly target: string
-    readonly alias: string | null
-    readonly heading: string | null
-    readonly status: "resolved" | "unresolved"
-    readonly targetPageId: string | null
-  },
-  paths: ReadonlyMap<string, string>
-) => ({
-  source_page_id: link.sourcePageId,
-  source_path: paths.get(link.sourcePageId) ?? null,
-  target: link.target,
-  alias: link.alias,
-  heading: link.heading,
-  status: link.status,
-  target_page_id: link.targetPageId,
-  target_path: link.targetPageId === null ? null : (paths.get(link.targetPageId) ?? null)
-})
+const linkData = (link: WikiLink, paths: ReadonlyMap<string, string>) => {
+  const targetPageId = link.status === WIKI_LINK_STATUS.resolved ? link.targetPageId : null
+  return {
+    source_page_id: link.sourcePageId,
+    source_path: paths.get(link.sourcePageId) ?? null,
+    target: link.target,
+    alias: link.label.kind === WIKI_LINK_LABEL.alias ? link.label.alias : null,
+    heading: link.anchor.kind === WIKI_LINK_ANCHOR.heading ? link.anchor.heading : null,
+    status: link.status,
+    target_page_id: targetPageId,
+    target_path: targetPageId === null ? null : (paths.get(targetPageId) ?? null)
+  }
+}
 
 interface WikiOperationDeps {
   readonly wiki: Wiki["Service"]

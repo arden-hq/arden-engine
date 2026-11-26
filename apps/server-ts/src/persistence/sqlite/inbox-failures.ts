@@ -1,5 +1,6 @@
 import { providerSentence } from "@arden-hq/protocol/chat"
 import type { InboxFailureEntry } from "../inbox/store.js"
+import type { InboxFailureRun } from "@arden-hq/protocol/inbox"
 import { SPACE_ARCHIVED_PAUSE_LINE } from "./automation-auto-pause.js"
 import { inArdenWords } from "../restart-notice.js"
 import { sha256Hex } from "@arden-hq/std/hash"
@@ -100,6 +101,27 @@ const pausesByAutomation = (
   return pauses
 }
 
+const failureSpace = (
+  spaceId: string | null,
+  titles: ReadonlyMap<string, string>
+): InboxFailureEntry["space"] => {
+  const title = spaceId === null ? undefined : titles.get(spaceId)
+  return spaceId === null || title === undefined
+    ? { kind: "loose" }
+    : { kind: "space", space_id: spaceId, title }
+}
+
+const failureOrigin = (
+  automationId: string | null,
+  runId: string | null
+): InboxFailureEntry["origin"] => {
+  const run: InboxFailureRun =
+    runId === null ? { kind: "unstarted" } : { kind: "started", run_id: runId }
+  return automationId === null
+    ? { kind: "task", run }
+    : { kind: "automation", automation_task_id: automationId, run }
+}
+
 const failureDigest = (cause: string): string => sha256Hex(cause).slice(0, 16)
 
 export const automationFailureEntries = (input: {
@@ -172,11 +194,8 @@ export const automationFailureEntries = (input: {
       counted: true,
       unread: unread(item.lastAt, input.marks.get(key)),
       readAt: input.marks.get(key),
-      spaceId: item.spaceId ?? undefined,
-      spaceTitle: item.spaceId === null ? undefined : input.spaceTitles.get(item.spaceId),
-      automationTaskId: item.automationId ?? undefined,
-      runId: item.runId ?? undefined,
-      workflowRef: undefined,
+      space: failureSpace(item.spaceId, input.spaceTitles),
+      origin: failureOrigin(item.automationId, item.runId),
       cause: pausedGroups.has(key)
         ? `${item.count === 1 ? "Paused" : `Paused after ${item.count} failed runs in a row`}: ${inArdenWords(item.cause)}`
         : inArdenWords(item.cause),
@@ -196,11 +215,8 @@ export const automationFailureEntries = (input: {
       counted: true,
       unread: unread(row.created_at, input.marks.get(key)),
       readAt: input.marks.get(key),
-      spaceId: undefined,
-      spaceTitle: undefined,
-      automationTaskId: row.task_id,
-      runId: undefined,
-      workflowRef: undefined,
+      space: { kind: "loose" },
+      origin: { kind: "automation", automation_task_id: row.task_id, run: { kind: "unstarted" } },
       cause: SPACE_ARCHIVED_PAUSE_LINE,
       runCount: 0,
       firstAt: row.created_at,

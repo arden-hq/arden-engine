@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { RunQueries } from "../persistence/runs/queries.js"
 import type { Wiki } from "../wiki/service.js"
+import { pageLifecycle } from "../wiki/snapshot.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { changePages, writtenPageData } from "./wiki.js"
 import { requireObserved } from "./wiki-records.js"
@@ -130,7 +131,11 @@ export const makeWikiRetireTools = ({
         result: `Archived ${record.resource.path}; its path now redirects to ${target.resource.path}.`,
         preview: "Wiki page merged",
         data: {
-          page: writtenPageData({ ...target.page, path: target.resource.path }),
+          page: writtenPageData({
+            ...target.page,
+            path: target.resource.path,
+            lifecycle: pageLifecycle(target.page)
+          }),
           merged_from: record.resource.path,
           changed: true
         },

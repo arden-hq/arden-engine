@@ -13,14 +13,21 @@ export const planLimitNoticeRows = (
 
 type StoreOperation = "view" | "mark_read" | "dismiss"
 
-const PlanLimitNoticeSchema = Schema.Struct({
-  level: Schema.Literals(["background", "arden", "used_up"]),
+const noticeFields = {
   usedPercent: Schema.Number,
-  limitPercent: Schema.NullOr(Schema.Number),
   windowSeconds: Schema.Number,
   resetsAt: Schema.String,
   since: Schema.String
-})
+} as const
+
+const PlanLimitNoticeSchema = Schema.Union([
+  Schema.Struct({ ...noticeFields, level: Schema.Literal("used_up"), limitPercent: Schema.Null }),
+  Schema.Struct({
+    ...noticeFields,
+    level: Schema.Literals(["background", "arden"]),
+    limitPercent: Schema.Number
+  })
+])
 
 export const planLimitEntries = Effect.fn("SqliteInbox.planLimitEntries")(function* (
   operation: StoreOperation,
@@ -51,9 +58,11 @@ export const planLimitEntries = Effect.fn("SqliteInbox.planLimitEntries")(functi
     counted: true,
     unread: unread(notice.since, marks.get(key)),
     readAt: marks.get(key),
-    level: notice.level,
+    reached:
+      notice.limitPercent === null
+        ? { level: notice.level }
+        : { level: notice.level, limit_percent: notice.limitPercent },
     usedPercent: notice.usedPercent,
-    limitPercent: notice.limitPercent ?? undefined,
     windowSeconds: notice.windowSeconds,
     resetsAt: notice.resetsAt
   }

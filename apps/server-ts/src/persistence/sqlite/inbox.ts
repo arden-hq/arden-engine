@@ -4,6 +4,13 @@ import { pendingDecisionCards } from "./pending-decision-cards.js"
 import { failureRows } from "./inbox-failure-rows.js"
 import { decodeRunApproval, type ApprovalRow } from "./run-approvals.js"
 import { INBOX_ITEM_LIMIT } from "@arden-hq/protocol/inbox"
+import {
+  blockedSpaceGroups,
+  blockedTaskEntries,
+  group,
+  type CommentRow,
+  type TaskRow
+} from "./inbox-blocked.js"
 import { DateTime, Effect } from "effect"
 import { planLimitEntries, planLimitNoticeRows } from "./inbox-plan-limit.js"
 import { SqlClient } from "effect/unstable/sql"
@@ -30,7 +37,6 @@ import {
   automationFailureEntries,
   collapseWhitespace,
   failureCause,
-  later,
   timeValue,
   unread,
   type SpacePauseRow,
@@ -44,22 +50,6 @@ const FAILURE_WINDOW_DAYS = 7
 interface SpaceRow {
   readonly space_id: string
   readonly name: string
-}
-
-interface TaskRow {
-  readonly item_id: string
-  readonly space_id: string | null
-  readonly stable_key: string
-  readonly seq: number | null
-  readonly text: string
-  readonly waiting_on: string
-  readonly updated_at: string
-}
-
-interface CommentRow {
-  readonly item_id: string
-  readonly body: string
-  readonly created_at: string
 }
 
 interface AbandonedDeliveryRow {
@@ -186,21 +176,6 @@ const newestFirst = <T>(
 const approvalKey = (approval: RunApproval): string =>
   `approval:${approval.run_id}:${approval.tool_call_id}`
 
-const group = (
-  key: string,
-  kind: InboxEntryGroup["kind"],
-  title: string,
-  items: ReadonlyArray<InboxEntry>,
-  spaceId?: string
-): InboxEntryGroup => ({
-  key,
-  kind,
-  title,
-  spaceId,
-  count: items.filter((item) => item.counted).length,
-  items
-})
-
 const capGroups = (groups: ReadonlyArray<InboxEntryGroup>): Array<InboxEntryGroup> => {
   const result: Array<InboxEntryGroup> = []
   let remaining = INBOX_ITEM_LIMIT
@@ -208,7 +183,7 @@ const capGroups = (groups: ReadonlyArray<InboxEntryGroup>): Array<InboxEntryGrou
     if (remaining <= 0) break
     const items = current.items.slice(0, remaining)
     remaining -= items.length
-    result.push(group(current.key, current.kind, current.title, items, current.spaceId))
+    result.push({ ...current, items, count: items.filter((item) => item.counted).length })
   }
   return result
 }
@@ -440,47 +415,12 @@ export const makeInboxStore = ({
     if (tasks.length !== snapshot.tasks.length) {
       return yield* storeError(operation, "storage", "Stored Inbox data is corrupt")
     }
-    const blockedItems: Array<InboxBlockedTaskEntry> = tasks.map((task) => {
-      const comment = latestComments.get(task.item_id)
-      const at = later(task.updated_at, comment?.created_at ?? null)
-      const key = `task:${task.item_id}`
-      return {
-        source: "blocked_task",
-        key,
-        groupKey: `space:${task.space_id ?? "none"}`,
-        at,
-        counted: false,
-        unread: unread(at, marks.get(key)),
-        readAt: marks.get(key),
-        spaceId: task.space_id,
-        spaceTitle: task.space_id === null ? null : (spaceTitles.get(task.space_id) ?? ""),
-        itemId: task.item_id,
-        stableKey: task.stable_key,
-        seq: task.seq ?? undefined,
-        text: task.text,
-        waitingOn: task.waiting_on,
-        question: comment?.body,
-        questionAt: comment?.created_at
-      }
+    const sortedBlocked = byRecency(blockedTaskEntries(tasks, latestComments, spaceTitles, marks))
+    const spaceGroups = blockedSpaceGroups(sortedBlocked.filter(shown)).sort((left, right) => {
+      const leftAt = left.items[0]?.at ?? ""
+      const rightAt = right.items[0]?.at ?? ""
+      return timeValue(rightAt) - timeValue(leftAt)
     })
-    const sortedBlocked = byRecency(blockedItems)
-    const blockedBySpace = new Map<string | null, Array<InboxBlockedTaskEntry>>()
-    for (const item of sortedBlocked.filter(shown)) {
-      const spaceItems = blockedBySpace.get(item.spaceId) ?? []
-      spaceItems.push(item)
-      blockedBySpace.set(item.spaceId, spaceItems)
-    }
-    const spaceGroups = [...blockedBySpace.entries()]
-      .map(([spaceId, items]) =>
-        spaceId === null
-          ? group("space:none", "space", "No Space", items)
-          : group(`space:${spaceId}`, "space", spaceTitles.get(spaceId) ?? "", items, spaceId)
-      )
-      .sort((left, right) => {
-        const leftAt = left.items[0]?.at ?? ""
-        const rightAt = right.items[0]?.at ?? ""
-        return timeValue(rightAt) - timeValue(leftAt)
-      })
 
     const approvalItems = snapshot.approvals.map((approval): InboxApprovalEntry => {
       const key = approvalKey(approval)
@@ -506,8 +446,7 @@ export const makeInboxStore = ({
     })
     const abandonedItems = snapshot.abandonedDeliveries.map((row): InboxFailureEntry => {
       const key = `failure:workflow:${row.workflow_ref}:${row.attempt}`
-      const spaceId =
-        row.space_id !== null && spaceTitles.has(row.space_id) ? row.space_id : undefined
+      const title = row.space_id === null ? undefined : spaceTitles.get(row.space_id)
       return {
         source: "failure",
         key,
@@ -516,11 +455,11 @@ export const makeInboxStore = ({
         counted: true,
         unread: unread(row.settled_at, marks.get(key)),
         readAt: marks.get(key),
-        spaceId,
-        spaceTitle: spaceId === undefined ? undefined : spaceTitles.get(spaceId),
-        automationTaskId: undefined,
-        runId: row.origin_run_id,
-        workflowRef: row.workflow_ref,
+        space:
+          row.space_id === null || title === undefined
+            ? { kind: "loose" }
+            : { kind: "space", space_id: row.space_id, title },
+        origin: { kind: "workflow", workflow_ref: row.workflow_ref, run_id: row.origin_run_id },
         cause: abandonedDeliveryCause(row),
         runCount: 1,
         firstAt: row.settled_at,
@@ -577,20 +516,22 @@ export const makeInboxStore = ({
       ...shownFailures
     ]
     const groups: Array<InboxEntryGroup> = [
-      ...(shownPlan.length === 0 ? [] : [group("limits", "limits", "Plan limit", shownPlan)]),
+      ...(shownPlan.length === 0
+        ? []
+        : [group("limits", "Plan limit", shownPlan, { kind: "limits" })]),
       ...(shownQuestions.length === 0
         ? []
-        : [group("questions", "questions", "Questions", shownQuestions)]),
+        : [group("questions", "Questions", shownQuestions, { kind: "questions" })]),
       ...spaceGroups,
       ...(shownApprovals.length === 0
         ? []
-        : [group("approvals", "approvals", "Approvals", shownApprovals)]),
+        : [group("approvals", "Approvals", shownApprovals, { kind: "approvals" })]),
       ...(shownIncidents.length === 0
         ? []
-        : [group("incidents", "incidents", "Delivery issues", shownIncidents)]),
+        : [group("incidents", "Delivery issues", shownIncidents, { kind: "incidents" })]),
       ...(shownFailures.length === 0
         ? []
-        : [group("failures", "failures", "Failures", shownFailures)])
+        : [group("failures", "Failures", shownFailures, { kind: "failures" })])
     ]
     return {
       view: {

@@ -195,7 +195,7 @@ export const makeWikiPageHistoryTools = ({
       )
       const entries = history.commits.flatMap((commit) => {
         const change = commit.changes.find(
-          (candidate) => (candidate.after ?? candidate.before)?.resourceId === record.page.pageId
+          (candidate) => candidate.after.resourceId === record.page.pageId
         )
         if (change === undefined) return []
         return [
@@ -205,7 +205,7 @@ export const makeWikiPageHistoryTools = ({
             origin: commit.origin,
             reason: commit.reason,
             action: change.action,
-            path: (change.after ?? change.before)?.path ?? input.path,
+            path: change.after.path,
             restorable: commit.restorable.includes("after")
           }
         ]

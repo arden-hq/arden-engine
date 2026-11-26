@@ -8,22 +8,23 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
     at: entry.at,
     counted: entry.counted,
     unread: entry.unread,
-    read_at: entry.readAt ?? null
+    read_mark:
+      entry.readAt === undefined
+        ? { kind: "unmarked" as const }
+        : { kind: "marked" as const, read_at: entry.readAt }
   }
   switch (entry.source) {
     case "blocked_task":
       return {
         ...base,
         source: entry.source,
-        space_id: entry.spaceId,
-        space_title: entry.spaceTitle,
+        space: entry.space,
         item_id: entry.itemId,
         stable_key: entry.stableKey,
-        seq: entry.seq ?? null,
+        numbering: entry.numbering,
         text: entry.text,
         waiting_on: entry.waitingOn,
-        question: entry.question ?? null,
-        question_at: entry.questionAt ?? null
+        ask: entry.ask
       }
     case "approval":
       return { ...entry.approval, ...base, source: entry.source }
@@ -31,11 +32,8 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
       return {
         ...base,
         source: entry.source,
-        space_id: entry.spaceId ?? null,
-        space_title: entry.spaceTitle ?? null,
-        automation_task_id: entry.automationTaskId ?? null,
-        run_id: entry.runId ?? null,
-        workflow_ref: entry.workflowRef ?? null,
+        space: entry.space,
+        origin: entry.origin,
         cause: entry.cause,
         run_count: entry.runCount,
         first_at: entry.firstAt,
@@ -58,9 +56,8 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
       return {
         ...base,
         source: entry.source,
-        level: entry.level,
+        reached: entry.reached,
         used_percent: entry.usedPercent,
-        limit_percent: entry.limitPercent ?? null,
         window_seconds: entry.windowSeconds,
         resets_at: entry.resetsAt
       }
@@ -68,11 +65,7 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
 }
 
 const groupToWire = (group: InboxEntryGroup): InboxGroup => ({
-  key: group.key,
-  kind: group.kind,
-  title: group.title,
-  space_id: group.spaceId ?? null,
-  count: group.count,
+  ...group,
   items: group.items.map(entryToWire)
 })
 

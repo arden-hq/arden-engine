@@ -5,6 +5,9 @@ export {
   WikiTitleSchema,
   WikiResourceStateSchema,
   WikiPageLifecycleSchema,
+  WikiExcerptSchema,
+  WikiMomentSchema,
+  WikiDiffBaseSchema,
   WikiRestoreSideSchema,
   WikiMetadataSchema
 } from "./schema/shared.js"
@@ -38,19 +41,15 @@ export {
 } from "./schema/responses.js"
 
 export {
-  CreateWikiPageInputSchema,
   RenameWikiPageInputSchema,
   WikiPageGuardSchema,
-  WikiCreateRequestContextSchema,
   WikiUpdateRequestContextSchema,
   WikiRenameRequestContextSchema,
-  WikiCreateRequestSchema,
   WikiUpdateRequestSchema,
   WikiVersionRequestSchema,
   WikiHistoryRestoreRequestContextSchema,
   WikiHistoryRestoreRequestSchema,
   WikiRenameRequestSchema,
-  encodeCreateWikiRequestEffect,
   encodeUpdateWikiRequestEffect,
   encodeWikiVersionRequestEffect,
   encodeWikiHistoryRestoreRequestEffect,

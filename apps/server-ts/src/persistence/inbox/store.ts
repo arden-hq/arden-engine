@@ -1,5 +1,12 @@
 import { storeErrorFields } from "../errors.js"
 import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
+import type {
+  InboxFailureOrigin,
+  InboxPlanLimitReached,
+  InboxSpace,
+  InboxTaskAsk,
+  InboxTaskNumbering
+} from "@arden-hq/protocol/inbox"
 import { Context, Effect, Schema } from "effect"
 
 export class InboxStoreError extends Schema.TaggedError<InboxStoreError>()("InboxStoreError", {
@@ -20,15 +27,13 @@ interface InboxEntryBase {
 
 export interface InboxBlockedTaskEntry extends InboxEntryBase {
   readonly source: "blocked_task"
-  readonly spaceId: string | null
-  readonly spaceTitle: string | null
+  readonly space: InboxSpace
   readonly itemId: string
   readonly stableKey: string
-  readonly seq: number | undefined
+  readonly numbering: InboxTaskNumbering
   readonly text: string
   readonly waitingOn: "you" | "external"
-  readonly question: string | undefined
-  readonly questionAt: string | undefined
+  readonly ask: InboxTaskAsk
 }
 
 export interface InboxApprovalEntry extends InboxEntryBase {
@@ -38,11 +43,8 @@ export interface InboxApprovalEntry extends InboxEntryBase {
 
 export interface InboxFailureEntry extends InboxEntryBase {
   readonly source: "failure"
-  readonly spaceId: string | undefined
-  readonly spaceTitle: string | undefined
-  readonly automationTaskId: string | undefined
-  readonly runId: string | undefined
-  readonly workflowRef: string | undefined
+  readonly space: InboxSpace
+  readonly origin: InboxFailureOrigin
   readonly cause: string
   readonly runCount: number
   readonly firstAt: string
@@ -66,9 +68,8 @@ export interface InboxIncidentEntry extends InboxEntryBase {
 
 export interface InboxPlanLimitEntry extends InboxEntryBase {
   readonly source: "plan_limit"
-  readonly level: "background" | "arden" | "used_up"
+  readonly reached: InboxPlanLimitReached
   readonly usedPercent: number
-  readonly limitPercent: number | undefined
   readonly windowSeconds: number
   readonly resetsAt: string
 }
@@ -81,14 +82,18 @@ export type InboxEntry =
   | InboxIncidentEntry
   | InboxPlanLimitEntry
 
-export interface InboxEntryGroup {
+interface InboxEntryGroupBase {
   readonly key: string
-  readonly kind: "space" | "questions" | "approvals" | "incidents" | "failures" | "limits"
   readonly title: string
-  readonly spaceId: string | undefined
   readonly count: number
   readonly items: ReadonlyArray<InboxEntry>
 }
+
+export type InboxEntryGroup =
+  | (InboxEntryGroupBase & { readonly kind: "space"; readonly space: InboxSpace })
+  | (InboxEntryGroupBase & {
+      readonly kind: "questions" | "approvals" | "incidents" | "failures" | "limits"
+    })
 
 export interface InboxState {
   readonly generatedAt: string

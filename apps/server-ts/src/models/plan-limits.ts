@@ -1,5 +1,22 @@
 import { hasPlanCredits, type PlanCredits, type PlanLimitsReport } from "@arden-hq/protocol/runs"
-import { effectiveBackgroundLimit, type LimitSettings } from "@arden-hq/protocol/settings"
+import {
+  effectiveBackgroundLimit,
+  KEEP_GOING,
+  PLAN_STOP,
+  TOKEN_CAP,
+  type LimitSettings,
+  type PlanStop,
+  type TokenCap
+} from "@arden-hq/protocol/settings"
+
+export const stopPercent = (stop: PlanStop): number | undefined =>
+  stop.kind === PLAN_STOP.at ? stop.percent : undefined
+
+export const capTokens = (cap: TokenCap): number | undefined =>
+  cap.kind === TOKEN_CAP.capped ? cap.tokens : undefined
+
+export const keepGoingUntil = (settings: LimitSettings): number | undefined =>
+  settings.keepGoing.kind === KEEP_GOING.until ? Date.parse(settings.keepGoing.until) : undefined
 import { iso } from "../runtime/clock.js"
 
 export interface PlanWindowReading {
@@ -105,18 +122,26 @@ export const quotaDecision = (input: {
 }
 
 export const quotaLimits = (settings: LimitSettings): QuotaLimits => ({
-  ardenLimitPercent: settings.ardenLimitPercent ?? undefined,
-  backgroundLimitPercent: settings.backgroundLimitPercent ?? undefined,
-  keepGoingUntil: settings.keepGoingUntil === null ? undefined : Date.parse(settings.keepGoingUntil)
+  ardenLimitPercent: stopPercent(settings.ardenLimit),
+  backgroundLimitPercent: stopPercent(settings.backgroundLimit),
+  keepGoingUntil: keepGoingUntil(settings)
 })
 
 export const automationLimitPercent = (
   settings: LimitSettings,
   automationId: string | undefined
-): number | undefined =>
-  automationId === undefined
-    ? undefined
-    : (settings.automationLimits[automationId]?.pauseAtPercent ?? undefined)
+): number | undefined => {
+  const limit = automationId === undefined ? undefined : settings.automationLimits[automationId]
+  return limit === undefined ? undefined : stopPercent(limit.pause)
+}
+
+export const automationTokenCap = (
+  settings: LimitSettings,
+  automationId: string
+): number | undefined => {
+  const limit = settings.automationLimits[automationId]
+  return limit === undefined ? undefined : capTokens(limit.cap)
+}
 
 interface WindowPace {
   readonly elapsedShare: number
@@ -239,8 +264,8 @@ export const planLimitNotice = (
       undefined
     )
   if (window === undefined) return undefined
-  const arden = settings.ardenLimitPercent
-  const background = effectiveBackgroundLimit(settings)
+  const arden = stopPercent(settings.ardenLimit) ?? null
+  const background = stopPercent(effectiveBackgroundLimit(settings)) ?? null
   const base = {
     usedPercent: window.usedPercent,
     windowSeconds: window.windowSeconds,
@@ -248,7 +273,8 @@ export const planLimitNotice = (
   }
   if (window.usedPercent >= 100 && !hasPlanCredits(reading?.credits))
     return { ...base, level: "used_up", limitPercent: null }
-  const keepGoing = settings.keepGoingUntil !== null && Date.parse(settings.keepGoingUntil) > now
+  const until = keepGoingUntil(settings)
+  const keepGoing = until !== undefined && until > now
   if (arden !== null && window.usedPercent >= arden && !keepGoing)
     return { ...base, level: "arden", limitPercent: arden }
   if (background !== null && window.usedPercent >= background)

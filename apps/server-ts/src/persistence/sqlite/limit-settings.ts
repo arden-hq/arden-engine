@@ -1,14 +1,12 @@
 import {
+  applyLimitSettingsPatch,
   DEFAULT_LIMIT_SETTINGS,
   type LimitSettings,
   type LimitSettingsPatch
 } from "@arden-hq/protocol/settings"
-import {
-  LimitSettingsDocumentPatchSchema,
-  LimitSettingsSchema
-} from "@arden-hq/protocol/effect/settings"
+import { LimitSettingsSchema } from "@arden-hq/protocol/effect/settings"
 import { DateTime, Effect, PubSub, Stream } from "effect"
-import type { PlanLimitNotice } from "../../models/plan-limits.js"
+import { automationTokenCap, type PlanLimitNotice } from "../../models/plan-limits.js"
 
 import { LimitSettingsStore, LimitSettingsStoreError } from "../settings/store.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -30,7 +28,7 @@ export const makeLimitSettingsStore = Effect.fn("SqliteLimitSettingsStore.make")
     namespace: "limit_settings",
     label: "limit settings",
     schema: LimitSettingsSchema,
-    patchSchema: LimitSettingsDocumentPatchSchema,
+    patchSchema: LimitSettingsSchema,
     defaults: DEFAULT_LIMIT_SETTINGS,
     error: LimitSettingsStoreError
   })
@@ -38,20 +36,12 @@ export const makeLimitSettingsStore = Effect.fn("SqliteLimitSettingsStore.make")
   const updateSettings = Effect.fn("SqliteLimitSettingsStore.updateSettings")(function* (
     patch: LimitSettingsPatch
   ) {
-    const { automationLimit, ...rest } = patch
     return yield* writer
       .transact(
         Effect.gen(function* () {
-          const settings = yield* document.updateInTransaction((current) => {
-            if (automationLimit === undefined) return rest
-            const { automationId, ...limit } = automationLimit
-            const { [automationId]: _previous, ...others } = current.automationLimits
-            const cleared = limit.pauseAtPercent === null && limit.maxTokensPerRun === null
-            return {
-              ...rest,
-              automationLimits: cleared ? others : { ...others, [automationId]: limit }
-            }
-          })
+          const settings = yield* document.updateInTransaction((current) =>
+            applyLimitSettingsPatch(current, patch)
+          )
           yield* releaseQuotaPauses(writer.sql)
           const unit = yield* UnitOfWork
           yield* unit.afterCommit(PubSub.publish(changed, settings).pipe(Effect.asVoid))
@@ -132,6 +122,8 @@ export const makeLimitSettingsStore = Effect.fn("SqliteLimitSettingsStore.make")
   })
   return LimitSettingsStore.of({
     settings: document.read,
+    automationTokenCap: (automationId: string) =>
+      document.read().pipe(Effect.map((settings) => automationTokenCap(settings, automationId))),
     updateSettings,
     changes: Stream.fromPubSub(changed),
     recheckPausedRuns: () =>

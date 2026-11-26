@@ -212,13 +212,20 @@ const tables: Readonly<Record<string, RouteTable>> = {
   storageRoutes: table(storageRoutes, {}),
   toolRoutes: table(toolRoutes, {}),
   wikiRoutes: table(wikiRoutes, {
-    pages: () => wikiRoutes.pages(),
+    pages: () =>
+      wikiRoutes.pages({ includeRedirects: false, limit: 100, start: { kind: "first" } }),
     page: () => wikiRoutes.page("page-1"),
     archive: () => wikiRoutes.archive("page-1"),
     restoreArchived: () => wikiRoutes.restoreArchived("page-1"),
-    history: () => wikiRoutes.history("page-1"),
+    history: () => wikiRoutes.history("page-1", { limit: 50 }),
     historyRestore: () => wikiRoutes.historyRestore("page-1", "commit-1"),
-    diff: () => wikiRoutes.diff("page-1"),
+    diff: () =>
+      wikiRoutes.diff("page-1", {
+        base: { kind: "empty" },
+        target: "version-1",
+        offset: 0,
+        limit: 100
+      }),
     versionDiff: () => wikiRoutes.versionDiff("page-1", { before: "absent", after: "version-1" }),
     links: () => wikiRoutes.links("page-1")
   }),

@@ -182,14 +182,14 @@ export const makeChatAdmission = ({
       const automationTokenLimit =
         valid.automation === undefined
           ? undefined
-          : ((yield* limits.settings().pipe(
+          : yield* limits.automationTokenCap(valid.automation.automationId).pipe(
               Effect.mapError((cause) =>
                 writeError("start", "storage", "Could not read the plan limits", {
                   sessionId: valid.sessionId,
                   cause
                 })
               )
-            )).automationLimits[valid.automation.automationId]?.maxTokensPerRun ?? undefined)
+            )
       const now = yield* DateTime.now
       const timestamp = DateTime.formatIso(now)
       const settleDelivery = (target: DeliveryTarget) => {

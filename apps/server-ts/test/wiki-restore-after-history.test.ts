@@ -114,7 +114,10 @@ it("the owner restores a chosen version of any page over the route, refused once
       const response = await handler(new Request(`http://localhost${route}`, init))
       return { status: response.status, body: await response.json() }
     }
-    const { pages } = await Effect.runPromise(wiki.list({}))
+    const listed = await Effect.runPromise(
+      wiki.list({ includeRedirects: false, limit: 100, start: { kind: "first" } })
+    )
+    const pages = listed.kind === "snapshot" ? listed.pages : []
     for (const pageId of [
       PAGE,
       pages.find((page) => page.path === RULES_PAGE_PATH)?.pageId ?? ""
@@ -122,7 +125,7 @@ it("the owner restores a chosen version of any page over the route, refused once
       const first = await Effect.runPromise(wiki.read(pageId))
       const edit = wikiRequests.update(first, first.content.replace("First", "Second"))
       const second = wikiDecoders.page((await call("PUT", wikiRoutes.page(pageId), edit)).body)
-      const history = (await call("GET", wikiRoutes.history(pageId))).body
+      const history = (await call("GET", wikiRoutes.history(pageId, { limit: 50 }))).body
       const commits = wikiDecoders.history(history).commits
       expect(commits.map((commit) => commit.restorable)).toEqual([[], ["after"]])
       const restore = (page: WikiPage) =>

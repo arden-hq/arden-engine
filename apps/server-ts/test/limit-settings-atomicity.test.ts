@@ -2,13 +2,23 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
+import {
+  KEEP_GOING,
+  LIMIT_SETTINGS_CHANGE,
+  PLAN_STOP,
+  type PlanStop
+} from "@arden-hq/protocol/settings"
 import { makeLimitSettingsStore } from "../src/persistence/sqlite/limit-settings.js"
 import { makeWriter } from "../src/persistence/sqlite/deps.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 
-it.each([100, null])(
-  "persists a background stop of %s and rolls back a failed change",
-  async (backgroundLimitPercent) => {
+const backgroundStop = (percent: number): PlanStop => ({ kind: PLAN_STOP.at, percent })
+const change = (value: PlanStop) =>
+  [{ kind: LIMIT_SETTINGS_CHANGE.backgroundLimit, value }] as const
+
+it.each<PlanStop>([backgroundStop(100), { kind: PLAN_STOP.unlimited }])(
+  "persists a background stop of %j and rolls back a failed change",
+  async (backgroundLimit) => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -24,24 +34,24 @@ it.each([100, null])(
             writer: makeWriter({ sql, reader: sql, queue }),
             sessionEvents: { appendEventInTransaction: () => Effect.die("no notice is recorded") }
           })
-          const before = yield* store.updateSettings({ backgroundLimitPercent })
+          const before = yield* store.updateSettings(change(backgroundLimit))
           expect(yield* store.settings()).toEqual({
-            ardenLimitPercent: 90,
-            backgroundLimitPercent,
-            keepGoingUntil: null,
+            ardenLimit: { kind: PLAN_STOP.at, percent: 90 },
+            backgroundLimit,
+            keepGoing: { kind: KEEP_GOING.off },
             automationLimits: {}
           })
           yield* sql`UPDATE chat_runs SET metadata_json = ${paused}`
           yield* sql`CREATE TRIGGER refuse_resume BEFORE UPDATE ON chat_runs BEGIN SELECT RAISE(ABORT, 'resume failed'); END`
-          const failed = yield* Effect.exit(store.updateSettings({ backgroundLimitPercent: 75 }))
+          const failed = yield* Effect.exit(store.updateSettings(change(backgroundStop(75))))
           expect(Exit.isFailure(failed)).toBe(true)
           expect(yield* store.settings()).toEqual(before)
           expect(yield* sql`SELECT metadata_json FROM chat_runs`).toEqual([
             { metadata_json: paused }
           ])
           yield* sql`DROP TRIGGER refuse_resume`
-          const updated = yield* store.updateSettings({ backgroundLimitPercent: 75 })
-          expect(updated.backgroundLimitPercent).toBe(75)
+          const updated = yield* store.updateSettings(change(backgroundStop(75)))
+          expect(updated.backgroundLimit).toEqual(backgroundStop(75))
           expect(yield* sql`SELECT metadata_json FROM chat_runs`).toEqual([{ metadata_json: "{}" }])
           yield* sql`UPDATE chat_runs SET metadata_json = ${paused}`
           yield* sql`INSERT INTO chat_runs VALUES ('completed', ${paused})`

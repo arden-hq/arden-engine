@@ -15,7 +15,9 @@ import {
 } from "@arden-hq/protocol/permissions"
 import {
   DEFAULT_INTELLIGENCE_SETTINGS,
-  intelligenceSettingsRequests
+  INTELLIGENCE_SETTINGS_CHANGE,
+  intelligenceSettingsRequests,
+  type IntelligenceSettingsPatch
 } from "@arden-hq/protocol/settings"
 import { toolDecoders, toolRoutes } from "@arden-hq/protocol/tools"
 import { sleep } from "@arden-hq/std/sleep"
@@ -256,29 +258,44 @@ export const applySettings = async ({
   // Sub-agents follow the tool: offered, they get the file's limits or the
   // defaults; not offered, they are off, so the two never disagree. Both are
   // written on every start, so an earlier start's limits do not linger.
-  const subAgentLimits = (): { maxAgentDepth?: number; maxConcurrentAgents?: number } => {
+  const subAgentLimits = (): IntelligenceSettingsPatch => {
     if (offered !== undefined && !offered.has("spawn_agent"))
-      return { maxAgentDepth: 1, maxConcurrentAgents: 1 }
-    if (offered === undefined && settings.subAgents === undefined) return {}
-    return {
-      maxAgentDepth: settings.subAgents?.maxDepth ?? DEFAULT_INTELLIGENCE_SETTINGS.maxAgentDepth,
-      maxConcurrentAgents:
-        settings.subAgents?.maxConcurrent ?? DEFAULT_INTELLIGENCE_SETTINGS.maxConcurrentAgents
-    }
+      return [
+        { kind: INTELLIGENCE_SETTINGS_CHANGE.maxAgentDepth, value: 1 },
+        { kind: INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentAgents, value: 1 }
+      ]
+    if (offered === undefined && settings.subAgents === undefined) return []
+    return [
+      {
+        kind: INTELLIGENCE_SETTINGS_CHANGE.maxAgentDepth,
+        value: settings.subAgents?.maxDepth ?? DEFAULT_INTELLIGENCE_SETTINGS.maxAgentDepth
+      },
+      {
+        kind: INTELLIGENCE_SETTINGS_CHANGE.maxConcurrentAgents,
+        value:
+          settings.subAgents?.maxConcurrent ?? DEFAULT_INTELLIGENCE_SETTINGS.maxConcurrentAgents
+      }
+    ]
   }
-  const limits = {
+  const compaction = settings.compaction
+  const limits: IntelligenceSettingsPatch = [
     ...subAgentLimits(),
-    ...(settings.compaction?.threshold === undefined
-      ? {}
-      : { compactionThreshold: settings.compaction.threshold }),
-    ...(settings.compaction?.keepRatio === undefined
-      ? {}
-      : { compactionKeepRatio: settings.compaction.keepRatio }),
-    ...(settings.compaction?.summaryMaxTokens === undefined
-      ? {}
-      : { summaryMaxTokens: settings.compaction.summaryMaxTokens })
-  }
-  if (Object.keys(limits).length > 0)
+    ...(compaction?.threshold === undefined
+      ? []
+      : [{ kind: INTELLIGENCE_SETTINGS_CHANGE.compactionThreshold, value: compaction.threshold }]),
+    ...(compaction?.keepRatio === undefined
+      ? []
+      : [{ kind: INTELLIGENCE_SETTINGS_CHANGE.compactionKeepRatio, value: compaction.keepRatio }]),
+    ...(compaction?.summaryMaxTokens === undefined
+      ? []
+      : [
+          {
+            kind: INTELLIGENCE_SETTINGS_CHANGE.summaryMaxTokens,
+            value: compaction.summaryMaxTokens
+          }
+        ])
+  ]
+  if (limits.length > 0)
     await call("/settings/intelligence", "PATCH", intelligenceSettingsRequests.update(limits))
 
   if (settings.workspace !== undefined) {
