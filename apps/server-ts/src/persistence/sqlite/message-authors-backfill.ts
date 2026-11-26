@@ -23,6 +23,7 @@ const parsed = (json: string): unknown => {
  */
 export const messageAuthorsBackfill: Backfill = {
   name: MESSAGE_AUTHORS_BACKFILL,
+  landed: "2026-11-16",
   chunk: Effect.fn("MessageAuthors.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const after = Number(cursor ?? 0)

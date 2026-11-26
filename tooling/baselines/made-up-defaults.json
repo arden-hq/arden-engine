@@ -1,0 +1,8 @@
+{
+  "apps/server-ts/src/automations/producers/task.ts": 1,
+  "apps/server-ts/src/chat/result-history.ts": 2,
+  "apps/server-ts/src/persistence/sqlite/proposal-room.ts": 1,
+  "apps/server-ts/src/persistence/sqlite/session-branch.ts": 1,
+  "apps/server-ts/src/tools/google-calendar-rules.ts": 2,
+  "apps/server-ts/src/tools/google-docs-document.ts": 1
+}

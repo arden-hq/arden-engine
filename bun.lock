@@ -155,6 +155,7 @@
       },
       "devDependencies": {
         "@types/node": "catalog:",
+        "fast-check": "4.10.2",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },

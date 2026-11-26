@@ -1,0 +1,36 @@
+name: Checks only tighten
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-only-tighten-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tighten:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Counts only go down, judged by the base commit's copy of the check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+          CHECK_REF="$BASE_SHA"
+          if ! git cat-file -e "$CHECK_REF:tooling/checks-only-tighten.mjs" 2>/dev/null; then
+            CHECK_REF=HEAD
+          fi
+          STAGED_CHECK=$(mktemp -d "$RUNNER_TEMP/arden-tighten.XXXXXX")
+          git archive "$CHECK_REF" tooling | tar -x -C "$STAGED_CHECK"
+          node "$STAGED_CHECK/tooling/checks-only-tighten.mjs" "$BASE_SHA" "--pr-body=$RUNNER_TEMP/pr-body.txt"

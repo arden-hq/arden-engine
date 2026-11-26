@@ -8,8 +8,11 @@ interface BackfillChunk {
   readonly next: string | undefined
 }
 
+type LandedDate = `${number}-${number}-${number}`
+
 interface BackfillBase {
   readonly name: string
+  readonly landed: LandedDate
   readonly remaining: Effect.Effect<number, SqlError.SqlError, SqlClient.SqlClient>
 }
 
@@ -35,12 +38,17 @@ export type BackfillContext = SqlClient.SqlClient | SessionLifecycleEvents | Uni
 export type AnyBackfill = Backfill<unknown, BackfillContext> | PreparedBackfill<BackfillContext>
 
 const BACKFILL_NAME = /^[a-z][a-z0-9_]{0,63}$/
+const LANDED_DATE = /^\d{4}-\d{2}-\d{2}$/
 
 export const checkBackfills = (list: ReadonlyArray<AnyBackfill>): ReadonlyArray<AnyBackfill> => {
   const seen = new Set<string>()
   for (const backfill of list) {
     if (!BACKFILL_NAME.test(backfill.name))
       throw new Error(`Backfill name ${JSON.stringify(backfill.name)} is not lower snake case`)
+    if (!LANDED_DATE.test(backfill.landed))
+      throw new Error(
+        `Backfill ${backfill.name} has landed ${JSON.stringify(backfill.landed)}; write YYYY-MM-DD`
+      )
     if (seen.has(backfill.name)) throw new Error(`Backfill ${backfill.name} is declared twice`)
     seen.add(backfill.name)
   }

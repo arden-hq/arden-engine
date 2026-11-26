@@ -14,6 +14,9 @@
   keeps "did this change since the run read it" itself, in the run's
   `observations`. `tool-contract.ts` refuses a hash input at start.
 - Before a commit: `just check` (typecheck, lint, format, tests).
+- When a check keeps failing: after three fix attempts on the same check, stop.
+  Tell the owner what fails, what you tried and the cause you suspect. Do not
+  retry it, skip it or loosen it.
 
 ## Recipes
 

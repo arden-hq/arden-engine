@@ -8,6 +8,7 @@ export const CHAT_UPLOAD_MESSAGES_BACKFILL = "chat_upload_messages"
 
 export const chatUploadMessagesBackfill: Backfill = {
   name: CHAT_UPLOAD_MESSAGES_BACKFILL,
+  landed: "2026-11-09",
   chunk: Effect.fn("ChatUploadMessages.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{ readonly message_rowid: number; readonly names: number }>`

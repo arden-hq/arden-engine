@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "node:fs"
 import { defineConfig } from "oxlint"
+import { baselinedOverrides } from "./tooling/lint-plugin.mjs"
 import { exemptDirs, ownedBans, ownerFiles } from "./tooling/owned-behaviors.mjs"
 
 
@@ -469,6 +470,7 @@ export default defineConfig({
       files: ["**/scripts/**/*.{mjs,cjs,js}", ...testFiles],
       rules: restrictedSyntaxOwner()
     },
+    ...baselinedOverrides,
     ...ownedBehaviorOverrides
   ]
 })

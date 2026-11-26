@@ -4,6 +4,7 @@ import type { Backfill } from "./backfills/backfill.js"
 
 export const taskHistoryBackfill: Backfill = {
   name: "space_task_revisions_baseline",
+  landed: "2026-11-09",
   chunk: Effect.fn("WorkHistory.taskHistoryBackfill")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const now = DateTime.formatIso(yield* DateTime.now)
@@ -31,6 +32,7 @@ export const taskHistoryBackfill: Backfill = {
 
 export const proposalHistoryBackfill: Backfill = {
   name: "task_proposal_revisions_baseline",
+  landed: "2026-11-09",
   chunk: Effect.fn("WorkHistory.proposalHistoryBackfill")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const now = DateTime.formatIso(yield* DateTime.now)
