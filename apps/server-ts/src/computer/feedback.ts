@@ -39,27 +39,29 @@ export function nativeVisual(state: unknown): NativeVisual | undefined {
   }
 }
 
+const UNLOCATED: ComputerFeedback = { kind: "unlocated" }
+
 export function nativeFeedback({
   action,
   visual
 }: {
   action: NativeAction
   visual: NativeVisual | undefined
-}): ComputerFeedback | null {
-  if (visual === undefined) return null
+}): ComputerFeedback {
+  if (visual === undefined) return UNLOCATED
   const frame = { width: visual.screenshot_width, height: visual.screenshot_height }
   const base = { id: action.observation, frame }
   if (action.action === "pixel_click") return { ...base, kind: "pointer", x: action.x, y: action.y }
   if (action.action === "drag") return { ...base, kind: "pointer", x: action.to_x, y: action.to_y }
-  if (!("element" in action) || action.element === undefined) return null
+  if (!("element" in action) || action.element === undefined) return UNLOCATED
   const rect = visual.elements.find(
     (element) => element.element_token === action.element
   )?.screenshot_frame
-  if (rect === undefined || rect.w <= 0 || rect.h <= 0) return null
+  if (rect === undefined || rect.w <= 0 || rect.h <= 0) return UNLOCATED
   const x = Math.max(0, rect.x)
   const y = Math.max(0, rect.y)
   const width = Math.min(frame.width, rect.x + rect.w) - x
   const height = Math.min(frame.height, rect.y + rect.h) - y
-  if (width <= 0 || height <= 0) return null
+  if (width <= 0 || height <= 0) return UNLOCATED
   return { ...base, kind: "target", x, y, width, height }
 }

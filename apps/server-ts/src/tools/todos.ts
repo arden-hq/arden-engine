@@ -105,7 +105,7 @@ const makeTodoTool = ({ store }: { readonly store: TodoStore["Service"] }): Serv
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(TodoUpdateParametersSchema),
     metadata: {
-      display: { trail: "plan" },
+      display: [{ fact: "trail", value: "plan" }],
       effect: "run_record",
       display_name: "Update Todos",
       kind: "todo",

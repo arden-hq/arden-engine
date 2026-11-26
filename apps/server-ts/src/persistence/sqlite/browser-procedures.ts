@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto"
 import { captureLearning, procedureInputHash } from "../browser-procedures/model.js"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { BrowserProcedureSummary } from "@arden-hq/protocol/browser-procedures"
+import {
+  BrowserProcedureJobSchema,
+  type BrowserProcedureSummary
+} from "@arden-hq/protocol/browser-procedures"
 import { BrowserProcedureStore, BrowserProcedureStoreError } from "../browser-procedures/store.js"
 import {
   ProcedurePolicySchema,
@@ -167,18 +170,14 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
       yield* reader<Row>`SELECT * FROM browser_procedures ORDER BY updated_at DESC LIMIT 500`
     const jobs = yield* reader<{
       readonly id: string
-      readonly status: "pending" | "running" | "failed"
+      readonly status: string
       readonly error: string | null
     }>`
       SELECT id, status, error FROM browser_procedure_jobs WHERE status <> 'completed' ORDER BY created_at DESC LIMIT 30`
     return {
       enabled: yield* enabled,
       procedures: procedures.map(summary),
-      jobs: jobs.map((job) => ({
-        id: job.id,
-        status: job.status,
-        ...(job.error === null ? {} : { error: job.error })
-      }))
+      jobs: yield* Schema.decodeUnknownEffect(Schema.Array(BrowserProcedureJobSchema))(jobs)
     }
   })
   const eligible = Effect.fn("BrowserProcedures.eligible")(function* (

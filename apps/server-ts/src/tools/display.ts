@@ -7,10 +7,10 @@ const RETIRED_TOOL_ALIASES: Readonly<Record<string, string>> = {
 }
 
 const UNLISTED_TOOL_DISPLAY: Readonly<Record<string, ToolDisplay>> = {
-  no_reply: { trail: "hidden" },
-  automation_blocked: { row: "blocked" },
-  load_tools: { result: "tool_list" },
-  tool_search: { result: "tool_list" }
+  no_reply: [{ fact: "trail", value: "hidden" }],
+  automation_blocked: [{ fact: "row", value: "blocked" }],
+  load_tools: [{ fact: "result", value: "tool_list" }],
+  tool_search: [{ fact: "result", value: "tool_list" }]
 }
 
 export const unlistedToolDisplay = (
@@ -20,7 +20,7 @@ export const unlistedToolDisplay = (
   ...Object.fromEntries(
     Object.entries(RETIRED_TOOL_ALIASES).map(([retired, current]) => [
       retired,
-      displayOf(current) ?? {}
+      displayOf(current) ?? []
     ])
   )
 })

@@ -124,8 +124,15 @@ export type {
   ChatProjectionEvent,
   ChatServerEvent
 } from "./chat/events/stream.js"
+export {
+  ANONYMOUS_FRAME,
+  SSE_DECODE_DEFAULTS,
+  SSE_FRAME_ID,
+  sseFrameId
+} from "./transport/contracts.js"
 export type {
   SseFrame,
+  SseFrameId,
   SseRetryDirective,
   DecodedServerEventFrame,
   UnknownServerEventFrame,

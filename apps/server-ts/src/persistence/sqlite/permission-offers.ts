@@ -1,3 +1,4 @@
+import { WORDS_RULE_REPLACES } from "@arden-hq/protocol/permissions"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ResolveRunQuestionInput } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
@@ -213,7 +214,8 @@ const saveChange = Effect.fn("PermissionOffer.saveChange")(function* (input: {
         list,
         decision: change.decision,
         rules: change.rules ?? [],
-        source
+        source,
+        replaces: { kind: WORDS_RULE_REPLACES.nothing }
       })
     )
     return

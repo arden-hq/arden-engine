@@ -33,6 +33,7 @@ describe("startConfiguredServer", () => {
       dataDirectory: directory,
       accessFile,
       usageFile: join(directory, "usage.json"),
+      offeredTools: { kind: "all" },
       toolsWithoutRule: ["drive_upload"],
       mcpServers: [],
       provider: "llama.cpp",

@@ -467,7 +467,7 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       toolCatalog: async () => ({
-        tools: [catalogEntry("vault_pay", { card: "vault_card_pay" })],
+        tools: [catalogEntry("vault_pay", [{ fact: "card", value: "vault_card_pay" }])],
         unlisted: {}
       }),
       wait: async (_run, options) => {

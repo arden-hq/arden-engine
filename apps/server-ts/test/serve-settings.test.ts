@@ -169,7 +169,7 @@ it("a configured server starts with its settings in place and publishes its acce
       dataDirectory,
       accessFile: join(dataDirectory, "cli-access.json"),
       usageFile: join(dataDirectory, "usage.json"),
-      offeredTools: ["exec_command"],
+      offeredTools: { kind: "listed", names: ["exec_command"] },
       toolsWithoutRule: configured.applied.toolsWithoutRule,
       mcpServers: [],
       provider: "responses",

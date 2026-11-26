@@ -50,7 +50,11 @@ it("lifecycle rule deletes only old status rows the trigger listener has read", 
         trimJournals({
           writer,
           policy: {
-            retention: () => Effect.succeed({ agentTraceDays: null, wikiHistoryDays: null })
+            retention: () =>
+              Effect.succeed({
+                agentTrace: { kind: "forever" },
+                wikiHistory: { kind: "forever" }
+              } as const)
           }
         })
       const kept = () =>
@@ -106,7 +110,11 @@ it("session rule walks old rows once: step rows of free runs and no-run rows go;
       const sql = yield* SqlClient.SqlClient
       const writer = makeWriter({ sql, reader: sql, queue: yield* PersistenceWriteQueue })
       const policy = {
-        retention: () => Effect.succeed({ agentTraceDays: 30, wikiHistoryDays: null })
+        retention: () =>
+          Effect.succeed({
+            agentTrace: { kind: "days", days: 30 },
+            wikiHistory: { kind: "forever" }
+          } as const)
       }
       const session = (id: string) =>
         sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type)

@@ -1,10 +1,15 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { NESTING } from "../persistence/tools/tool-roles.js"
-import type {
-  WorkflowEffectDisposition,
-  WorkflowError,
-  WorkflowErrorCode,
-  WorkflowSourceRef
+import {
+  MESSAGE_PREVIEW,
+  NO_RECOVERY,
+  WORKFLOW_PREVIEW,
+  recoverBy,
+  type WorkflowEffectDisposition,
+  type WorkflowError,
+  type WorkflowErrorCode,
+  type WorkflowRecovery,
+  type WorkflowSourceRef
 } from "@arden-hq/protocol/workflows"
 import { Effect, type Schema } from "effect"
 
@@ -63,7 +68,8 @@ const isChildFailureEvent = (event: ScriptAgentChildAttemptEvent): event is Chil
 const isUnsafe = (effect: WorkflowEffectDisposition): effect is "applied" | "unknown" =>
   effect === "applied" || effect === "unknown"
 
-const recoveryAction = (retryable: boolean): string | null => (retryable ? "retry" : null)
+const recoveryAction = (retryable: boolean): WorkflowRecovery =>
+  retryable ? recoverBy("retry") : NO_RECOVERY
 
 const childErrorCode = (status: ChildFailureEvent["status"]): WorkflowErrorCode => {
   switch (status) {
@@ -82,7 +88,8 @@ const eventError = (event: ChildFailureEvent): WorkflowError => ({
   code: childErrorCode(event.status),
   message: event.error,
   retryable: event.retryable,
-  recovery_action: recoveryAction(event.retryable)
+  recovery: recoveryAction(event.retryable),
+  preview: MESSAGE_PREVIEW
 })
 
 const refusedStepError = (
@@ -95,7 +102,8 @@ const refusedStepError = (
       ? `An earlier run of this ${step} changed something outside Arden, so it does not run again`
       : `An earlier run of this ${step} may have changed something outside Arden, so it does not run again`,
   retryable: false,
-  recovery_action: "review what it changed before running it again"
+  recovery: recoverBy("review what it changed before running it again"),
+  preview: MESSAGE_PREVIEW
 })
 
 const agentFailure = (
@@ -111,7 +119,8 @@ const agentFailure = (
         code: "uncertain_effect",
         message: errorMessage(cause, "A script agent stopped after it may have changed something"),
         retryable: false,
-        recovery_action: "review what the agent changed before retrying"
+        recovery: recoverBy("review what the agent changed before retrying"),
+        preview: MESSAGE_PREVIEW
       }
     }
   }
@@ -122,7 +131,8 @@ const agentFailure = (
         code: "cancelled",
         message: "The script agent was cancelled",
         retryable: false,
-        recovery_action: null
+        recovery: NO_RECOVERY,
+        preview: MESSAGE_PREVIEW
       }
     }
   }
@@ -136,7 +146,8 @@ const agentFailure = (
       code: "agent_failed",
       message: errorMessage(cause, "A script agent failed"),
       retryable,
-      recovery_action: recoveryAction(retryable)
+      recovery: recoveryAction(retryable),
+      preview: MESSAGE_PREVIEW
     }
   }
 }
@@ -146,8 +157,11 @@ const outcomeError = (outcome: Extract<ScriptOutcome, { readonly status: "failed
     code: outcome.error.code,
     message: outcome.error.message,
     retryable: outcome.error.retryable,
-    recovery_action: recoveryAction(outcome.error.retryable),
-    ...(outcome.error.preview === undefined ? {} : { preview: outcome.error.preview })
+    recovery: recoveryAction(outcome.error.retryable),
+    preview:
+      outcome.error.preview === undefined
+        ? MESSAGE_PREVIEW
+        : { kind: WORKFLOW_PREVIEW.line, text: outcome.error.preview }
   }) satisfies WorkflowError
 
 const attentionPreview = (tally: {
@@ -171,7 +185,7 @@ class AgentNeedsReviewError extends Error {}
 const failed = (code: WorkflowErrorCode, message: string): ScriptSettlement => ({
   status: "failed",
   value: null,
-  error: { code, message, retryable: false, recovery_action: null },
+  error: { code, message, retryable: false, recovery: NO_RECOVERY, preview: MESSAGE_PREVIEW },
   sourceRefs: []
 })
 
@@ -351,7 +365,10 @@ export const executeScriptAttempt = async (
     return {
       status: "needs_attention",
       value,
-      error: { ...needsAttention, preview: attentionPreview(tally) },
+      error: {
+        ...needsAttention,
+        preview: { kind: WORKFLOW_PREVIEW.line, text: attentionPreview(tally) }
+      },
       sourceRefs
     }
   }

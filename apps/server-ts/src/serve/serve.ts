@@ -1,4 +1,8 @@
-import { LOCAL_CAPABILITY_HEADER, type ConfiguredServerReady } from "@arden-hq/protocol/daemon"
+import {
+  LOCAL_CAPABILITY_HEADER,
+  OFFERED_TOOLS,
+  type ConfiguredServerReady
+} from "@arden-hq/protocol/daemon"
 import { randomBytes } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
@@ -177,9 +181,10 @@ export const readyLine = (configured: ConfiguredServer): ConfiguredServerReady =
   dataDirectory: configured.dataDirectory,
   accessFile: configured.accessFile,
   usageFile: configured.usageFile,
-  ...(configured.applied.offeredTools === undefined
-    ? {}
-    : { offeredTools: configured.applied.offeredTools }),
+  offeredTools:
+    configured.applied.offeredTools === undefined
+      ? { kind: OFFERED_TOOLS.all }
+      : { kind: OFFERED_TOOLS.listed, names: configured.applied.offeredTools },
   toolsWithoutRule: configured.applied.toolsWithoutRule,
   mcpServers: configured.applied.mcpServers,
   ...configured.startedOn

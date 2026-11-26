@@ -1,5 +1,5 @@
 import type { CompletionResponse, ModelProvider, ModelRequestMiddleware } from "@arden-hq/loop"
-import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
+import { STREAM_MARK, type ModelPhaseTiming, type StreamMark } from "@arden-hq/protocol/daemon"
 import type { RunUsage } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
@@ -37,6 +37,9 @@ export const responseUsage = (response: CompletionResponse): RunUsage => {
   }
 }
 
+const streamMark = (ms: number | undefined): StreamMark =>
+  ms === undefined ? { kind: STREAM_MARK.unseen } : { kind: STREAM_MARK.seen, ms }
+
 export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
   const clock = () => performance.now()
   let current: string | undefined
@@ -66,13 +69,7 @@ export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
         sampleId: id,
         phase,
         outcome,
-        durationMs: Math.max(0, Math.round(clock() - start)),
-        consumerMs: 0,
-        firstItemMs: null,
-        firstTextMs: null,
-        firstToolMs: null,
-        retries: 0,
-        scheduledBackoffMs: 0
+        durationMs: Math.max(0, Math.round(clock() - start))
       })
     }
   }
@@ -95,9 +92,9 @@ export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
         const id = sampleId()
         const start = clock()
         let consumerMs = 0
-        let firstItemMs: number | null = null
-        let firstTextMs: number | null = null
-        let firstToolMs: number | null = null
+        let firstItemMs: number | undefined
+        let firstTextMs: number | undefined
+        let firstToolMs: number | undefined
         let retries = 0
         let scheduledBackoffMs = 0
         let completed = false
@@ -151,9 +148,9 @@ export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
             outcome,
             durationMs: Math.max(0, Math.round(clock() - start)),
             consumerMs: Math.round(consumerMs),
-            firstItemMs,
-            firstTextMs,
-            firstToolMs,
+            firstItem: streamMark(firstItemMs),
+            firstText: streamMark(firstTextMs),
+            firstTool: streamMark(firstToolMs),
             retries,
             scheduledBackoffMs: Math.max(0, Math.round(scheduledBackoffMs))
           })

@@ -141,34 +141,40 @@ export const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInte
     const forwardedFrom = Option.getOrUndefined(
       Schema.decodeUnknownOption(ChatForwardedSourceSchema)(envelope.forwarded_from)
     )
-    const instructionSource = isAgentInstruction(sender, {
-      parentSessionRef: row.parent_session_ref ?? undefined
-    })
+    const instructionSource = isAgentInstruction(sender, row.parent_session_ref ?? undefined)
       ? (row.parent_session_ref ?? undefined)
       : undefined
     const sourceSessionRef = fromChat?.session_ref ?? instructionSource
     if (
       isInternalWorkMessage({
         role: envelope.role,
-        sender,
-        communication: Option.getOrUndefined(
-          Schema.decodeUnknownOption(CommunicationEnvelopeSchema)(envelope.communication)
-        ),
-        update: Option.getOrUndefined(
-          Schema.decodeUnknownOption(ChatUpdateSchema)(envelope.update)
-        ),
-        agentResult: Option.getOrUndefined(
-          Schema.decodeUnknownOption(AgentResultSchema)(envelope.agent_result)
-        ),
-        fromChat: sourceSessionRef === undefined ? undefined : { sessionRef: sourceSessionRef },
-        forwardedFrom:
-          forwardedFrom === undefined ? undefined : { messageId: forwardedFrom.message_id }
+        forwarded: forwardedFrom !== undefined,
+        carriesWork:
+          Option.isSome(
+            Schema.decodeUnknownOption(CommunicationEnvelopeSchema)(envelope.communication)
+          ) ||
+          Option.isSome(Schema.decodeUnknownOption(ChatUpdateSchema)(envelope.update)) ||
+          Option.isSome(Schema.decodeUnknownOption(AgentResultSchema)(envelope.agent_result)),
+        sender:
+          sender === undefined
+            ? { kind: "unattributed" }
+            : {
+                kind: "attributed",
+                sender,
+                origin:
+                  sourceSessionRef === undefined
+                    ? { kind: "direct" }
+                    : { kind: "from_chat", sessionRef: sourceSessionRef }
+              }
       })
     )
       return true
     return isInternalWorkMessage({
       role: envelope.role,
-      agentResult: yield* agentResultPresentation(sql, row.session_id, row.message_id)
+      forwarded: false,
+      carriesWork:
+        (yield* agentResultPresentation(sql, row.session_id, row.message_id)) !== undefined,
+      sender: { kind: "unattributed" }
     })
   },
   (effect, _sql, row) =>

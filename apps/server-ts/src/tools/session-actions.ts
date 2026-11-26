@@ -419,7 +419,7 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(SendMessageParametersSchema),
     metadata: {
-      display: { result: "chat_sent" },
+      display: [{ fact: "result", value: "chat_sent" }],
       effect: "arden_db",
       display_name: "Send Message",
       kind: "tool",

@@ -1,3 +1,4 @@
+import { MESSAGE_PREVIEW, recoverBy } from "@arden-hq/protocol/workflows"
 import type { RetryVerdict } from "../persistence/scripts/journal.js"
 import type { ScriptSettlement } from "../persistence/scripts/store.js"
 import { outboxRetryDelayMs } from "../runtime/outbox.js"
@@ -11,7 +12,8 @@ export const interruptedByRestart: ScriptSettlement = {
     code: "interrupted",
     message: "Arden restarted while the script was running",
     retryable: true,
-    recovery_action: "retry"
+    recovery: recoverBy("retry"),
+    preview: MESSAGE_PREVIEW
   },
   sourceRefs: []
 }
@@ -54,7 +56,8 @@ export const attemptStep = (input: {
           input.verdict.effect === "applied" ? "changed" : "may have changed"
         } something outside Arden.`,
         retryable: false,
-        recovery_action: "review what it changed before retrying"
+        recovery: recoverBy("review what it changed before retrying"),
+        preview: MESSAGE_PREVIEW
       }
     }
   }

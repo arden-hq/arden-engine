@@ -1,5 +1,5 @@
 import { cutText } from "@arden-hq/std/text"
-import type { CliTool, CliToolsReport } from "@arden-hq/protocol/cli-tools"
+import { CLI_TOOL_VERSION, type CliTool, type CliToolsReport } from "@arden-hq/protocol/cli-tools"
 import type { TodoSnapshot } from "@arden-hq/protocol/sessions/todos"
 
 import type { AutomationOriginPolicy } from "../persistence/automations/catalog.js"
@@ -183,11 +183,20 @@ export const renderCliToolsContext = (report: CliToolsReport | undefined): strin
 }
 
 const describeCliTool = (tool: CliTool): string => {
-  const head = [tool.command, tool.version, signInWords(tool.sign_in)]
+  const head = [tool.command, versionWords(tool.version), signInWords(tool.sign_in)]
     .filter((part): part is string => part !== null && part !== undefined)
     .join(" ")
   const skill = usableSkill(tool.skill)
   return skill === undefined ? head : `${head}, Skill ${skill}`
+}
+
+const versionWords = (version: CliTool["version"]): string | undefined => {
+  switch (version.kind) {
+    case CLI_TOOL_VERSION.reported:
+      return version.text
+    case CLI_TOOL_VERSION.unreported:
+      return undefined
+  }
 }
 
 const signInWords = (signIn: CliTool["sign_in"]): string | undefined => {

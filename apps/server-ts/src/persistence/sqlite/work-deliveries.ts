@@ -198,7 +198,6 @@ export const makeWorkDeliverySql = ({
                   : ({
                       code: "delivery.rerouted",
                       severity: "info",
-                      cause: null,
                       deliveryId: row.delivery_id,
                       sourceRunId: row.source_run_id,
                       fromSessionId: row.session_id,

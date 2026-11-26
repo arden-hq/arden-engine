@@ -1,6 +1,6 @@
 import { parseJsonTextOrUndefined } from "../common/json-text.js"
 import { clipLine } from "@arden-hq/std/text"
-import { toolKindLabel, type StepIconKey } from "./tool-words.js"
+import { toolKindLabel, type StepIconKey, type ToolNaming } from "./tool-words.js"
 import { isRecord } from "@arden-hq/std/json"
 
 /**
@@ -9,15 +9,10 @@ import { isRecord } from "@arden-hq/std/json"
  * call here, so one call never reads two ways.
  */
 
-/** One call as its row reads it. `args` is the parsed argument object, or
- *  null while it is not (yet) one. */
-export interface CallWordsInput {
-  readonly name: string | undefined
-  readonly displayName: string | undefined
+export interface CallWordsInput extends ToolNaming {
   readonly args: Readonly<Record<string, unknown>> | null
-  /** The server's rendering hints, preferred over the registry's. */
-  readonly icon?: string | null | undefined
-  readonly noun?: string | null | undefined
+  readonly icon: string | null
+  readonly noun: string | null
 }
 
 /** A call's arguments as an object, or null while they are partial JSON or
@@ -38,7 +33,7 @@ export function callKindWords(call: CallWordsInput): {
   const page = webPageAction(call)
   if (page !== undefined) return { verb: page, iconKey: "globe", noun: "page" }
   if (readsSavedOutput(call)) return { verb: "Read the full output", iconKey: "file", noun: null }
-  const base = toolKindLabel({ name: call.name, displayName: call.displayName })
+  const base = toolKindLabel(call)
   return {
     verb: base.verb,
     iconKey: asIconKey(call.icon) ?? base.iconKey,
@@ -60,7 +55,7 @@ export interface CallSubject {
  *  use. A code run names what its script called, which only its result knows,
  *  so it has none here. */
 export function callSubject(call: CallWordsInput, max: number): CallSubject | null {
-  const name = call.name?.toLowerCase() ?? ""
+  const name = call.name.toLowerCase()
   if (SCRIPT_TOOLS.has(name) || TOOL_ID_ARGS.has(name)) return null
   if (readsSavedOutput(call)) {
     const grep = call.args?.grep
@@ -175,7 +170,7 @@ const ICON_KEYS: ReadonlySet<string> = new Set<StepIconKey>([
 
 const isIconKey = (value: string): value is StepIconKey => ICON_KEYS.has(value)
 
-function asIconKey(value: string | null | undefined): StepIconKey | null {
+function asIconKey(value: string | null): StepIconKey | null {
   return value && isIconKey(value) ? value : null
 }
 
@@ -188,7 +183,7 @@ function readsSavedOutput(call: CallWordsInput): boolean {
 }
 
 function webPageAction(call: CallWordsInput): string | undefined {
-  if (call.name?.toLowerCase() !== "web_search") return undefined
+  if (call.name.toLowerCase() !== "web_search") return undefined
   const type = call.args?.type
   if (type === "open_page") return "Read a page"
   if (type === "find_in_page") return "Searched a page"

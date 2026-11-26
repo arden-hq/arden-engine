@@ -1,5 +1,5 @@
-import type { CliToolSkill } from "@arden-hq/protocol/cli-tools"
-import type { Skill } from "@arden-hq/protocol/skills"
+import type { CliToolSkill, CliToolVersion } from "@arden-hq/protocol/cli-tools"
+import { SKILL_PLACE, type Skill } from "@arden-hq/protocol/skills"
 
 export interface CliToolEntry {
   readonly id: string
@@ -217,7 +217,7 @@ export const CLI_TOOLS: ReadonlyArray<CliToolEntry> = [
 
 const VERSION = /\bv?(\d+\.\d+(?:\.\d+)?)/
 
-export const parseVersion = (output: string): string | null => {
+export const parseVersion = (output: string): CliToolVersion => {
   const lines = output
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -225,16 +225,16 @@ export const parseVersion = (output: string): string | null => {
     .slice(0, 3)
   for (const line of lines) {
     const match = VERSION.exec(line)
-    if (match?.[1] !== undefined) return match[1]
+    if (match?.[1] !== undefined) return { kind: "reported", text: match[1] }
   }
-  return null
+  return { kind: "unreported" }
 }
 
 export const skillFor = (entry: CliToolEntry, skills: ReadonlyArray<Skill>): CliToolSkill => {
   for (const name of entry.skills) {
     const skill = skills.find((candidate) => candidate.name === name)
     if (skill === undefined) continue
-    return skill.builtin
+    return skill.place.kind === SKILL_PLACE.builtin
       ? { kind: "built_in", name: skill.name }
       : { kind: "installed", name: skill.name, enabled: skill.enabled }
   }

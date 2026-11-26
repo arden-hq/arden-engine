@@ -1,7 +1,9 @@
-import type {
-  PermissionRuleItem,
-  PermissionRuleList,
-  PermissionRuleSubject
+import {
+  PERMISSION_RULE_ORIGIN,
+  PERMISSION_TOOL_OWNER,
+  type PermissionRuleItem,
+  type PermissionRuleList,
+  type PermissionRuleSubject
 } from "@arden-hq/protocol/permissions"
 import { commandWords } from "../../persistence/permissions/command-policy.js"
 import type { PermissionRule, RuleList, RuleSubject } from "../../persistence/permissions/rules.js"
@@ -34,7 +36,10 @@ export const ruleItems = (
       list: listItem(rule.list),
       decision: rule.decision,
       subject: subjectItem(rule.subject, names),
-      from: rule.fromRuleId
+      from:
+        rule.fromRuleId === null
+          ? { kind: PERMISSION_RULE_ORIGIN.standalone }
+          : { kind: PERMISSION_RULE_ORIGIN.words, rule_id: rule.fromRuleId }
     }))
 
 export const subjectItem = (subject: RuleSubject, names: RuleNames): PermissionRuleSubject => {
@@ -44,10 +49,15 @@ export const subjectItem = (subject: RuleSubject, names: RuleNames): PermissionR
       return {
         kind: "tool",
         tool: subject.tool,
-        server: subject.server,
         title: tool?.title ?? subject.tool,
-        server_title:
-          subject.server === null ? null : (names.connector(subject.server) ?? subject.server)
+        owner:
+          subject.server === null
+            ? { kind: PERMISSION_TOOL_OWNER.arden }
+            : {
+                kind: PERMISSION_TOOL_OWNER.connector,
+                server: subject.server,
+                title: names.connector(subject.server) ?? subject.server
+              }
       }
     }
     case "site":

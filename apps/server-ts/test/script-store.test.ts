@@ -30,7 +30,8 @@ const failed = {
     code: "agent_failed",
     message: "An agent failed",
     retryable: true,
-    recovery_action: "retry"
+    recovery: { kind: "action", text: "retry" },
+    preview: { kind: "message" }
   },
   sourceRefs: []
 } as const

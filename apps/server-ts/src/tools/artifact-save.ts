@@ -83,7 +83,7 @@ const makeArtifactSaveTool = (
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
     metadata: {
-      display: { result: "saved_artifact" },
+      display: [{ fact: "result", value: "saved_artifact" }],
       effect: "arden_db",
       scopes: ["agent_research"],
       display_name: "Save artifact",

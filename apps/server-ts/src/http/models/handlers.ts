@@ -6,7 +6,13 @@ import { ModelProviderService } from "../../models/provider.js"
 import type { ModelSettingsSnapshot } from "../../persistence/models/store.js"
 import { ArdenApi } from "../api.js"
 import { failInternal } from "../errors.js"
-import type { ModelResetScope } from "@arden-hq/protocol/models"
+import {
+  modelSlotOf,
+  reasoningOf,
+  type ModelSettingsResponseSchema
+} from "@arden-hq/protocol/effect/models"
+
+type ModelSettingsWire = typeof ModelSettingsResponseSchema.Type
 
 const catalogResponse = (catalog: CatalogListing) => {
   const models = catalog.providers.flatMap((provider) => provider.models)
@@ -31,22 +37,10 @@ const catalogResponse = (catalog: CatalogListing) => {
   }
 }
 
-export type ModelSettingsResponse = {
-  readonly chat_model: string | null
-  readonly at_defaults: Readonly<Record<ModelResetScope, boolean>>
-  readonly reasoning_effort: string | null
-  readonly reasoning_efforts: string[]
-  readonly model_reasoning_efforts: { [x: string]: string }
-  readonly model_roles: {
-    background: { model: string | null; reasoning_effort: string | null }
-    helper: { model: string | null; reasoning_effort: string | null }
-  }
-}
-
 export const modelSettingsResponse = (
   catalog: CatalogListing,
   settings: ModelSettingsSnapshot
-): ModelSettingsResponse => {
+): ModelSettingsWire => {
   const chatModel = catalog.providers
     .flatMap((provider) => provider.models)
     .find((model) => model.id === settings.chatModelId)
@@ -57,19 +51,19 @@ export const modelSettingsResponse = (
   const modelEfforts = { ...settings.modelReasoningEfforts }
   if (offered === null && settings.chatModelId !== null) delete modelEfforts[settings.chatModelId]
   return {
-    chat_model: settings.chatModelId,
+    chat_model: modelSlotOf(settings.chatModelId),
     at_defaults: settings.atDefaults,
-    reasoning_effort: offered,
+    reasoning: reasoningOf(offered),
     reasoning_efforts: efforts,
     model_reasoning_efforts: modelEfforts,
     model_roles: {
       background: {
-        model: role.background.modelId,
-        reasoning_effort: role.background.reasoningEffort
+        model: modelSlotOf(role.background.modelId),
+        reasoning: reasoningOf(role.background.reasoningEffort)
       },
       helper: {
-        model: role.helper.modelId,
-        reasoning_effort: role.helper.reasoningEffort
+        model: modelSlotOf(role.helper.modelId),
+        reasoning: reasoningOf(role.helper.reasoningEffort)
       }
     }
   }

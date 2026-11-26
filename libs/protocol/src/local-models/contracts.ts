@@ -48,8 +48,6 @@ export interface LocalModelInfo extends JsonRecord {
   readonly input: "text" | "text+image"
   /** Download size of every file together. */
   readonly totalBytes: number
-  /** Vector width; null for decision models. */
-  readonly dimensions: number | null
   readonly install: LocalModelInstall
 }
 
@@ -61,9 +59,12 @@ export type LocalModelRuntime =
   | { readonly state: "stopped" | "starting" | "running" }
   | { readonly state: "failed"; readonly error: string }
 
+export type LocalModelsFreeSpace =
+  | { readonly kind: "measured"; readonly bytes: number }
+  | { readonly kind: "unmeasured" }
+
 export interface LocalModelsStatus extends JsonRecord {
   readonly models: ReadonlyArray<LocalModelInfo>
-  /** Free bytes on the disk that holds the models; null when unknown. */
-  readonly freeBytes: number | null
+  readonly freeSpace: LocalModelsFreeSpace
   readonly runtime: LocalModelRuntime
 }

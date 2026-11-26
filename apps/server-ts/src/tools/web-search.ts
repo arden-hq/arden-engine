@@ -20,7 +20,7 @@ const makeWebSearchTool = (): ServerTool =>
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
     parameterJsonSchema,
     metadata: {
-      display: { row: "web_sites" },
+      display: [{ fact: "row", value: "web_sites" }],
       effect: "none",
       hosted: true,
       display_name: "Web search",

@@ -284,10 +284,10 @@ describe("the model server beside the signed-in account", () => {
           await running.call(modelRoutes.settings, {
             method: "PATCH",
             headers,
-            body: modelRequests.update({
-              chatModelId: GEMMA,
-              roles: { helper: { modelId: GEMMA } }
-            })
+            body: modelRequests.update([
+              { kind: "chat_model", model: { kind: "model", modelId: GEMMA } },
+              { kind: "role_model", role: "helper", model: { kind: "model", modelId: GEMMA } }
+            ])
           })
         ).status
       ).toBe(200)

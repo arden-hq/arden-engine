@@ -1,21 +1,35 @@
 import { Effect, Schema, SchemaTransformation } from "effect"
 import { withExtras } from "../common/schema.js"
-import type {
-  ModelAssignment,
-  ModelCatalog,
-  ModelOption,
-  ModelProvider,
-  ModelRole,
-  ModelSettingsResponse,
-  ModelSettingsPatch
+import {
+  MODEL_SETTINGS_CHANGE,
+  MODEL_TARGET,
+  REASONING_TARGET,
+  type ModelAssignment,
+  type ModelCatalog,
+  type ModelOption,
+  type ModelProvider,
+  type ModelRole,
+  type ModelSettingsChange,
+  type ModelSettingsResponse,
+  type ModelSettingsPatch,
+  type ReasoningTarget
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
 const ModelIdSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const LabelSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const ReasoningEffortSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(128))
-const NullableModelIdSchema = Schema.NullOr(ModelIdSchema)
-const NullableReasoningEffortSchema = Schema.NullOr(ReasoningEffortSchema)
+
+const ModelSlotSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(MODEL_TARGET.none) }),
+  Schema.Struct({ kind: Schema.Literal(MODEL_TARGET.model), model_id: ModelIdSchema })
+])
+const ReasoningSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(REASONING_TARGET.default) }),
+  Schema.Struct({ kind: Schema.Literal(REASONING_TARGET.effort), effort: ReasoningEffortSchema })
+])
+type ModelSlotWire = typeof ModelSlotSchema.Type
+type ReasoningWire = typeof ReasoningSchema.Type
 
 const ModelIdsSchema = Schema.UniqueArray(ModelIdSchema)
 const NonEmptyModelIdsSchema = Schema.NonEmptyArray(ModelIdSchema).check(Schema.isUnique())
@@ -31,7 +45,7 @@ export const ModelProviderResponseSchema = withExtras({
 
 export const ModelCatalogResponseSchema = withExtras({
   models: ModelIdsSchema,
-  names: Schema.optionalKey(Schema.Record(ModelIdSchema, LabelSchema)),
+  names: Schema.Record(ModelIdSchema, LabelSchema),
   groups: Schema.Array(ModelProviderResponseSchema),
   reasoning_efforts: ReasoningEffortsByModelSchema
 }).check(
@@ -59,7 +73,7 @@ export const ModelCatalogResponseSchema = withExtras({
     if (grouped.size !== modelIds.size) {
       return { path: ["groups"], issue: "does not cover every model exactly once" }
     }
-    for (const modelId of Object.keys(catalog.names ?? {})) {
+    for (const modelId of Object.keys(catalog.names)) {
       if (!modelIds.has(modelId)) {
         return { path: ["names", modelId], issue: "does not name a catalog model" }
       }
@@ -74,8 +88,8 @@ export const ModelCatalogResponseSchema = withExtras({
 )
 
 const ModelRoleSelectionResponseSchema = withExtras({
-  model: NullableModelIdSchema,
-  reasoning_effort: NullableReasoningEffortSchema
+  model: ModelSlotSchema,
+  reasoning: ReasoningSchema
 })
 
 const ModelRolesResponseSchema = Schema.Struct({
@@ -83,39 +97,45 @@ const ModelRolesResponseSchema = Schema.Struct({
   helper: ModelRoleSelectionResponseSchema
 })
 
-/** The model-owned fields of `GET /config`; `config/schema.ts` composes them
- * with the tool-owned fields into the whole response. */
 export const modelSettingsResponseFields = {
-  chat_model: NullableModelIdSchema,
-  reasoning_effort: NullableReasoningEffortSchema,
+  chat_model: ModelSlotSchema,
+  reasoning: ReasoningSchema,
   reasoning_efforts: ReasoningEffortListSchema,
   model_reasoning_efforts: SelectedReasoningByModelSchema,
   model_roles: ModelRolesResponseSchema,
-  at_defaults: Schema.optionalKey(Schema.Struct({ chat: Schema.Boolean, roles: Schema.Boolean }))
+  at_defaults: Schema.Struct({ chat: Schema.Boolean, roles: Schema.Boolean })
 }
 
 type ModelSettingsWireFields = Schema.Struct<typeof modelSettingsResponseFields>["Type"]
 
-/** Cross-field rules of the model-owned `GET /config` fields. */
+export const modelIdOf = (slot: ModelSlotWire): string | null =>
+  slot.kind === MODEL_TARGET.model ? slot.model_id : null
+
+export const effortOf = (reasoning: ReasoningWire): string | null =>
+  reasoning.kind === REASONING_TARGET.effort ? reasoning.effort : null
+
+export const modelSlotOf = (modelId: string | null): ModelSlotWire =>
+  modelId === null ? { kind: MODEL_TARGET.none } : { kind: MODEL_TARGET.model, model_id: modelId }
+
+export const reasoningOf = (effort: string | null): ReasoningWire =>
+  effort === null ? { kind: REASONING_TARGET.default } : { kind: REASONING_TARGET.effort, effort }
+
 export const modelSettingsConsistency = Schema.makeFilter((settings: ModelSettingsWireFields) => {
   const roles = settings.model_roles
-  const chatEffort =
-    settings.chat_model === null
-      ? null
-      : (settings.model_reasoning_efforts[settings.chat_model] ?? null)
-  if (settings.reasoning_effort !== chatEffort) {
-    return { path: ["reasoning_effort"], issue: "does not match the selected chat model" }
+  const chatModel = modelIdOf(settings.chat_model)
+  const chatEffort = effortOf(settings.reasoning)
+  const savedEffort =
+    chatModel === null ? null : (settings.model_reasoning_efforts[chatModel] ?? null)
+  if (chatEffort !== savedEffort) {
+    return { path: ["reasoning"], issue: "does not match the selected chat model" }
   }
-  if (
-    settings.reasoning_effort !== null &&
-    !settings.reasoning_efforts.includes(settings.reasoning_effort)
-  ) {
-    return { path: ["reasoning_effort"], issue: "is not supported by the selected chat model" }
+  if (chatEffort !== null && !settings.reasoning_efforts.includes(chatEffort)) {
+    return { path: ["reasoning"], issue: "is not supported by the selected chat model" }
   }
 
   for (const [role, selection] of Object.entries(roles)) {
-    if (selection.model === null && selection.reasoning_effort !== null) {
-      return { path: ["model_roles", role, "reasoning_effort"], issue: "requires a model" }
+    if (modelIdOf(selection.model) === null && effortOf(selection.reasoning) !== null) {
+      return { path: ["model_roles", role, "reasoning"], issue: "requires a model" }
     }
   }
   return undefined
@@ -125,94 +145,42 @@ export const ModelSettingsResponseSchema = withExtras(modelSettingsResponseField
   modelSettingsConsistency
 )
 
-const ModelRolePatchSchema = Schema.Struct({
-  modelId: Schema.optionalKey(NullableModelIdSchema),
-  reasoningEffort: Schema.optionalKey(NullableReasoningEffortSchema)
-}).check(
-  Schema.makeFilter((patch) => {
-    if (Object.keys(patch).length === 0) return "a role patch requires at least one field"
-    return patch.modelId === null &&
-      patch.reasoningEffort !== undefined &&
-      patch.reasoningEffort !== null
-      ? "a cleared role model cannot have a reasoning effort"
-      : undefined
+const RoleSchema = Schema.Literals(["background", "helper"] as const)
+
+const ModelSettingsChangeRequestSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(MODEL_SETTINGS_CHANGE.chatModel), model: ModelSlotSchema }),
+  Schema.Struct({
+    kind: Schema.Literal(MODEL_SETTINGS_CHANGE.modelReasoning),
+    model_id: ModelIdSchema,
+    reasoning: ReasoningSchema
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(MODEL_SETTINGS_CHANGE.roleModel),
+    role: RoleSchema,
+    model: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(MODEL_TARGET.chat) }),
+      Schema.Struct({ kind: Schema.Literal(MODEL_TARGET.model), model_id: ModelIdSchema })
+    ])
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(MODEL_SETTINGS_CHANGE.roleReasoning),
+    role: RoleSchema,
+    reasoning: ReasoningSchema
   })
-)
+])
 
-const ModelRolesPatchSchema = Schema.Struct({
-  background: Schema.optionalKey(ModelRolePatchSchema),
-  helper: Schema.optionalKey(ModelRolePatchSchema)
-}).check(
-  Schema.makeFilter((roles) =>
-    Object.keys(roles).length > 0 ? undefined : "roles must contain at least one role"
-  )
-)
-
-const ModelReasoningPatchSchema = Schema.Struct({
-  modelId: ModelIdSchema,
-  effort: NullableReasoningEffortSchema
-})
-
-export const ModelSettingsPatchSchema = Schema.Struct({
-  chatModelId: Schema.optionalKey(NullableModelIdSchema),
-  modelReasoning: Schema.optionalKey(ModelReasoningPatchSchema),
-  roles: Schema.optionalKey(ModelRolesPatchSchema)
-}).check(
-  Schema.makeFilter((patch) =>
-    Object.keys(patch).length > 0 ? undefined : "a model settings patch requires at least one field"
-  )
-)
-
-const ModelRolePatchRequestSchema = Schema.Struct({
-  model: Schema.optionalKey(NullableModelIdSchema),
-  reasoning_effort: Schema.optionalKey(NullableReasoningEffortSchema)
-}).check(
-  Schema.makeFilter((patch) => {
-    if (Object.keys(patch).length === 0) return "a role patch requires at least one field"
-    return patch.model === null &&
-      patch.reasoning_effort !== undefined &&
-      patch.reasoning_effort !== null
-      ? "a cleared role model cannot have a reasoning effort"
-      : undefined
-  })
-)
-
-const ModelRolesPatchRequestSchema = Schema.Struct({
-  background: Schema.optionalKey(ModelRolePatchRequestSchema),
-  helper: Schema.optionalKey(ModelRolePatchRequestSchema)
-}).check(
-  Schema.makeFilter((roles) =>
-    Object.keys(roles).length > 0 ? undefined : "model_roles must contain at least one role"
-  )
-)
-
-/** The model-owned `PATCH /config` body. Exact: a key outside `fields` is refused. */
 export const ModelSettingsPatchRequestSchema = Schema.Struct({
-  chat_model: Schema.optionalKey(NullableModelIdSchema),
-  reasoning_model: Schema.optionalKey(ModelIdSchema),
-  reasoning_effort: Schema.optionalKey(NullableReasoningEffortSchema),
-  model_roles: Schema.optionalKey(ModelRolesPatchRequestSchema)
-})
-  .check(
-    Schema.makeFilter((patch) => {
-      if (Object.keys(patch).length === 0) {
-        return "a model settings patch requires at least one field"
-      }
-      return (patch.reasoning_model === undefined) === (patch.reasoning_effort === undefined)
-        ? undefined
-        : "reasoning_model and reasoning_effort must be provided together"
-    })
-  )
-  .annotate({ parseOptions: strict })
+  changes: Schema.NonEmptyArray(ModelSettingsChangeRequestSchema)
+}).annotate({ parseOptions: strict })
 
 type ModelProviderWire = Schema.Schema.Type<typeof ModelProviderResponseSchema>
 type ModelCatalogWire = Schema.Schema.Type<typeof ModelCatalogResponseSchema>
-type ModelSettingsPatchWire = Schema.Schema.Type<typeof ModelSettingsPatchSchema>
 type ModelSettingsPatchRequestWire = Schema.Schema.Type<typeof ModelSettingsPatchRequestSchema>
+type ModelSettingsChangeWire = Schema.Schema.Type<typeof ModelSettingsChangeRequestSchema>
 
 const mapModel = (catalog: ModelCatalogWire, modelId: string): ModelOption => ({
   id: modelId,
-  name: catalog.names?.[modelId] ?? modelId,
+  name: catalog.names[modelId] ?? modelId,
   reasoningEfforts: catalog.reasoning_efforts[modelId] ?? []
 })
 
@@ -249,83 +217,101 @@ const effectiveAssignment = (
 
 export const mapSettings = (settings: ModelSettingsWireFields): ModelSettingsResponse => ({
   chat: effectiveAssignment(
-    settings.chat_model,
-    settings.reasoning_effort,
+    modelIdOf(settings.chat_model),
+    effortOf(settings.reasoning),
     settings.model_reasoning_efforts
   ),
   roles: Object.fromEntries(
     Object.entries(settings.model_roles).map(([role, selection]) => [
       role,
       effectiveAssignment(
-        selection.model,
-        selection.reasoning_effort,
+        modelIdOf(selection.model),
+        effortOf(selection.reasoning),
         settings.model_reasoning_efforts
       )
     ])
   ) as Record<ModelRole, ModelAssignment>,
   chatReasoningEfforts: settings.reasoning_efforts,
   reasoningByModel: settings.model_reasoning_efforts,
-  atDefaults: settings.at_defaults ?? { chat: false, roles: false }
+  atDefaults: settings.at_defaults
 })
 
-/** A cleared role model clears its effort too; an unset effort is left alone. */
-const roleReasoningEffort = (
-  value: Schema.Schema.Type<typeof ModelRolePatchSchema>
-): { readonly reasoning_effort?: string | null } => {
-  if (value.modelId === null) return { reasoning_effort: null }
-  return value.reasoningEffort === undefined ? {} : { reasoning_effort: value.reasoningEffort }
+const reasoningToWire = (reasoning: ReasoningTarget): ReasoningWire =>
+  reasoning.kind === REASONING_TARGET.effort
+    ? { kind: reasoning.kind, effort: reasoning.effort }
+    : { kind: reasoning.kind }
+
+const reasoningFromWire = (reasoning: ReasoningWire): ReasoningTarget =>
+  reasoning.kind === REASONING_TARGET.effort
+    ? { kind: reasoning.kind, effort: reasoning.effort }
+    : { kind: reasoning.kind }
+
+const changeToWire = (change: ModelSettingsChange): ModelSettingsChangeWire => {
+  switch (change.kind) {
+    case MODEL_SETTINGS_CHANGE.chatModel:
+      return {
+        kind: change.kind,
+        model:
+          change.model.kind === MODEL_TARGET.model
+            ? { kind: change.model.kind, model_id: change.model.modelId }
+            : { kind: change.model.kind }
+      }
+    case MODEL_SETTINGS_CHANGE.modelReasoning:
+      return {
+        kind: change.kind,
+        model_id: change.modelId,
+        reasoning: reasoningToWire(change.reasoning)
+      }
+    case MODEL_SETTINGS_CHANGE.roleModel:
+      return {
+        kind: change.kind,
+        role: change.role,
+        model:
+          change.model.kind === MODEL_TARGET.model
+            ? { kind: change.model.kind, model_id: change.model.modelId }
+            : { kind: change.model.kind }
+      }
+    case MODEL_SETTINGS_CHANGE.roleReasoning:
+      return { kind: change.kind, role: change.role, reasoning: reasoningToWire(change.reasoning) }
+  }
 }
 
-const encodeSettingsPatch = (patch: ModelSettingsPatchWire): Record<string, unknown> => ({
-  ...(patch.chatModelId === undefined ? {} : { chat_model: patch.chatModelId }),
-  ...(patch.modelReasoning === undefined
-    ? {}
-    : {
-        reasoning_model: patch.modelReasoning.modelId,
-        reasoning_effort: patch.modelReasoning.effort
-      }),
-  ...(patch.roles === undefined
-    ? {}
-    : {
-        model_roles: Object.fromEntries(
-          Object.entries(patch.roles).map(([role, value]) => [
-            role,
-            {
-              ...(value.modelId === undefined ? {} : { model: value.modelId }),
-              ...roleReasoningEffort(value)
-            }
-          ])
-        )
-      })
-})
+const changeFromWire = (change: ModelSettingsChangeWire): ModelSettingsChange => {
+  switch (change.kind) {
+    case MODEL_SETTINGS_CHANGE.chatModel:
+      return {
+        kind: change.kind,
+        model:
+          change.model.kind === MODEL_TARGET.model
+            ? { kind: change.model.kind, modelId: change.model.model_id }
+            : { kind: change.model.kind }
+      }
+    case MODEL_SETTINGS_CHANGE.modelReasoning:
+      return {
+        kind: change.kind,
+        modelId: change.model_id,
+        reasoning: reasoningFromWire(change.reasoning)
+      }
+    case MODEL_SETTINGS_CHANGE.roleModel:
+      return {
+        kind: change.kind,
+        role: change.role,
+        model:
+          change.model.kind === MODEL_TARGET.model
+            ? { kind: change.model.kind, modelId: change.model.model_id }
+            : { kind: change.model.kind }
+      }
+    case MODEL_SETTINGS_CHANGE.roleReasoning:
+      return {
+        kind: change.kind,
+        role: change.role,
+        reasoning: reasoningFromWire(change.reasoning)
+      }
+  }
+}
 
-/** Project a decoded model-owned `PATCH /config` body into the domain patch. */
-export const toModelSettingsPatch = (patch: ModelSettingsPatchRequestWire): ModelSettingsPatch => ({
-  ...(patch.chat_model === undefined ? {} : { chatModelId: patch.chat_model }),
-  ...(patch.reasoning_model === undefined
-    ? {}
-    : {
-        modelReasoning: {
-          modelId: patch.reasoning_model,
-          effort: patch.reasoning_effort ?? null
-        }
-      }),
-  ...(patch.model_roles === undefined
-    ? {}
-    : {
-        roles: Object.fromEntries(
-          Object.entries(patch.model_roles).map(([role, value]) => [
-            role,
-            {
-              ...(value.model === undefined ? {} : { modelId: value.model }),
-              ...(value.reasoning_effort === undefined
-                ? {}
-                : { reasoningEffort: value.reasoning_effort })
-            }
-          ])
-        )
-      })
-})
+export const toModelSettingsPatch = (patch: ModelSettingsPatchRequestWire): ModelSettingsPatch =>
+  patch.changes.map(changeFromWire)
 
 export const ModelResetRequestSchema = Schema.Struct({
   scope: Schema.Literals(["chat", "roles"])
@@ -339,12 +325,12 @@ export const encodeModelResetEffect = (
   )
 
 export const encodeModelSettingsPatchEffect = (
-  value: unknown
+  value: ModelSettingsPatch
 ): Effect.Effect<string, Schema.SchemaError, never> =>
-  Schema.decodeUnknownEffect(ModelSettingsPatchSchema)(value, strict).pipe(
-    Effect.map(encodeSettingsPatch),
-    Effect.map(JSON.stringify)
-  )
+  Schema.decodeUnknownEffect(ModelSettingsPatchRequestSchema)(
+    { changes: value.map(changeToWire) },
+    strict
+  ).pipe(Effect.map(JSON.stringify))
 
 /** The ChatGPT transcription endpoint's own cap on one recording. */
 export const TRANSCRIBE_MAX_BYTES = 25 * 1024 * 1024

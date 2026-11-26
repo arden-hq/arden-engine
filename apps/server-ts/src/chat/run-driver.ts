@@ -172,7 +172,6 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
                 ...timing,
                 code: "chat.model_phase",
                 severity: "info",
-                cause: null,
                 runId: input.runId,
                 sessionId: input.sessionId
               })
@@ -378,10 +377,10 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
                 !output.parent_id &&
                 output.host.presentation !== "conversation" &&
                 (output.host.kind === "agent" ||
-                  isPublicActivityTool({
-                    name: output.name,
-                    presentation: output.host.presentation === "status" ? "status" : undefined
-                  }))
+                  isPublicActivityTool(
+                    output.name,
+                    output.host.presentation === "status" ? "status" : undefined
+                  ))
               )
                 purpose?.work(output)
             } else {

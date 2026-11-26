@@ -25,14 +25,40 @@ export interface WorkflowSourceRef extends JsonRecord {
   readonly title: string
 }
 
+export const WORKFLOW_RECOVERY = { none: "none", action: "action" } as const
+export const WORKFLOW_PREVIEW = { message: "message", line: "line" } as const
+export const SCRIPT_END = { open: "open", ended: "ended" } as const
+export const SCRIPT_FAILURE = { none: "none", failed: "failed" } as const
+export const AGENT_RUN = { none: "none", run: "run" } as const
+
+export type WorkflowRecovery =
+  | { readonly kind: "none" }
+  | { readonly kind: "action"; readonly text: string }
+
+export type WorkflowPreview =
+  | { readonly kind: "message" }
+  | { readonly kind: "line"; readonly text: string }
+
+export const NO_RECOVERY: WorkflowRecovery = { kind: WORKFLOW_RECOVERY.none }
+export const MESSAGE_PREVIEW: WorkflowPreview = { kind: WORKFLOW_PREVIEW.message }
+export const recoverBy = (text: string): WorkflowRecovery => ({
+  kind: WORKFLOW_RECOVERY.action,
+  text
+})
+
 export interface WorkflowError extends JsonRecord {
   readonly code: WorkflowErrorCode
   readonly message: string
   readonly retryable: boolean
-  readonly recovery_action: string | null
-  /** One plain line for a person, when the message is written for the model. */
-  readonly preview?: string
+  readonly recovery: WorkflowRecovery
+  readonly preview: WorkflowPreview
 }
+
+export type ScriptEnd = { readonly kind: "open" } | { readonly kind: "ended"; readonly at: string }
+
+export type ScriptFailure =
+  | { readonly kind: "none" }
+  | { readonly kind: "failed"; readonly error: WorkflowError }
 
 /** A script's own record: one row per detached code_mode script. */
 export interface ScriptSummary extends JsonRecord {
@@ -43,18 +69,19 @@ export interface ScriptSummary extends JsonRecord {
   readonly origin_session_ref: string
   readonly origin_run_id: string
   readonly origin_tool_call_id: string
-  readonly error: WorkflowError | null
+  readonly failure: ScriptFailure
   readonly created_at: string
   readonly updated_at: string
-  readonly ended_at: string | null
+  readonly end: ScriptEnd
 }
 
 /** An admitted child run; later steering in the same chat does not change this execution. */
 export interface ScriptAgentAttempt extends JsonRecord {
   readonly session_ref: string
-  readonly run_id: string | null
   readonly tool_call_id: string
-  readonly status: string
+  readonly run:
+    | { readonly kind: "none" }
+    | { readonly kind: "run"; readonly run_id: string; readonly status: string }
 }
 
 /** One `agent()` of a script, as its latest child session stands. */
@@ -62,7 +89,7 @@ export interface ScriptAgent extends JsonRecord {
   readonly key: string
   readonly attempts: ReadonlyArray<ScriptAgentAttempt>
   readonly label: string
-  readonly mode: "research" | "code" | "work" | null
+  readonly mode: "research" | "code" | "work" | "unrecorded"
   readonly status: "running" | "completed" | "failed"
   readonly session_ref: string
 }

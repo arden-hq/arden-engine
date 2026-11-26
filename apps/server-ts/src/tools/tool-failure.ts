@@ -39,3 +39,11 @@ export const toolFault = (message: string, preview: string): ToolExecutionError 
 
 export const toolRefusal = (message: string, preview: string): ToolExecutionError =>
   new ToolExecutionError(message, { preview, retryable: false })
+
+export const requireResult = <A>(operation: string, value: A | null): A => {
+  if (value !== null) return value
+  throw new ToolExecutionError(`The Automation disappeared during ${operation}`, {
+    preview: "Automation not found",
+    retryable: false
+  })
+}

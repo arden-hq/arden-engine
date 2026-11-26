@@ -28,12 +28,15 @@ const approval = (toolCallId: string, toolName: string): RunApproval => ({
 })
 
 const displays: Readonly<Record<string, ToolDisplay>> = {
-  vault_pay: { card: "vault_card_pay" },
-  vault_allow_payment_frame: { card: "vault_card_frame" },
-  vault_ask_key: { card: "vault_key_ask" },
-  browser_ask_secret: { card: "site_secret" },
-  vault_use_key: { card: "vault_key_use" },
-  exec_command: { card: "command", refresh: "terminals" }
+  vault_pay: [{ fact: "card", value: "vault_card_pay" }],
+  vault_allow_payment_frame: [{ fact: "card", value: "vault_card_frame" }],
+  vault_ask_key: [{ fact: "card", value: "vault_key_ask" }],
+  browser_ask_secret: [{ fact: "card", value: "site_secret" }],
+  vault_use_key: [{ fact: "card", value: "vault_key_use" }],
+  exec_command: [
+    { fact: "card", value: "command" },
+    { fact: "refresh", value: "terminals" }
+  ]
 }
 
 it("the phone is offered no card only the Arden app can answer", () => {

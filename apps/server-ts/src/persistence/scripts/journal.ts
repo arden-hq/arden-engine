@@ -1,4 +1,5 @@
 import type {
+  ScriptAgent,
   ScriptAgentAttempt,
   ScriptExecution,
   WorkflowEffectDisposition,
@@ -40,7 +41,7 @@ export interface ScriptAgentView {
   readonly key: string
   readonly attempts: ReadonlyArray<ScriptAgentAttempt>
   readonly label: string
-  readonly mode: "research" | "code" | "work" | null
+  readonly mode: ScriptAgent["mode"]
   readonly status: "running" | "completed" | "failed"
   readonly sessionRef: string
 }

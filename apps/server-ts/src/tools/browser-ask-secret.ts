@@ -158,7 +158,7 @@ const makeBrowserAskSecretTool = (
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(AskSecretParametersSchema),
     metadata: {
-      display: { card: "site_secret" },
+      display: [{ fact: "card", value: "site_secret" }],
       effect: "none",
       display_name: "Sign-in secret",
       kind: "browser",

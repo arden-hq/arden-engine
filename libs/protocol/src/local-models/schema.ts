@@ -30,7 +30,6 @@ const ModelWireSchema = withExtras({
   license_url: Schema.NonEmptyString,
   input: Schema.Literals(["text", "text+image"] as const),
   total_bytes: NonNegativeIntSchema,
-  dimensions: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   install: InstallWireSchema
 })
 
@@ -41,7 +40,10 @@ const RuntimeWireSchema = Schema.Union([
 
 export const LocalModelsStatusResponseSchema = withExtras({
   models: Schema.Array(ModelWireSchema),
-  free_bytes: Schema.NullOr(NonNegativeIntSchema),
+  free_space: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("measured"), bytes: NonNegativeIntSchema }),
+    Schema.Struct({ kind: Schema.Literal("unmeasured") })
+  ]),
   runtime: RuntimeWireSchema
 })
 
@@ -105,13 +107,12 @@ const modelFromWire = (model: ModelWire): LocalModelInfo => ({
   licenseUrl: model.license_url,
   input: model.input,
   totalBytes: model.total_bytes,
-  dimensions: model.dimensions,
   install: installFromWire(model.install)
 })
 
 export const mapLocalModelsStatus = (status: StatusWire): LocalModelsStatus => ({
   models: status.models.map(modelFromWire),
-  freeBytes: status.free_bytes,
+  freeSpace: status.free_space,
   runtime:
     status.runtime.state === "failed"
       ? { state: "failed", error: status.runtime.error }
@@ -127,10 +128,9 @@ export const localModelsStatusResponse = (status: LocalModelsStatus): StatusWire
     license_url: model.licenseUrl,
     input: model.input,
     total_bytes: model.totalBytes,
-    dimensions: model.dimensions,
     install: installToWire(model.install)
   })),
-  free_bytes: status.freeBytes,
+  free_space: status.freeSpace,
   runtime:
     status.runtime.state === "failed"
       ? { state: "failed", error: status.runtime.error }

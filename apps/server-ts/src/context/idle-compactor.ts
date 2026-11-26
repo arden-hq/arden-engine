@@ -16,10 +16,11 @@ import { HANDOFF_BYTES_PER_TOKEN, handoffContent } from "./handoff.js"
 import { summarizeContext } from "./summarizer.js"
 import { replayedAssistant, replayPrefix } from "./summary-requests.js"
 import type { IdleCompactionCandidate, IdleCompactionDecision } from "./idle-queue.js"
+import { operationalCauseText } from "../runtime/operational-events.js"
 
 export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor")(
   function* (input: {
-    readonly report: (decision: IdleCompactionDecision, cause?: unknown) => void
+    readonly report: (decision: IdleCompactionDecision) => void
     readonly commit: (
       snapshot: ContextCompactionSnapshot,
       plan: CompactionPlan,
@@ -175,14 +176,12 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
         Effect.onExit((exit) =>
           Exit.isFailure(exit)
             ? Effect.sync(() =>
-                input.report(
-                  {
-                    sessionId: candidate.sessionId,
-                    decision: "failed",
-                    reason: signal.aborted ? "stopped by activity" : "error or timeout"
-                  },
-                  exit.cause
-                )
+                input.report({
+                  sessionId: candidate.sessionId,
+                  decision: "failed",
+                  reason: signal.aborted ? "stopped by activity" : "error or timeout",
+                  cause: operationalCauseText(exit.cause)
+                })
               )
             : Effect.void
         )

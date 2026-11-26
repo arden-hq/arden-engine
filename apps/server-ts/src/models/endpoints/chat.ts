@@ -318,7 +318,7 @@ const offered = (
   const [first] = skipped
   if (models.length > 0 && (first === undefined || !rules.named))
     return { result: "works", models, skipped }
-  if (first === undefined) return { result: "model_missing", model: null, message: NO_MODEL }
+  if (first === undefined) return { result: "no_model", message: NO_MODEL }
   return skipFailure(first, rules.taken)
 }
 
@@ -401,7 +401,7 @@ const discoveryFailure = (failure: DiscoveryFailure, message: string): ChatEndpo
     case "no_model_list":
       return { result: failureForStatus(failure.status), message }
     case "no_model":
-      return { result: "model_missing", model: null, message: NO_MODEL }
+      return { result: "no_model", message: NO_MODEL }
     case "model_missing":
       return { result: "model_missing", model: failure.model, message }
     case "no_tool_calls":

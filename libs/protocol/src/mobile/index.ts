@@ -1,9 +1,14 @@
 import { decoderFor } from "../common/boundary.js"
 import { MobileConversationSchema, MobileSpacesSchema, MobileHomeSchema } from "./schema.js"
 
+export { MOBILE_CHAT_LINK, MOBILE_FILING } from "./schema.js"
+
 export type {
   MobileAsk,
   MobileChange,
+  MobileChatLink,
+  MobileDetail,
+  MobileFiling,
   MobileConversation,
   MobileConversationItem,
   MobileSpaces,

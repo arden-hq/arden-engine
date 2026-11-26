@@ -1,10 +1,8 @@
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
-import { GoogleDesktopClientFileSchema } from "@arden-hq/protocol/effect/google"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
-import { Effect, Option, Schema } from "effect"
-import { readdir, readFile, stat } from "node:fs/promises"
+import { Effect, Schema } from "effect"
 import { homedir } from "node:os"
 import { basename, isAbsolute, join } from "node:path"
 
@@ -31,6 +29,7 @@ import { appliedReceipt } from "./call-receipt.js"
 import { pagesReceipt } from "./wiki-records.js"
 import { toolFailure } from "./tool-failure.js"
 import { chatHref } from "../sessions/chat-href.js"
+import { newestClientFile, readClientFile } from "./google-client-file.js"
 
 const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 
@@ -74,8 +73,6 @@ const GoogleClientParametersSchema = Schema.Struct({
     })
   )
 })
-
-const MAX_CLIENT_FILE_BYTES = 64 * 1024
 
 interface OnboardingToolServices {
   readonly sessions: SessionQueries["Service"]
@@ -382,7 +379,7 @@ const makeOnboardingTools = ({
       "Start the app's guided tour, which points at the real sidebar and message box. Use it when the user asks to be shown around. Returns at once; the app runs the tour.",
     parameters: Schema.toStandardSchemaV1(TourParametersSchema),
     metadata: {
-      display: { app: "tour" },
+      display: [{ fact: "app", value: "tour" }],
       effect: "none",
       display_name: "Show Me Around",
       kind: "tool",
@@ -441,7 +438,7 @@ const makeOnboardingTools = ({
       const client = await readClientFile(file)
       const configured = await Effect.runPromise(
         google
-          .configureClient({ clientId: client.clientId, clientSecret: client.clientSecret })
+          .configureClient(client.oauth)
           .pipe(Effect.mapError((error) => toolFailure(error, "Google client not saved"))),
         { signal: ctx.signal }
       )
@@ -460,18 +457,17 @@ const makeOnboardingTools = ({
       return {
         host: appliedReceipt(ctx, {
           kind: "target",
-          resourceRef: `google_client:${client.clientId}`,
+          resourceRef: `google_client:${client.oauth.clientId}`,
           domain: "other",
-          title:
-            client.projectId === undefined ? "Google client" : `Google client: ${client.projectId}`,
+          title: `Google client: ${client.projectId}`,
           href: "arden:settings/integrations"
         }),
-        result: `Imported the Google client from ${basename(file)}${client.projectId === undefined ? "" : ` (project ${client.projectId})`}. Connect each service next.`,
+        result: `Imported the Google client from ${basename(file)} (project ${client.projectId}). Connect each service next.`,
         preview: "Google client imported",
         data: {
           status: "configured",
           file: basename(file),
-          ...(client.projectId === undefined ? {} : { project_id: client.projectId })
+          project_id: client.projectId
         }
       }
     }
@@ -504,50 +500,6 @@ const wikiKnowledgeTarget = (
       )
     )
 })
-
-const newestClientFile = async (downloads: string): Promise<string | undefined> => {
-  const names = (await readdir(downloads).catch(() => [])).filter((name) =>
-    /^client_secret_.*\.json$/.test(name)
-  )
-  const dated = await Promise.all(
-    names.map(async (name) => {
-      const info = await stat(join(downloads, name)).catch(() => undefined)
-      return info?.isFile() === true ? [{ path: join(downloads, name), at: info.mtimeMs }] : []
-    })
-  )
-  return dated.flat().sort((left, right) => right.at - left.at)[0]?.path
-}
-
-const readClientFile = async (
-  file: string
-): Promise<{
-  readonly clientId: string
-  readonly clientSecret: string
-  readonly projectId: string | undefined
-}> => {
-  const info = await stat(file).catch(() => undefined)
-  if (info?.isFile() !== true || info.size > MAX_CLIENT_FILE_BYTES) {
-    throw new ToolExecutionError(`${basename(file)} is not a Google client file.`, {
-      preview: "Not a client file",
-      retryable: false
-    })
-  }
-  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(GoogleDesktopClientFileSchema))(
-    await readFile(file, "utf8")
-  )
-  if (Option.isNone(decoded)) {
-    throw new ToolExecutionError(
-      `${basename(file)} is not a Desktop app OAuth client. In Google Cloud, create an OAuth client of type Desktop app and download its JSON.`,
-      { preview: "Not a Desktop client", retryable: false }
-    )
-  }
-  const installed = decoded.value.installed
-  return {
-    clientId: installed.client_id,
-    clientSecret: installed.client_secret,
-    projectId: installed.project_id
-  }
-}
 
 export const onboardingTools = Effect.gen(function* () {
   return makeOnboardingTools({

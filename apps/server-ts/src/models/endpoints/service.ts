@@ -4,7 +4,6 @@ import type {
   DecisionBackendState,
   DecisionSource,
   DecisionStatus,
-  ModelEndpoint,
   ModelEndpointCheck,
   ModelEndpointDraft,
   ModelEndpointKind,
@@ -40,7 +39,8 @@ import { checkDecisionEndpoint } from "../decisions/service.js"
 import { DecisionEndpointSource, type SelectedDecisionEndpoint } from "../decisions/source.js"
 import { decisionSiteStatuses } from "../decisions/sites.js"
 import { ModelProviderSwitch } from "../provider-switch.js"
-import { makeChatEndpoint, viewAll as chatViews, type ChatEndpointRequest } from "./chat-service.js"
+import { makeChatEndpoint, type ChatEndpointRequest } from "./chat-service.js"
+import { view, viewAll } from "./views.js"
 import { type EndpointFailureReason, runtimeFailure } from "./failure.js"
 
 export class ModelEndpointsError extends Schema.TaggedError<ModelEndpointsError>()(
@@ -115,6 +115,11 @@ const secretTarget = (owner: SecretOwner): SecureDocumentTarget => {
 }
 
 const SecretDocumentSchema = Schema.Struct({ secret: Schema.NonEmptyString })
+
+interface CheckedEndpoint {
+  readonly check: ModelEndpointCheck
+  readonly dimensions: StoredEndpoint["dimensions"]
+}
 
 interface ResolvedEndpoint extends Omit<StoredEndpoint, "dimensions" | "health"> {
   readonly secret: string
@@ -284,24 +289,28 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
           fetch: options.fetch
         }).pipe(
           Effect.timed,
-          Effect.map(([elapsed, dimensions]): ModelEndpointCheck => ({
-            result: "works",
-            input: "text",
-            dimensions,
-            ms: Math.round(Duration.toMillis(elapsed))
+          Effect.map(([elapsed, dimensions]): CheckedEndpoint => ({
+            check: { result: "works", input: "text", ms: Math.round(Duration.toMillis(elapsed)) },
+            dimensions
           })),
           Effect.catch((error) =>
-            Effect.succeed<ModelEndpointCheck>({ result: error.reason, message: error.message })
+            Effect.succeed<CheckedEndpoint>({
+              check: { result: error.reason, message: error.message },
+              dimensions: null
+            })
           )
         )
       : checkDecisionEndpoint(decisionEndpointOf(endpoint, options.fetch, CHECK_TIMEOUT_MS)).pipe(
-          Effect.map(({ text, image }): ModelEndpointCheck => {
-            if (!text.ok) return { result: text.reason, message: text.message }
+          Effect.map(({ text, image }): CheckedEndpoint => {
+            if (!text.ok)
+              return { check: { result: text.reason, message: text.message }, dimensions: null }
             return {
-              result: "works",
-              input: image !== "not_declared" && image.ok ? "text+image" : "text",
-              dimensions: null,
-              ms: text.ms
+              check: {
+                result: "works",
+                input: image !== "not_declared" && image.ok ? "text+image" : "text",
+                ms: text.ms
+              },
+              dimensions: null
             }
           })
         )
@@ -312,7 +321,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
   ) {
     const revision = revisions[kind]
     const endpoint = yield* resolve(kind, draft)
-    const result = yield* runCheck(kind, endpoint)
+    const result = (yield* runCheck(kind, endpoint)).check
     const stored = (yield* settings())[kind]
     const sameAsSaved =
       draft.auth.kind === "keep" &&
@@ -330,7 +339,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
     draft: ModelEndpointDraft
   ) {
     const endpoint = yield* resolve(kind, draft)
-    const result = yield* runCheck(kind, endpoint)
+    const { check: result, dimensions } = yield* runCheck(kind, endpoint)
     if (result.result !== "works") return result
     const stored: StoredEndpoint = {
       baseUrl: endpoint.baseUrl,
@@ -338,7 +347,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       model: endpoint.model,
       input: result.input,
       auth: endpoint.auth,
-      dimensions: result.dimensions,
+      dimensions,
       health: { state: "works" }
     }
     yield* credentialLock.withPermit(
@@ -607,15 +616,4 @@ const decisionEndpointOf = (
   input: endpoint.input,
   timeoutMs,
   fetch
-})
-
-const view = (kind: ModelEndpointKind, stored: StoredEndpoint): ModelEndpoint => ({
-  kind,
-  ...stored
-})
-
-const viewAll = (saved: ModelEndpointSettings): ModelEndpointsView => ({
-  search: saved.search === null ? null : view("search", saved.search),
-  decision: saved.decision === null ? null : view("decision", saved.decision),
-  chat: chatViews(saved.chat)
 })

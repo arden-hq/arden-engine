@@ -1,3 +1,4 @@
+import { RUN_EXECUTION } from "@arden-hq/protocol/daemon"
 import { Effect, Exit, Semaphore } from "effect"
 import type { ChatRunScheduling } from "../persistence/chat/store.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
@@ -63,13 +64,15 @@ export const makeAgentRunScheduler = (): AgentRunScheduler => {
               return diagnostics.operational({
                 code: "chat.agent_run_timing",
                 severity: "info",
-                cause: null,
                 ...identity,
                 waitMs:
                   acquiredAt === undefined
                     ? elapsed(startedAt)
                     : Math.max(0, Math.round(acquiredAt - startedAt)),
-                executionMs: acquiredAt === undefined ? null : elapsed(acquiredAt),
+                execution:
+                  acquiredAt === undefined
+                    ? { kind: RUN_EXECUTION.neverAcquired }
+                    : { kind: RUN_EXECUTION.acquired, ms: elapsed(acquiredAt) },
                 outcome
               })
             })

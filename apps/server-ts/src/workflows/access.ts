@@ -1,4 +1,9 @@
-import type { ScriptDetail, ScriptSummary } from "@arden-hq/protocol/workflows"
+import {
+  SCRIPT_END,
+  SCRIPT_FAILURE,
+  type ScriptDetail,
+  type ScriptSummary
+} from "@arden-hq/protocol/workflows"
 import { Effect, Schema } from "effect"
 
 import type { ScriptJournal } from "../persistence/scripts/journal.js"
@@ -54,10 +59,16 @@ export const scriptSummary = (record: ScriptRecord): ScriptSummary => ({
   origin_session_ref: record.originSessionRef,
   origin_run_id: record.originRunId,
   origin_tool_call_id: record.originToolCallId,
-  error: record.error,
+  failure:
+    record.error === null
+      ? { kind: SCRIPT_FAILURE.none }
+      : { kind: SCRIPT_FAILURE.failed, error: record.error },
   created_at: record.createdAt,
   updated_at: record.updatedAt,
-  ended_at: record.endedAt
+  end:
+    record.endedAt === null
+      ? { kind: SCRIPT_END.open }
+      : { kind: SCRIPT_END.ended, at: record.endedAt }
 })
 
 export const scriptDetail = Effect.fn("ScriptAccess.detail")(function* (

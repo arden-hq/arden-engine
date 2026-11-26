@@ -6,7 +6,7 @@ import type {
   RelayCommandRecord,
   RelayCommandState
 } from "../persistence/relay/store.js"
-import type { SseFrame } from "@arden-hq/protocol"
+import type { SseFrame, SseFrameId } from "@arden-hq/protocol"
 
 export interface LoopbackResponse {
   readonly status: number
@@ -22,7 +22,7 @@ export interface Loopback {
   }) => Promise<LoopbackResponse>
   readonly events: (input: {
     readonly path: string
-    readonly lastEventId: string | undefined
+    readonly lastEventId: SseFrameId
     readonly signal: AbortSignal
   }) => AsyncIterable<Pick<SseFrame, "id" | "data">>
 }

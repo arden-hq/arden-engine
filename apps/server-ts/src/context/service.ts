@@ -22,7 +22,6 @@ import { planCompaction, type CompactionPlan } from "./planner.js"
 import { summarizeContext } from "./summarizer.js"
 import { SummaryRequests } from "./summary-requests.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
-import { serializeOperationalCause } from "../runtime/operational-events.js"
 import {
   IdleCompactionQueue,
   type IdleCompactionRequest,
@@ -41,12 +40,10 @@ export type ManualCompactionResult =
       readonly status: "nothing_to_compact"
       readonly message: string
       readonly messageCount: number
-      readonly beforeTokens: number | null
     }
   | {
       readonly status: "compacted"
       readonly message: string
-      readonly beforeTokens: number | null
       readonly beforeMessages: number
       readonly afterMessages: number
       readonly messagesCompressed: number
@@ -209,7 +206,7 @@ export class ContextCompaction extends Context.Service<
       ) => Effect.Effect<void, unknown>
     }
     readonly manual: (
-      sessionId?: string
+      sessionId: string
     ) => Effect.Effect<ManualCompactionResult, ContextCompactionError>
     readonly automatic: (
       input: AutomaticCompactionInput
@@ -223,12 +220,11 @@ export class ContextCompaction extends Context.Service<
       const config = yield* ServerConfig
       const diagnostics = yield* Diagnostics
       const context = yield* Effect.context<never>()
-      const report = (decision: IdleCompactionDecision, cause?: unknown) =>
+      const report = (decision: IdleCompactionDecision) =>
         void Effect.runForkWith(context)(
           diagnostics.operational({
             code: "context.idle_compaction",
             severity: "info",
-            cause: serializeOperationalCause(cause),
             ...decision
           })
         )
@@ -358,11 +354,8 @@ export class ContextCompaction extends Context.Service<
         return committed
       })
 
-      const manual = Effect.fn("ContextCompaction.manual")(function* (sessionId?: string) {
-        if (sessionId !== undefined) idleQueue.cancel(sessionId, "compacted by hand")
-        if (sessionId === undefined) {
-          return { status: "no_session", message: "Nothing to compact in this chat yet." } as const
-        }
+      const manual = Effect.fn("ContextCompaction.manual")(function* (sessionId: string) {
+        idleQueue.cancel(sessionId, "compacted by hand")
         const snapshot = yield* store.snapshot({ sessionId }).pipe(
           Effect.mapError((cause) => mapStoreError("manual", cause)),
           Effect.catchTag("ContextCompactionError", (cause) =>
@@ -375,7 +368,6 @@ export class ContextCompaction extends Context.Service<
         const controls = yield* intelligence
           .settings()
           .pipe(Effect.mapError((cause) => mapSettingsError("manual", snapshot.sessionId, cause)))
-        const beforeTokens = storedInputTokens(snapshot)
         const plan = planCompaction(
           snapshot.messages,
           snapshot.ownerWords,
@@ -385,8 +377,7 @@ export class ContextCompaction extends Context.Service<
           return {
             status: "nothing_to_compact",
             message: `Nothing to compact (${snapshot.messages.length} messages)`,
-            messageCount: snapshot.messages.length,
-            beforeTokens
+            messageCount: snapshot.messages.length
           } as const
         }
         const summary = yield* summarize("manual", snapshot, plan, controls.summaryMaxTokens)
@@ -394,7 +385,6 @@ export class ContextCompaction extends Context.Service<
         return {
           status: "compacted",
           message: `Compacted ${committed.messagesBefore} → ${committed.messagesAfter} messages`,
-          beforeTokens,
           beforeMessages: committed.messagesBefore,
           afterMessages: committed.messagesAfter,
           messagesCompressed: plan.source.length

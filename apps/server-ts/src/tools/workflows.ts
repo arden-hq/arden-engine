@@ -1,7 +1,15 @@
 import { cutText } from "@arden-hq/std/text"
 import { groupedCount } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
-import type { ScriptDetail } from "@arden-hq/protocol/workflows"
+import {
+  SCRIPT_END,
+  SCRIPT_FAILURE,
+  WORKFLOW_PREVIEW,
+  WORKFLOW_RECOVERY,
+  type ScriptAgent,
+  type ScriptDetail,
+  type WorkflowError
+} from "@arden-hq/protocol/workflows"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -136,14 +144,32 @@ const workflowResource = (record: ScriptRecord, state: string) => ({
   href: chatHref({ publicRef: record.originSessionRef })
 })
 
+const modeText: Readonly<Record<ScriptAgent["mode"], string>> = {
+  research: "research",
+  code: "code",
+  work: "work",
+  unrecorded: "-"
+}
+
+const workflowErrorLine = (error: WorkflowError): string =>
+  JSON.stringify({
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+    recovery_action: error.recovery.kind === WORKFLOW_RECOVERY.action ? error.recovery.text : null,
+    ...(error.preview.kind === WORKFLOW_PREVIEW.line ? { preview: error.preview.text } : {})
+  })
+
 const formatScript = (detail: ScriptDetail, result: string | undefined): string => {
   const { script } = detail
   const lines = [
-    `Script ${script.workflow_ref}: status=${script.status}; attempt=${script.attempt}; version=${script.version}; started=${script.created_at}; ended=${script.ended_at ?? "-"}.`,
-    ...(script.error === null ? [] : [`Error: ${JSON.stringify(script.error)}`]),
+    `Script ${script.workflow_ref}: status=${script.status}; attempt=${script.attempt}; version=${script.version}; started=${script.created_at}; ended=${script.end.kind === SCRIPT_END.ended ? script.end.at : "-"}.`,
+    ...(script.failure.kind === SCRIPT_FAILURE.failed
+      ? [`Error: ${workflowErrorLine(script.failure.error)}`]
+      : []),
     ...detail.agents.map(
       (agent) =>
-        `- Agent ${JSON.stringify(agent.label)}: ${agent.status}; mode=${agent.mode ?? "-"}; session_ref=${agent.session_ref}`
+        `- Agent ${JSON.stringify(agent.label)}: ${agent.status}; mode=${modeText[agent.mode]}; session_ref=${agent.session_ref}`
     )
   ]
   if (result !== undefined) {

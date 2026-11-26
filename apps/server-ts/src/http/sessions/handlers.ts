@@ -48,12 +48,7 @@ import {
   sessionListCursorToWire
 } from "../wire/sessions.js"
 import { RunQueries } from "../../persistence/runs/queries.js"
-import {
-  artifactRole,
-  ConversationArtifactError,
-  ConversationArtifacts,
-  type ConversationArtifactManifest
-} from "../../artifacts/conversation.js"
+import { ConversationArtifactError, ConversationArtifacts } from "../../artifacts/conversation.js"
 import { sessionLineage } from "../../persistence/sessions/lineage.js"
 import { HttpApiSchema } from "effect/unstable/httpapi"
 import { SessionFileCleanup } from "../../storage/session-file-cleanup.js"
@@ -65,24 +60,7 @@ import type { RunQueryError } from "../../persistence/runs/queries.js"
 import type { ScriptStoreError } from "../../persistence/scripts/store.js"
 import type { WorkStoreError } from "../../persistence/work/store.js"
 import { Wiki } from "../../wiki/service.js"
-
-const visualizationToWire = (manifest: ConversationArtifactManifest, turnId?: string) => ({
-  runtime_version: manifest.runtime_version,
-  libraries: manifest.libraries,
-  ref: manifest.ref,
-  kind: manifest.kind,
-  title: manifest.title,
-  summary: manifest.summary,
-  mode: manifest.mode,
-  media_type: manifest.media_type,
-  byte_length: manifest.byte_length,
-  created_at: manifest.created_at,
-  ...(manifest.kind === "file" ? { filename: manifest.filename } : {}),
-  ...(manifest.producer_run_id === undefined ? {} : { producer_run_id: manifest.producer_run_id }),
-  ...(manifest.operation_key === undefined ? {} : { operation_key: manifest.operation_key }),
-  ...(turnId === undefined ? {} : { turn_id: turnId }),
-  role: artifactRole(manifest)
-})
+import { NO_TURNS, visualizationToWire } from "./visualization-wire.js"
 
 const triageActionError = (
   error: SessionTriageConflict | SessionStoreError | SpaceStoreError | SessionQueryFailure
@@ -513,14 +491,7 @@ export const SessionHandlers = HttpApiBuilder.group(
               ),
               Effect.orElseSucceed(() => new Map<string, string>())
             )
-          return manifests.map((manifest) =>
-            visualizationToWire(
-              manifest,
-              manifest.producer_run_id === undefined
-                ? undefined
-                : turns.get(manifest.producer_run_id)
-            )
-          )
+          return manifests.map((manifest) => visualizationToWire(manifest, turns))
         })
       )
       .handle(
@@ -529,7 +500,7 @@ export const SessionHandlers = HttpApiBuilder.group(
           const lineage = yield* artifactLineage(params.sessionId)
           if (lineage === null) return yield* new HttpApiError.NotFound({})
           const { manifest } = yield* readInLineage(lineage, params.artifactRef)
-          return visualizationToWire(manifest)
+          return visualizationToWire(manifest, NO_TURNS)
         })
       )
       .handle(

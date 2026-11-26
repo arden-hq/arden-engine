@@ -19,7 +19,7 @@ it("names a Skill in a shared folder after its SKILL.md, not its folder", async 
   const result = await Effect.runPromise(
     Effect.gen(function* () {
       const catalog = yield* SkillCatalog
-      const listed = (yield* catalog.list()).filter((entry) => !entry.builtin)
+      const listed = (yield* catalog.list()).filter((entry) => entry.place.kind === "local")
       const loaded = yield* catalog.load("self-improvement")
       return { names: listed.map((entry) => entry.name), directory: loaded.directory }
     }).pipe(Effect.provide(skillCatalogLayer(null, { extraRoots: [shared] })))
@@ -34,7 +34,9 @@ it("still refuses a Skill in Arden's own folder whose name differs from the fold
   const names = await Effect.runPromise(
     Effect.gen(function* () {
       const catalog = yield* SkillCatalog
-      return (yield* catalog.list()).filter((entry) => !entry.builtin).map((entry) => entry.name)
+      return (yield* catalog.list())
+        .filter((entry) => entry.place.kind === "local")
+        .map((entry) => entry.name)
     }).pipe(Effect.provide(skillCatalogLayer(own)))
   )
   expect(names).toEqual([])

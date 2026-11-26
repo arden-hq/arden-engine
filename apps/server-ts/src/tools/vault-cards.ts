@@ -231,7 +231,7 @@ const makeVaultPayTool = (
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(PayParametersSchema),
     metadata: {
-      display: { card: "vault_card_pay" },
+      display: [{ fact: "card", value: "vault_card_pay" }],
       effect: "none",
       display_name: "Pay with a card",
       kind: "tool",
@@ -303,7 +303,7 @@ const makeAllowFrameTool = (
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(FrameParametersSchema),
     metadata: {
-      display: { card: "vault_card_frame" },
+      display: [{ fact: "card", value: "vault_card_frame" }],
       effect: "none",
       display_name: "Payment frame",
       kind: "tool",

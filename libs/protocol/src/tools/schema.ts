@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { withExtras } from "../common/schema.js"
 import type { ToolCatalogEntry, ToolCatalogResponse, ToolPolicy } from "./contracts.js"
-import { LEGACY_TOOL_DISPLAY, ToolDisplayWireSchema, toToolDisplay } from "./display.js"
+import { ToolDisplayWireSchema, toToolDisplay } from "./display.js"
 
 const nonEmptyText = Schema.String.check(Schema.isMinLength(1))
 const toolName = Schema.String.check(
@@ -27,11 +27,7 @@ export const ToolPolicySchema = withExtras({
   action: ToolActionSchema,
   scope: ToolScopeSchema,
   requires_approval: Schema.Boolean,
-  permissions: ToolPermissionListSchema,
-  concurrency_group: Schema.NullOr(nonEmptyText),
-  destructive: Schema.NullOr(Schema.Boolean),
-  open_world: Schema.NullOr(Schema.Boolean),
-  idempotent: Schema.NullOr(Schema.Boolean)
+  permissions: ToolPermissionListSchema
 })
 
 export const ToolCatalogEntrySchema = withExtras({
@@ -39,10 +35,10 @@ export const ToolCatalogEntrySchema = withExtras({
   display_name: nonEmptyText,
   description: Schema.String,
   kind: nonEmptyText,
-  source: Schema.NullOr(nonEmptyText),
+  source: nonEmptyText,
   policy: ToolPolicySchema,
   default_approval: ToolDefaultApprovalSchema,
-  display: Schema.optionalKey(ToolDisplayWireSchema)
+  display: ToolDisplayWireSchema
 }).check(
   Schema.makeFilter((tool) =>
     tool.default_approval === (tool.policy.requires_approval ? "ask" : "approve")
@@ -53,8 +49,7 @@ export const ToolCatalogEntrySchema = withExtras({
 
 export const ToolCatalogResponseSchema = withExtras({
   tools: Schema.Array(ToolCatalogEntrySchema),
-  /** Absent from a server that predates display facts. */
-  unlisted: Schema.optionalKey(Schema.Record(Schema.String, ToolDisplayWireSchema))
+  unlisted: Schema.Record(Schema.String, ToolDisplayWireSchema)
 }).check(
   Schema.makeFilter((response) => {
     const names = new Set(response.tools.map((tool) => tool.name))
@@ -68,31 +63,17 @@ type ToolPolicyWire = Schema.Schema.Type<typeof ToolPolicySchema>
 type ToolCatalogEntryWire = Schema.Schema.Type<typeof ToolCatalogEntrySchema>
 
 const mapToolPolicy = (policy: ToolPolicyWire): ToolPolicy => {
-  const {
-    action,
-    scope,
-    requires_approval,
-    permissions,
-    concurrency_group,
-    destructive,
-    open_world,
-    idempotent,
-    ...extras
-  } = policy
+  const { action, scope, requires_approval, permissions, ...extras } = policy
   return {
     ...extras,
     action,
     scope,
     requiresApproval: requires_approval,
-    permissions,
-    concurrencyGroup: concurrency_group,
-    destructive,
-    openWorld: open_world,
-    idempotent
+    permissions
   }
 }
 
-const mapToolCatalogEntry = (tool: ToolCatalogEntryWire, legacy: boolean): ToolCatalogEntry => {
+const mapToolCatalogEntry = (tool: ToolCatalogEntryWire): ToolCatalogEntry => {
   const {
     name,
     display_name,
@@ -116,7 +97,7 @@ const mapToolCatalogEntry = (tool: ToolCatalogEntryWire, legacy: boolean): ToolC
     source,
     effectivePolicy: mapToolPolicy(policy),
     defaultApproval: default_approval,
-    display: legacy ? (LEGACY_TOOL_DISPLAY[name] ?? {}) : toToolDisplay(display ?? {})
+    display: toToolDisplay(display)
   }
 }
 
@@ -124,15 +105,11 @@ export const toToolCatalogResponse = (
   response: typeof ToolCatalogResponseSchema.Type
 ): ToolCatalogResponse => {
   const { tools, unlisted, ...extras } = response
-  const legacy = unlisted === undefined
-  const listed = new Set(tools.map((tool) => tool.name))
   return {
     ...extras,
-    tools: tools.map((tool) => mapToolCatalogEntry(tool, legacy)),
+    tools: tools.map(mapToolCatalogEntry),
     unlisted: Object.fromEntries(
-      legacy
-        ? Object.entries(LEGACY_TOOL_DISPLAY).filter(([name]) => !listed.has(name))
-        : Object.entries(unlisted).map(([name, wire]) => [name, toToolDisplay(wire)])
+      Object.entries(unlisted).map(([name, wire]) => [name, toToolDisplay(wire)])
     )
   }
 }

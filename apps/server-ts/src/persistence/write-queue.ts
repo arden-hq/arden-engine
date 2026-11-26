@@ -1,3 +1,4 @@
+import { PREVIOUS_WRITE, type StorageWriteWaitOperationalEvent } from "@arden-hq/protocol/daemon"
 import { Clock, Context, Deferred, Effect, Layer, Option, Queue } from "effect"
 import { Diagnostics } from "../runtime/diagnostics.js"
 
@@ -45,7 +46,7 @@ export class PersistenceWriteQueue extends Context.Service<
         })
       )
 
-      let previousOperation: string | null = null
+      let previous: StorageWriteWaitOperationalEvent["previous"] = { kind: PREVIOUS_WRITE.none }
       const reportSlowWait = Effect.fn("PersistenceWriteQueue.reportSlowWait")(function* (
         request: WriteRequest
       ) {
@@ -56,10 +57,9 @@ export class PersistenceWriteQueue extends Context.Service<
         yield* diagnostics.operational({
           code: "storage.write_wait",
           severity: "warning",
-          cause: null,
           lane: request.lane,
           operation: request.operation,
-          previousOperation,
+          previous,
           waitMs: Math.round(waitMs),
           queued
         })
@@ -86,13 +86,12 @@ export class PersistenceWriteQueue extends Context.Service<
             yield* diagnostics.operational({
               code: "storage.write_slow",
               severity: "warning",
-              cause: null,
               lane: request.lane,
               operation: request.operation,
               durationMs: Math.round(durationMs)
             })
           }
-          previousOperation = request.operation
+          previous = { kind: PREVIOUS_WRITE.operation, operation: request.operation }
         })
       )
       yield* Effect.forkScoped(worker)

@@ -9,11 +9,7 @@ const policyResponse = (policy: ToolPolicy) => ({
   action: policy.action,
   scope: policy.scope,
   requires_approval: policy.requiresApproval,
-  permissions: [...policy.permissions],
-  concurrency_group: policy.concurrencyGroup,
-  destructive: policy.destructive,
-  open_world: policy.openWorld,
-  idempotent: policy.idempotent
+  permissions: [...policy.permissions]
 })
 
 export const ToolHandlers = HttpApiBuilder.group(

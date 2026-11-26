@@ -59,7 +59,7 @@ export const reduceRunActivity = (
     event.type === "TOOL_CALL_START" &&
     !event.parent_id &&
     event.presentation !== "conversation" &&
-    isPublicActivityTool({ name: event.tool_call_name, presentation: event.presentation })
+    isPublicActivityTool(event.tool_call_name, event.presentation)
   ) {
     return {
       ...current,

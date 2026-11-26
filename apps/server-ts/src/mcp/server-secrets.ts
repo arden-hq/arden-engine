@@ -1,4 +1,4 @@
-import type { McpTransportInput } from "@arden-hq/protocol/mcp"
+import { MCP_FOLDER, type McpFolderInput, type McpTransportInput } from "@arden-hq/protocol/mcp"
 
 import type { McpStoredServer, McpStoredTransport } from "../persistence/mcp/store.js"
 import { mcpError } from "./errors.js"
@@ -40,7 +40,7 @@ const storedTransport = (
         command: input.command,
         args: input.args,
         environmentKeys: secretKeys,
-        cwd: input.cwd === undefined ? storedCwd(existing) : input.cwd
+        cwd: storedFolder(input.cwd, existing)
       }
     : {
         type: "http",
@@ -49,8 +49,14 @@ const storedTransport = (
         headerKeys: secretKeys
       }
 
-const storedCwd = (existing: McpStoredTransport | undefined): string | null =>
-  existing?.type === "stdio" ? existing.cwd : null
+const storedFolder = (
+  input: McpFolderInput,
+  existing: McpStoredTransport | undefined
+): string | null => {
+  if (input.kind === MCP_FOLDER.folder) return input.path
+  if (input.kind === MCP_FOLDER.home) return null
+  return existing?.type === "stdio" ? existing.cwd : null
+}
 
 const storedSecretKeys = (transport: McpStoredTransport): ReadonlyArray<string> =>
   transport.type === "stdio" ? transport.environmentKeys : transport.headerKeys

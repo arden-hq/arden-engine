@@ -1,5 +1,11 @@
 import { previewLine } from "@arden-hq/protocol/chat"
-import type { MobileAsk, MobileChange } from "@arden-hq/protocol/mobile"
+import {
+  MOBILE_FILING,
+  type MobileAsk,
+  type MobileChange,
+  type MobileDetail,
+  type MobileFiling
+} from "@arden-hq/protocol/mobile"
 import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
 import { grantedOnlyInTheApp, type ToolDisplay } from "@arden-hq/protocol/tools"
 import { namedTool } from "@arden-hq/protocol/views"
@@ -10,6 +16,14 @@ export interface AskPlace {
   readonly home: boolean
   readonly onboarding: boolean
 }
+
+export const filingOf = (spaceId: string | null | undefined): MobileFiling =>
+  spaceId === undefined || spaceId === null
+    ? { kind: MOBILE_FILING.loose }
+    : { kind: MOBILE_FILING.space, space_id: spaceId }
+
+const detailOf = (text: string | null | undefined): MobileDetail =>
+  text === undefined || text === null ? { kind: "plain" } : { kind: "detailed", text }
 
 export function mobileAsks({
   questions,
@@ -33,7 +47,7 @@ export function mobileAsks({
     const spaceName = spaceId === undefined ? undefined : spaceNames.get(spaceId)
     return {
       session_id: sessionId,
-      space_id: spaceId ?? null,
+      space: filingOf(spaceId),
       place: (place?.home === true ? spaceName : place?.name?.trim()) || spaceName || "untitled"
     }
   }
@@ -48,12 +62,12 @@ export function mobileAsks({
     ...where(asked.destination_session_id),
     asked_at: asked.created_at,
     prompt: asked.content.prompt,
-    detail: asked.content.detail,
+    detail: detailOf(asked.content.detail),
     multiple: asked.content.multiple === true,
     options: asked.content.choices.map((choice) => ({
       id: choice.id,
       label: choice.label,
-      detail: choice.detail ?? null
+      detail: detailOf(choice.detail)
     }))
   })
   return [
@@ -79,7 +93,7 @@ function approvalTitle(approval: RunApproval): string {
     oneLine(approval.presentation?.title) ??
     oneLine(approval.description) ??
     oneLine(approval.preview) ??
-    namedTool({ name: approval.tool_name, displayName: undefined })
+    namedTool({ name: approval.tool_name, displayName: null })
   )
 }
 

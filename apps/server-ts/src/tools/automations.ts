@@ -18,12 +18,13 @@ import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { AutomationId } from "../persistence/automations/model.js"
 import { AutomationQueue } from "../persistence/automations/queue.js"
 import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
-import { SessionStore, type SessionStoreError } from "../persistence/sessions/store.js"
+import { SessionStore } from "../persistence/sessions/store.js"
 import { ModelStore, type ModelStoreError } from "../persistence/models/store.js"
 import { LimitSettingsStore } from "../persistence/settings/store.js"
 import { setAutomationLimits } from "./automation-limits.js"
 import {
   ApprovalPolicyStore,
+  sessionApprovalMode,
   type ApprovalPolicyError
 } from "../persistence/permissions/approval-policy.js"
 import {
@@ -33,7 +34,7 @@ import {
   RunsParametersSchema,
   UpdateParametersSchema
 } from "./automation-tool-schema.js"
-import { toolFailure } from "./tool-failure.js"
+import { requireResult, toolFailure } from "./tool-failure.js"
 import {
   CREATE_APPROVAL_EDITS,
   createCardOf,
@@ -63,6 +64,7 @@ import {
   deletedAutomationResource,
   lastAutomationVersion,
   resolveAutomation,
+  resolveChatRef,
   storeFailure
 } from "./automation-records.js"
 
@@ -83,30 +85,11 @@ const sessionFailure = (error: SessionQueryFailure): ToolExecutionError =>
     "Chat unavailable"
   )
 
-const sessionStoreFailure = (error: SessionStoreError): ToolExecutionError =>
-  toolFailure(error, "Chat unavailable")
-
 const modelFailure = (error: ModelStoreError): ToolExecutionError =>
   toolFailure(error, "Model unavailable")
 
 const policyFailure = (error: ApprovalPolicyError): ToolExecutionError =>
   toolFailure(error, "Chat permissions unavailable")
-
-const resolveChatRef = async (
-  store: SessionStore["Service"],
-  sessionRef: string,
-  signal: AbortSignal
-) => {
-  const [session] = await Effect.runPromise(
-    store.list({ sessionRef, scope: "all", limit: 1 }).pipe(Effect.mapError(sessionStoreFailure)),
-    { signal }
-  )
-  if (session !== undefined) return session
-  throw new ToolExecutionError(`No active Chat ${sessionRef}`, {
-    preview: "Chat not found",
-    retryable: false
-  })
-}
 
 const automationModelInfo = async (
   automation: Automation,
@@ -133,7 +116,7 @@ const automationModelInfo = async (
         )
   const context = {
     chat_ref: chat?.kind === "yours" ? (runChat?.publicRef ?? null) : null,
-    action_mode: permission?.approval_mode ?? null
+    action_mode: permission && sessionApprovalMode(permission)
   }
   if (automation.system !== null && !automation.system.settable.includes("model")) {
     return { ...context, model_source: "source_chat", effective_model: null }
@@ -217,14 +200,6 @@ const runLines = (run: ReturnType<typeof runData>): string => {
   ].join("\n")
 }
 
-const requireResult = <A>(operation: string, value: A | null): A => {
-  if (value !== null) return value
-  throw new ToolExecutionError(`The Automation disappeared during ${operation}`, {
-    preview: "Automation not found",
-    retryable: false
-  })
-}
-
 const chosenChat = async (
   choice: { readonly where: "current" | "own" | undefined; readonly chat_ref: string | undefined },
   services: AutomationToolServices,
@@ -269,7 +244,11 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
         parseOptions: { onExcessProperty: "error" }
       }),
       metadata: {
-        display: { card: "automation", result: "automation_created", refresh: "automations" },
+        display: [
+          { fact: "card", value: "automation" },
+          { fact: "result", value: "automation_created" },
+          { fact: "refresh", value: "automations" }
+        ],
         effect: "arden_db",
         display_name: "Create Automation",
         standing: "always",
@@ -448,7 +427,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
         parseOptions: { onExcessProperty: "error" }
       }),
       metadata: {
-        display: { refresh: "automations" },
+        display: [{ fact: "refresh", value: "automations" }],
         effect: "arden_db",
         display_name: "Update Automation",
         standing: "always",
@@ -668,7 +647,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
         "End one Automation by exact automation_ref when its job is finished or the user no longer wants it: it is removed and its own chat, with its reports, is archived. To stop it only for now, pause it with automation_update enabled=false instead. Built-in system Automations cannot be deleted; pause them. Asks by default.",
       parameters: Schema.toStandardSchemaV1(RefParametersSchema),
       metadata: {
-        display: { refresh: "automations" },
+        display: [{ fact: "refresh", value: "automations" }],
         effect: "arden_db",
         display_name: "Delete Automation",
         standing: "always",
@@ -721,7 +700,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
         "Queue one run of an Automation now. An enabled Automation starts as soon as a worker is free. A paused one is queued but waits until it is resumed; this does not resume it or its schedule. Refused while it is already running. Returns before the run ends; check automation_list_runs for the outcome. A system Automation that needs its trigger's input (Chat summaries) has no manual run. Uses the user's approval settings.",
       parameters: Schema.toStandardSchemaV1(RefParametersSchema),
       metadata: {
-        display: { refresh: "automations" },
+        display: [{ fact: "refresh", value: "automations" }],
         effect: "arden_db",
         detached: true,
         display_name: "Run Automation",

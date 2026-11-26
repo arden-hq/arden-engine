@@ -17,7 +17,12 @@ import {
   type HistoryToolCall,
   type InteractionSender
 } from "@arden-hq/protocol/chat"
-import type { MobileConversation, MobileConversationItem } from "@arden-hq/protocol/mobile"
+import {
+  MOBILE_CHAT_LINK,
+  type MobileChatLink,
+  type MobileConversation,
+  type MobileConversationItem
+} from "@arden-hq/protocol/mobile"
 import type { RunProgress } from "@arden-hq/protocol/runs"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
 import {
@@ -30,7 +35,7 @@ import {
 import type { JsonObject } from "../persistence/json.js"
 import { addLinkKeys, ardenPlace, newLinkKeys, placeHome, type PhoneHome } from "./letter.js"
 
-type Page = Pick<MobileConversation, "items" | "live_row" | "before" | "latest_event_seq">
+type Page = Pick<MobileConversation, "items" | "live" | "before" | "latest_event_seq">
 
 export interface ConversationLookups {
   readonly sessionIds: ReadonlyMap<string, string>
@@ -60,7 +65,7 @@ export function conversationPage({
       const sent = sentItem(call, lookups)
       if (sent === undefined) continue
       const seen = sentTo.get(message.turn_id) ?? new Set<string>()
-      const key = sent.session_id ?? sent.title
+      const key = sent.chat.kind === MOBILE_CHAT_LINK.linked ? sent.chat.session_id : sent.title
       if (seen.has(key)) continue
       seen.add(key)
       sentTo.set(message.turn_id, seen)
@@ -69,11 +74,16 @@ export function conversationPage({
   }
   return {
     items,
-    live_row:
+    live:
       running === undefined
-        ? null
-        : { text: liveText(progress), started_at: running.started_at ?? now },
-    before: history.page.has_more_before ? (history.page.before ?? null) : null,
+        ? { kind: "idle" }
+        : { kind: "running", text: liveText(progress), started_at: running.started_at ?? now },
+    before:
+      history.page.has_more_before &&
+      history.page.before !== undefined &&
+      history.page.before !== null
+        ? { kind: "earlier", cursor: history.page.before }
+        : { kind: "beginning" },
     latest_event_seq: history.runtime.latest_event_seq
   }
 }
@@ -130,12 +140,10 @@ function messageItems(
       {
         kind: "sender",
         id: message.message_id,
-        sender: "automation",
-        name: message.automation.name,
+        sender: { kind: "automation", name: message.automation.name },
         preview: previewMarkup(message.automation.prompt) ?? "",
         body: message.automation.prompt,
         failed: false,
-        session_id: null,
         at
       }
     ]
@@ -146,25 +154,22 @@ function messageItems(
         kind: "handoff",
         id: message.message_id,
         from_session_id: message.from_chat.session_id,
-        from_title: lookups.names.get(message.from_chat.session_id) ?? null,
+        from_title: titleOf(lookups.names.get(message.from_chat.session_id)),
         markdown: phoneLinks(message.content, lookups),
         at
       }
     ]
   }
   if (!isSenderArrival(message) || isCorrespondence(message)) return []
-  const sender = senderOf(message)
   const body = message.content
   return [
     {
       kind: "sender",
       id: message.message_id,
-      sender,
-      name: sender === "workflow" ? null : message.from.name?.trim() || message.from.id,
+      sender: senderOf(message, lookups),
       preview: previewMarkup(message.preview?.trim() || body) ?? "",
       body: phoneLinks(body, lookups),
       failed: failed(message),
-      session_id: sender === "agent" ? (lookups.sessionIds.get(message.from.id) ?? null) : null,
       at
     }
   ]
@@ -177,25 +182,44 @@ function userItem(message: HistoryMessage): MobileConversationItem {
   return {
     kind: "user",
     id: message.message_id,
-    client_id: message.client_id ?? null,
+    client:
+      message.client_id === undefined
+        ? { kind: "untracked" }
+        : { kind: "tracked", client_id: message.client_id },
     text: sent.text,
     photos: message.role === ROLE.user ? (message.images?.length ?? 0) : 0,
     files: sent.files.map((file) => file.name),
     reply_to:
       quoted === undefined
-        ? null
+        ? { kind: "fresh" }
         : {
+            kind: "quote",
             role: quoted.role,
             text: previewLine(withFileNames(quoted.content)) ?? quoted.content
           },
-    sent_from: message.sent_from ?? null
+    sent_from:
+      message.sent_from === undefined
+        ? { kind: "typed" }
+        : { kind: "surface", surface: message.sent_from }
   }
 }
 
-const senderOf = (sender: InteractionSender): "agent" | "workflow" | "command" => {
-  if (isCommandArrival(sender)) return "command"
-  return sender.from.source === INTERACTION_SOURCE.workflow ? "workflow" : "agent"
+type SenderRow = Extract<MobileConversationItem, { readonly kind: "sender" }>["sender"]
+
+const senderOf = (sender: InteractionSender, lookups: ConversationLookups): SenderRow => {
+  const name = sender.from.name?.trim() || sender.from.id
+  if (isCommandArrival(sender)) return { kind: "command", name }
+  if (sender.from.source === INTERACTION_SOURCE.workflow) return { kind: "workflow" }
+  return { kind: "agent", name, chat: chatLink(lookups.sessionIds.get(sender.from.id)) }
 }
+
+const chatLink = (sessionId: string | undefined): MobileChatLink =>
+  sessionId === undefined
+    ? { kind: MOBILE_CHAT_LINK.unlinked }
+    : { kind: MOBILE_CHAT_LINK.linked, session_id: sessionId }
+
+const titleOf = (title: string | undefined) =>
+  title === undefined ? { kind: "unnamed" as const } : { kind: "named" as const, title }
 
 const failed = (sender: InteractionSender): boolean =>
   sender.kind === INTERACTION_KIND.completion &&
@@ -205,16 +229,22 @@ const failed = (sender: InteractionSender): boolean =>
 function internalWorkMessage(message: HistoryMessage): boolean {
   return isInternalWorkMessage({
     role: message.role,
-    sender: message.role === ROLE.interaction ? message : undefined,
-    communication: message.communication,
-    update: message.update,
-    agentResult: message.agent_result,
-    fromChat:
-      message.from_chat === undefined ? undefined : { sessionRef: message.from_chat.session_ref },
-    forwardedFrom:
-      message.forwarded_from === undefined
-        ? undefined
-        : { messageId: message.forwarded_from.message_id }
+    forwarded: message.forwarded_from !== undefined,
+    carriesWork:
+      message.communication !== undefined ||
+      message.update !== undefined ||
+      message.agent_result !== undefined,
+    sender:
+      message.role === ROLE.interaction
+        ? {
+            kind: "attributed",
+            sender: message,
+            origin:
+              message.from_chat === undefined
+                ? { kind: "direct" }
+                : { kind: "from_chat", sessionRef: message.from_chat.session_ref }
+          }
+        : { kind: "unattributed" }
   })
 }
 
@@ -242,11 +272,11 @@ function sentItem(
 ): (MobileConversationItem & { kind: "sent" }) | undefined {
   const send = sendOf(call)
   if (send === undefined) return undefined
-  const sessionId = lookups.sessionIds.get(send.ref) ?? null
+  const sessionId = lookups.sessionIds.get(send.ref)
   const title =
-    (sessionId === null ? undefined : lookups.names.get(sessionId)) ??
+    (sessionId === undefined ? undefined : lookups.names.get(sessionId)) ??
     (send.title || "another chat")
-  return { kind: "sent", id: call.id, session_id: sessionId, title }
+  return { kind: "sent", id: call.id, chat: chatLink(sessionId), title }
 }
 
 const LINK = /\[([^\]]*)\]\(([^)\s]+)\)/g

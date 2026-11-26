@@ -1,6 +1,6 @@
 import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
 import type { SpaceSummary } from "@arden-hq/protocol/spaces"
-import type { MobileAsk } from "@arden-hq/protocol/mobile"
+import { MOBILE_FILING, type MobileAsk } from "@arden-hq/protocol/mobile"
 import type { SessionListItem } from "@arden-hq/protocol/sessions"
 import { chatName } from "@arden-hq/protocol/views"
 import { Array as Arr, DateTime, Effect } from "effect"
@@ -8,7 +8,7 @@ import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { addressedHomeLetter } from "../../automations/home-letter-links.js"
 import { ChatHistory } from "../../chat/history.js"
 import { ChatHistoryInvalidCursor, ChatSessionNotFound } from "../../chat/history-errors.js"
-import { mobileAsks, type AskPlace } from "../../mobile/asks.js"
+import { filingOf, mobileAsks, type AskPlace } from "../../mobile/asks.js"
 import { conversationLookupKeys, conversationPage } from "../../mobile/conversation.js"
 import { isSpaceHome, looseChats, mobileSpace } from "../../mobile/spaces.js"
 import { letterLookupKeys, mobileLetter, type PhoneHome } from "../../mobile/letter.js"
@@ -141,12 +141,18 @@ export const MobileHandlers = HttpApiBuilder.group(
         asks,
         letter:
           newest === undefined
-            ? null
-            : mobileLetter(newest, {
-                sessionIds: new Map(resolved.flat()),
-                taskPlaces: yield* taskPlaces(taskIds)
-              }),
-        next_at: letters.next_at,
+            ? { kind: "awaiting" as const }
+            : {
+                kind: "written" as const,
+                ...mobileLetter(newest, {
+                  sessionIds: new Map(resolved.flat()),
+                  taskPlaces: yield* taskPlaces(taskIds)
+                })
+              },
+        next:
+          letters.next_at === null
+            ? { kind: "paused" as const }
+            : { kind: "due" as const, at: letters.next_at },
         cursor
       }
     })
@@ -161,7 +167,10 @@ export const MobileHandlers = HttpApiBuilder.group(
           space,
           chats: yield* list({ spaceId: space.key, scope: "primary", limit: SPACE_CHAT_LIMIT }),
           live: live.filter((session) => session.space_id === space.key),
-          asks: asks.filter((ask: MobileAsk) => ask.space_id === space.key)
+          asks: asks.filter(
+            (ask: MobileAsk) =>
+              ask.space.kind === MOBILE_FILING.space && ask.space.space_id === space.key
+          )
         })
       })
       const rows = yield* Effect.forEach(overview.spaces, spaceRow)
@@ -198,7 +207,10 @@ export const MobileHandlers = HttpApiBuilder.group(
       const taskHomes = yield* taskPlaces(keys.taskIds)
       const named = [...new Set([...keys.sessionIds, ...sessionIds.values()])]
       const names = new Map(
-        (yield* chatsById(named)).map((row): [string, string] => [row.session_id, chatName(row)])
+        (yield* chatsById(named)).map((row): [string, string] => [
+          row.session_id,
+          chatName(row.name)
+        ])
       )
       const savedBlocks = new Map<string, Map<number, JsonObject>>()
       for (const saved of yield* answerBlocks.list(sessionId)) {
@@ -211,8 +223,8 @@ export const MobileHandlers = HttpApiBuilder.group(
         spaceId === null ? [] : yield* list({ spaceId, scope: "primary", limit: SPACE_CHAT_LIMIT })
       return {
         session_id: sessionId,
-        title: chatName(session),
-        space_id: spaceId,
+        title: chatName(session.name),
+        space: filingOf(spaceId),
         ...conversationPage({
           history: page,
           progress,
@@ -228,7 +240,7 @@ export const MobileHandlers = HttpApiBuilder.group(
           )
           .map((chat) => ({
             session_id: chat.session_id,
-            title: chatName(chat),
+            title: chatName(chat.name),
             updated_at: chat.last_activity,
             working: chat.is_active === true
           }))

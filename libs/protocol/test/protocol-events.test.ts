@@ -8,7 +8,9 @@ import {
   decodeServerEvent,
   decodeServerEventStream,
   decodeServerEventStreamBuffer,
-  encodeServerEventFrame
+  encodeServerEventFrame,
+  SSE_DECODE_DEFAULTS,
+  sseFrameId
 } from "@arden-hq/protocol"
 import { reasoningStreamEventSchemas, textStreamEventSchemas } from "@arden-hq/protocol/effect/chat"
 import { collect } from "./kit.js"
@@ -49,8 +51,12 @@ it("rejects frame ids that could inject fields and headers that disagree with th
     message_id: "message-1",
     delta: "x"
   }
-  expect(() => encodeServerEventFrame(event, { id: "7\nevent: injected" })).toThrow(ProtocolError)
-  expect(() => encodeServerEventFrame(event, { id: "7\0ignored" })).toThrow(ProtocolError)
+  expect(() => encodeServerEventFrame(event, { id: sseFrameId("7\nevent: injected") })).toThrow(
+    ProtocolError
+  )
+  expect(() => encodeServerEventFrame(event, { id: sseFrameId("7\0ignored") })).toThrow(
+    ProtocolError
+  )
   expect(() =>
     decodeServerEventStreamBuffer(
       'event: TEXT_MESSAGE_START\ndata: {"type":"TEXT_MESSAGE_CONTENT","message_id":"m","delta":"x"}\n\n'
@@ -69,6 +75,7 @@ it("skips an event type this build does not know and keeps the stream open", asy
 
   expect(() =>
     decodeServerEventStreamBuffer('event: RUN_FINISHED\ndata: {"type":"RUN_FINISHED"}\n\n', {
+      ...SSE_DECODE_DEFAULTS,
       onUnknownEvent: () => {
         throw new Error("must not be called")
       }
@@ -123,10 +130,9 @@ it("streams any mix of known and unknown events, split anywhere: known ones arri
         const text = items
           .map((item) =>
             item.known
-              ? encodeServerEventFrame(
-                  item.event,
-                  item.event.seq === undefined ? {} : { id: String(item.event.seq) }
-                )
+              ? encodeServerEventFrame(item.event, {
+                  id: sseFrameId(item.event.seq === undefined ? undefined : String(item.event.seq))
+                })
               : `${item.id === undefined ? "" : `id: ${item.id}\n`}event: ${item.type}\ndata: ${JSON.stringify({ ...item.payload, type: item.type })}\n\n`
           )
           .join("")
@@ -143,7 +149,7 @@ it("streams any mix of known and unknown events, split anywhere: known ones arri
             (async function* () {
               yield* chunks
             })(),
-            { onUnknownEvent: (frame) => dropped.push(frame) }
+            { ...SSE_DECODE_DEFAULTS, onUnknownEvent: (frame) => dropped.push(frame) }
           )
         )
         let lastId: string | undefined
@@ -152,7 +158,7 @@ it("streams any mix of known and unknown events, split anywhere: known ones arri
         for (const item of items) {
           const id = item.known ? item.event.seq : item.id
           if (id !== undefined) lastId = String(id)
-          const withId = lastId === undefined ? {} : { id: lastId }
+          const withId = { id: sseFrameId(lastId) }
           if (item.known) expected.push({ ...withId, event: item.event.type, data: item.event })
           else expectedDropped.push({ ...withId, event: item.type, type: item.type })
         }

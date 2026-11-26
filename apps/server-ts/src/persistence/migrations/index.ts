@@ -188,6 +188,8 @@ import { runtimeRecordRun } from "./0187_runtime_record_run.js"
 import { toolCallParents } from "./0188_tool_call_parents.js"
 import { streamRecords } from "./0189_stream_records.js"
 import { spaceJobKeys } from "./0190_space_job_keys.js"
+import { workflowErrorStates } from "./0191_workflow_error_states.js"
+import { computerStepStates } from "./0192_computer_step_states.js"
 
 /**
  * How a migration keeps every reference whole. A whole-database check reads
@@ -407,7 +409,9 @@ export const migrations: ReadonlyArray<Migration> = [
   runtimeRecordRun,
   toolCallParents,
   streamRecords,
-  spaceJobKeys
+  spaceJobKeys,
+  workflowErrorStates,
+  computerStepStates
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

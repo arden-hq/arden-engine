@@ -2,10 +2,13 @@ import { Effect, Schema } from "effect"
 import { strict } from "../common/boundary.js"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema } from "../common/schema.js"
 
-/**
- * The Mac's side of the iPhone companion, for Settings: the relay connection,
- * pairing, and the paired phones. Absence is `null`.
- */
+export const RELAY_PRESENCE = { online: "online", offline: "offline", unseen: "unseen" } as const
+export const RELAY_PAIR_REQUEST = { none: "none", waiting: "waiting" } as const
+export const RELAY_SETTING = {
+  enabled: "enabled",
+  relay_url: "relay_url",
+  keep_awake: "keep_awake"
+} as const
 
 const Dev = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{22}$/))
 
@@ -13,18 +16,25 @@ export const RelayDeviceSchema = Schema.Struct({
   dev: Dev,
   name: Schema.String,
   added_at: IsoDateTimeStringSchema,
-  /** While `online` this is now. */
-  last_seen_at: Schema.NullOr(IsoDateTimeStringSchema),
-  online: Schema.Boolean
+  presence: Schema.Union([
+    Schema.Struct({ state: Schema.Literal(RELAY_PRESENCE.online) }),
+    Schema.Struct({
+      state: Schema.Literal(RELAY_PRESENCE.offline),
+      last_seen_at: IsoDateTimeStringSchema
+    }),
+    Schema.Struct({ state: Schema.Literal(RELAY_PRESENCE.unseen) })
+  ])
 })
 
-/** A phone that scanned the code and waits for this Mac to allow it. Both
- *  screens show `code`. */
-export const RelayPairRequestSchema = Schema.Struct({
-  dev: Dev,
-  name: Schema.String,
-  code: Schema.String.check(Schema.isPattern(/^\d{6}$/))
-})
+export const RelayPairRequestSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(RELAY_PAIR_REQUEST.none) }),
+  Schema.Struct({
+    kind: Schema.Literal(RELAY_PAIR_REQUEST.waiting),
+    dev: Dev,
+    name: Schema.String,
+    code: Schema.String.check(Schema.isPattern(/^\d{6}$/))
+  })
+])
 
 /**
  * `off` — turned off in settings; `unavailable` — this Mac has no secure
@@ -46,7 +56,7 @@ export const RelayStatusSchema = Schema.Struct({
   keep_awake: Schema.Boolean,
   /** Runs the Mac is kept awake for now; 0 when it is not held awake. */
   keeping_awake: NonNegativeIntSchema,
-  pair_request: Schema.NullOr(RelayPairRequestSchema),
+  pair_request: RelayPairRequestSchema,
   devices: Schema.Array(RelayDeviceSchema)
 })
 
@@ -61,11 +71,14 @@ export const RelayPairDecisionSchema = Schema.Struct({
   allow: Schema.Boolean
 })
 
-export const RelaySettingsPatchSchema = Schema.Struct({
-  enabled: Schema.optionalKey(Schema.Boolean),
-  relay_url: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^wss?:\/\/\S+$/))),
-  keep_awake: Schema.optionalKey(Schema.Boolean)
-})
+export const RelaySettingsPatchSchema = Schema.Union([
+  Schema.Struct({ setting: Schema.Literal(RELAY_SETTING.enabled), enabled: Schema.Boolean }),
+  Schema.Struct({
+    setting: Schema.Literal(RELAY_SETTING.relay_url),
+    relay_url: Schema.String.check(Schema.isPattern(/^wss?:\/\/\S+$/))
+  }),
+  Schema.Struct({ setting: Schema.Literal(RELAY_SETTING.keep_awake), keep_awake: Schema.Boolean })
+])
 
 export const encodeRelayPairDecisionEffect = (
   value: unknown

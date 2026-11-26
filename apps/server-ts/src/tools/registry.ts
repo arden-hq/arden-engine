@@ -199,11 +199,7 @@ const policy = (metadata: ServerToolMetadata): ToolPolicy => ({
   action: metadata.action,
   scope: metadata.policy_scope,
   requiresApproval: metadata.default_approval === "ask",
-  permissions: metadata.permissions,
-  concurrencyGroup: metadata.concurrency_group,
-  destructive: metadata.destructive,
-  openWorld: metadata.open_world,
-  idempotent: metadata.idempotent
+  permissions: metadata.permissions
 })
 
 const catalogEntry = (tool: ServerTool, description: string): ToolCatalogEntry => ({
@@ -214,7 +210,7 @@ const catalogEntry = (tool: ServerTool, description: string): ToolCatalogEntry =
   source: tool.meta.source,
   effectivePolicy: policy(tool.meta),
   defaultApproval: tool.meta.default_approval,
-  display: tool.meta.display ?? {}
+  display: tool.meta.display ?? []
 })
 
 export interface RuleNames {

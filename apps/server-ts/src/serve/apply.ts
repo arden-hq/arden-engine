@@ -1,6 +1,18 @@
 import { parseJsonBody } from "@arden-hq/protocol/common"
-import { mcpDecoders, mcpRequests, mcpRoutes } from "@arden-hq/protocol/mcp"
-import { permissionDecoders, permissionRoutes } from "@arden-hq/protocol/permissions"
+import {
+  MCP_DIAGNOSTICS,
+  MCP_FOLDER,
+  MCP_SERVER_DETAIL,
+  mcpDecoders,
+  mcpRequests,
+  mcpRoutes,
+  type McpServer
+} from "@arden-hq/protocol/mcp"
+import {
+  PERMISSION_TOOL_OWNER,
+  permissionDecoders,
+  permissionRoutes
+} from "@arden-hq/protocol/permissions"
 import {
   DEFAULT_INTELLIGENCE_SETTINGS,
   intelligenceSettingsRequests
@@ -90,6 +102,11 @@ const MCP_CONNECT_TIMEOUT_MS = 60_000
  * Model, step limit, Memory, Skills and the sandbox are start options instead
  * (`serverOptionsFor`).
  */
+const failureText = (server: McpServer): string => {
+  if (server.diagnostics.kind === MCP_DIAGNOSTICS.captured) return server.diagnostics.text
+  return server.detail.kind === MCP_SERVER_DETAIL.shown ? server.detail.text : "null"
+}
+
 export const applySettings = async ({
   request,
   settings,
@@ -118,7 +135,7 @@ export const applySettings = async ({
       subject.kind === "tool"
         ? entry.subject.kind === "tool" &&
           entry.subject.tool === subject.tool &&
-          entry.subject.server === null
+          entry.subject.owner.kind === PERMISSION_TOOL_OWNER.arden
         : entry.subject.kind === "path" &&
           entry.subject.path === subject.path &&
           entry.subject.access === subject.access
@@ -187,7 +204,10 @@ export const applySettings = async ({
           command: server.command,
           args: server.args,
           environment: { set, retain: [] },
-          ...(server.cwd === undefined ? {} : { cwd: server.cwd })
+          cwd:
+            server.cwd === undefined
+              ? { kind: MCP_FOLDER.keep }
+              : { kind: MCP_FOLDER.folder, path: server.cwd }
         }
       })
     )
@@ -202,9 +222,7 @@ export const applySettings = async ({
         .servers.filter((server) => wanted.has(server.name))
       const failed = servers.find((server) => server.status === "failed")
       if (failed !== undefined)
-        throw new SettingsError(
-          `MCP server ${failed.name} failed: ${failed.diagnostics ?? failed.detail}`
-        )
+        throw new SettingsError(`MCP server ${failed.name} failed: ${failureText(failed)}`)
       if (
         servers.length === wanted.size &&
         servers.every((server) => server.status === "connected")

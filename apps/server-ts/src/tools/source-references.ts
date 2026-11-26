@@ -1,6 +1,13 @@
 import { DateTime, Effect, Schema } from "effect"
 import { accountReadyFor } from "@arden-hq/protocol/google"
-import type { SourceMetadata, SourceMetadataInput } from "@arden-hq/protocol/source-titles"
+import {
+  SOURCE_DATE,
+  SOURCE_INPUT,
+  SOURCE_LINK,
+  type SourceLink,
+  type SourceMetadata,
+  type SourceMetadataInput
+} from "@arden-hq/protocol/source-titles"
 import { publicWebUrl } from "@arden-hq/std/url"
 import type { GoogleToolConnections } from "./google-accounts.js"
 import { googleCall, decodeGoogle } from "./google-request.js"
@@ -16,6 +23,11 @@ import { automationResource } from "./automation-records.js"
 import { chatTarget } from "./call-receipt.js"
 import { makeSourceTitles } from "./source-titles.js"
 import { currentMillis } from "../runtime/clock.js"
+
+const unlinked: SourceLink = { kind: SOURCE_LINK.unlinked }
+const undated = { kind: SOURCE_DATE.undated } as const
+const linkTo = (href: string | null | undefined): SourceLink =>
+  href === null || href === undefined ? unlinked : { kind: SOURCE_LINK.linked, href }
 
 const DriveMetadata = decodeGoogle(
   Schema.Struct({
@@ -46,16 +58,18 @@ export function makeSourceReferences({
   const pending = new Map<string, Promise<SourceMetadata>>()
   const active = new Set<Promise<SourceMetadata>>()
   const readOne = async (input: SourceMetadataInput): Promise<SourceMetadata> => {
-    const web = publicWebUrl(input.href ?? input.ref)
+    const place = input.type === SOURCE_INPUT.place ? input : undefined
+    const href = place?.link.kind === SOURCE_LINK.linked ? place.link.href : undefined
+    const web = publicWebUrl(href ?? input.ref)
     const gmailKind = gmailRefKind(input.ref)
     const mailKind = gmailKind ?? GMAIL_REF_KIND.message
-    let provider = input.provider
+    let provider = place?.provider
     if (provider === undefined) {
       if (gmailKind !== undefined) provider = "gmail"
       else if (web.kind === "ok") provider = "web"
       else provider = "unknown"
     }
-    let kind = input.kind
+    let kind = place?.kind
     if (kind === undefined) {
       if (provider === "gmail") kind = mailKind
       else kind = web.kind === "ok" ? "web_page" : "reference"
@@ -64,12 +78,13 @@ export function makeSourceReferences({
     const unavailable = (
       reason: "not_connected" | "not_found" | "unsupported" | "unavailable" | "unnamed"
     ): SourceMetadata => ({ ...identity, status: "unavailable", reason })
-    if (input.title?.trim() && provider !== "web")
+    if (place?.title.trim() && provider !== "web")
       return {
         ...identity,
         status: "resolved",
-        title: input.title,
-        href: input.href ?? null
+        title: place.title,
+        date: undated,
+        link: place.link
       }
     const drive =
       provider === "google_drive" ||
@@ -125,12 +140,13 @@ export function makeSourceReferences({
           if (!automations) return unavailable("unsupported")
           const automation = await Effect.runPromise(automations.get(AutomationId.make(input.ref)))
           if (!automation) return unavailable("not_found")
-          const href =
+          const link = linkTo(
             automation.automation_ref === undefined
               ? null
-              : (automationResource({ ...automation, automation_ref: automation.automation_ref })
-                  .href ?? null)
-          return { ...identity, status: "resolved", title: automation.name, href }
+              : automationResource({ ...automation, automation_ref: automation.automation_ref })
+                  .href
+          )
+          return { ...identity, status: "resolved", title: automation.name, date: undated, link }
         }
         if (provider === "arden" && kind === "run") {
           if (!runs || !sessions) return unavailable("unsupported")
@@ -138,14 +154,15 @@ export function makeSourceReferences({
           if (!run) return unavailable("not_found")
           const session = await Effect.runPromise(sessions.loadHistoryHeader(run.sessionId))
           const title = session?.name ?? "Run"
-          const href =
+          const link = linkTo(
             session === null ? null : chatTarget({ ...session, turnId: run.turnId }, title).href
+          )
           return {
             ...identity,
             status: "resolved",
             title,
-            at: DateTime.formatIso(run.startedAt),
-            href
+            date: { kind: SOURCE_DATE.dated, at: DateTime.formatIso(run.startedAt) },
+            link
           }
         }
         if (provider === "gmail") {
@@ -177,11 +194,17 @@ export function makeSourceReferences({
             receivedAt: messageDate(item.internalDate),
             use: "found"
           })
-          return { ...identity, status: "resolved", title: source.title, href: source.href }
+          return {
+            ...identity,
+            status: "resolved",
+            title: source.title,
+            date: undated,
+            link: linkTo(source.href)
+          }
         }
         if (drive && accountKey === "") {
           if (web.kind !== "ok") return unavailable("not_connected")
-          const title = await titles.read({ url: web.url.href, title: input.title ?? "" })
+          const title = await titles.read({ url: web.url.href, title: place?.title ?? "" })
           if (title === null) return unavailable("not_connected")
           return {
             ...identity,
@@ -189,7 +212,8 @@ export function makeSourceReferences({
             kind: "document",
             status: "resolved",
             title,
-            href: input.ref
+            date: undated,
+            link: linkTo(input.ref)
           }
         }
         if (drive) {
@@ -209,14 +233,21 @@ export function makeSourceReferences({
             kind: "document",
             status: "resolved",
             title: file.name,
-            href: web.kind === "ok" ? input.ref : (file.webViewLink ?? null)
+            date: undated,
+            link: linkTo(web.kind === "ok" ? input.ref : file.webViewLink)
           }
         }
         if (web.kind !== "ok") return unavailable("unsupported")
-        const title = await titles.read({ url: web.url.href, title: input.title ?? "" })
+        const title = await titles.read({ url: web.url.href, title: place?.title ?? "" })
         return title === null
           ? unavailable("unnamed")
-          : { ...identity, status: "resolved", title, href: input.href ?? input.ref }
+          : {
+              ...identity,
+              status: "resolved",
+              title,
+              date: undated,
+              link: linkTo(href ?? input.ref)
+            }
       } catch {
         return unavailable("unavailable")
       }

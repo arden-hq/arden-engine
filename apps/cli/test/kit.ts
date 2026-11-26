@@ -14,16 +14,12 @@ export const catalogEntry = (name: string, display: ToolDisplay): ToolCatalogEnt
   displayName: name,
   description: "",
   kind: "tool",
-  source: null,
+  source: "arden",
   effectivePolicy: {
     action: "read",
     scope: "external",
     requiresApproval: true,
-    permissions: [],
-    concurrencyGroup: null,
-    destructive: null,
-    openWorld: null,
-    idempotent: null
+    permissions: []
   },
   defaultApproval: "ask",
   display
@@ -158,7 +154,7 @@ export const defaultClient = (): CliClient => ({
   deleteSession: async () => undefined,
   answerApproval: async () => undefined,
   answerConnection: async () => undefined,
-  toolCatalog: async () => ({ tools: [catalogEntry("write_file", {})], unlisted: {} }),
+  toolCatalog: async () => ({ tools: [catalogEntry("write_file", [])], unlisted: {} }),
   answerQuestion: async () => {
     throw new Error("answerQuestion is not stubbed")
   },

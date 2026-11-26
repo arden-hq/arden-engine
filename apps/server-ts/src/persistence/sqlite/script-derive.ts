@@ -1,5 +1,10 @@
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-import type { WorkflowEffectDisposition, WorkflowSourceRef } from "@arden-hq/protocol/workflows"
+import {
+  WORKFLOW_PREVIEW,
+  type WorkflowEffectDisposition,
+  type WorkflowError,
+  type WorkflowSourceRef
+} from "@arden-hq/protocol/workflows"
 import type { Schema } from "effect"
 
 import { scriptResultText } from "../workflows/script-identity.js"
@@ -173,7 +178,7 @@ export interface ScriptResultInput {
   readonly originRunId: string
   readonly status: ScriptResultPayload["status"]
   readonly value: Schema.Json
-  readonly error: { readonly message: string; readonly preview?: string } | null
+  readonly error: WorkflowError | null
   readonly sourceRefs: ReadonlyArray<WorkflowSourceRef>
 }
 
@@ -195,7 +200,7 @@ export const scriptResultRow = (input: ScriptResultInput): ScriptResultRow => ({
     workflowRef: input.workflowRef,
     attempt: input.attempt,
     status: input.status,
-    preview: input.error?.preview ?? null,
+    preview: input.error?.preview.kind === WORKFLOW_PREVIEW.line ? input.error.preview.text : null,
     sourceRefs: boundedSourceRefs(input.sourceRefs)
   },
   inboxKey: `failure:workflow:${input.workflowRef}:${input.attempt}`

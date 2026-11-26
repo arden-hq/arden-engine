@@ -256,7 +256,7 @@ export const makeCalendarTools = ({
       metadata: {
         effect: "external",
         display_name: "Create Calendar Event",
-        display: { card: "calendar" },
+        display: [{ fact: "card", value: "calendar" }],
         kind: "tool",
         action: "write",
         approval_preview: "Create this Calendar event.",
@@ -387,7 +387,7 @@ export const makeCalendarTools = ({
       metadata: {
         effect: "external",
         display_name: "Edit Calendar Event",
-        display: { card: "calendar" },
+        display: [{ fact: "card", value: "calendar" }],
         kind: "tool",
         action: "write",
         approval_preview: "Edit this Calendar event.",
@@ -533,7 +533,7 @@ export const makeCalendarTools = ({
       metadata: {
         effect: "external",
         display_name: "Delete Calendar Event",
-        display: { card: "calendar" },
+        display: [{ fact: "card", value: "calendar" }],
         kind: "tool",
         action: "write",
         approval_preview: "Delete this Calendar event.",
@@ -600,7 +600,7 @@ export const makeCalendarTools = ({
       metadata: {
         effect: "external",
         display_name: "Answer Calendar Invitation",
-        display: { card: "calendar" },
+        display: [{ fact: "card", value: "calendar" }],
         kind: "tool",
         action: "write",
         approval_preview: "Answer this Calendar invitation.",

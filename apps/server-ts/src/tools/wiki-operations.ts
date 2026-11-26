@@ -462,7 +462,7 @@ const makeWikiOperationTools = ({
       `${STANDING_LIMIT_NOTE} Asks by default, except in Memory runs.`,
     parameters: Schema.toStandardSchemaV1(PatchParametersSchema),
     metadata: {
-      display: { card: "page_patch" },
+      display: [{ fact: "card", value: "page_patch" }],
       effect: "arden_db",
       display_name: "Patch Wiki Page",
       kind: "tool",

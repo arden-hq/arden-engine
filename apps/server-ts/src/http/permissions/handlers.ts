@@ -49,10 +49,7 @@ export const PermissionHandlers = HttpApiBuilder.group(
       )
       .handle("setSession", ({ params, payload }) =>
         policy
-          .setSession({
-            sessionId: params.sessionId,
-            ...(payload.approval_mode === undefined ? {} : { mode: payload.approval_mode })
-          })
+          .setSession({ sessionId: params.sessionId, mode: payload.approval_mode })
           .pipe(Effect.catch(failStore))
       )
       .handle("defaultMode", () =>
@@ -135,7 +132,7 @@ export const PermissionHandlers = HttpApiBuilder.group(
             decision: payload.decision,
             rules: kept.map((rule) => ({ subject: rule.subject, decision: rule.decision })),
             source: { kind: "settings" },
-            ...(payload.replaces === undefined ? {} : { replaces: payload.replaces })
+            replaces: payload.replaces
           })
           return yield* listed(pageOf(list))
         }).pipe(Effect.catch(failStore))

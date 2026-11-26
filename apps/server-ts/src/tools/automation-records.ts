@@ -4,6 +4,11 @@ import { Effect } from "effect"
 import type { AutomationCatalog } from "../persistence/automations/catalog.js"
 import type { AutomationStoreError } from "../persistence/automations/store.js"
 import type { MakeMutationReceiptInput } from "../persistence/tools/mutation-receipt.js"
+import type {
+  SessionListEntry,
+  SessionStore,
+  SessionStoreError
+} from "../persistence/sessions/store.js"
 import { toolFailure } from "./tool-failure.js"
 
 const failurePreview = (error: AutomationStoreError): string => {
@@ -88,3 +93,22 @@ export const deletedAutomationResource = (
         beforeVersion: String(lastVersion),
         afterVersion: "absent"
       }
+
+const sessionStoreFailure = (error: SessionStoreError): ToolExecutionError =>
+  toolFailure(error, "Chat unavailable")
+
+export const resolveChatRef = async (
+  store: SessionStore["Service"],
+  sessionRef: string,
+  signal: AbortSignal
+): Promise<SessionListEntry> => {
+  const [session] = await Effect.runPromise(
+    store.list({ sessionRef, scope: "all", limit: 1 }).pipe(Effect.mapError(sessionStoreFailure)),
+    { signal }
+  )
+  if (session !== undefined) return session
+  throw new ToolExecutionError(`No active Chat ${sessionRef}`, {
+    preview: "Chat not found",
+    retryable: false
+  })
+}

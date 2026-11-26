@@ -100,6 +100,7 @@ describe("HeadlessClient", () => {
       fetch: async () =>
         Response.json({
           models: ["gemma-4", "qwen3"],
+          names: { "gemma-4": "gemma-4", qwen3: "qwen3" },
           groups: [{ provider: "llama.cpp", label: "llama.cpp", models: ["gemma-4", "qwen3"] }],
           reasoning_efforts: { "gemma-4": ["none", "medium"] }
         })

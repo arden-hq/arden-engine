@@ -180,7 +180,10 @@ export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<Serve
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(WriteParametersSchema),
     metadata: {
-      display: { card: "file_change", result: "applied_edit" },
+      display: [
+        { fact: "card", value: "file_change" },
+        { fact: "result", value: "applied_edit" }
+      ],
       effect: "local_files",
       local_target: { arg: "path", kind: "file" },
       display_name: "Write File",
@@ -298,7 +301,10 @@ export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<Serve
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EditParametersSchema),
     metadata: {
-      display: { card: "file_change", result: "applied_edit" },
+      display: [
+        { fact: "card", value: "file_change" },
+        { fact: "result", value: "applied_edit" }
+      ],
       effect: "local_files",
       local_target: { arg: "path", kind: "file" },
       display_name: "Edit File",

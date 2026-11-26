@@ -1,28 +1,36 @@
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
-import type { AgentResult, InteractionSender } from "../chat/history.js"
-import type { ChatUpdate, CommunicationEnvelope } from "../chat/communication.js"
+import type { InteractionSender } from "../chat/history.js"
 
-/** Stored work input remains available to the main agent, never published as its answer. */
-export function isInternalWorkMessage(message: {
+export interface WorkMessageFacts {
   readonly role: string
-  readonly sender?: InteractionSender | undefined
-  readonly communication?: CommunicationEnvelope | undefined
-  readonly update?: ChatUpdate | undefined
-  readonly agentResult?: AgentResult | undefined
-  readonly fromChat?: { readonly sessionRef: string } | undefined
-  readonly forwardedFrom?: { readonly messageId: string } | undefined
-}): boolean {
-  if (message.role !== ROLE.interaction || message.forwardedFrom !== undefined) return false
-  if (
-    message.communication !== undefined ||
-    message.update !== undefined ||
-    message.agentResult !== undefined
-  )
-    return true
-  const sender = message.sender
-  if (sender?.from.source !== INTERACTION_SOURCE.agent) return false
+  readonly forwarded: boolean
+  readonly carriesWork: boolean
+  readonly sender: WorkMessageSender
+}
+
+export const WORK_MESSAGE_SENDER = {
+  unattributed: "unattributed",
+  attributed: "attributed"
+} as const
+
+export const CHAT_ORIGIN = { direct: "direct", fromChat: "from_chat" } as const
+
+export type WorkMessageSender =
+  | { readonly kind: "unattributed" }
+  | { readonly kind: "attributed"; readonly sender: InteractionSender; readonly origin: ChatOrigin }
+
+export type ChatOrigin =
+  | { readonly kind: "direct" }
+  | { readonly kind: "from_chat"; readonly sessionRef: string }
+
+export function isInternalWorkMessage(message: WorkMessageFacts): boolean {
+  if (message.role !== ROLE.interaction || message.forwarded) return false
+  if (message.carriesWork) return true
+  if (message.sender.kind === WORK_MESSAGE_SENDER.unattributed) return false
+  const { sender, origin } = message.sender
+  if (sender.from.source !== INTERACTION_SOURCE.agent) return false
   if (sender.kind === INTERACTION_KIND.completion) return true
-  if (message.fromChat?.sessionRef === sender.from.id) return false
+  if (origin.kind === CHAT_ORIGIN.fromChat && origin.sessionRef === sender.from.id) return false
   return sender.kind === INTERACTION_KIND.message
 }
 
@@ -47,7 +55,7 @@ export function isSenderArrival(sender: InteractionSender | undefined): boolean 
  * alone says nothing about direction: child and sibling updates use it too. */
 export function isAgentInstruction(
   sender: InteractionSender | undefined,
-  { parentSessionRef }: { readonly parentSessionRef?: string | undefined } = {}
+  parentSessionRef: string | undefined
 ): boolean {
   return (
     sender?.from.source === INTERACTION_SOURCE.agent &&

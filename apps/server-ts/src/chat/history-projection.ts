@@ -406,10 +406,7 @@ const projectMessage = (
     record.role === ROLE.interaction
       ? (Option.getOrUndefined(
           Schema.decodeUnknownOption(ChatHandoffSourceSchema)(envelope.from_chat)
-        ) ??
-        (isAgentInstruction(sender, { parentSessionRef: parentSource?.session_ref })
-          ? parentSource
-          : undefined))
+        ) ?? (isAgentInstruction(sender, parentSource?.session_ref) ? parentSource : undefined))
       : undefined
   const forwardedFrom =
     record.role === ROLE.user || record.role === ROLE.interaction
