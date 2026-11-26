@@ -12,6 +12,7 @@ const LegacyForkSchema = Schema.Struct({
 
 export const sessionForkOriginBackfill: Backfill = {
   name: "session_fork_origin",
+  landed: "2026-11-09",
   chunk: Effect.fn("SessionForkOrigin.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{

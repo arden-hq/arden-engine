@@ -5,6 +5,7 @@ import { userAutomationSql } from "./authority-sql.js"
 
 export const spaceHistoryBackfill: Backfill = {
   name: "space_revisions_baseline_v2",
+  landed: "2026-11-09",
   chunk: Effect.fn("ContextHistory.spaceBaseline")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const now = DateTime.formatIso(yield* DateTime.now)
@@ -33,6 +34,7 @@ export const spaceHistoryBackfill: Backfill = {
 
 export const sessionHistoryBackfill: Backfill = {
   name: "session_revisions_baseline_v2",
+  landed: "2026-11-09",
   chunk: Effect.fn("ContextHistory.sessionBaseline")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const now = DateTime.formatIso(yield* DateTime.now)
@@ -63,6 +65,7 @@ export const sessionHistoryBackfill: Backfill = {
 
 export const automationHistoryBackfill: Backfill = {
   name: "automation_configuration_revisions_baseline",
+  landed: "2026-11-09",
   chunk: Effect.fn("ContextHistory.automationBaseline")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const now = DateTime.formatIso(yield* DateTime.now)

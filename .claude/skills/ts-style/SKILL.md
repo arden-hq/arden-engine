@@ -64,11 +64,10 @@ const Status = { Open: "open", Closed: "closed" } as const
 type Status = (typeof Status)[keyof typeof Status] // "open" | "closed"
 ```
 
-A boolean flag that will ever grow a third state becomes a literal-union field, with a doc comment stating what each value means:
+A boolean flag that will ever grow a third state becomes a literal-union field whose value names say what each means:
 
 ```ts
 // zod schemas.ts — undefined is the base state, each rung documented
-/** undefined — required; "optional" — may be omitted; "defaulted" — omitted AND substituted. */
 optin?: "optional" | "defaulted" | undefined
 ```
 
@@ -84,7 +83,7 @@ Constrain payloads that cross a serialization boundary (persistence, IPC, wire, 
 
 ## Exhaustiveness
 
-A literal-to-literal mapping (error-reason translation, label lookup) is an exhaustive `switch`, never an if-chain. On a closed union, omit `default` so the compiler flags new members; group identity cases with fallthrough. If most branches are identity, a doc comment says why the exceptions exist.
+A literal-to-literal mapping (error-reason translation, label lookup) is an exhaustive `switch`, never an if-chain. On a closed union, omit `default` so the compiler flags new members; group identity cases with fallthrough.
 
 ```ts
 // One real mapping, compiler-checked — adding a StoreError reason breaks this switch
@@ -167,7 +166,7 @@ function setDefault<T>(values: T[], fallback: NoInfer<T>): void
 type ChatId = string & { readonly __brand: "ChatId" }
 ```
 
-A non-obvious type-level trick gets a comment naming the failure it works around (XState links the TypeScript issue number above each one).
+A non-obvious type-level trick names the failure it works around, with the TypeScript issue number, in the commit message.
 
 ## Errors
 
@@ -250,7 +249,7 @@ Never alias or star-import; import a module's own exported namespace by name if 
 - Co-locate a type with the code that uses it; promote to a shared file only at the smallest scope that actually imports it. A global `types.ts` dumping ground is forbidden.
 - Cap modules around ~500 lines (hard stop ~800, tests excluded): past that, new functionality goes in a new module, and extractions take their tests along. Keep high-traffic orchestration files orchestration-only.
 - Resist adding concepts to the biggest package (`apps/server-ts`) by default — check whether an existing lib fits or a new one is due; that pressure is why `@arden-hq/loop`, `@arden-hq/jobs`, `@arden-hq/journal` exist.
-- Comment non-obvious constraints and surprising behavior only — never what the next line does or why a change is correct.
+- No comments in code: the reason goes in the commit message or the PR. Lint enforces it (`arden/no-comments`).
 
 ## Testing
 

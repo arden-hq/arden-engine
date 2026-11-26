@@ -39,12 +39,23 @@ check:
     bun run check:tells
     bun run check:decision-words
     bun run check:recipes
+    node tooling/markdown-places.mjs
     bun run lint
     bun run format:check
     bun run knip
     bun run depcruise
     just test
     just speed
+
+# Lower the checked-in baselines to the current counts (never raises one). --seed counts from scratch.
+[positional-arguments]
+ratchet *args:
+    node tooling/ratchet.mjs "$@"
+    bun run lint
+
+# Run the CI checks before every git push from this clone: baselines may not rise, then just check.
+hooks:
+    git config core.hooksPath .githooks
 
 # Run every test suite.
 test:

@@ -83,6 +83,7 @@ const legacyOutcomeSql = (sql: SqlClient.SqlClient, run: Statement.Fragment) => 
 
 export const runOutcomeBackfill: Backfill = {
   name: "run_outcome",
+  landed: "2026-11-09",
   chunk: Effect.fn("AutomationRunOutcome.backfill")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{ readonly id: number }>`SELECT id FROM automation_runs

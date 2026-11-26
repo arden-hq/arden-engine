@@ -33,6 +33,7 @@ const cursorOf = (kind: "run" | "deferred", rowid: number): string =>
 
 export const pendingDecisionVisibilityBackfill: Backfill = {
   name: "pending_decision_visibility_v2",
+  landed: "2026-11-09",
   chunk: Effect.fn("PendingDecisionVisibility.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const deferred = cursor?.startsWith("d:") === true

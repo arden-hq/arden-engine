@@ -13,6 +13,7 @@ export const messageTurnIdSql = (sql: SqlClient.SqlClient, table: string) =>
 
 export const messageTurnIdsBackfill: Backfill = {
   name: MESSAGE_TURN_IDS_BACKFILL,
+  landed: "2026-11-09",
   chunk: Effect.fn("MessageTurns.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{ readonly message_rowid: number }>`

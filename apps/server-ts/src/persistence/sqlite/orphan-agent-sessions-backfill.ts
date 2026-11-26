@@ -12,6 +12,7 @@ const orphanAgent = `session_type = 'agent' AND NOT EXISTS (
 
 export const orphanAgentSessionsBackfill: Backfill<unknown, BackfillContext> = {
   name: "orphan_agent_sessions",
+  landed: "2026-11-09",
   chunk: Effect.fn("OrphanAgentSessions.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const sessionEvents = yield* SessionLifecycleEvents

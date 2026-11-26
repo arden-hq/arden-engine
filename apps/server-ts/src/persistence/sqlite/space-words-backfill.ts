@@ -34,6 +34,7 @@ const parseCursor = (
  * migration 0141 converted every other table. */
 export const spaceWordsBackfill: Backfill = {
   name: SPACE_WORDS_BACKFILL,
+  landed: "2026-11-09",
   chunk: Effect.fn("SpaceWords.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const at = parseCursor(cursor)
