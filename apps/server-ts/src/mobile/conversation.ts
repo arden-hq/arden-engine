@@ -1,4 +1,4 @@
-import { RUNTIME_RUN } from "@arden-hq/protocol/chat"
+import { PAGE_BOUNDS, RUNTIME_RUN } from "@arden-hq/protocol/chat"
 import {
   INTERACTION_KIND,
   INTERACTION_OUTCOME,
@@ -24,8 +24,8 @@ import {
   type MobileConversation,
   type MobileConversationItem
 } from "@arden-hq/protocol/mobile"
-import type { RunProgress } from "@arden-hq/protocol/runs"
-import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import { TOOL_TITLE, isActiveRunStatus } from "@arden-hq/protocol/runs"
+import type { RunProgressRecord } from "../persistence/runs/queries.js"
 import {
   isCommandArrival,
   isInternalWorkMessage,
@@ -51,7 +51,7 @@ export function conversationPage({
   lookups = { sessionIds: new Map(), taskPlaces: new Map(), names: new Map() }
 }: {
   readonly history: HistoryResponse
-  readonly progress: RunProgress | undefined
+  readonly progress: RunProgressRecord | undefined
   readonly lookups?: ConversationLookups
 }): Page {
   const active = history.runtime.active_run
@@ -81,10 +81,8 @@ export function conversationPage({
         ? { kind: "idle" }
         : { kind: "running", text: liveText(progress), started_at: running.started_at },
     before:
-      history.page.has_more_before &&
-      history.page.before !== undefined &&
-      history.page.before !== null
-        ? { kind: "earlier", cursor: history.page.before }
+      history.page.has_more_before && history.page.bounds.kind === PAGE_BOUNDS.bounded
+        ? { kind: "earlier", cursor: history.page.bounds.before }
         : { kind: "beginning" },
     latest_event_seq: history.runtime.latest_event_seq
   }
@@ -305,11 +303,14 @@ function phoneLinks(markdown: string, lookups: ConversationLookups): string {
   })
 }
 
-function liveText(progress: RunProgress | undefined): string {
+function liveText(progress: RunProgressRecord | undefined): string {
   const tools = progress?.active_tools ?? []
-  const titled = [...tools]
-    .reverse()
-    .find((tool) => tool.title !== null && tool.title.trim() !== "")
-  if (titled?.title) return titled.title.trim()
+  const titles = tools.flatMap((tool) =>
+    tool.title.kind === TOOL_TITLE.titled && tool.title.title.trim() !== ""
+      ? [tool.title.title]
+      : []
+  )
+  const titled = titles.at(-1)
+  if (titled !== undefined) return titled.trim()
   return tools.length > 0 ? "Working" : "Thinking"
 }

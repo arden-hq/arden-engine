@@ -1,6 +1,7 @@
 import { isPublicActivityTool } from "../views/tool-words.js"
 import type { ChatProjectionEvent } from "./events/stream.js"
 import { RUN_ACTIVITY_TARGET } from "./events/run.js"
+import { TOOL_PARENT } from "./tool-face.js"
 import type { JsonRecord } from "../common/json.js"
 
 export interface RunActivity extends JsonRecord {
@@ -60,7 +61,7 @@ export const reduceRunActivity = (
   }
   if (
     event.type === "TOOL_CALL_START" &&
-    !event.parent_id &&
+    event.parent.kind === TOOL_PARENT.root &&
     event.presentation !== "conversation" &&
     isPublicActivityTool(event.tool_call_name, event.presentation)
   ) {

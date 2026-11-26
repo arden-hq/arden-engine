@@ -15,7 +15,7 @@ import {
   ConnectionAccountSchema
 } from "../approval-fields-schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
-import type { CommonServerEventFields } from "../../common/event-fields.js"
+import type { JsonRecord } from "../../common/json.js"
 import type {
   ApprovalAsked,
   ApprovalAsker,
@@ -27,7 +27,6 @@ import type {
   ConnectionAction,
   ConnectionState
 } from "../runtime.js"
-import type { JsonRecord } from "../../common/json.js"
 import { RuleSavedInSchema, type RuleSavedIn } from "../../runs/questions.js"
 
 /** Persisted with each delivery so historical routing survives later moves. */
@@ -54,7 +53,7 @@ const DecisionRouteSchema = Schema.Struct({
   ] as const)
 })
 
-export interface ApprovalNeededEvent extends CommonServerEventFields {
+export interface ApprovalNeededEvent extends JsonRecord {
   readonly type: "approval_needed"
   readonly tool_id: string
   readonly asked: ApprovalAsked
@@ -72,7 +71,7 @@ export interface ApprovalNeededEvent extends CommonServerEventFields {
   readonly asker: ApprovalAsker
 }
 
-export interface ApprovalResolvedEvent extends CommonServerEventFields {
+export interface ApprovalResolvedEvent extends JsonRecord {
   readonly type: "approval_resolved"
   readonly run_id: string
   readonly tool_id: string
@@ -80,7 +79,7 @@ export interface ApprovalResolvedEvent extends CommonServerEventFields {
   readonly decision_route: DecisionRoute
 }
 
-export interface ConnectionNeededEvent extends CommonServerEventFields {
+export interface ConnectionNeededEvent extends JsonRecord {
   readonly type: "connection_needed"
   readonly run_id: string
   readonly session_id: string
@@ -99,7 +98,7 @@ export interface ConnectionNeededEvent extends CommonServerEventFields {
   readonly decision_route: DecisionRoute
 }
 
-export interface ConnectionResolvedEvent extends CommonServerEventFields {
+export interface ConnectionResolvedEvent extends JsonRecord {
   readonly type: "connection_resolved"
   readonly run_id: string
   readonly tool_id: string

@@ -1,6 +1,6 @@
 import type { HandlerItemRef } from "../automations/handler-item.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
-import type { EventUsage } from "@arden-hq/protocol"
+import type { StoredRunUsage } from "../runs/stored-result.js"
 import type { ToolResult } from "@arden-hq/loop"
 import type {
   CancelInput,
@@ -76,7 +76,7 @@ export interface ChatWriteFinishInput {
   readonly messages: ReadonlyArray<StoredMessageEnvelope>
   readonly result?: RunTerminalResult
   readonly stopReason?: string
-  readonly usage?: EventUsage
+  readonly usage?: StoredRunUsage
   readonly lastInputTokens?: number | null
   readonly terminalTextEnded?: boolean
   readonly supersededMessageIds?: ReadonlyArray<string>

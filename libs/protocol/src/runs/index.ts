@@ -1,6 +1,6 @@
 import { RunProgressSchema } from "./progress.js"
 export type { RunProgress } from "./progress.js"
-export { RUN_PROGRESS_EVENT_TYPES } from "./progress.js"
+export { RUN_PROGRESS_EVENT_TYPES, RUN_PURPOSE, TOOL_TITLE } from "./progress.js"
 import {
   HomePresenceResponseSchema,
   encodeHomePresenceEffect,

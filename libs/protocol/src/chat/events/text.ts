@@ -2,7 +2,7 @@ import { Schema } from "effect"
 import { event } from "../../common/schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { AssistantTextPhase } from "../history.js"
-import type { CommonServerEventFields } from "../../common/event-fields.js"
+import type { JsonRecord } from "../../common/json.js"
 
 export const STREAM_RECORD = { part: "part", unowned: "unowned" } as const
 
@@ -32,27 +32,27 @@ export const messageEnd = (
   content_start: { kind: CONTENT_START.unanchored }
 })
 
-export interface TextMessageStartEvent extends CommonServerEventFields {
+export interface TextMessageStartEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_START"
   readonly message_id: string
   readonly record: StreamRecord
 }
 
 /** Lossy presentation delta. TEXT_MESSAGE_END restates the full text. */
-export interface TextMessageContentEvent extends CommonServerEventFields {
+export interface TextMessageContentEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_CONTENT"
   readonly message_id: string
   readonly delta: string
 }
 
-export interface TextMessageEndEvent extends CommonServerEventFields {
+export interface TextMessageEndEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_END"
   readonly message_id: string
   readonly closure: MessageClosure
   readonly content_start: ContentStart
 }
 
-export interface TextMessagePhaseEvent extends CommonServerEventFields {
+export interface TextMessagePhaseEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_PHASE"
   readonly message_id: string
   readonly phase: AssistantTextPhase

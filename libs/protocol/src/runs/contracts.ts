@@ -1,9 +1,10 @@
-export type { RunApproval } from "./approvals.js"
+export type { RunApproval, RunApprovalConnection, RunApprovalText } from "./approvals.js"
+export { APPROVAL_CONNECTION, APPROVAL_TEXT } from "./approvals.js"
 export type { HomePresenceInput } from "./home.js"
 import type { ChatProjectionEvent } from "../chat/events/stream.js"
+import type { EventUsage } from "../common/event-fields.js"
 import type { JsonRecord, JsonValue } from "../common/json.js"
 import type {
-  PROVIDER_COST,
   LOCAL_INSTRUCTION_STATUS,
   RUN_STOP_REASON,
   RUN_RESULT,
@@ -102,6 +103,7 @@ export type {
 export type { RunApprovalWork, RunOrigin, RunTaskBinding, RunContext } from "./context.js"
 export { RUN_BELONGS_TO, RUN_ORIGIN, RUN_TASK_BINDING } from "./context.js"
 export type { WorkerAttempt, WorkerAttemptPage } from "./attempts.js"
+export { ATTEMPT_END, ATTEMPT_RUN, ATTEMPT_TEXT } from "./attempts.js"
 export type {
   RunQuestion,
   AnswerSaid,
@@ -134,18 +136,9 @@ export type {
   WorkerAttemptPageOptions
 } from "./list-options.js"
 
-export type ProviderCost =
-  | { readonly kind: typeof PROVIDER_COST.unreported }
-  | { readonly kind: typeof PROVIDER_COST.reported; readonly usd: number }
+export type { ProviderCost } from "../common/event-fields.js"
 
-export interface RunUsage extends JsonRecord {
-  readonly prompt: number
-  readonly completion: number
-  readonly total: number
-  readonly cache_read: number
-  readonly cache_write: number
-  readonly cost: ProviderCost
-}
+export type RunUsage = EventUsage
 
 export interface RunTerminalResult extends JsonRecord {
   readonly text: string

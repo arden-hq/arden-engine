@@ -65,6 +65,8 @@ interface RunEventRecord {
   readonly event: ChatProjectionEvent
 }
 
+export type RunProgressRecord = Omit<RunProgress, "purpose">
+
 export interface RunEventPageRecord {
   readonly runId: string
   readonly sessionId: string
@@ -142,7 +144,7 @@ export interface SessionRunReference {
 export class RunQueries extends Context.Service<
   RunQueries,
   {
-    readonly progress: (runId: string) => Effect.Effect<RunProgress | null, RunQueryFailure>
+    readonly progress: (runId: string) => Effect.Effect<RunProgressRecord | null, RunQueryFailure>
     readonly waitingToolCalls: (
       runId: string
     ) => Effect.Effect<ReadonlyArray<string>, RunQueryFailure>

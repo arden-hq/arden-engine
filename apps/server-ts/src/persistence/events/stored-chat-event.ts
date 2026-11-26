@@ -17,9 +17,11 @@ import {
   SESSION_NAME,
   TODO_EXPLANATION
 } from "@arden-hq/protocol/chat"
+import { PROVIDER_COST } from "@arden-hq/protocol"
 import { ChatProjectionEventSchema } from "@arden-hq/protocol/effect/chat"
 import { type Effect, Schema } from "effect"
 import { isJsonObject, type JsonObject } from "../json.js"
+import { storedToolEventUpgrades } from "./stored-tool-event.js"
 
 type StoredEventUpgrade = (event: JsonObject, sessionId: string) => JsonObject
 
@@ -206,16 +208,46 @@ const contextSize = (tokens: unknown) =>
 
 const countOr = (value: unknown): number => (typeof value === "number" ? value : 0)
 
-const runFinished: StoredEventUpgrade = (event) => {
-  if ("context" in event) return event
-  const usage = event["usage"]
+const eventUsage = (usage: JsonObject): JsonObject => {
+  if (isJsonObject(usage["cost"])) return usage
+  const prompt = countOr(usage["prompt"])
+  const completion = countOr(usage["completion"])
+  const cacheRead = countOr(usage["cache_read"])
+  const cacheWrite = countOr(usage["cache_write"])
+  const cost = usage["cost"]
   return {
-    ...withoutKeys(event, ["context_input_tokens"]),
-    usage: isJsonObject(usage) ? { kind: RUN_USAGE.metered, usage } : { kind: RUN_USAGE.unmetered },
-    context: contextSize(event["context_input_tokens"]),
-    message_count: countOr(event["message_count"])
+    ...withoutKeys(usage, ["cost", "exclusive_cost"]),
+    prompt,
+    completion,
+    total:
+      typeof usage["total"] === "number"
+        ? usage["total"]
+        : prompt + completion + cacheRead + cacheWrite,
+    cache_read: cacheRead,
+    cache_write: cacheWrite,
+    cost:
+      typeof cost === "number"
+        ? { kind: PROVIDER_COST.reported, usd: cost }
+        : { kind: PROVIDER_COST.unreported }
   }
 }
+
+const runUsage = (event: JsonObject): JsonObject => {
+  const usage = event["usage"]
+  if (isJsonObject(usage) && usage["kind"] === RUN_USAGE.metered && isJsonObject(usage["usage"]))
+    return { kind: RUN_USAGE.metered, usage: eventUsage(usage["usage"]) }
+  if (isJsonObject(usage) && usage["kind"] === RUN_USAGE.unmetered) return usage
+  return isJsonObject(usage)
+    ? { kind: RUN_USAGE.metered, usage: eventUsage(usage) }
+    : { kind: RUN_USAGE.unmetered }
+}
+
+const runFinished: StoredEventUpgrade = (event) => ({
+  ...withoutKeys(event, ["context_input_tokens"]),
+  usage: runUsage(event),
+  context: "context" in event ? event["context"] : contextSize(event["context_input_tokens"]),
+  message_count: countOr(event["message_count"])
+})
 
 const runError: StoredEventUpgrade = (event) => ({
   ...withoutKeys(event, ["debug_id", "recoverable"]),
@@ -223,10 +255,11 @@ const runError: StoredEventUpgrade = (event) => ({
 })
 
 const tokenUsage: StoredEventUpgrade = (event) => {
-  if ("context" in event) return event
+  const usage = event["usage"]
   return {
     ...withoutKeys(event, ["context_input_tokens", "cost", "task_id", "child_run_id"]),
-    context: contextSize(event["context_input_tokens"]),
+    usage: eventUsage(isJsonObject(usage) ? usage : {}),
+    context: "context" in event ? event["context"] : contextSize(event["context_input_tokens"]),
     message_count: countOr(event["message_count"]),
     scope: textOr(event["scope"], "run")
   }
@@ -262,7 +295,8 @@ const upgrades: Partial<Record<ChatProjectionEvent["type"], StoredEventUpgrade>>
   RUN_ERROR: runError,
   token_usage: tokenUsage,
   run_activity: runActivity,
-  thinking
+  thinking,
+  ...storedToolEventUpgrades
 }
 
 const isKnownType = (type: string): type is ChatProjectionEvent["type"] =>

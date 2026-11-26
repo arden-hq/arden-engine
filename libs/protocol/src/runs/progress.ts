@@ -12,7 +12,9 @@ import {
   ToolCallStartEventSchema
 } from "../chat/events/tool.js"
 
-/** Compact activity at one durable journal position; no transcript or tool output. */
+export const RUN_PURPOSE = { none: "none", stated: "stated" } as const
+export const TOOL_TITLE = { untitled: "untitled", titled: "titled" } as const
+
 export const RunProgressSchema = Schema.Struct({
   run_id: Schema.NonEmptyString,
   session_id: Schema.NonEmptyString,
@@ -20,11 +22,17 @@ export const RunProgressSchema = Schema.Struct({
   started_at: IsoDateTimeStringSchema,
   through_sequence: Schema.Natural,
   trace_removed: Schema.Boolean,
-  purpose: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  purpose: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_PURPOSE.none) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_PURPOSE.stated), text: Schema.String })
+  ]),
   active_tools: Schema.Array(
     Schema.Struct({
       tool_call_id: Schema.NonEmptyString,
-      title: Schema.NullOr(Schema.String)
+      title: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal(TOOL_TITLE.untitled) }),
+        Schema.Struct({ kind: Schema.Literal(TOOL_TITLE.titled), title: Schema.String })
+      ])
     })
   )
 })

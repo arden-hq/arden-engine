@@ -7,28 +7,28 @@ import {
   NonNegativeIntSchema
 } from "../../common/schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
-import type { CommonServerEventFields } from "../../common/event-fields.js"
+import type { JsonRecord } from "../../common/json.js"
 import type { SessionFocus } from "../../sessions/focus/contracts.js"
 import type { TodoListItem } from "../../sessions/todos/contracts.js"
 
-export interface MessageIngestedEvent extends CommonServerEventFields {
+export interface MessageIngestedEvent extends JsonRecord {
   readonly type: "message_ingested"
   readonly client_id: string
   readonly run_id: string
 }
 
-export interface TranscriptChangedEvent extends CommonServerEventFields {
+export interface TranscriptChangedEvent extends JsonRecord {
   readonly type: "transcript_changed"
 }
 
-export interface CompactionStartedEvent extends CommonServerEventFields {
+export interface CompactionStartedEvent extends JsonRecord {
   readonly type: "compaction_started"
   readonly run_id: string
   readonly compaction_id: string
   readonly messages_before: number
 }
 
-export interface CompactionFinishedEvent extends CommonServerEventFields {
+export interface CompactionFinishedEvent extends JsonRecord {
   readonly type: "compaction_finished"
   readonly run_id: string
   readonly compaction_id: string
@@ -38,19 +38,19 @@ export interface CompactionFinishedEvent extends CommonServerEventFields {
 }
 
 /** A Goal's change, as older journals carry it; nothing emits it now. */
-export interface FocusUpdatedEvent extends CommonServerEventFields {
+export interface FocusUpdatedEvent extends JsonRecord {
   readonly type: "focus_updated"
   readonly session_id: string
   readonly focus: SessionFocus
 }
 
 /** A Goal cleared, as older journals carry it; nothing emits it now. */
-export interface FocusClearedEvent extends CommonServerEventFields {
+export interface FocusClearedEvent extends JsonRecord {
   readonly type: "focus_cleared"
   readonly session_id: string
 }
 
-export interface TodoUpdatedEvent extends CommonServerEventFields {
+export interface TodoUpdatedEvent extends JsonRecord {
   readonly type: "todo_updated"
   readonly run_id: string
   readonly tool_call_id: string

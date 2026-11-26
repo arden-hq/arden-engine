@@ -33,11 +33,10 @@ export const lifecycleSse = (delivery: AppDelivery): SseEvent => {
     id: String(delivery.sequence),
     event: delivery.event.type,
     data: JSON.stringify({
-      session_id: SESSION_LIFECYCLE_STREAM_ID,
       ...delivery.event,
       seq: delivery.sequence,
-      timestamp: delivery.event.timestamp ?? delivery.createdAtMs,
-      ...(delivery.replayed ? { replay: true } : {})
+      timestamp: delivery.createdAtMs,
+      replay: delivery.replayed
     })
   }
 }

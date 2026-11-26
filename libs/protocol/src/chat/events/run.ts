@@ -9,7 +9,8 @@ import type { ChatUpdate } from "../communication.js"
 import { ChatUpdateSchema } from "../communication-schema.js"
 import type { ChatServerEvent } from "./stream.js"
 import { MESSAGE_CLOSURE } from "./text.js"
-import type { CommonServerEventFields, EventUsage } from "../../common/event-fields.js"
+import { PROVIDER_COST, type EventUsage } from "../../common/event-fields.js"
+import type { JsonRecord } from "../../common/json.js"
 
 export const RUN_CAUSE = {
   questionAnswer: "question_answer",
@@ -38,7 +39,7 @@ export type RunCause =
       readonly context_mode: "fresh" | "continue" | "fork"
     }
 
-export interface RunStartedEvent extends CommonServerEventFields {
+export interface RunStartedEvent extends JsonRecord {
   readonly type: "RUN_STARTED"
   readonly run_id: string
   readonly session_id: string
@@ -52,7 +53,7 @@ export type SessionName =
   | { readonly kind: typeof SESSION_NAME.unnamed }
   | { readonly kind: typeof SESSION_NAME.named; readonly name: string }
 
-export interface SessionUpdatedEvent extends CommonServerEventFields {
+export interface SessionUpdatedEvent extends JsonRecord {
   readonly type: "session_updated"
   readonly session_id: string
   readonly name: SessionName
@@ -75,7 +76,18 @@ export const contextSize = (inputTokens: number | null | undefined): ContextSize
     ? { kind: CONTEXT_SIZE.unmeasured }
     : { kind: CONTEXT_SIZE.measured, input_tokens: inputTokens }
 
-export interface RunFinishedEvent extends CommonServerEventFields {
+export const contextUsage = (counts: {
+  readonly prompt: number
+  readonly completion: number
+  readonly cache_read: number
+  readonly cache_write: number
+}): EventUsage => ({
+  ...counts,
+  total: counts.prompt + counts.completion + counts.cache_read + counts.cache_write,
+  cost: { kind: PROVIDER_COST.unreported }
+})
+
+export interface RunFinishedEvent extends JsonRecord {
   readonly type: "RUN_FINISHED"
   readonly run_id: string
   readonly turn_id: string
@@ -84,13 +96,13 @@ export interface RunFinishedEvent extends CommonServerEventFields {
   readonly message_count: number
 }
 
-export interface RunCancelledEvent extends CommonServerEventFields {
+export interface RunCancelledEvent extends JsonRecord {
   readonly type: "run_cancelled"
   readonly run_id: string
   readonly turn_id: string
 }
 
-export interface RunErrorEvent extends CommonServerEventFields {
+export interface RunErrorEvent extends JsonRecord {
   readonly type: "RUN_ERROR"
   readonly run_id: string
   readonly turn_id: string
@@ -98,7 +110,7 @@ export interface RunErrorEvent extends CommonServerEventFields {
   readonly code: ChatRunErrorCode
 }
 
-export interface TokenUsageEvent extends CommonServerEventFields {
+export interface TokenUsageEvent extends JsonRecord {
   readonly type: "token_usage"
   readonly run_id: string
   readonly usage: EventUsage
@@ -107,7 +119,7 @@ export interface TokenUsageEvent extends CommonServerEventFields {
   readonly scope: "run" | "tool" | string
 }
 
-export interface RunActivityEvent extends CommonServerEventFields {
+export interface RunActivityEvent extends JsonRecord {
   readonly type: "run_activity"
   readonly run_id: string
   readonly target: RunActivityTarget
@@ -123,27 +135,27 @@ export type RunActivityTarget =
       readonly tool_call_ids: ReadonlyArray<string>
     }
 
-export interface ThinkingEvent extends CommonServerEventFields {
+export interface ThinkingEvent extends JsonRecord {
   readonly type: "thinking"
   readonly status: string
   readonly run_id: string
 }
 
 /** Live-only: the run took an owner message into its history. The row reads it until the model acts. */
-export interface InputTakenEvent extends CommonServerEventFields {
+export interface InputTakenEvent extends JsonRecord {
   readonly type: "input_taken"
   readonly run_id: string
 }
 
 /** Live-only reconnect status; never persisted, never a run failure. */
-export interface StreamRetryEvent extends CommonServerEventFields {
+export interface StreamRetryEvent extends JsonRecord {
   readonly type: "stream_retry"
   readonly run_id: string
   readonly attempt: number
   readonly max_attempts: number
 }
 
-export interface ModelResponseResetEvent extends CommonServerEventFields {
+export interface ModelResponseResetEvent extends JsonRecord {
   readonly type: "model_response_reset"
   readonly message_ids: ReadonlyArray<string>
   readonly tool_call_ids: ReadonlyArray<string>
@@ -155,7 +167,7 @@ export interface ModelResponseResetEvent extends CommonServerEventFields {
  * screen until the new one completes. `replaced`: the new answer completed
  * and the old one (`message_ids`) left the transcript for good.
  */
-export interface FinalTextSupersededEvent extends CommonServerEventFields {
+export interface FinalTextSupersededEvent extends JsonRecord {
   readonly type: "final_text_superseded"
   readonly run_id: string
   readonly message_ids: ReadonlyArray<string>

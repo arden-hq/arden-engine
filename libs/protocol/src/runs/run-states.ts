@@ -1,4 +1,4 @@
-export const PROVIDER_COST = { unreported: "unreported", reported: "reported" } as const
+export { PROVIDER_COST } from "../common/event-fields.js"
 
 export const LOCAL_INSTRUCTION_STATUS = {
   loaded: "loaded",

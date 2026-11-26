@@ -79,7 +79,16 @@ import { ServerEventSchema } from "../events/schema.js"
 import { GmailSendReceiptSchema } from "./gmail-receipt.js"
 
 export * from "./contracts.js"
-export { INTERACTION_KINDS, INTERACTION_OUTCOMES, INTERACTION_SOURCES } from "./history.js"
+export {
+  ACTIVE_WORK,
+  INTERACTION_KINDS,
+  INTERACTION_OUTCOMES,
+  INTERACTION_SOURCES,
+  PAGE_BOUNDS,
+  pageBounds,
+  TOOL_COUNT_NAME,
+  TURN_ENDING
+} from "./history.js"
 export type { ToolResultValueResponse } from "./schema.js"
 export * from "./runtime.js"
 export {
@@ -127,6 +136,31 @@ export {
 export { RESTART_INTERRUPTION } from "./restart-words.js"
 export { MAX_TOOL_DISPLAY_TITLE_LENGTH, TOOL_DISPLAY_TITLE_ARGUMENT } from "./tool-display.js"
 export {
+  DEFAULT_TOOL_KIND,
+  GMAIL_SEND,
+  TOOL_DATA,
+  TOOL_EXECUTION,
+  TOOL_ICON,
+  TOOL_NOUN,
+  TOOL_PARENT,
+  TOOL_PRESENTATION,
+  TOOL_RETRY,
+  TOOL_SOURCE,
+  TOOL_TITLE,
+  toolRetry,
+  type GmailSend,
+  type ToolData,
+  type ToolExecution,
+  type ToolFace,
+  type ToolIcon,
+  type ToolNoun,
+  type ToolParent,
+  type ToolPresentation,
+  type ToolRetry,
+  type ToolSource,
+  type ToolTitle
+} from "./tool-face.js"
+export {
   APPROVAL_PRESENTATION_LIMITS,
   sanitizeApprovalPresentation
 } from "./approval-presentation.js"
@@ -143,6 +177,7 @@ export {
   AUTOMATION_PROMPT,
   CONTEXT_SIZE,
   contextSize,
+  contextUsage,
   RUN_ACTIVITY_TARGET,
   RUN_CAUSE,
   RUN_USAGE,

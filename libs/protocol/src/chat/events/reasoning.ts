@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { event } from "../../common/schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
-import type { CommonServerEventFields } from "../../common/event-fields.js"
+import type { JsonRecord } from "../../common/json.js"
 import {
   ContentStartSchema,
   MessageClosureSchema,
@@ -11,7 +11,7 @@ import {
   type StreamRecord
 } from "./text.js"
 
-export interface ReasoningMessageStartEvent extends CommonServerEventFields {
+export interface ReasoningMessageStartEvent extends JsonRecord {
   readonly type: "REASONING_MESSAGE_START"
   readonly message_id: string
   readonly record: StreamRecord
@@ -22,13 +22,13 @@ export interface ReasoningMessageStartEvent extends CommonServerEventFields {
  * normal completion; the durable transcript
  * (`HistoryMessage.reasoning_content`) is authoritative after the turn.
  */
-export interface ReasoningMessageContentEvent extends CommonServerEventFields {
+export interface ReasoningMessageContentEvent extends JsonRecord {
   readonly type: "REASONING_MESSAGE_CONTENT"
   readonly message_id: string
   readonly delta: string
 }
 
-export interface ReasoningMessageEndEvent extends CommonServerEventFields {
+export interface ReasoningMessageEndEvent extends JsonRecord {
   readonly type: "REASONING_MESSAGE_END"
   readonly message_id: string
   readonly closure: MessageClosure

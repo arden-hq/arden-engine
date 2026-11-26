@@ -5,6 +5,9 @@ import {
   WorkerAttemptPageSchema
 } from "@arden-hq/protocol/effect/runs"
 import {
+  ATTEMPT_END,
+  ATTEMPT_RUN,
+  ATTEMPT_TEXT,
   RUN_PAGE,
   RUN_PAGE_NEXT,
   type RunPageNext,
@@ -15,6 +18,9 @@ import type { SqlClient } from "effect/unstable/sql"
 import { decodeJson } from "./json.js"
 import { workError } from "./work-records.js"
 import type { WorkStore } from "../work/store.js"
+
+const attemptText = (text: string | null) =>
+  text === null ? { kind: ATTEMPT_TEXT.none } : { kind: ATTEMPT_TEXT.text, text }
 
 const nextAttemptPage = (lastId: number | undefined): RunPageNext<number> =>
   lastId === undefined ? { kind: RUN_PAGE_NEXT.end } : { kind: RUN_PAGE_NEXT.more, cursor: lastId }
@@ -55,9 +61,21 @@ export const makeWorkAttempts = (sql: SqlClient.SqlClient): WorkStore["Service"]
     const attempts = yield* Effect.forEach(
       visible,
       Effect.fn(function* (row) {
-        const { origin, item_id, task_generation, ...attempt } = row
+        const { origin, item_id, task_generation } = row
         return {
-          ...attempt,
+          id: row.id,
+          run:
+            row.run_id === null || row.session_id === null
+              ? { kind: ATTEMPT_RUN.none }
+              : { kind: ATTEMPT_RUN.run, run_id: row.run_id, session_id: row.session_id },
+          status: row.status,
+          started_at: row.started_at,
+          end:
+            row.ended_at === null
+              ? { kind: ATTEMPT_END.open }
+              : { kind: ATTEMPT_END.ended, at: row.ended_at },
+          result: attemptText(row.result),
+          error: attemptText(row.error),
           context: wireRunContext({
             origin: yield* decodeJson(RunOriginSchema, origin).pipe(
               Effect.mapError((cause) =>

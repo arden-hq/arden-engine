@@ -12,6 +12,7 @@ import type {
   ToolResultValueResponse
 } from "@arden-hq/protocol/chat"
 import { HISTORY_WINDOW, TURN_WORK_VIEW } from "@arden-hq/protocol/chat"
+import { IDLE_WORK, pageBefore, runningWork, turnEnding } from "./history-shells.js"
 import { readToolResult } from "@arden-hq/answer-ui/tool-result"
 import { Context, Effect, Layer, Predicate } from "effect"
 import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
@@ -30,7 +31,7 @@ import {
   type ToolExecutionResultMetadata
 } from "../persistence/tools/history-queries.js"
 import type { ToolExecutionStoreError } from "../persistence/tools/store.js"
-import { boundActiveWorkTail, type HistoryRows } from "./history-budget.js"
+import type { HistoryRows } from "./history-budget.js"
 import {
   ChatHistoryError,
   ChatSessionNotFound,
@@ -174,8 +175,8 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
           const records = yield* requireTurnStamps(page.records, sessionId)
           const activeWorkTail =
             snapshot.work === null
-              ? null
-              : boundActiveWorkTail(
+              ? IDLE_WORK
+              : runningWork(
                   compactTurnWork(
                     yield* projectTurnWork(
                       tools,
@@ -271,9 +272,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               has_work: turnIdsWithWork.has(shell.turnId),
               has_tool_work: turnIdsWithToolWork.has(shell.turnId),
               tool_calls: toolCallCounts.get(shell.turnId) ?? [],
-              ...(shell.failure === undefined
-                ? {}
-                : { error_code: shell.failure.code, error_message: shell.failure.message })
+              ending: turnEnding(shell.failure)
             }))
           }
           return {
@@ -364,7 +363,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             )
             pages.unshift(compactTurnWork(page))
             complete = !page.page.has_more_before
-            before = page.page.before ?? undefined
+            before = pageBefore(page.page)
             if (complete || before === undefined) break
           }
           return {

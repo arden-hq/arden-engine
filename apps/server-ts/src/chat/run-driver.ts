@@ -1,10 +1,10 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { ContextExperiments } from "../context/experiments.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
-import { contextSize, type ChatApprovalMode, type ChatRunErrorCode } from "@arden-hq/protocol/chat"
+import type { ChatApprovalMode, ChatRunErrorCode } from "@arden-hq/protocol/chat"
 import type { JsonObject } from "../persistence/json.js"
-import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import type { StoredRunTerminalResult, StoredRunUsage } from "../persistence/runs/stored-result.js"
+import { tokenUsageEvent } from "./token-usage-event.js"
 import { addCost, decodeMessage, providerErrorCode } from "@arden-hq/loop"
 import type { AgentEvent, Result as LoopResult } from "@arden-hq/loop"
 import { Cause, Effect, Result, Schema, Stream } from "effect"
@@ -291,15 +291,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
                                         sessionId: input.sessionId,
                                         events: [
                                           {
-                                            event: {
-                                              type: "token_usage",
-                                              run_id: input.runId,
-                                              session_id: input.sessionId,
-                                              scope: "run",
-                                              usage: context.usage,
-                                              context: contextSize(context.inputTokens),
-                                              message_count: projected.count
-                                            } satisfies ChatProjectionEvent,
+                                            event: tokenUsageEvent(input, context, projected.count),
                                             runId: input.runId
                                           }
                                         ]

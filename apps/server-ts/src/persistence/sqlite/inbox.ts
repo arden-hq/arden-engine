@@ -30,6 +30,7 @@ import {
   type OpenAsks
 } from "../inbox/store.js"
 import type { RunApproval } from "@arden-hq/protocol/runs"
+import { spokenDescription } from "./inbox-spoken.js"
 import { makeRunQuestionReader, type QuestionRow } from "./run-question-read.js"
 import { MAX_SCRIPT_RESULT_ATTEMPTS } from "../scripts/results.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -126,34 +127,6 @@ const abandonedDeliveryCause = (row: AbandonedDeliveryRow): string => {
       : quoted(row.chat_name)
   const reason = row.last_error === null ? "no error was recorded" : failureCause(row.last_error)
   return `Workflow result never reached ${chat}: ${reason}`
-}
-
-const isLowerAlphaNumeric = (character: string): boolean => {
-  const code = character.charCodeAt(0)
-  return (code >= 48 && code <= 57) || (code >= 97 && code <= 122)
-}
-
-const spokenDescription = (value: string | null): string | null => {
-  if (value === null) return null
-  let text = value
-  let searchFrom = 0
-  while (searchFrom < text.length) {
-    const open = text.indexOf("(", searchFrom)
-    if (open < 0) break
-    const close = text.indexOf(")", open + 1)
-    if (close < 0) break
-    const inner = text.slice(open + 1, close)
-    const tilde = inner.indexOf("~")
-    const suffix = tilde < 0 ? "" : inner.slice(tilde + 1)
-    if (suffix.length >= 4 && [...suffix].every(isLowerAlphaNumeric)) {
-      text = `${text.slice(0, open).trimEnd()}${text.slice(close + 1)}`
-      searchFrom = open
-    } else {
-      searchFrom = close + 1
-    }
-  }
-  const result = collapseWhitespace(text)
-  return result.length === 0 ? null : result
 }
 
 const byRecency = <T extends { readonly at: string; readonly key: string }>(

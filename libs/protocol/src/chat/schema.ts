@@ -3,18 +3,20 @@ import { eventTypeLiterals } from "../common/event-types.js"
 import type {
   ChatProjectionEvent,
   ChatServerEvent,
+  FramedChatProjectionEvent,
   SnapshotProjectionEvent
 } from "./events/stream.js"
 import type { JsonRecord } from "../common/json.js"
 import type { Agrees, Assert } from "../common/type-agreement.js"
-import type { HistoryMessage } from "./history.js"
+import { ACTIVE_WORK, type HistoryMessage } from "./history.js"
+import { HistoryPageSchema, TurnShellSchema } from "./history-page-schema.js"
 import type { HistoryResponse } from "./history.js"
 import type { TurnDetailsResponse, TurnWorkResponse } from "./history.js"
 import { CHAT_REPLY_QUOTES_MAX } from "./contracts.js"
 import type { ChatReceiptStatus, ToolCallResponse } from "./contracts.js"
 import {
-  ToolOutcomeSchema,
   event,
+  isChatEventFrame,
   optionalBoolean,
   optionalInt,
   optionalNullableString,
@@ -44,6 +46,7 @@ export * from "./events/session.js"
 export * from "./interaction.js"
 export * from "./runtime-schema.js"
 export * from "./history-query-schema.js"
+export * from "./history-page-schema.js"
 import {
   ActiveRunSnapshotSchema,
   RuntimeApprovalSnapshotSchema,
@@ -62,10 +65,12 @@ import {
 import { APPROVAL_MODES } from "../permissions/modes.js"
 
 export const StreamKeepaliveEventSchema = event("stream_keepalive", {
+  session_id: Schema.NonEmptyString,
+  seq: NonNegativeIntSchema,
   latest_seq: NonNegativeIntSchema
 }).check(
   Schema.makeFilter((event) =>
-    event.seq === undefined || event.seq === event.latest_seq
+    event.seq === event.latest_seq
       ? undefined
       : { path: ["latest_seq"], issue: "must equal the SSE sequence" }
   )
@@ -90,6 +95,12 @@ const chatProjectionEventSchemas = [
  */
 export const ChatProjectionEventSchema: Schema.Codec<ChatProjectionEvent> = Schema.Union(
   chatProjectionEventSchemas
+)
+
+export const FramedChatProjectionEventSchema = ChatProjectionEventSchema.pipe(
+  Schema.refine((event): event is FramedChatProjectionEvent => isChatEventFrame(event), {
+    message: "chat events must carry session_id, seq, timestamp and replay"
+  })
 )
 
 /** Every `type` the projection stream can carry, read from the schemas. */
@@ -345,7 +356,6 @@ const historyToolCallSchema = withExtras({
   presentation: Schema.optionalKey(Schema.Literals(["work", "conversation", "status"] as const)),
   is_error: optionalBoolean,
   retryable: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
-  outcome: Schema.optionalKey(ToolOutcomeSchema),
   gmail_send_receipt: Schema.optionalKey(GmailSendReceiptSchema),
   /** The result's structured data for a conversation-surface call, so the
    *  conversation stream can render a proposal or a navigation card without
@@ -455,17 +465,9 @@ export const HistoryMessageSchema: Schema.Codec<HistoryMessage> = Schema.Union([
     ...historyMessageFields,
     role: Schema.Literal("tool"),
     is_error: optionalBoolean,
-    retryable: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
-    outcome: Schema.optionalKey(ToolOutcomeSchema)
+    retryable: Schema.optionalKey(Schema.NullOr(Schema.Boolean))
   }).check(noImages)
 ])
-
-export const HistoryPageSchema = withExtras({
-  has_more_before: Schema.Boolean,
-  has_more_after: Schema.Boolean,
-  before: optionalNullableString,
-  after: optionalNullableString
-})
 
 export const ContextBudgetSnapshotSchema = withExtras({
   model: Schema.NullOr(Schema.String),
@@ -473,31 +475,6 @@ export const ContextBudgetSnapshotSchema = withExtras({
   compaction_trigger: Schema.NullOr(Schema.Int),
   input_tokens: Schema.Int,
   message_count: Schema.Int
-})
-
-/** A turn record without its messages: enough to group a paged window whose
- *  head starts mid-turn (the enclosing turn's identity and stamps). */
-export const TurnShellSchema = withExtras({
-  turn_id: Schema.NonEmptyString,
-  message_start_seq: NonNegativeIntSchema,
-  message_end_seq: NonNegativeIntSchema,
-  started_at: Schema.String,
-  ended_at: Schema.String,
-  has_work: Schema.Boolean,
-  has_tool_work: Schema.Boolean,
-  tool_calls: Schema.optionalKey(
-    Schema.Array(
-      withExtras({
-        name: Schema.String,
-        display_name: Schema.NullOr(Schema.String),
-        count: NonNegativeIntSchema,
-        rejected: Schema.optionalKey(NonNegativeIntSchema),
-        seqs: Schema.optionalKey(Schema.Array(NonNegativeIntSchema))
-      })
-    )
-  ),
-  error_code: Schema.optionalKey(Schema.String),
-  error_message: Schema.optionalKey(Schema.String)
 })
 
 export const TurnWorkResponseSchema: Schema.Codec<TurnWorkResponse> = withExtras({
@@ -514,22 +491,21 @@ export const TurnDetailsResponseSchema: Schema.Codec<TurnDetailsResponse> = with
 
 export const HistoryResponseSchema: Schema.Codec<HistoryResponse> = withExtras({
   messages: Schema.Array(HistoryMessageSchema),
-  active_work_tail: Schema.NullOr(TurnWorkResponseSchema),
+  active_work_tail: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(ACTIVE_WORK.idle) }),
+    Schema.Struct({ kind: Schema.Literal(ACTIVE_WORK.running), work: TurnWorkResponseSchema })
+  ]),
   runtime: SessionRuntimeSnapshotSchema,
   page: HistoryPageSchema,
   context_budget: ContextBudgetSnapshotSchema,
-  /** Turn records covering every turn_id in `messages`, in turn order. */
-  turn_shells: Schema.optionalKey(Schema.Array(TurnShellSchema))
+  turn_shells: Schema.Array(TurnShellSchema)
 })
 
 /** A projection event as a resume snapshot carries it: addressed, sequenced, replay-marked. */
 export const SnapshotProjectionEventSchema = ChatProjectionEventSchema.pipe(
   Schema.refine(
-    (event): event is SnapshotProjectionEvent =>
-      typeof event.session_id === "string" &&
-      typeof event.seq === "number" &&
-      event.replay === true,
-    { message: "snapshot events must carry session_id, seq and replay" }
+    (event): event is SnapshotProjectionEvent => isChatEventFrame(event) && event.replay === true,
+    { message: "snapshot events must carry session_id, seq, timestamp and replay" }
   )
 )
 
@@ -572,8 +548,6 @@ export const SessionResumeSnapshotSchema = withExtras({
     for (const [index, event] of snapshot.active_events.entries()) {
       if (
         event.session_id !== runtime.session_id ||
-        event.replay !== true ||
-        event.seq === undefined ||
         !Number.isSafeInteger(event.seq) ||
         event.seq <= previousSequence ||
         event.seq > snapshot.applied_seq
@@ -583,7 +557,7 @@ export const SessionResumeSnapshotSchema = withExtras({
           issue: "snapshot events must be ordered, replay-marked, and covered by applied_seq"
         })
       }
-      if (event.seq !== undefined) previousSequence = event.seq
+      previousSequence = event.seq
     }
     return issues
   })
@@ -591,8 +565,6 @@ export const SessionResumeSnapshotSchema = withExtras({
 
 export const StreamSnapshotEventSchema = withExtras({
   type: Schema.Literal("stream_snapshot"),
-  timestamp: optionalNumber,
-  replay: optionalBoolean,
   session_id: Schema.NonEmptyString,
   seq: NonNegativeIntSchema,
   snapshot: SessionResumeSnapshotSchema
@@ -607,8 +579,6 @@ export const StreamSnapshotEventSchema = withExtras({
 
 export const StreamLiveEventSchema = withExtras({
   type: Schema.Literal("stream_live"),
-  timestamp: optionalNumber,
-  replay: optionalBoolean,
   session_id: Schema.NonEmptyString,
   seq: NonNegativeIntSchema,
   caught_up_through: NonNegativeIntSchema
@@ -622,8 +592,6 @@ export const StreamLiveEventSchema = withExtras({
 
 export const StreamOverflowEventSchema = withExtras({
   type: Schema.Literal("stream_overflow"),
-  timestamp: optionalNumber,
-  replay: optionalBoolean,
   session_id: Schema.NonEmptyString,
   seq: NonNegativeIntSchema,
   cursor: NonNegativeIntSchema,
@@ -637,7 +605,7 @@ export const StreamOverflowEventSchema = withExtras({
 )
 
 const chatServerEventSchemas = [
-  ChatProjectionEventSchema,
+  FramedChatProjectionEventSchema,
   StreamKeepaliveEventSchema,
   StreamSnapshotEventSchema,
   StreamLiveEventSchema,

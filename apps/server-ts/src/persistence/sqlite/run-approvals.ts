@@ -10,12 +10,19 @@ import {
   type ApprovalPresentation,
   type ApprovalPreview
 } from "@arden-hq/protocol/chat"
-import type { RuleSavedIn, RunApproval, RunApprovalWork } from "@arden-hq/protocol/runs"
+import {
+  APPROVAL_CONNECTION,
+  APPROVAL_TEXT,
+  type RuleSavedIn,
+  type RunApproval,
+  type RunApprovalText,
+  type RunApprovalWork
+} from "@arden-hq/protocol/runs"
 import { RuleSavedInSchema } from "@arden-hq/protocol/effect/runs"
 import { sanitizeApprovalPresentation } from "@arden-hq/protocol/chat"
 import { Effect, Option, Schema } from "effect"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
-import { grantFolderField } from "../permissions/grant-folder.js"
+import { grantFolderOf } from "../permissions/grant-folder.js"
 import { decodeJson } from "./json.js"
 import {
   ConnectionRequiredDataSchema,
@@ -55,31 +62,36 @@ export const decodeRunApproval = Effect.fn("decodeRunApproval")(function* (row: 
     : null
   const kind = connection ? "integration_connection" : row.kind
   const subject = kind === "subagent_result" ? text(payload, "task") : null
+  const presentation = sanitizeApprovalPresentation(payload.presentation)
   return {
     at: row.requested_at,
     run_id: row.run_id,
     session_id: row.session_id,
     destination_session_id: row.destination_session_id,
-    work: workOf(row.work_json),
+    asker: askerOf(row.work_json),
     tool_call_id: row.tool_call_id,
     decision_delivery: row.source === "deferred" ? "deferred" : "blocking",
     kind,
-    connection,
+    connection:
+      connection === null
+        ? { kind: APPROVAL_CONNECTION.none }
+        : { kind: APPROVAL_CONNECTION.connection, connection },
     tool_name: row.tool_name,
     action: row.action,
-    scope: row.scope,
-    preview: row.preview,
-    diff: row.diff,
-    description: text(payload, "description"),
-    detail: text(payload, "detail"),
-    subject: connection?.label ?? subject,
-    reason: connection?.reason ?? null,
-    presentation: sanitizeApprovalPresentation(payload.presentation) ?? null,
+    preview: approvalPreview(row.preview),
+    diff: approvalDiff(row.diff),
+    description: approvalText(text(payload, "description")),
+    detail: approvalText(text(payload, "detail")),
+    subject: approvalText(connection?.label ?? subject),
+    card: approvalCard(presentation),
     rule_places: storedRulePlaces(payload),
-    ...(payload.can_attach_folder_to_space === true ? { can_attach_folder_to_space: true } : {}),
-    ...grantFolderField(row.tool_name, data)
+    can_attach_folder_to_space: payload.can_attach_folder_to_space === true,
+    grant_folder: grantFolderOf(row.tool_name, data)
   } satisfies RunApproval
 })
+
+const approvalText = (value: string | null): RunApprovalText =>
+  value === null ? { kind: APPROVAL_TEXT.none } : { kind: APPROVAL_TEXT.text, text: value }
 
 const RulePlacesSchema = Schema.Array(RuleSavedInSchema)
 

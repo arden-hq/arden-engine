@@ -8,3 +8,4 @@ export * from "./facade-schema.js"
 export * from "./facade-mappers.js"
 
 export * from "./change-evidence.js"
+export * from "./tool-face.js"

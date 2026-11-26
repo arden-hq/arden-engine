@@ -23,7 +23,9 @@ describe("automation event stream frames", () => {
           task: { kind: LINK.none }
         }
       })
-    ).toEqual(expect.objectContaining({ session_id: "chat-1", seq: 7 }))
+    ).toEqual(
+      expect.objectContaining({ session_id: "chat-1", seq: 7, timestamp: 1_000, replay: false })
+    )
   })
 
   it("keeps the chat a blocking-work change names", () => {

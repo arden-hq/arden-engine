@@ -1,3 +1,4 @@
+import { resultDataEntry } from "../runs/stored-question-data.js"
 import {
   approvalCard,
   approvalDiff,
@@ -223,9 +224,7 @@ export const makeToolHistory = ({
             {
               isError: result.is_error === true,
               retryable: result.retryable ?? null,
-              ...(projected.data === undefined || projected.data === null
-                ? {}
-                : { data: projected.data }),
+              ...resultDataEntry(projected.data),
               ...(durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0
                 ? {}
                 : { durationMs })

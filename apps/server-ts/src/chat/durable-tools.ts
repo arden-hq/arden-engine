@@ -33,6 +33,7 @@ import type { ChatMessageFailure } from "./message-errors.js"
 import type { HeldBackground } from "./held-background.js"
 import { RecordedToolPause } from "../execution/recorded-tool-pause.js"
 import { taskDirectionReview } from "../persistence/work/task-direction.js"
+import { toolOutputEvent, toolProgressEvent, toolWaitingEvent } from "./tool-events.js"
 
 export interface ToolHost {
   readonly lifecycle: Semaphore.Semaphore
@@ -184,7 +185,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     if (request.changesState && mutationHalt !== undefined) {
       const held = mutationHalt
       yield* appendToolEvent({
-        event: { type: "TOOL_CALL_WAITING", tool_call_id: request.toolCallId },
+        event: toolWaitingEvent(request.toolCallId),
         runId: run.runId
       }).pipe(
         Effect.catchCause((cause) =>
@@ -433,12 +434,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     emitToolProgress: (request) =>
       runPromise(
         appendToolEvent({
-          event: {
-            type: "TOOL_CALL_PROGRESS",
-            tool_call_id: request.toolCallId,
-            message: request.message,
-            ...(request.data === undefined ? {} : { data: request.data })
-          },
+          event: toolProgressEvent(request),
           runId: run.runId,
           admission: "detached"
         })
@@ -446,12 +442,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     emitToolOutput: (request) =>
       runPromise(
         appendToolEvent({
-          event: {
-            type: "TOOL_CALL_OUTPUT_DELTA",
-            tool_call_id: request.toolCallId,
-            stream: request.stream,
-            delta: request.delta
-          },
+          event: toolOutputEvent(request),
           runId: run.runId
         })
       ),

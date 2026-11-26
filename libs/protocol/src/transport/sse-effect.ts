@@ -58,11 +58,7 @@ const validateServerEventFrame = Effect.fn("validateServerEventFrame")(function*
       payloadType: input.data.type
     })
   }
-  if (
-    input.id.kind === SSE_FRAME_ID.identified &&
-    input.data.seq !== undefined &&
-    input.id.id !== String(input.data.seq)
-  ) {
+  if (input.id.kind === SSE_FRAME_ID.identified && input.id.id !== String(input.data.seq)) {
     return yield* new EventSequenceMismatch({
       frameId: input.id.id,
       payloadSequence: input.data.seq

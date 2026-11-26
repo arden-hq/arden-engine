@@ -3,8 +3,10 @@ import type { Agrees, Assert } from "../common/type-agreement.js"
 import { eventTypeLiterals } from "../common/event-types.js"
 import { ENTITY_TARGET, LINK, TASK_SPACE } from "../common/links.js"
 import { SessionListItemSchema } from "../sessions/state-schema.js"
+import type { EventFrame, Framed } from "../common/event-fields.js"
 import type {
   AutomationEvent,
+  LifecycleFeedBody,
   RecordToldStatus,
   ServerEvent,
   TaskWorkChangedEvent
@@ -18,6 +20,7 @@ import {
   AppDestinationSchema,
   IsoDateTimeStringSchema,
   event,
+  isEventFrame,
   sessionEvent,
   NonNegativeIntSchema
 } from "../common/schema.js"
@@ -28,6 +31,8 @@ import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
  *  Chat detail stream attaches at its captured head and signals a lost range
  *  with `stream_overflow` instead. */
 export const StreamResetEventSchema = event("stream_reset", {
+  session_id: Schema.NonEmptyString,
+  seq: NonNegativeIntSchema,
   reason: Schema.Literals(["future_cursor", "replay_gap"] as const)
 })
 
@@ -226,8 +231,7 @@ export type AutomationEventAgrees = Assert<
   Agrees<(typeof automationEventSchemas)[number]["Type"], AutomationEvent>
 >
 
-const serverEventSchemas = [
-  ChatServerEventSchema,
+const lifecycleFeedSchemas = [
   AutomationProgressEventSchema,
   AutomationFinishedEventSchema,
   RecordToldEventSchema,
@@ -243,7 +247,21 @@ const serverEventSchemas = [
   FocusChoiceChangedEventSchema,
   TaskWorkChangedEventSchema,
   TaskVisibilityChangedEventSchema,
-  QuestionChangedEventSchema,
+  QuestionChangedEventSchema
+] as const
+
+const LifecycleFeedBodySchema: Schema.Codec<LifecycleFeedBody, JsonRecord> =
+  Schema.Union(lifecycleFeedSchemas)
+
+const FramedLifecycleFeedEventSchema = LifecycleFeedBodySchema.pipe(
+  Schema.refine((event): event is Framed<LifecycleFeedBody, EventFrame> => isEventFrame(event), {
+    message: "lifecycle events must carry seq, timestamp and replay"
+  })
+)
+
+const serverEventSchemas = [
+  ChatServerEventSchema,
+  FramedLifecycleFeedEventSchema,
   StreamResetEventSchema
 ] as const
 

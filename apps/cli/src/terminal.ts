@@ -1,4 +1,10 @@
-import { APPROVAL_ASKED, APPROVAL_CARD, APPROVAL_PREVIEW } from "@arden-hq/protocol/chat"
+import {
+  APPROVAL_ASKED,
+  APPROVAL_CARD,
+  APPROVAL_PREVIEW,
+  TOOL_DATA,
+  TOOL_TITLE
+} from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { liveSessions } from "./session-list.js"
 import { activeRunId } from "@arden-hq/protocol/sessions"
@@ -23,10 +29,10 @@ export const progressLines = (): ((event: HeadlessRunEvent) => string | undefine
     if (data.type === "run_cancelled") return "the Run was cancelled"
     if (data.type === "TOOL_CALL_START") {
       if (named.has(data.tool_call_id)) return undefined
-      const name = data.display_name ?? data.tool_call_name
-      const title = data.display_title
+      const name = data.display_name
+      const title = data.title.kind === TOOL_TITLE.titled ? data.title.text : ""
       calls.set(data.tool_call_id, {
-        name: title === undefined || title === "" || title === name ? name : `${name} · ${title}`,
+        name: title === "" || title === name ? name : `${name} · ${title}`,
         args: ""
       })
       return undefined
@@ -312,12 +318,12 @@ export const requestResponder = (input: {
     },
     onEvent: async (event, signal) => {
       const data = event.data
-      if (data.type === "TOOL_CALL_START")
-        toolNames.set(data.tool_call_id, data.display_name ?? data.tool_call_name)
+      if (data.type === "TOOL_CALL_START") toolNames.set(data.tool_call_id, data.display_name)
       const runId = "run_id" in data && typeof data.run_id === "string" ? data.run_id : input.runId
       if (!runs.has(runId)) return
       if (data.type === "TOOL_CALL_RESULT") {
-        const question = questionOf(data.data)
+        const question =
+          data.data.kind === TOOL_DATA.attached ? questionOf(data.data.value) : undefined
         if (question === undefined || handled.has(question.question_id)) return
         handled.add(question.question_id)
         if (ask === undefined) say(`question: ${question.content.prompt} (answer it in Arden)`)

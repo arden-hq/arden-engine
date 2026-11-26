@@ -10,12 +10,13 @@ import {
   NonNegativeIntSchema,
   PositiveIntSchema,
   RuntimeRunStatusSchema,
-  withExtras
+  withExtras,
+  ProviderCostSchema
 } from "../common/schema.js"
 import type { RuntimeRunStatus } from "../chat/runtime.js"
 import { SessionNameSchema } from "../sessions/state-schema.js"
 import type { SessionName } from "../sessions/states.js"
-import { PROVIDER_COST, RUN_MODEL, RUN_REASONING } from "./run-states.js"
+import { RUN_MODEL, RUN_REASONING } from "./run-states.js"
 import type { ProviderCost, RunModel, RunReasoning, RunUsage } from "./contracts.js"
 import { RunUsageSchema } from "./schema.js"
 import { MODEL_CALL_KINDS, type ModelCallKind } from "./usage.js"
@@ -190,15 +191,9 @@ export interface SessionUsageReport extends JsonRecord {
   readonly runs: ReadonlyArray<SessionRunUsage>
 }
 
-const NonNegativeNumberSchema = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
 const IdentifierSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 const DaySchema = Schema.String.check(Schema.isMinLength(10), Schema.isMaxLength(10))
 const SessionTypeSchema = Schema.Literals(["chat", "channel", "agent"] as const)
-
-const ProviderCostSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal(PROVIDER_COST.unreported) }),
-  Schema.Struct({ kind: Schema.Literal(PROVIDER_COST.reported), usd: NonNegativeNumberSchema })
-])
 
 const RunModelSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal(RUN_MODEL.unrecorded) }),

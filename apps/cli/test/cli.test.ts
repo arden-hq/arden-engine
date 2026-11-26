@@ -364,7 +364,20 @@ const QUESTION_EVENT: HeadlessRunEvent = {
     name: "ask_user",
     run_id: "run-1",
     session_id: "session-1",
-    data: { question: QUESTION }
+    seq: 1,
+    timestamp: 1,
+    replay: false,
+    content: "",
+    preview: "",
+    display_name: "ask_user",
+    kind: "tool",
+    is_error: false,
+    retry: "unstated",
+    duration_ms: 0,
+    data: { kind: "attached", value: { question: QUESTION } },
+    source_refs: [],
+    gmail_send: { kind: "unconfirmed" },
+    execution: "runtime"
   }
 }
 

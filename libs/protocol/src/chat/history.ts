@@ -124,7 +124,6 @@ export interface HistoryToolCall extends JsonRecord {
   readonly presentation?: "work" | "conversation" | "status"
   readonly is_error?: boolean
   readonly retryable?: boolean | null
-  readonly outcome?: ToolOutcome
   /** Present only after Gmail accepted a send and returned provider evidence. */
   readonly gmail_send_receipt?: GmailSendReceipt
   /** Structured result data, served for conversation-surface calls and, as
@@ -231,7 +230,6 @@ export type HistoryMessage = HistoryMessageBase &
         readonly images?: never
         readonly is_error?: boolean
         readonly retryable?: boolean | null
-        readonly outcome?: ToolOutcome
       }
   )
 
@@ -245,35 +243,52 @@ export interface TurnShell extends JsonRecord {
   /** Work beyond reasoning: a tool call ran. A turn that only reasoned
    *  "thought"; one that ran tools "worked". */
   readonly has_tool_work: boolean
-  /** Which tools the turn called and how often, so a settled fold can say
-   *  what it did before its rows are paged in. */
-  readonly tool_calls?: ReadonlyArray<TurnToolCallCount>
-  /** The turn's last run failed (it ended with RUN_ERROR): its code and the
-   *  message the reader was shown. Both present together, or both absent. */
-  readonly error_code?: string
-  readonly error_message?: string
+  readonly tool_calls: ReadonlyArray<TurnToolCallCount>
+  readonly ending: TurnEnding
 }
+
+export const TURN_ENDING = { ended: "ended", failed: "failed" } as const
+
+export type TurnEnding =
+  | { readonly kind: typeof TURN_ENDING.ended }
+  | { readonly kind: typeof TURN_ENDING.failed; readonly code: string; readonly message: string }
+
+export const TOOL_COUNT_NAME = { unnamed: "unnamed", named: "named" } as const
+
+export type ToolCountName =
+  | { readonly kind: typeof TOOL_COUNT_NAME.unnamed }
+  | { readonly kind: typeof TOOL_COUNT_NAME.named; readonly text: string }
 
 export interface TurnToolCallCount extends JsonRecord {
   readonly name: string
-  readonly display_name: string | null
+  readonly display_name: ToolCountName
   readonly count: number
-  /** How many of `count` the user turned down on their approval cards: they
-   *  never ran. Absent from a server that predates it, which means none. */
-  readonly rejected?: number
-  /** Where each of the `count` calls sits in the chat: the `seq` of the
-   *  message that made it, ascending. A reader compares them with the `seq` of
-   *  a reply to tell which calls came before that reply, without paging the
-   *  turn's work in. Absent from a server that predates it. */
-  readonly seqs?: ReadonlyArray<number>
+  readonly rejected: number
+  readonly seqs: ReadonlyArray<number>
 }
 
 export interface HistoryPage extends JsonRecord {
   readonly has_more_before: boolean
   readonly has_more_after: boolean
-  readonly before?: string | null
-  readonly after?: string | null
+  readonly bounds: PageBounds
 }
+
+export const PAGE_BOUNDS = { empty: "empty", bounded: "bounded" } as const
+
+export type PageBounds =
+  | { readonly kind: typeof PAGE_BOUNDS.empty }
+  | { readonly kind: typeof PAGE_BOUNDS.bounded; readonly before: string; readonly after: string }
+
+export const pageBounds = (before: string | undefined, after: string | undefined): PageBounds =>
+  before === undefined || after === undefined
+    ? { kind: PAGE_BOUNDS.empty }
+    : { kind: PAGE_BOUNDS.bounded, before, after }
+
+export const ACTIVE_WORK = { idle: "idle", running: "running" } as const
+
+export type ActiveWork =
+  | { readonly kind: typeof ACTIVE_WORK.idle }
+  | { readonly kind: typeof ACTIVE_WORK.running; readonly work: TurnWorkResponse }
 
 export interface ContextBudgetSnapshot extends JsonRecord {
   readonly model: string | null
@@ -286,11 +301,11 @@ export interface ContextBudgetSnapshot extends JsonRecord {
 export interface HistoryResponse extends JsonRecord {
   readonly messages: ReadonlyArray<HistoryMessage>
   /** Bounded work projection for the exact active physical turn. */
-  readonly active_work_tail: TurnWorkResponse | null
+  readonly active_work_tail: ActiveWork
   readonly runtime: SessionRuntimeSnapshot
   readonly page: HistoryPage
   readonly context_budget: ContextBudgetSnapshot
-  readonly turn_shells?: ReadonlyArray<TurnShell>
+  readonly turn_shells: ReadonlyArray<TurnShell>
 }
 
 export interface TurnWorkResponse extends JsonRecord {
@@ -312,25 +327,3 @@ export interface TurnDetailsResponse extends JsonRecord {
 }
 
 export type AssistantTextPhase = "commentary" | "final_answer"
-
-export interface ToolOutcome extends JsonRecord {
-  readonly status: "succeeded" | "failed" | "denied" | "uncertain"
-  readonly error?: {
-    readonly code: string
-    readonly retryable: boolean
-    readonly recovery_action?: string
-    readonly diagnostic_ref?: string
-  }
-  readonly effect?: {
-    readonly operation: string
-    readonly target: string
-    readonly before_ref?: string
-    readonly after_ref?: string
-  }
-  readonly verification?: {
-    readonly postcondition: string
-    readonly observed: string
-    readonly confidence?: number
-  }
-  readonly receipt?: string
-}

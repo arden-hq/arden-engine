@@ -6,6 +6,7 @@ import {
   SETTINGS_DESTINATION_TAB,
   type AppSettingsTabId
 } from "./navigation.js"
+import { PROVIDER_COST } from "./event-fields.js"
 import type { Agrees, Assert } from "./type-agreement.js"
 import type { ConnectionState, RuntimeRunStatus } from "../chat/runtime.js"
 import { TODO_REASON, TODO_STATUS } from "../sessions/todos/contracts.js"
@@ -51,22 +52,16 @@ export const withExtras = <Fields extends Schema.Struct.Fields>(
   fields: Fields
 ): WithExtras<Fields> => Schema.StructWithRest(Schema.Struct(fields), extraFields)
 
-const eventCommon = <const Type extends string>(type: Type) => ({
-  type: Schema.Literal(type),
-  timestamp: optionalNumber,
-  seq: optionalNonNegativeInt,
-  replay: optionalBoolean
-})
+const eventType = <const Type extends string>(type: Type) => ({ type: Schema.Literal(type) })
 
-type EventFields<Type extends string> = ReturnType<typeof eventCommon<Type>>
+type EventFields<Type extends string> = ReturnType<typeof eventType<Type>>
 
 export const event = <const Type extends string, Fields extends Schema.Struct.Fields>(
   type: Type,
   fields: Fields
-): WithExtras<EventFields<Type> & { session_id: typeof optionalString } & Fields> =>
+): WithExtras<EventFields<Type> & Fields> =>
   withExtras({
-    ...eventCommon(type),
-    session_id: optionalString,
+    ...eventType(type),
     ...fields
   })
 
@@ -81,49 +76,38 @@ export const sessionEvent = <
   fields: Fields
 ): WithExtras<EventFields<Type> & { session_id: SessionId } & Fields> =>
   withExtras({
-    ...eventCommon(type),
+    ...eventType(type),
     session_id: sessionId,
     ...fields
   })
 
+const EventFrameSchema = Schema.Struct({
+  seq: NonNegativeIntSchema,
+  timestamp: Schema.Number,
+  replay: Schema.Boolean
+})
+
+export const isEventFrame = Schema.is(EventFrameSchema)
+
+export const isChatEventFrame = Schema.is(
+  Schema.Struct({ ...EventFrameSchema.fields, session_id: Schema.NonEmptyString })
+)
+
+export const ProviderCostSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(PROVIDER_COST.unreported) }),
+  Schema.Struct({
+    kind: Schema.Literal(PROVIDER_COST.reported),
+    usd: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
+  })
+])
+
 export const eventUsage = withExtras({
-  prompt: optionalNumber,
-  completion: optionalNumber,
-  total: optionalNumber,
-  cache_read: optionalNumber,
-  cache_write: optionalNumber,
-  cost: optionalNumber,
-  exclusive_cost: optionalNumber
-})
-
-const toolOutcomeError = withExtras({
-  code: Schema.String,
-  retryable: Schema.Boolean,
-  recovery_action: optionalString,
-  diagnostic_ref: optionalString
-})
-
-const toolOutcomeEffect = withExtras({
-  operation: Schema.String,
-  target: Schema.String,
-  before_ref: optionalString,
-  after_ref: optionalString
-})
-
-const toolOutcomeVerification = withExtras({
-  postcondition: Schema.String,
-  observed: Schema.String,
-  confidence: optionalNumber
-})
-
-const toolOutcomeStatus = Schema.Literals(["succeeded", "failed", "denied", "uncertain"] as const)
-
-export const ToolOutcomeSchema = withExtras({
-  status: toolOutcomeStatus,
-  error: Schema.optionalKey(toolOutcomeError),
-  effect: Schema.optionalKey(toolOutcomeEffect),
-  verification: Schema.optionalKey(toolOutcomeVerification),
-  receipt: optionalString
+  prompt: Schema.Number,
+  completion: Schema.Number,
+  total: Schema.Number,
+  cache_read: Schema.Number,
+  cache_write: Schema.Number,
+  cost: ProviderCostSchema
 })
 
 export const RuntimeRunStatusSchema = Schema.Literals([

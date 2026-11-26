@@ -1,5 +1,5 @@
 import { contextSize, messageEnd, RUN_USAGE } from "@arden-hq/protocol/chat"
-import type { EventUsage } from "@arden-hq/protocol"
+import { type StoredRunUsage, wireRunUsage } from "../runs/stored-result.js"
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { randomUUID } from "node:crypto"
 import type { RunEnding } from "./tool-receipts.js"
@@ -316,9 +316,12 @@ export const textEnd = (
 })
 
 export const runTotals = (
-  usage: EventUsage | undefined,
+  usage: StoredRunUsage | undefined,
   inputTokens: number | null | undefined
 ): Pick<Extract<ChatProjectionEvent, { readonly type: "RUN_FINISHED" }>, "usage" | "context"> => ({
-  usage: usage === undefined ? { kind: RUN_USAGE.unmetered } : { kind: RUN_USAGE.metered, usage },
+  usage:
+    usage === undefined
+      ? { kind: RUN_USAGE.unmetered }
+      : { kind: RUN_USAGE.metered, usage: wireRunUsage(usage) },
   context: contextSize(inputTokens)
 })

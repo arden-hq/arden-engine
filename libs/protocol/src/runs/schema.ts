@@ -5,11 +5,11 @@ import {
   IsoDateTimeStringSchema,
   withExtras,
   NonNegativeIntSchema,
-  PositiveIntSchema
+  PositiveIntSchema,
+  ProviderCostSchema
 } from "../common/schema.js"
 import {
   LOCAL_INSTRUCTION_STATUS,
-  PROVIDER_COST,
   RUN_CLIENT,
   RUN_EVENTS_SEEN,
   RUN_FAILURE,
@@ -31,11 +31,6 @@ import { CONTEXT_SIZE } from "../chat/events/run.js"
 
 const NonNegativeNumberSchema = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
 const IdentifierSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
-
-const ProviderCostSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal(PROVIDER_COST.unreported) }),
-  Schema.Struct({ kind: Schema.Literal(PROVIDER_COST.reported), usd: NonNegativeNumberSchema })
-])
 
 const ContextSizeSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal(CONTEXT_SIZE.unmeasured) }),

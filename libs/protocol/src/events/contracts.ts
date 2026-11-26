@@ -7,25 +7,28 @@ import type {
   TaskSpace
 } from "../common/links.js"
 export * from "../common/links.js"
-import type { CommonServerEventFields } from "../common/event-fields.js"
+import type { EventFrame, Framed } from "../common/event-fields.js"
+import type { JsonRecord } from "../common/json.js"
 import type { SessionListItem } from "../sessions/contracts.js"
 import type { ChatServerEvent, StreamKeepaliveEvent } from "../chat/events/stream.js"
 import type { AutomationRunOutcome } from "../automations/outcome.js"
 
 /** Automation-stream only: the Chat detail stream attaches at its captured
  *  head and reports a lost range with `stream_overflow`. */
-export interface StreamResetEvent extends CommonServerEventFields {
+export interface StreamResetEvent extends JsonRecord {
   readonly type: "stream_reset"
+  readonly session_id: string
+  readonly seq: number
   readonly reason: "future_cursor" | "replay_gap"
 }
 
-export interface AutomationProgressEvent extends CommonServerEventFields {
+export interface AutomationProgressEvent extends JsonRecord {
   readonly type: "automation_progress"
   readonly task_id: string
   readonly status: string
 }
 
-export interface AutomationFinishedEvent extends CommonServerEventFields {
+export interface AutomationFinishedEvent extends JsonRecord {
   readonly type: "automation_finished"
   readonly task_id: string
   readonly outcome: AutomationRunOutcome | "completed"
@@ -49,7 +52,7 @@ export type RecordToldStatus =
  * row in a chat, as the run's own reply, or as an Inbox item. Clients notify from
  * it with `notifyOwner` (`@arden-hq/protocol/notifications`), once per `key`.
  */
-export interface RecordToldEvent extends CommonServerEventFields {
+export interface RecordToldEvent extends JsonRecord {
   readonly type: "record_told"
   /** `ending:<run id>` for a run, else the entity event's key. */
   readonly key: string
@@ -68,30 +71,30 @@ export interface RecordToldEvent extends CommonServerEventFields {
   readonly task: LinkedTask
 }
 
-export interface SessionCreatedEvent extends CommonServerEventFields {
+export interface SessionCreatedEvent extends JsonRecord {
   readonly type: "session_created"
   readonly session: SessionListItem
 }
 
-export interface SessionActivityEvent extends CommonServerEventFields {
+export interface SessionActivityEvent extends JsonRecord {
   readonly type: "session_activity"
   readonly session: SessionListItem
 }
 
-export interface ChatInputCommittedEvent extends CommonServerEventFields {
+export interface ChatInputCommittedEvent extends JsonRecord {
   readonly type: "chat_input_committed"
   readonly chat_session_id: string
   readonly run_id: string
 }
 
-export interface SessionBlockingWorkEvent extends CommonServerEventFields {
+export interface SessionBlockingWorkEvent extends JsonRecord {
   readonly type: "session_blocking_work"
   readonly session_id: string
   readonly blocking_work: boolean
 }
 
 /** A connection's state, tools or events changed: whatever shows it reads it again. */
-export interface McpServerChangedEvent extends CommonServerEventFields {
+export interface McpServerChangedEvent extends JsonRecord {
   readonly type: "mcp_server_changed"
   readonly server: string
 }
@@ -101,13 +104,13 @@ export type EntityKind = "session" | "space" | "automation" | "permission" | "ta
 
 /** A committed change to one row of `kind` (`id`), or to many (`id` null): whatever
  *  shows it reads it again. The server tells it at commit, whoever wrote. */
-export interface EntityChangedEvent extends CommonServerEventFields {
+export interface EntityChangedEvent extends JsonRecord {
   readonly type: "entity_changed"
   readonly kind: EntityKind
   readonly target: EntityChangeTarget
 }
 
-export interface NavigationRequestedEvent extends CommonServerEventFields {
+export interface NavigationRequestedEvent extends JsonRecord {
   readonly type: "navigation_requested"
   readonly origin_session_id: string
   readonly destination: AppDestination
@@ -116,7 +119,7 @@ export interface NavigationRequestedEvent extends CommonServerEventFields {
   readonly asked_by: NavigationAskedBy
 }
 
-export interface QuestionChangedEvent extends CommonServerEventFields {
+export interface QuestionChangedEvent extends JsonRecord {
   readonly type: "question_changed"
   readonly question_id: string
   readonly run_id: string
@@ -124,20 +127,20 @@ export interface QuestionChangedEvent extends CommonServerEventFields {
   readonly task: LinkedTask
 }
 
-export interface TaskVisibilityChangedEvent extends CommonServerEventFields {
+export interface TaskVisibilityChangedEvent extends JsonRecord {
   readonly type: "task_visibility_changed"
   readonly space: TaskSpace
   readonly item_id: string
 }
 
-export interface WorkChangedEvent extends CommonServerEventFields {
+export interface WorkChangedEvent extends JsonRecord {
   readonly type: "work_changed"
   readonly space: TaskSpace
   readonly item_id: string
   readonly change: "comment" | "status"
 }
 
-export interface TaskProposalChangedEvent extends CommonServerEventFields {
+export interface TaskProposalChangedEvent extends JsonRecord {
   readonly type: "task_proposal_changed"
   readonly space_id: string
   readonly proposal_id: string
@@ -145,7 +148,7 @@ export interface TaskProposalChangedEvent extends CommonServerEventFields {
   readonly status: "offered" | "accepted" | "rejected" | "expired" | "retired"
 }
 
-export interface FocusChoiceChangedEvent extends CommonServerEventFields {
+export interface FocusChoiceChangedEvent extends JsonRecord {
   readonly type: "focus_choice_changed"
   readonly space_id: string
   readonly question_id: string
@@ -153,7 +156,7 @@ export interface FocusChoiceChangedEvent extends CommonServerEventFields {
   readonly status: "offered" | "settled"
 }
 
-interface TaskWorkEventFields extends CommonServerEventFields {
+interface TaskWorkEventFields extends JsonRecord {
   readonly type: "task_work_changed"
   readonly space: TaskSpace
   readonly item_id: string
@@ -199,5 +202,7 @@ export type AutomationEvent =
   | StreamKeepaliveEvent
   | StreamResetEvent
 
+export type LifecycleFeedBody = Exclude<AutomationEvent, StreamKeepaliveEvent | StreamResetEvent>
+
 /** Complete chat + automation event vocabulary currently used by Arden. */
-export type ServerEvent = ChatServerEvent | AutomationEvent
+export type ServerEvent = ChatServerEvent | Framed<LifecycleFeedBody, EventFrame> | StreamResetEvent

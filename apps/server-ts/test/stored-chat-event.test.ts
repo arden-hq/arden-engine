@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
+import { runDecoders } from "@arden-hq/protocol/runs"
 import { decodeStoredChatEvent } from "../src/persistence/events/stored-chat-event.js"
 
 const decode = (data: unknown) => Effect.runPromise(decodeStoredChatEvent(data, "session-1"))
@@ -132,5 +133,136 @@ describe("stored chat events", () => {
     await expect(
       decode({ type: "RUN_ERROR", run_id: "run-1", turn_id: "turn-1", message: "x" })
     ).resolves.toEqual(expect.objectContaining({ code: "provider_error" }))
+  })
+
+  it("reads an old run's usage with its total and its reported or unreported cost", async () => {
+    await expect(
+      decode({
+        type: "RUN_FINISHED",
+        run_id: "run-1",
+        turn_id: "turn-1",
+        message_count: 1,
+        usage: { prompt: 5, completion: 2, total: 7, cache_read: 0, cache_write: 0, cost: 0.5 }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        usage: {
+          kind: "metered",
+          usage: {
+            prompt: 5,
+            completion: 2,
+            total: 7,
+            cache_read: 0,
+            cache_write: 0,
+            cost: { kind: "reported", usd: 0.5 }
+          }
+        }
+      })
+    )
+    await expect(
+      decode({
+        type: "token_usage",
+        run_id: "run-1",
+        scope: "run",
+        message_count: 1,
+        context: { kind: "measured", input_tokens: 9 },
+        usage: { prompt: 4, completion: 1, cache_read: 3, cache_write: 1 }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        usage: {
+          prompt: 4,
+          completion: 1,
+          total: 9,
+          cache_read: 3,
+          cache_write: 1,
+          cost: { kind: "unreported" }
+        }
+      })
+    )
+  })
+})
+
+describe("stored tool events", () => {
+  it("reads an old tool start's face and an old result's retry, data and receipt", async () => {
+    await expect(
+      decode({
+        type: "TOOL_CALL_START",
+        tool_call_id: "call-1",
+        tool_call_name: "read",
+        parent_id: null,
+        display_title: "notes.md",
+        icon: null,
+        presentation: "conversation"
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        parent: { kind: "root" },
+        display_name: "read",
+        title: { kind: "titled", text: "notes.md" },
+        kind: "tool",
+        icon: { kind: "plain" },
+        noun: { kind: "unnamed" },
+        source: { kind: "unsourced" },
+        presentation: "conversation",
+        execution: "runtime"
+      })
+    )
+    await expect(
+      decode({
+        type: "TOOL_CALL_RESULT",
+        tool_call_id: "call-1",
+        name: "read",
+        content: "text",
+        is_error: false,
+        retryable: false,
+        data: { rows: 1 },
+        execution: "provider"
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        retry: "final",
+        data: { kind: "attached", value: { rows: 1 } },
+        source_refs: [],
+        gmail_send: { kind: "unconfirmed" },
+        execution: "provider"
+      })
+    )
+    await expect(
+      decode({ type: "TOOL_CALL_PROGRESS", tool_call_id: "call-1", message: "working" })
+    ).resolves.toEqual(expect.objectContaining({ data: { kind: "none" }, execution: "runtime" }))
+  })
+
+  it("upgrades an old question in a tool result's data to the question the routes send", async () => {
+    const question = {
+      question_id: "q",
+      run_id: "r",
+      turn_id: "t",
+      session_id: "c",
+      destination_session_id: "c",
+      context: { origin: { kind: "chat", session_id: "c", turn_id: "t" }, task: null },
+      content: { prompt: "Which?", detail: null, choices: [{ id: "a", label: "A" }] },
+      status: "open",
+      resolution: null,
+      continuation: null,
+      focus_choice: null,
+      permission_offer: null,
+      continuity_revision: null,
+      created_at: "2026-11-24T00:00:00.000Z"
+    }
+    const event = await decode({
+      type: "TOOL_CALL_RESULT",
+      tool_call_id: "call-1",
+      name: "ask_user_input",
+      content: "asked",
+      data: { question }
+    })
+    const decoded = runDecoders.question(
+      event.type === "TOOL_CALL_RESULT" && event.data.kind === "attached"
+        ? event.data.value["question"]
+        : undefined
+    )
+    expect(decoded.content.detail).toEqual({ kind: "none" })
+    expect(decoded.resolution).toEqual({ kind: "unresolved" })
   })
 })

@@ -1,14 +1,8 @@
 {
   "libs/protocol/src/chat/approval-presentation.ts": 31,
   "libs/protocol/src/chat/contracts.ts": 28,
-  "libs/protocol/src/chat/events/tool.ts": 50,
   "libs/protocol/src/chat/facade-schema.ts": 26,
-  "libs/protocol/src/chat/history.ts": 50,
-  "libs/protocol/src/chat/schema.ts": 32,
-  "libs/protocol/src/common/event-fields.ts": 11,
-  "libs/protocol/src/common/schema.ts": 11,
-  "libs/protocol/src/runs/approval-schema.ts": 12,
-  "libs/protocol/src/runs/approvals.ts": 3,
-  "libs/protocol/src/runs/attempts.ts": 5,
-  "libs/protocol/src/runs/progress.ts": 3
+  "libs/protocol/src/chat/history.ts": 31,
+  "libs/protocol/src/chat/schema.ts": 23,
+  "libs/protocol/src/common/schema.ts": 8
 }

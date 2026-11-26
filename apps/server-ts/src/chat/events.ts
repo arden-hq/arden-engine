@@ -1,4 +1,5 @@
 import type {
+  FramedChatProjectionEvent,
   SnapshotProjectionEvent,
   StreamLiveEvent,
   StreamOverflowEvent,
@@ -472,10 +473,14 @@ const readDurableRange = Effect.fn("ChatEventStream.readDurableRange")(function*
 
 const eventRecordToProjectionEvent = (record: SessionEventRecord): SnapshotProjectionEvent => ({
   ...record.event,
+  ...chatEventFrame(record),
+  replay: true
+})
+
+const chatEventFrame = (record: SessionEventRecord) => ({
   session_id: record.sessionId,
   seq: record.sequence,
-  timestamp: record.event.timestamp ?? DateTime.toEpochMillis(record.createdAt),
-  replay: true
+  timestamp: DateTime.toEpochMillis(record.createdAt)
 })
 
 const resumeDeliveryToSse = (
@@ -533,13 +538,7 @@ export const withKeepalives = <E>(
   )
 
 const eventRecordToSse = (record: SessionEventRecord, replay = false): SseEvent => {
-  const payload = {
-    ...record.event,
-    session_id: record.sessionId,
-    seq: record.sequence,
-    timestamp: record.event.timestamp ?? DateTime.toEpochMillis(record.createdAt),
-    ...(replay ? { replay: true } : {})
-  }
+  const payload: FramedChatProjectionEvent = { ...record.event, ...chatEventFrame(record), replay }
   return {
     _tag: "Event",
     id: String(record.sequence),

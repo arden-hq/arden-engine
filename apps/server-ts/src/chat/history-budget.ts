@@ -1,5 +1,10 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { HistoryResponse, TurnWorkResponse } from "@arden-hq/protocol/chat"
+import {
+  PAGE_BOUNDS,
+  pageBounds,
+  type HistoryResponse,
+  type TurnWorkResponse
+} from "@arden-hq/protocol/chat"
 import { snapshotJsonBytes as bytes } from "./snapshot-encoding.js"
 
 const ACTIVE_WORK_TAIL_BYTES = 1024 * 1024
@@ -36,8 +41,10 @@ export const boundActiveWorkTail = (
   let start = 0
   const pageAt = (index: number): TurnWorkResponse["page"] => ({
     ...work.page,
-    before: carriers[index]?.message_id ?? null,
-    after: index < carriers.length ? (carriers.at(-1)?.message_id ?? null) : null,
+    bounds: pageBounds(
+      carriers[index]?.message_id,
+      index < carriers.length ? carriers.at(-1)?.message_id : undefined
+    ),
     has_more_before: index > 0 || work.page.has_more_before
   })
   const removed = new Set<string>()
@@ -62,12 +69,13 @@ export const boundActiveWorkTail = (
 
 export const boundConversationWindow = <H extends HistoryRows>(history: H, capacity: number): H => {
   if (bytes(history) <= capacity) return history
+  const after = history.page.bounds.kind === PAGE_BOUNDS.bounded ? history.page.bounds.after : ""
   const fixedBytes =
     bytes({
       ...history,
       messages: [],
-      page: { ...history.page, before: null, has_more_before: true }
-    }) - bytes(null)
+      page: { ...history.page, bounds: pageBounds("", after), has_more_before: true }
+    }) - bytes("")
   const messageBytes = history.messages.map((message) => bytes(message) + 1)
   let payloadBytes = messageBytes.reduce((sum, size) => sum + size, 0)
   let start = 0
@@ -87,7 +95,7 @@ export const boundConversationWindow = <H extends HistoryRows>(history: H, capac
     messages,
     page: {
       ...history.page,
-      before: messages[0]?.message_id ?? null,
+      bounds: pageBounds(messages[0]?.message_id, after),
       has_more_before: true
     }
   }

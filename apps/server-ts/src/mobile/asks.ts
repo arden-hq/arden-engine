@@ -1,5 +1,11 @@
 import { type StoredRunQuestion } from "../persistence/runs/stored-question.js"
-import { previewLine } from "@arden-hq/protocol/chat"
+import {
+  APPROVAL_CARD,
+  APPROVAL_DIFF,
+  APPROVAL_PREVIEW,
+  previewLine,
+  type ApprovalPresentation
+} from "@arden-hq/protocol/chat"
 import {
   MOBILE_FILING,
   type MobileAsk,
@@ -7,7 +13,7 @@ import {
   type MobileDetail,
   type MobileFiling
 } from "@arden-hq/protocol/mobile"
-import type { RunApproval } from "@arden-hq/protocol/runs"
+import { APPROVAL_TEXT, type RunApproval, type RunApprovalText } from "@arden-hq/protocol/runs"
 import { grantedOnlyInTheApp, type ToolDisplay } from "@arden-hq/protocol/tools"
 import { namedTool } from "@arden-hq/protocol/views"
 
@@ -89,21 +95,31 @@ export function mobileAsks({
   ]
 }
 
+const textOf = (text: RunApprovalText): string | undefined =>
+  text.kind === APPROVAL_TEXT.text ? text.text : undefined
+
+const previewOf = (approval: RunApproval): string | undefined =>
+  approval.preview.kind === APPROVAL_PREVIEW.preview ? approval.preview.text : undefined
+
+const presentationOf = (approval: RunApproval): ApprovalPresentation | undefined =>
+  approval.card.kind === APPROVAL_CARD.presented ? approval.card.presentation : undefined
+
 function approvalTitle(approval: RunApproval): string {
   return (
-    oneLine(approval.presentation?.title) ??
-    oneLine(approval.description) ??
-    oneLine(approval.preview) ??
+    oneLine(presentationOf(approval)?.title) ??
+    oneLine(textOf(approval.description)) ??
+    oneLine(previewOf(approval)) ??
     namedTool({ name: approval.tool_name, displayName: null })
   )
 }
 
 function approvalChange(approval: RunApproval): MobileChange {
-  const files = approval.diff === null ? [] : parseUnifiedDiff(approval.diff)
+  const files =
+    approval.diff.kind === APPROVAL_DIFF.diff ? parseUnifiedDiff(approval.diff.patch) : []
   if (files.length > 0) return { kind: "diff", files }
-  const body = approval.presentation?.body
+  const body = presentationOf(approval)?.body
   if (body?.label === "Command") return { kind: "command", command: body.text }
-  const fields = (approval.presentation?.fields ?? [])
+  const fields = (presentationOf(approval)?.fields ?? [])
     .filter((field) => field.value.trim().length > 0)
     .slice(0, 2)
     .map((field) => `${field.label}: ${field.value}`)
@@ -111,8 +127,8 @@ function approvalChange(approval: RunApproval): MobileChange {
   return {
     kind: "summary",
     text:
-      oneLine(approval.preview) ??
-      oneLine(approval.description) ??
+      oneLine(previewOf(approval)) ??
+      oneLine(textOf(approval.description)) ??
       oneLine(fields) ??
       approvalTitle(approval)
   }

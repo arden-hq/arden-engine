@@ -352,6 +352,7 @@ export interface QueuedMessageAddress {
 }
 
 export type {
+  ActiveWork,
   AgentResult,
   ChatSentFrom,
   ConnectionArrival,
@@ -373,6 +374,9 @@ export type {
   InteractionReference,
   InteractionSender,
   InteractionSource,
+  PageBounds,
+  ToolCountName,
+  TurnEnding,
   TurnShell,
   TurnToolCallCount,
   TurnWorkResponse,

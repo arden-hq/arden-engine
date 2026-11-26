@@ -1,4 +1,4 @@
-import { RUNTIME_RUN } from "@arden-hq/protocol/chat"
+import { pageBounds, RUNTIME_RUN } from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import {
   INTERACTION_KIND,
@@ -18,7 +18,6 @@ import {
   type HistoryMessage,
   type TurnWorkResponse
 } from "@arden-hq/protocol/chat"
-import { ToolOutcomeSchema } from "@arden-hq/protocol/effect/common"
 import {
   AgentResultSchema,
   ChatHandoffSourceSchema,
@@ -80,8 +79,7 @@ const StoredReplySchema = Schema.Union([
 export const historyPage = (page: TranscriptPage): HistoryResponse["page"] => ({
   has_more_before: page.hasMoreBefore,
   has_more_after: page.hasMoreAfter,
-  before: page.records[0]?.messageId ?? null,
-  after: page.records[page.records.length - 1]?.messageId ?? null
+  bounds: pageBounds(page.records[0]?.messageId, page.records.at(-1)?.messageId)
 })
 
 export const activeRunSnapshot = (
@@ -308,10 +306,6 @@ const projectMessage = (
       ? envelope.retryable
       : undefined
   const retryable = metadata === undefined ? persistedRetryable : metadata.retryable
-  const outcome =
-    record.role === ROLE.tool
-      ? Option.getOrUndefined(decodeToolOutcome(envelope.outcome))
-      : undefined
   const data = metadata?.data ?? envelope.data
   const automation =
     surface === "conversation" &&
@@ -428,7 +422,6 @@ const projectMessage = (
     ...(toolCallId === undefined ? {} : { tool_call_id: toolCallId }),
     ...(isError === undefined ? {} : { is_error: isError }),
     ...(retryable === undefined ? {} : { retryable }),
-    ...(outcome === undefined ? {} : { outcome }),
     ...(record.role !== ROLE.tool || data === undefined ? {} : { data }),
     ...(replyTo === undefined
       ? {}
@@ -694,7 +687,6 @@ const contentContext = (
   })
 }
 
-const decodeToolOutcome = Schema.decodeUnknownOption(ToolOutcomeSchema)
 const decodeGmailSendReceipt = Schema.decodeUnknownOption(GmailSendReceiptSchema)
 
 export const historyToolCalls = (
@@ -707,7 +699,6 @@ export const historyToolCalls = (
     const name = Predicate.isString(call.name) ? call.name : fallbackName
     if (!Predicate.isString(call.id) || name === undefined) return []
     const argumentsValue = call.arguments ?? fn?.arguments ?? {}
-    const outcome = Option.getOrUndefined(decodeToolOutcome(call.outcome))
     return [
       {
         id: call.id,
@@ -732,8 +723,7 @@ export const historyToolCalls = (
         ...(Predicate.isBoolean(call.is_error) ? { is_error: call.is_error } : {}),
         ...(call.retryable === null || Predicate.isBoolean(call.retryable)
           ? { retryable: call.retryable }
-          : {}),
-        ...(outcome === undefined ? {} : { outcome })
+          : {})
       }
     ]
   })
@@ -745,7 +735,6 @@ const historyProviderToolCalls = (
   if (!Array.isArray(value)) return []
   return value.filter(Predicate.isObject).flatMap((call) => {
     if (!Predicate.isString(call.id) || !Predicate.isString(call.name)) return []
-    const outcome = Option.getOrUndefined(decodeToolOutcome(call.outcome))
     return [
       {
         id: call.id,
@@ -767,7 +756,6 @@ const historyProviderToolCalls = (
         ...(call.retryable === null || Predicate.isBoolean(call.retryable)
           ? { retryable: call.retryable }
           : {}),
-        ...(outcome === undefined ? {} : { outcome }),
         ...(Array.isArray(call.source_refs) && call.source_refs.length > 0
           ? { data: { source_refs: call.source_refs } }
           : {})

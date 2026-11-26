@@ -44,13 +44,12 @@ import { conversationMessagePredicate } from "./transcript-predicates.js"
 import { assistantTextStart } from "./assistant-text-start.js"
 
 const finishUsageSchema = Schema.Struct({
-  prompt: Schema.optionalKey(Schema.Natural),
-  completion: Schema.optionalKey(Schema.Natural),
-  total: Schema.optionalKey(Schema.Natural),
-  cache_read: Schema.optionalKey(Schema.Natural),
-  cache_write: Schema.optionalKey(Schema.Natural),
-  cost: Schema.optionalKey(Schema.Number),
-  exclusive_cost: Schema.optionalKey(Schema.Number)
+  prompt: Schema.Natural,
+  completion: Schema.Natural,
+  total: Schema.Natural,
+  cache_read: Schema.Natural,
+  cache_write: Schema.Natural,
+  cost: Schema.optionalKey(Schema.Number)
 })
 
 const finishInputSchema = Schema.Struct({

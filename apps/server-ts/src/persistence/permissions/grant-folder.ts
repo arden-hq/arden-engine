@@ -13,14 +13,6 @@ export const grantFolderOf = (toolName: string, data: unknown): ApprovalGrantFol
     : { kind: APPROVAL_GRANT_FOLDER.folder, folder: shortFolder(collapseHome(folder)) }
 }
 
-export const grantFolderField = (
-  toolName: string,
-  data: unknown
-): { readonly grant_folder?: string } => {
-  const folder = spaceFolderGrantOf(toolName, data)?.local_folder
-  return folder === undefined ? {} : { grant_folder: shortFolder(collapseHome(folder)) }
-}
-
 const shortFolder = (shown: string): string => {
   if (shown.length <= GRANT_FOLDER_TEXT) return shown
   const [first, ...rest] = shown.split("/")

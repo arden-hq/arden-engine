@@ -23,7 +23,6 @@ export type { SessionType, SessionListItem } from "./sessions/contracts.js"
 export type { AppSettingsTabId, AppDestination } from "./common/navigation.js"
 export type { TodoStatus, TodoListItem } from "./sessions/todos/contracts.js"
 export type {
-  ToolOutcome,
   AssistantTextPhase,
   AgentResult,
   Interaction,
@@ -35,7 +34,14 @@ export type {
   InteractionSender,
   InteractionSource
 } from "./chat/history.js"
-export type { EventUsage, CommonServerEventFields } from "./common/event-fields.js"
+export { PROVIDER_COST } from "./common/event-fields.js"
+export type {
+  ChatEventFrame,
+  ProviderCost,
+  EventFrame,
+  EventUsage,
+  Framed
+} from "./common/event-fields.js"
 export type {
   RunStartedEvent,
   SessionUpdatedEvent,
@@ -117,6 +123,7 @@ export type {
   TaskWorkEndedEvent,
   TaskWorkChangedEvent,
   AutomationEvent,
+  LifecycleFeedBody,
   ServerEvent
 } from "./events/contracts.js"
 export type {
@@ -127,7 +134,8 @@ export type {
   StreamLiveEvent,
   StreamOverflowEvent,
   ChatProjectionEvent,
-  ChatServerEvent
+  ChatServerEvent,
+  FramedChatProjectionEvent
 } from "./chat/events/stream.js"
 export {
   ANONYMOUS_FRAME,

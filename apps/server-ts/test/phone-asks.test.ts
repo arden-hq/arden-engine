@@ -12,21 +12,22 @@ const approval = (toolCallId: string, toolName: string): RunApproval => ({
   run_id: "run-1",
   session_id: "chat-1",
   destination_session_id: "chat-1",
-  work: null,
+  asker: { kind: "chat" },
   tool_call_id: toolCallId,
+  decision_delivery: "blocking",
   kind: "tool_approval",
-  connection: null,
+  connection: { kind: "none" },
   tool_name: toolName,
   action: "execute",
-  scope: "run",
-  preview: `Use ${toolName}`,
-  description: null,
-  detail: null,
-  subject: null,
-  reason: null,
-  presentation: null,
-  diff: null,
-  rule_places: []
+  preview: { kind: "preview", text: `Use ${toolName}` },
+  description: { kind: "none" },
+  detail: { kind: "none" },
+  subject: { kind: "none" },
+  card: { kind: "plain" },
+  diff: { kind: "no_diff" },
+  rule_places: [],
+  can_attach_folder_to_space: false,
+  grant_folder: { kind: "none" }
 })
 
 const displays: Readonly<Record<string, ToolDisplay>> = {

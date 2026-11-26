@@ -1,6 +1,13 @@
 import { LocalCaller } from "../middleware/local-only.js"
 import { runListOptions } from "@arden-hq/protocol/effect/runs"
-import { RUN_LIST_FILTER, RUN_PAGE, RUN_PAGE_NEXT, RUN_TRACE } from "@arden-hq/protocol/runs"
+import {
+  RUN_LIST_FILTER,
+  RUN_PAGE,
+  RUN_PAGE_NEXT,
+  RUN_PURPOSE,
+  RUN_TRACE,
+  type RunProgress
+} from "@arden-hq/protocol/runs"
 import { runDetail } from "./run-detail.js"
 import { wireSessionRun, wireUsageReport } from "./usage-wire.js"
 import { wirePlanLimits } from "./plan-limits-wire.js"
@@ -21,6 +28,11 @@ import { currentMillis } from "../../runtime/clock.js"
 /** Joins a start time and a Run id into the list's `next` cursor. A start
  * time never holds it. */
 const RUN_LIST_CURSOR_SEPARATOR = "|"
+
+const runPurpose = (purpose: string | null | undefined): RunProgress["purpose"] =>
+  purpose === null || purpose === undefined
+    ? { kind: RUN_PURPOSE.none }
+    : { kind: RUN_PURPOSE.stated, text: purpose }
 
 const elapsedSeconds = (now: DateTime.Utc, then: DateTime.Utc): number =>
   Math.max(0, Math.floor((DateTime.toEpochMillis(now) - DateTime.toEpochMillis(then)) / 1_000))
@@ -138,7 +150,9 @@ export const RunHandlers = HttpApiBuilder.group(
           if (progress === null) return yield* new HttpApiError.NotFound({})
           return {
             ...progress,
-            purpose: events.currentActivity(progress.session_id, progress.run_id)?.purpose ?? null
+            purpose: runPurpose(
+              events.currentActivity(progress.session_id, progress.run_id)?.purpose
+            )
           }
         })
       )
