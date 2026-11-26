@@ -1,5 +1,5 @@
 import { captureMutationVersions } from "./mutation-links.js"
-import type { TaskProposal, TaskProposalCapturePolicy } from "@arden-hq/protocol/proposals"
+import type { TaskProposal } from "@arden-hq/protocol/proposals"
 import {
   SpaceTaskCaptureInputSchema,
   SpaceTaskSourceSchema,
@@ -135,7 +135,7 @@ export const makeProposalRevision = (options: {
               failure("storage", "Task proposal Run context is corrupt", cause)
             )
           )
-          const capturePolicy: TaskProposalCapturePolicy = {
+          const capturePolicy = {
             origin: context.origin.kind,
             task_item_id: context.task?.item_id ?? null,
             task_generation: context.task?.generation ?? null

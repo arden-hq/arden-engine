@@ -81,14 +81,15 @@ const start = (proposalId: string, spaceId?: string) =>
         expected_revision: 0,
         client_id: `start-${proposalId}`,
         decision: "accept",
-        ...(spaceId === undefined ? {} : { space_id: spaceId })
+        space: spaceId === undefined ? { kind: "proposed" } : { kind: "chosen", space_id: spaceId },
+        accepted_in: { kind: "elsewhere" }
       },
       { memory: [] }
     )
     const rows = yield* sql<{
       readonly space_id: string
     }>`SELECT space_id FROM space_tasks
-      WHERE item_id = ${task?.item_id ?? ""}`
+      WHERE item_id = ${task.kind === "started" ? task.task.item_id : ""}`
     return rows[0]?.space_id
   })
 

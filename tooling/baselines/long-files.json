@@ -43,7 +43,7 @@
   "apps/server-ts/src/persistence/sqlite/space-read.ts": 128,
   "apps/server-ts/src/persistence/sqlite/space-review.ts": 63,
   "apps/server-ts/src/persistence/sqlite/spaces.ts": 117,
-  "apps/server-ts/src/persistence/sqlite/task-proposals.ts": 202,
+  "apps/server-ts/src/persistence/sqlite/task-proposals.ts": 177,
   "apps/server-ts/src/persistence/sqlite/tool-approval-resolve.ts": 110,
   "apps/server-ts/src/persistence/sqlite/tool-approvals.ts": 156,
   "apps/server-ts/src/persistence/sqlite/tool-executions.ts": 139,

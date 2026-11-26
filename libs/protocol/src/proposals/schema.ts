@@ -13,33 +13,36 @@ import type {
   TaskProposal,
   TaskProposalList,
   TaskProposalRetirement,
-  TaskProposalSignal,
   TaskProposalConflict,
   TaskProposalReview
 } from "./contracts.js"
 
 const identity = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1024))
 
-export const TaskProposalPlaceSchema = Schema.Literals(["space", "chat"] as const)
+const SignalSenderSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unnamed") }),
+  Schema.Struct({ kind: Schema.Literal("named"), name: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
 
-export const TaskProposalCapturePolicySchema = Schema.Struct({
-  origin: Schema.Literals(["chat", "automation", "task", "space", "unrecorded"] as const),
-  task_item_id: Schema.NullOr(identity),
-  task_generation: Schema.NullOr(NonNegativeIntSchema)
-})
-
-export const TaskProposalSignalSchema: Schema.Codec<TaskProposalSignal> = withExtras({
-  source: Schema.NonEmptyString,
-  title: Schema.String,
-  from: Schema.NullOr(Schema.String)
-})
+const TaskProposalSignalSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unsignalled") }),
+  Schema.Struct({
+    kind: Schema.Literal("signal"),
+    source: Schema.NonEmptyString,
+    title: Schema.String,
+    from: SignalSenderSchema
+  })
+]).pipe(Schema.toTaggedUnion("kind"))
 
 const TaskProposalRetirementEvidenceSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("chat"),
     session_id: identity,
-    turn_id: Schema.NullOr(identity),
-    label: Schema.NullOr(Schema.String)
+    turn: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("whole_chat") }),
+      Schema.Struct({ kind: Schema.Literal("turn"), turn_id: identity })
+    ]),
+    label: SignalSenderSchema
   }),
   Schema.Struct({ kind: Schema.Literal("memory"), page_ref: identity }),
   Schema.Struct({ kind: Schema.Literal("task"), item_id: identity, label: Schema.String }),
@@ -47,7 +50,10 @@ const TaskProposalRetirementEvidenceSchema = Schema.Union([
     kind: Schema.Literal("connection_item"),
     item_id: identity,
     label: Schema.String,
-    url: Schema.NullOr(Schema.String)
+    link: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("unlinked") }),
+      Schema.Struct({ kind: Schema.Literal("linked"), url: Schema.String })
+    ])
   })
 ])
 
@@ -56,89 +62,113 @@ const TaskProposalRetirementSchema: Schema.Codec<TaskProposalRetirement> = withE
   evidence: Schema.Array(TaskProposalRetirementEvidenceSchema)
 })
 
-export const TaskProposalSchema: Schema.Codec<TaskProposal> = withExtras({
+const taskProposalFields = {
   proposal_id: identity,
-  place: TaskProposalPlaceSchema,
-  space_id: Schema.NullOr(identity),
-  chat_session_id: Schema.NullOr(identity),
+  placement: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("space"), space_id: identity }),
+    Schema.Struct({ kind: Schema.Literal("chat"), session_id: identity })
+  ]).pipe(Schema.toTaggedUnion("kind")),
   stable_key: WorkTaskKeySchema,
   text: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(WORK_TASK_TEXT_MAX_CHARS)),
-  body: Schema.NullOr(Schema.String.check(Schema.isMaxLength(WORK_TASK_BODY_MAX_CHARS))),
+  body: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("plain") }),
+    Schema.Struct({
+      kind: Schema.Literal("detailed"),
+      text: Schema.String.check(Schema.isMaxLength(WORK_TASK_BODY_MAX_CHARS))
+    })
+  ]),
   owner: Schema.Literals(["worker", "user", "external"] as const),
   capture: SpaceTaskCaptureInputSchema,
   sources: Schema.Array(SpaceTaskSourceSchema),
-  signal: Schema.NullOr(TaskProposalSignalSchema),
-  source_run_id: Schema.NullOr(identity),
-  source_session_id: Schema.NullOr(identity),
-  source_turn_id: Schema.NullOr(identity),
-  source_tool_call_id: Schema.NullOr(identity),
-  capture_policy: Schema.NullOr(TaskProposalCapturePolicySchema),
+  signal: TaskProposalSignalSchema,
+  origin: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("router") }),
+    Schema.Struct({
+      kind: Schema.Literal("run"),
+      run_id: identity,
+      session_id: identity,
+      turn_id: identity,
+      tool_call_id: identity
+    })
+  ]),
   revision: NonNegativeIntSchema,
-  status: Schema.Literals([
-    "held",
-    "offered",
-    "accepted",
-    "rejected",
-    "expired",
-    "retired"
-  ] as const),
-  retirement: Schema.NullOr(TaskProposalRetirementSchema),
-  item_id: Schema.NullOr(identity),
-  put_off_until: Schema.NullOr(IsoDateTimeStringSchema),
   created_at: IsoDateTimeStringSchema,
-  updated_at: IsoDateTimeStringSchema,
-  settled_at: Schema.NullOr(IsoDateTimeStringSchema)
-}).check(
-  Schema.makeFilter((proposal) => {
-    if ((proposal.place === "space") !== (proposal.space_id !== null))
-      return "a proposal names a Space exactly when it waits on one"
-    if ((proposal.place === "chat") !== (proposal.chat_session_id !== null))
-      return "a proposal names a chat exactly when it waits in one"
-    if ((proposal.status === "retired") !== (proposal.retirement !== null))
-      return "a retirement is recorded exactly when a proposal is retired"
-    if (proposal.put_off_until !== null && proposal.status !== "offered")
-      return "only an open offer is put off"
-    if (proposal.status === "held" || proposal.status === "offered") {
-      return proposal.item_id === null && proposal.settled_at === null
-        ? undefined
-        : "open proposals cannot have settlement fields"
-    }
-    if (
-      (proposal.status === "rejected" ||
-        proposal.status === "expired" ||
-        proposal.status === "retired") &&
-      proposal.item_id !== null
-    )
-      return "a skipped proposal has no Task"
-    return proposal.settled_at === null ? "settled proposals require settled_at" : undefined
+  updated_at: IsoDateTimeStringSchema
+} as const
+
+export const TaskProposalSchema: Schema.Codec<TaskProposal> = Schema.Union([
+  withExtras({ ...taskProposalFields, status: Schema.Literal("held") }),
+  withExtras({
+    ...taskProposalFields,
+    status: Schema.Literal("offered"),
+    put_off: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("in_view") }),
+      Schema.Struct({ kind: Schema.Literal("put_off"), until: IsoDateTimeStringSchema })
+    ])
+  }),
+  withExtras({
+    ...taskProposalFields,
+    status: Schema.Literal("accepted"),
+    settled_at: IsoDateTimeStringSchema,
+    task: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("kept"), item_id: identity }),
+      Schema.Struct({ kind: Schema.Literal("gone") })
+    ])
+  }),
+  withExtras({
+    ...taskProposalFields,
+    status: Schema.Literals(["rejected", "expired"]),
+    settled_at: IsoDateTimeStringSchema
+  }),
+  withExtras({
+    ...taskProposalFields,
+    status: Schema.Literal("retired"),
+    settled_at: IsoDateTimeStringSchema,
+    retirement: TaskProposalRetirementSchema
   })
-)
+])
 
 export const TaskProposalListSchema: Schema.Codec<TaskProposalList> = withExtras({
   proposals: Schema.Array(TaskProposalSchema)
 })
 
-export const TaskProposalListQuerySchema = Schema.Struct({
-  place: TaskProposalPlaceSchema,
-  space_id: Schema.optionalKey(identity),
-  session_id: Schema.optionalKey(identity)
-})
+export const TaskProposalListQuerySchema = Schema.Union([
+  Schema.Struct({ place: Schema.Literal("space"), space_id: identity }),
+  Schema.Struct({ place: Schema.Literal("chat"), session_id: identity })
+])
 
-export const ResolveTaskProposalInputSchema = Schema.Struct({
+const resolveBase = {
   expected_revision: NonNegativeIntSchema,
-  client_id: identity,
-  decision: Schema.Literals(["accept", "reject", "later"] as const),
-  session_id: Schema.optionalKey(identity),
-  space_id: Schema.optionalKey(identity)
-})
+  client_id: identity
+} as const
+
+export const ResolveTaskProposalInputSchema = Schema.Union([
+  Schema.Struct({
+    ...resolveBase,
+    decision: Schema.Literal("accept"),
+    space: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("proposed") }),
+      Schema.Struct({ kind: Schema.Literal("chosen"), space_id: identity })
+    ]),
+    accepted_in: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("elsewhere") }),
+      Schema.Struct({ kind: Schema.Literal("chat"), session_id: identity })
+    ])
+  }),
+  Schema.Struct({ ...resolveBase, decision: Schema.Literal("reject") }),
+  Schema.Struct({ ...resolveBase, decision: Schema.Literal("later") })
+])
 
 export const ResolveTaskProposalResponseSchema: Schema.Codec<ResolveTaskProposalResponse> =
   withExtras({
     proposal: TaskProposalSchema,
-    task: Schema.NullOr(SpaceTaskSchema)
+    task: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("started"), task: SpaceTaskSchema }),
+      Schema.Struct({ kind: Schema.Literal("unstarted") })
+    ])
   }).check(
     Schema.makeFilter((response) =>
-      response.task === null || response.proposal.status === "accepted"
+      response.task.kind !== "started" || response.proposal.status === "accepted"
         ? undefined
         : "only a started proposal returns a Task"
     )
@@ -202,7 +232,10 @@ export const TaskProposalReviewSchema = Schema.Struct({
   proposal: TaskProposalSchema
 })
 
-export const TaskProposalReviewStatusSchema = Schema.NullOr(TaskProposalReviewSchema)
+export const TaskProposalReviewStatusSchema = Schema.Union([
+  Schema.Struct({ state: Schema.Literal("unrequested") }),
+  TaskProposalReviewSchema
+])
 
 export const encodeRecheckTaskProposalRequestEffect = (
   value: unknown

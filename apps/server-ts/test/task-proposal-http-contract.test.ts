@@ -17,29 +17,26 @@ class ProposalTestApi extends HttpApi.make("arden-server").add(TaskProposalsApi)
 
 const proposal: TaskProposal = {
   proposal_id: "p1",
-  place: "space",
-  space_id: "d1",
-  chat_session_id: null,
+  placement: { kind: "space", space_id: "d1" },
   stable_key: "approved-messages",
   text: "Send approved messages",
-  body: null,
+  body: { kind: "plain" },
   owner: "worker",
   capture: { basis: "inferred", reason: "Approved in Memory." },
   sources: [{ kind: "memory", page_ref: "memory-page", revision: "memory-old" }],
-  signal: null,
-  source_run_id: "run1",
-  source_session_id: "session1",
-  source_turn_id: "turn1",
-  source_tool_call_id: "call1",
-  capture_policy: { origin: "space", task_item_id: null, task_generation: null },
+  signal: { kind: "unsignalled" },
+  origin: {
+    kind: "run",
+    run_id: "run1",
+    session_id: "session1",
+    turn_id: "turn1",
+    tool_call_id: "call1"
+  },
   revision: 1,
   status: "offered",
-  retirement: null,
-  item_id: null,
-  put_off_until: null,
+  put_off: { kind: "in_view" },
   created_at: "2026-10-16T10:00:00.000Z",
-  updated_at: "2026-10-16T10:00:00.000Z",
-  settled_at: null
+  updated_at: "2026-10-16T10:00:00.000Z"
 }
 
 const review: TaskProposalReview = {
@@ -55,7 +52,7 @@ it("encodes stale Memory conflicts and review status through the Task proposals 
       TaskProposalStore,
       TaskProposalStore.of({
         get: () => Effect.succeed(proposal),
-        memoryScope: () => Effect.succeed(proposal.space_id ?? undefined),
+        memoryScope: () => Effect.succeed("d1"),
         resolve: () => Effect.die("stale Memory must be rejected by the HTTP handler"),
         requestProposalReview: (input: { readonly expectedRevision: number }) =>
           Effect.succeed({ ...review, expected_revision: input.expectedRevision }),
@@ -107,7 +104,8 @@ it("encodes stale Memory conflicts and review status through the Task proposals 
                 expected_revision: 1,
                 client_id: "start1",
                 decision: "accept",
-                session_id: "session1"
+                space: { kind: "proposed" },
+                accepted_in: { kind: "chat", session_id: "session1" }
               })
             })
           )

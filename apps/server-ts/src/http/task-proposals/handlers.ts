@@ -1,6 +1,6 @@
 import type { TaskProposalScope } from "@arden-hq/protocol/proposals"
 import { Effect } from "effect"
-import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { TaskProposalStore, TaskProposalStoreError } from "../../persistence/proposals/store.js"
 import { TaskProposalConflictError } from "../../persistence/proposals/conflict.js"
 import { ProposalConflictResponse } from "./api.js"
@@ -10,20 +10,14 @@ import { Wiki } from "../../wiki/service.js"
 import { ArdenApi } from "../api.js"
 import { failStore } from "../errors.js"
 
-const scopeOf = (query: {
-  readonly place: TaskProposalScope["place"]
-  readonly space_id?: string
-  readonly session_id?: string
-}): TaskProposalScope | undefined => {
-  switch (query.place) {
-    case "space":
-      return query.space_id === undefined ? undefined : { place: "space", spaceId: query.space_id }
-    case "chat":
-      return query.session_id === undefined
-        ? undefined
-        : { place: "chat", sessionId: query.session_id }
-  }
-}
+const scopeOf = (
+  query:
+    | { readonly place: "space"; readonly space_id: string }
+    | { readonly place: "chat"; readonly session_id: string }
+): TaskProposalScope =>
+  query.place === "space"
+    ? { place: "space", spaceId: query.space_id }
+    : { place: "chat", sessionId: query.session_id }
 
 export const TaskProposalHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -36,12 +30,7 @@ export const TaskProposalHandlers = HttpApiBuilder.group(
       .handle("history", ({ params, query }) =>
         proposals.history({ id: params.proposalId, ...query }).pipe(Effect.catch(failStore))
       )
-      .handle("list", ({ query }) => {
-        const scope = scopeOf(query)
-        return scope === undefined
-          ? Effect.fail(new HttpApiError.BadRequest())
-          : proposals.list(scope).pipe(Effect.catch(failStore))
-      })
+      .handle("list", ({ query }) => proposals.list(scopeOf(query)).pipe(Effect.catch(failStore)))
       .handle("recheck", ({ params, payload }) =>
         proposals
           .requestProposalReview({
@@ -59,7 +48,7 @@ export const TaskProposalHandlers = HttpApiBuilder.group(
       )
       .handle("reviewStatus", ({ params }) =>
         proposals.proposalReviewStatus({ proposalId: params.proposalId }).pipe(
-          Effect.map((review) => review ?? null),
+          Effect.map((review) => review ?? { state: "unrequested" as const }),
           Effect.catch(failStore)
         )
       )

@@ -1,7 +1,11 @@
 import { quoted } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { ChatActionRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
-import type { TaskProposalRetirementSource } from "@arden-hq/protocol/proposals"
+import {
+  TASK_PROPOSAL_ORIGIN,
+  TASK_PROPOSAL_TASK,
+  type TaskProposalRetirementSource
+} from "@arden-hq/protocol/proposals"
 import { CreateSpaceTaskInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema, Struct } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -348,10 +352,11 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
           { signal: ctx.signal }
         )
       )
-      const taskUrl =
-        proposal.item_id === null ? null : `arden:task/${encodeURIComponent(proposal.item_id)}`
+      let taskUrl: string | null = null
       const authored =
-        proposal.source_run_id === ctx.run.runId && proposal.source_tool_call_id === ctx.toolCallId
+        proposal.origin.kind === TASK_PROPOSAL_ORIGIN.run &&
+        proposal.origin.run_id === ctx.run.runId &&
+        proposal.origin.tool_call_id === ctx.toolCallId
       let result: string
       switch (proposal.status) {
         case "held":
@@ -370,7 +375,9 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
           result = `${quoted(proposal.text)} expired unanswered; it is not offered again. This call changed nothing.`
           break
         case "accepted":
-          if (taskUrl === null) throw refusal("Accepted Task proposal is missing its Task")
+          if (proposal.task.kind === TASK_PROPOSAL_TASK.gone)
+            throw refusal("Accepted Task proposal is missing its Task")
+          taskUrl = `arden:task/${encodeURIComponent(proposal.task.item_id)}`
           result = `This proposal already resolved to ${namedLink(proposal.text, taskUrl)}.`
           break
       }

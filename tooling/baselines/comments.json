@@ -599,7 +599,7 @@
   "libs/protocol/src/permissions/modes.ts": 2,
   "libs/protocol/src/permissions/schema.ts": 3,
   "libs/protocol/src/permissions/words.ts": 6,
-  "libs/protocol/src/proposals/contracts.ts": 17,
+  "libs/protocol/src/proposals/contracts.ts": 2,
   "libs/protocol/src/proposals/schema.ts": 6,
   "libs/protocol/src/relay/schema.ts": 3,
   "libs/protocol/src/runs/approvals.ts": 7,

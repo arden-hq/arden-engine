@@ -74,29 +74,26 @@ describe("task_propose after a review", () => {
   const SPACE = "space-1"
   const offered: TaskProposal = {
     proposal_id: "task-proposal:p1",
-    place: "space",
-    space_id: SPACE,
-    chat_session_id: null,
+    placement: { kind: "space", space_id: SPACE },
     stable_key: "reply-to-ana",
     text: "Reply to Ana",
-    body: null,
+    body: { kind: "plain" },
     owner: "worker",
     capture: { basis: "inferred", reason: "Ana asked for a reply." },
     sources: [],
-    signal: null,
-    source_run_id: "run-fixture",
-    source_session_id: "session-fixture",
-    source_turn_id: "turn-1",
-    source_tool_call_id: "call-fixture",
-    capture_policy: { origin: "space", task_item_id: null, task_generation: null },
+    signal: { kind: "unsignalled" },
+    origin: {
+      kind: "run",
+      run_id: "run-fixture",
+      session_id: "session-fixture",
+      turn_id: "turn-1",
+      tool_call_id: "call-fixture"
+    },
     revision: 1,
     status: "offered",
-    retirement: null,
-    item_id: null,
-    put_off_until: null,
+    put_off: { kind: "in_view" },
     created_at: "2026-11-04T10:00:00.000Z",
-    updated_at: "2026-11-04T10:00:00.000Z",
-    settled_at: null
+    updated_at: "2026-11-04T10:00:00.000Z"
   }
 
   const fixture = (runSpaceId: string | null = SPACE) => {
