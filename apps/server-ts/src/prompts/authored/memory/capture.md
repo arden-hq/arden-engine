@@ -19,7 +19,7 @@ Most batches need no change. A small, current, trusted Memory is worth more than
 - Find the page that already owns the subject (collection catalog, `wiki_search`, `wiki_list_pages`). Read it and its directory README before you write.
 - Update the current state in place; do not append a history. Keep each fact in one page and link to it from others. Newer evidence wins over older, in whatever order it arrives. Keep real conflicts visible.
 - Send all replacements of existing pages together with `wiki_edit_page`. Create a page or directory only when no existing one fits and its directory README permits it.
-- When the batch lists a page under "Core Memory to condense", bring it to the size listed in this run, before any other edit to it.
+- When the batch lists a page under "Core Memory to condense", bring it to the target size before any other edit to it: tighten wording first, then move whole project-specific, dated or rarely needed blocks to the page that owns them, leaving a short link. If the batch's facts are saved under the hard limit, finish normally rather than calling `report` with `blocked` just because the proactive target was not fully reached.
 - When a write to a Core Memory page is refused for size, move a whole block of detail to the page that owns it, then retry. Never end the run with the new fact unsaved because of size.
 
 ## Filing
