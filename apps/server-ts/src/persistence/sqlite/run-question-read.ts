@@ -152,7 +152,7 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionRead
       AND json_extract(delivery.payload, '$.kind') = 'answer'
     LEFT JOIN chat_idempotency_keys AS answer_receipt
       ON answer_receipt.session_id = json_extract(delivery.payload, '$.sessionId')
-      AND answer_receipt.client_id = 'arrival:' || delivery.delivery_id
+      AND answer_receipt.client_id = delivery.message_id
     LEFT JOIN sessions AS asking ON asking.session_id = COALESCE(
       json_extract(r.metadata_json, '$.run_context.origin.session_id'), r.session_id)
     LEFT JOIN sessions AS asking_parent ON asking_parent.session_id = asking.parent_session_id

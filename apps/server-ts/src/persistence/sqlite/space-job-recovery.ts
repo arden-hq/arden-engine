@@ -39,13 +39,13 @@ export const makeSpaceJobRecovery = (options: {
         WITH authority AS MATERIALIZED (${automationRecoveryAuthority(sql)})
         SELECT keyed.task_id FROM (
           SELECT queue.task_id FROM automation_event_queue AS queue
-          WHERE substr(queue.task_id, 1, 6) = 'space:'
           UNION
           SELECT authority.automation_id FROM authority
-          WHERE substr(authority.automation_id, 1, 6) = 'space:'
         ) AS keyed
+        JOIN space_job_keys AS job_key ON job_key.automation_id = keyed.task_id
+          AND job_key.purpose = 'space_review'
         WHERE ${after === undefined ? sql`1` : sql`keyed.task_id > ${after}`}
-          AND NOT EXISTS (SELECT 1 FROM spaces WHERE space_id = substr(keyed.task_id, 7)
+          AND NOT EXISTS (SELECT 1 FROM spaces WHERE space_id = job_key.space_id
             AND archived_at IS NULL)
         ORDER BY keyed.task_id LIMIT ${CHUNK_SIZE}`
         for (const row of rows) yield* options.stopWork(row.task_id)

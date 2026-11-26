@@ -28,6 +28,7 @@ import { queuedEventType } from "./automation-listening.js"
 import { RUNS_ALONE } from "../automations/event-batch.js"
 import { keyMessageJson } from "./chat-key-message.js"
 import { reviewMayRunSql } from "./automation-rows.js"
+import { reviewSpaceIdSql } from "./automation-owner.js"
 
 const REVIEWED_TASK_COLUMNS = REVIEWED_TASK_FIELDS.map((field) => `'${field}', ${field}`).join(", ")
 
@@ -301,8 +302,7 @@ export const makeSpaceReviewStore = ({
       readonly trigger_json: string | null
     }>`
       SELECT queue.context, review_space.space_id, attempt.trigger_json FROM automation_event_queue AS queue
-      JOIN spaces AS review_space ON substr(queue.task_id, 1, 6) = 'space:'
-        AND review_space.space_id = substr(queue.task_id, 7)
+      JOIN spaces AS review_space ON review_space.space_id = ${reviewSpaceIdSql(sql, sql`queue.task_id`)}
       JOIN automation_runs AS attempt ON attempt.id = ${parsed.runId} AND attempt.task_id = queue.task_id
       WHERE queue.id = ${parsed.queueId} AND queue.task_id = ${lease.payload.automationId}
         AND queue.claimed_at IS NOT NULL AND attempt.claim_count = ${parsed.claimAttempt}

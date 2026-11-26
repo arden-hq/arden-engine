@@ -5,7 +5,7 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
-import { CODE_MODE_TOOL } from "../persistence/tools/tool-roles.js"
+import { CODE_MODE_TOOL, NESTING } from "../persistence/tools/tool-roles.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { ScriptStore, type ScriptRecord } from "../persistence/scripts/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
@@ -137,6 +137,14 @@ const makeCodeModeTool = (services: CodeModeServices): ServerTool =>
     execute: (input, ctx) => executeCodeMode(input, ctx, services)
   })
 
+export const nestedContext = (
+  ctx: ToolContext<ServerRunContext>,
+  toolCallId: string
+): ToolContext<ServerRunContext> => {
+  ctx.run.browserObservations.nest(toolCallId, ctx.toolCallId)
+  return { ...ctx, toolCallId }
+}
+
 export const executeCodeMode = async (
   input: typeof ParametersSchema.Type,
   ctx: ToolContext<ServerRunContext>,
@@ -187,6 +195,7 @@ export const executeCodeMode = async (
     tool: (request) =>
       ctx.run.codeMode.call({
         ...request,
+        parent: { toolCallId: request.parentToolCallId, nesting: { kind: NESTING.code } },
         detached,
         messages: ctx.messages,
         ...(ctx.beforeExecute === undefined ? {} : { beforeExecute: ctx.beforeExecute })

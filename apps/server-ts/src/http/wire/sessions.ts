@@ -36,6 +36,7 @@ export const listedSessionToWire = (session: SessionListEntry): ListedSession =>
   current_activity: session.currentActivity ?? null,
   presentation: session.presentation,
   ...storedSessionToWire(session),
+  parent_step: session.parentStep,
   has_unread: session.hasUnread,
   active_run_id: session.activeRun?.runId ?? null,
   active_turn_id: session.activeRun?.turnId ?? null,

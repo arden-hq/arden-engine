@@ -1,6 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { latestSessionRunQuery } from "./session-latest-run.js"
-import { sessionOriginQuery } from "./session-origin.js"
+import { sessionOriginColumns, sessionParentStep } from "./session-origin.js"
 import { sessionPresentations } from "./session-presentation.js"
 import { withFileNames } from "@arden-hq/protocol/chat"
 import { previewLine } from "../transcript/preview-line.js"
@@ -107,7 +107,8 @@ const SessionListRowSchema = Schema.Struct({
   thread_source_id: Schema.NullOr(Schema.String),
   thread_source_ref: Schema.NullOr(Schema.String),
   summary: Schema.NullOr(Schema.String),
-  origin: Schema.NullOr(Schema.Literals(["capture", "onboarding"]))
+  origin: Schema.NullOr(Schema.Literals(["capture", "onboarding"])),
+  parent_step_tool_call_id: nullableText
 })
 
 const ArchivedSessionRowSchema = Schema.Struct({
@@ -177,6 +178,7 @@ const listItem = Effect.fn("SqliteSessionStore.listItem")(function* (
   const runStatus = row.run_status
   return {
     ...storedSession(row, row.session_type ?? "chat"),
+    parentStep: sessionParentStep(row),
     presentation,
     spaceName: row.space_name ?? undefined,
     archivedAt: row.archived_at ?? undefined,
@@ -331,7 +333,7 @@ export const makeSessionListing = ({
              (SELECT summary FROM chat_summaries WHERE session_id = s.session_id) AS summary,
              CASE WHEN s.session_type = 'agent' AND json_extract(s.metadata, '$.agent.mode') = 'code'
                THEN json_extract(s.metadata, '$.agent.workspace.cwd') END AS agent_workspace,
-             ${reader.literal(sessionOriginQuery)} AS origin
+             ${reader.literal(sessionOriginColumns)}
       FROM ${sessions}
       LEFT JOIN chat_runs AS latest_run
         ON latest_run.run_id = (${reader.literal(latestSessionRunQuery)})

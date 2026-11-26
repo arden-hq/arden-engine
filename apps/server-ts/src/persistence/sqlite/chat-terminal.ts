@@ -40,6 +40,7 @@ import { isTerminalRunStatus } from "@arden-hq/protocol/runs"
 import { messageTurnIdSql } from "./message-turns.js"
 import { turnTouchesRecencySql } from "./session-unread.js"
 import { conversationMessagePredicate } from "./transcript-predicates.js"
+import { assistantTextStart } from "./assistant-text-start.js"
 
 const finishUsageSchema = Schema.Struct({
   prompt: Schema.optionalKey(Schema.Natural),
@@ -313,11 +314,7 @@ export const makeChatTerminal = ({
                       ]),
                   ...replacedEvents,
                   {
-                    event: {
-                      type: "TEXT_MESSAGE_START",
-                      message_id: nextAssistantMessageId,
-                      role: ROLE.assistant
-                    } satisfies ChatProjectionEvent,
+                    event: assistantTextStart(nextAssistantMessageId),
                     runId: run.run_id
                   }
                 ]

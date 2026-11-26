@@ -17,7 +17,14 @@ import {
 } from "../tools/store.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { approvalPermissionContext } from "./permissions.js"
-import { detachedWorkflowCalls, requireLiveWorkflowOwner } from "./detached-workflow-calls.js"
+import { requireLiveWorkflowOwner } from "./detached-workflow-calls.js"
+import {
+  approvedFollowUpOf,
+  beginLineage,
+  detachedLineage,
+  lineageColumns,
+  recordAgentCall
+} from "./call-lineage.js"
 import type { PersistenceDeps } from "./deps.js"
 import {
   type ChatRunRow,
@@ -43,7 +50,6 @@ import {
 import { settleToolExecutionInTransaction, settleUncertainRow } from "./tool-receipts.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
 import { unresolvedToolStatusList } from "./status-sets.js"
-import { deferredCallOf } from "../tools/deferred.js"
 import {
   MAX_CALL_TARGETS,
   type EffectTarget,
@@ -133,22 +139,10 @@ export const makeToolExecutions = ({
           if (run === undefined) {
             return yield* toolError("begin", "not_found", "Owning chat run was not found", identity)
           }
-          yield* requireLiveWorkflowOwner(sql, identity, "begin")
+          const lineage = yield* beginLineage(sql, identity, options.plan)
           if (!isActiveRunStatus(run.status)) {
-            const detached = yield* detachedWorkflowCalls(sql, identity.runId, [
-              identity.toolCallId
-            ]).pipe(
-              Effect.mapError((cause) =>
-                toolError(
-                  "begin",
-                  "storage",
-                  "Could not verify the detached workflow owner",
-                  identity,
-                  cause
-                )
-              )
-            )
-            const deferredCallId = deferredCallOf(identity.toolCallId)
+            const detached = yield* detachedLineage(sql, identity, lineage)
+            const deferredCallId = approvedFollowUpOf(lineage)
             const approvedRows =
               deferredCallId === undefined
                 ? []
@@ -259,16 +253,18 @@ export const makeToolExecutions = ({
           }
 
           const startedAt = DateTime.formatIso(yield* DateTime.now)
+          const [parentCall, nesting, script] = lineageColumns(lineage)
           yield* sql`
         INSERT INTO tool_calls (
           run_id, session_id, tool_call_id, tool_name, arguments_json,
-          changes_state, effect, status, result_json, started_at, ended_at, planned_from_json
+          changes_state, effect, status, result_json, started_at, ended_at, planned_from_json, parent_tool_call_id, nesting, script_tool_call_id
         ) VALUES (
           ${identity.runId}, ${identity.sessionId}, ${identity.toolCallId},
           ${identity.toolName}, ${argumentsJson}, ${Number(identity.changesState)},
-          ${identity.effect ?? null}, 'running', NULL, ${startedAt}, NULL, ${planned}
+          ${identity.effect ?? null}, 'running', NULL, ${startedAt}, NULL, ${planned}, ${parentCall}, ${nesting}, ${script}
         )
       `.pipe(
+            Effect.andThen(recordAgentCall(sql, identity, lineage)),
             Effect.mapError((cause) =>
               toolError("begin", "storage", "Could not start tool execution", identity, cause)
             )

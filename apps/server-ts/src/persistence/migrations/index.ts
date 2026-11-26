@@ -183,6 +183,11 @@ import { queuedSentFrom } from "./0053_queued_sent_from.js"
 import { mainSpace } from "./0183_main_space.js"
 import { eventsHandlerId } from "./0184_events_handler.js"
 import { itemsUnrouted } from "./0185_items_unrouted.js"
+import { deliveryMessageId } from "./0186_delivery_message_id.js"
+import { runtimeRecordRun } from "./0187_runtime_record_run.js"
+import { toolCallParents } from "./0188_tool_call_parents.js"
+import { streamRecords } from "./0189_stream_records.js"
+import { spaceJobKeys } from "./0190_space_job_keys.js"
 
 /**
  * How a migration keeps every reference whole. A whole-database check reads
@@ -397,7 +402,12 @@ export const migrations: ReadonlyArray<Migration> = [
   spaceReviewChatsSessionIndex,
   mainSpace,
   eventsHandlerId,
-  itemsUnrouted
+  itemsUnrouted,
+  deliveryMessageId,
+  runtimeRecordRun,
+  toolCallParents,
+  streamRecords,
+  spaceJobKeys
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

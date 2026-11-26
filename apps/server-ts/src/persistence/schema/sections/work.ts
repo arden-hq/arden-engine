@@ -1,9 +1,15 @@
 import type { OperationalSchemaSection } from "../section.js"
+import {
+  SPACE_JOB_KEY_TRIGGER,
+  SPACE_JOB_KEYS_TABLE,
+  TASK_JOB_KEY_TRIGGER
+} from "../../migrations/0190_space_job_keys.js"
 
 export const workSchemaSection = {
   name: "work",
   storageDomain: "work",
   tables: [
+    "space_job_keys",
     "space_tasks",
     "space_task_sources",
     "space_task_result_reads",
@@ -39,7 +45,13 @@ export const workSchemaSection = {
     "idx_space_task_comments_created",
     "idx_space_tasks_stuck"
   ],
-  triggers: ["task_revoke_attempts", "space_revoke_task_attempts", "task_clear_hold"],
+  triggers: [
+    "task_revoke_attempts",
+    "space_revoke_task_attempts",
+    "task_clear_hold",
+    "spaces_job_key",
+    "space_tasks_job_key"
+  ],
   statements: [
     `CREATE TABLE space_tasks (
       item_id TEXT PRIMARY KEY,
@@ -218,6 +230,9 @@ export const workSchemaSection = {
       WHERE resolution IS NULL AND closed_at IS NULL`,
     `CREATE INDEX idx_space_task_comments_created ON space_task_comments(created_at)`,
     `CREATE INDEX idx_space_tasks_stuck ON space_tasks(item_id)
-      WHERE status = 'open' AND owner = 'worker' AND next_attempt_at IS NULL`
+      WHERE status = 'open' AND owner = 'worker' AND next_attempt_at IS NULL`,
+    SPACE_JOB_KEYS_TABLE,
+    SPACE_JOB_KEY_TRIGGER,
+    TASK_JOB_KEY_TRIGGER
   ]
 } as const satisfies OperationalSchemaSection

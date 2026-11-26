@@ -32,7 +32,11 @@ const started = (sessionId: string) => ({
 })
 
 const messageStart = (messageId: string) => ({
-  event: { type: "TEXT_MESSAGE_START", message_id: messageId } satisfies ChatProjectionEvent,
+  event: {
+    type: "TEXT_MESSAGE_START",
+    message_id: messageId,
+    record: { kind: "part", record_id: messageId }
+  } satisfies ChatProjectionEvent,
   runId
 })
 

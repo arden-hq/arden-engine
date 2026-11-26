@@ -1,7 +1,8 @@
 import { parseJsonBody } from "@arden-hq/protocol/common"
 import type { MarketplaceSkill } from "@arden-hq/protocol/skills"
 import {
-  MarketplaceSkillIdSchema,
+  marketplaceSkillId,
+  type MarketplaceSkillAddress,
   MarketplaceSkillSearchTextSchema,
   MarketplaceSkillSourceSchema,
   SkillNameSchema
@@ -168,7 +169,7 @@ const toMarketplaceItem = (skill: {
   readonly installs: number
 }): MarketplaceCatalogItem | undefined => {
   if (!isSkillName(skill.skillId) || !isMarketplaceSource(skill.source)) return undefined
-  const id = `${skill.source}/${skill.skillId}`
+  const id = marketplaceSkillId({ source: skill.source, name: skill.skillId })
   return {
     id,
     name: skill.skillId,
@@ -301,16 +302,10 @@ export const listPopularMarketplace = Effect.fn("SkillMarketplace.popularSource"
 
 export const resolveRemoteSkill = Effect.fn("SkillMarketplace.resolveRemoteSkill")(function* (
   fetcher: MarketplaceFetch,
-  id: string
+  address: MarketplaceSkillAddress
 ) {
-  const safeId = yield* Schema.decodeUnknownEffect(MarketplaceSkillIdSchema)(id).pipe(
-    Effect.mapError((cause) =>
-      skillError("install", "invalid", "Marketplace skill ID is invalid", cause)
-    )
-  )
-  const separator = safeId.lastIndexOf("/")
-  const source = safeId.slice(0, separator)
-  const name = safeId.slice(separator + 1)
+  const { source, name } = address
+  const safeId = marketplaceSkillId(address)
   const results = yield* searchMarketplace(fetcher, name, MAX_SEARCH_ITEMS).pipe(
     Effect.mapError((error) => skillError("install", error.reason, error.message, error))
   )

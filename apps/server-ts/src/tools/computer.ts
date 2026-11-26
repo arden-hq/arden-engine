@@ -10,7 +10,7 @@ import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { computerNativeTools } from "./computer-native.js"
 import { isComputerStep, type ComputerStep } from "@arden-hq/protocol/computer"
 import { scriptStep } from "../computer/step.js"
-import { COMPUTER_TOOL, NESTED_CALL_MARKERS } from "../persistence/tools/tool-roles.js"
+import { COMPUTER_TOOL, NESTED_CALL_MARKERS, NESTING } from "../persistence/tools/tool-roles.js"
 import { currentMillis } from "../runtime/clock.js"
 
 const OPERATIONS = new Set([
@@ -119,7 +119,7 @@ export const computerTools = Effect.gen(function* () {
                   name,
                   args,
                   signal,
-                  parentToolCallId: ctx.toolCallId,
+                  parent: { toolCallId: ctx.toolCallId, nesting: { kind: NESTING.computer } },
                   toolCallId: `${ctx.toolCallId}${NESTED_CALL_MARKERS[COMPUTER_TOOL]}${index}`,
                   detached: false,
                   messages: ctx.messages,

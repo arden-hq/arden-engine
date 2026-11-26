@@ -22,8 +22,8 @@ export const webUrl = (url: string): URL | undefined => {
   return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed : undefined
 }
 
-export const atNodeRef = (nodeRef: string): string =>
-  nodeRef.startsWith("@") ? nodeRef : `@${nodeRef}`
+export const atNodeRef = (nodeHandle: string): string =>
+  nodeHandle.startsWith("@") ? nodeHandle : `@${nodeHandle}`
 
 export const originIssues = (input: string): Array<Schema.FilterIssue> =>
   webUrl(input)?.origin === input

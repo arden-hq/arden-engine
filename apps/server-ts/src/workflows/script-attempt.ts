@@ -1,4 +1,5 @@
 import { ToolExecutionError } from "@arden-hq/loop"
+import { NESTING } from "../persistence/tools/tool-roles.js"
 import type {
   WorkflowEffectDisposition,
   WorkflowError,
@@ -294,6 +295,7 @@ export const executeScriptAttempt = async (
     request.onResolved(resolved.toolCallId)
     return options.host.tool({
       ...request,
+      parent: { toolCallId: request.parentToolCallId, nesting: { kind: NESTING.code } },
       toolCallId: resolved.toolCallId,
       detached: true,
       messages: []

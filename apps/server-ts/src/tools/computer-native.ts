@@ -31,7 +31,7 @@ import {
   lookStep,
   pastTitle
 } from "../computer/step.js"
-import { appTarget, bundleName } from "./action-targets.js"
+import { appTarget, launchedAppTarget } from "./action-targets.js"
 import { currentMillis } from "../runtime/clock.js"
 import { ownWindowIssue } from "../computer/own-windows.js"
 
@@ -328,13 +328,7 @@ export const computerNativeTools = (
           })
           try {
             signal.throwIfAborted()
-            await effects.target(
-              appTarget({
-                objectId: input.bundle_id,
-                title: `Launched ${bundleName(input.bundle_id)}`,
-                place: bundleName(input.bundle_id)
-              })
-            )
+            await effects.target(launchedAppTarget(input.bundle_id))
             effects.sent()
             const result = await call("launch_app", { ...input })
             if (result.isError) effects.failed()

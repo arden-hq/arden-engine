@@ -4,9 +4,16 @@ import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { AssistantTextPhase } from "../history.js"
 import type { CommonServerEventFields } from "../../common/event-fields.js"
 
+export const STREAM_RECORD = { part: "part", unowned: "unowned" } as const
+
+export type StreamRecord =
+  | { readonly kind: typeof STREAM_RECORD.part; readonly record_id: string }
+  | { readonly kind: typeof STREAM_RECORD.unowned }
+
 export interface TextMessageStartEvent extends CommonServerEventFields {
   readonly type: "TEXT_MESSAGE_START"
   readonly message_id: string
+  readonly record: StreamRecord
   readonly role?: string
 }
 
@@ -43,8 +50,14 @@ export type TextStreamEvent =
   | TextMessageEndEvent
   | TextMessagePhaseEvent
 
+export const StreamRecordSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(STREAM_RECORD.part), record_id: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal(STREAM_RECORD.unowned) })
+])
+
 export const TextMessageStartEventSchema = event("TEXT_MESSAGE_START", {
   message_id: Schema.String,
+  record: StreamRecordSchema,
   role: optionalString
 })
 

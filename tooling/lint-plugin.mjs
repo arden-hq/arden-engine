@@ -116,6 +116,23 @@ const sources = "{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
 const testFiles = [`**/{test,tests}/**/*.${sources}`, `**/*.test.${sources}`]
 
 const idName = /(^id$|Id$|_id$|^ref$|Ref$)/
+const sqlId = String.raw`(?:[\w.]*_(?:id|ref)\b|\$\{[^}]*(?:Id|Ref|Key|_id|_ref)\b[^}]*\})`
+const sqlIdReads = [
+  new RegExp(String.raw`\b(?:substr|instr)\(\s*` + sqlId, "i"),
+  new RegExp(sqlId + String.raw`\s+(?:NOT\s+)?(?:LIKE|GLOB)\s+(?:'[^'%*]*[^'%*\s][%*]'|\$\{[^}]*\}\s*\|\|\s*'[%*]')`, "i"),
+  new RegExp(String.raw`\|\|\s*'[^'\s]*[:~]'\s*\)?\s*(?:AND|OR|$|\))`, "i"),
+  new RegExp(sqlId + String.raw`\s*[<>]=?\s*\$\{[^}]*(?:prefix|Prefix)[^}]*\}`, "i")
+]
+const idEdges = [
+  "apps/server-ts/src/computer/bundle-id.ts",
+  "apps/server-ts/src/persistence/managed-output/ref.ts",
+  "apps/server-ts/src/tools/google-gmail-refs.ts",
+  "libs/protocol/src/skills/marketplace-id.ts",
+  "libs/loop/src/providers/openai-responses/output-id.ts",
+  "apps/server-ts/src/mcp/own-request-id.ts",
+  "apps/server-ts/src/persistence/chat/workflow-delivery.ts",
+  "apps/server-ts/src/persistence/migrations/**"
+]
 const idLikeName = /(^id$|Id$|_id$|^ref$|Ref$|^key$|Key$|^index$|Index$)/
 const objectName = (node) => {
   const target = unwrap(node)
@@ -256,17 +273,25 @@ export const baselinedRules = [
   {
     rule: "no-id-parsing",
     files: [`apps/*/src/**/*.${sources}`, `libs/*/src/**/*.${sources}`],
-    ignores: [],
+    ignores: idEdges,
     baseline: "tooling/baselines/id-parsing.json",
     message: "Ids carry no meaning: never read a prefix or a part out of an id or ref. Keep the fact in its own typed field",
     description: "No reading parts out of ids.",
-    collect: (_context, found) => ({
+    collect: (context, found) => ({
       CallExpression: (node) => {
         const callee = node.callee
         if (callee.type !== "MemberExpression" || callee.computed || !idMethods.has(callee.property.name)) return
         if (cutsToLength(callee.property.name, node.arguments) || cleansCharacters(callee.property.name, node.arguments)) return
         const name = objectName(callee.object)
         if (name !== undefined && idName.test(name)) found.push({ node })
+      },
+      TemplateLiteral: (node) => {
+        const text = node.quasis
+          .map((quasi, index) =>
+            index < node.expressions.length ? `${quasi.value.raw}\${${context.sourceCode.getText(node.expressions[index])}}` : quasi.value.raw
+          )
+          .join("")
+        if (sqlIdReads.some((pattern) => pattern.test(text))) found.push({ node })
       }
     })
   },

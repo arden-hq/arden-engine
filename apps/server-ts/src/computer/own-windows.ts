@@ -1,5 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Schema } from "effect"
+import { bundleWithin } from "./bundle-id.js"
 
 /** The installed desktop app. A dev build runs as `com.github.Electron`, which
  *  every other Electron app shares, so a dev build is known by its process id
@@ -12,10 +13,8 @@ const isArray = Schema.is(Schema.Array(Schema.Json))
 const OWN_WINDOW_REFUSAL =
   "This is Arden's own window, which native control never touches. Use Arden's own tools instead; for connections, call capability_propose."
 
-const isArdenBundle = (bundleId: string | undefined): boolean => {
-  const id = bundleId?.toLowerCase()
-  return id === ARDEN_BUNDLE_ID || id?.startsWith(`${ARDEN_BUNDLE_ID}.`) === true
-}
+const isArdenBundle = (bundleId: string | undefined): boolean =>
+  bundleId !== undefined && bundleWithin(bundleId, ARDEN_BUNDLE_ID)
 
 const opensArden = (urls: unknown): boolean =>
   Array.isArray(urls) && urls.some((url) => typeof url === "string" && /^\s*arden:/i.test(url))

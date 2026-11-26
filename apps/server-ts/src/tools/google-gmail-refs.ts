@@ -4,10 +4,21 @@ import { decodeOpaque, encodeOpaque } from "../lib/opaque-ref.js"
 import { validRecipient } from "./google-gmail-mime.js"
 import { toolRefusal } from "./tool-failure.js"
 
+const THREAD_REF_PREFIX = "gmail-thread~"
+const MESSAGE_REF_SHAPE = /^[^\s:]+@[^\s:]+:[a-f0-9]+$/iu
+
+export const GMAIL_REF_KIND = { thread: "thread", message: "message" } as const
+export type GmailRefKind = (typeof GMAIL_REF_KIND)[keyof typeof GMAIL_REF_KIND]
+
+export const gmailRefKind = (value: string): GmailRefKind | undefined => {
+  if (value.startsWith(THREAD_REF_PREFIX)) return GMAIL_REF_KIND.thread
+  return MESSAGE_REF_SHAPE.test(value) ? GMAIL_REF_KIND.message : undefined
+}
+
 export const messageRef = (account: string, id: string): string => `${account}:${id}`
 
 export const threadRef = (account: string, id: string): string =>
-  `gmail-thread~${encodeOpaque({ version: 1, account, id })}`
+  `${THREAD_REF_PREFIX}${encodeOpaque({ version: 1, account, id })}`
 
 export const parseMessageRef = (
   value: string
@@ -33,8 +44,8 @@ const ThreadRefSchema = Schema.Struct({
 export const parseThreadRef = (
   value: string
 ): { readonly account: string; readonly id: string } => {
-  const decoded = value.startsWith("gmail-thread~")
-    ? Option.getOrUndefined(decodeOpaque(ThreadRefSchema, value.slice("gmail-thread~".length)))
+  const decoded = value.startsWith(THREAD_REF_PREFIX)
+    ? Option.getOrUndefined(decodeOpaque(ThreadRefSchema, value.slice(THREAD_REF_PREFIX.length)))
     : undefined
   if (decoded === undefined || !validRecipient(decoded.account) || /\s/u.test(decoded.id)) {
     throw toolRefusal(
@@ -44,6 +55,12 @@ export const parseThreadRef = (
   }
   return { account: decoded.account, id: decoded.id }
 }
+
+export const parseGmailRef = (
+  kind: GmailRefKind,
+  value: string
+): { readonly account: string; readonly id: string } =>
+  kind === GMAIL_REF_KIND.thread ? parseThreadRef(value) : parseMessageRef(value)
 
 export const threadPageRef = (
   threadReference: { readonly account: string; readonly id: string },

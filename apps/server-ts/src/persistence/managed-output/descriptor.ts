@@ -1,5 +1,9 @@
-export const MANAGED_OBJECT_HASH = /^[a-f0-9]{64}$/u
-export const MANAGED_OBJECT_PREFIX = "arden:managed-output/"
+import {
+  MANAGED_OBJECT_HASH,
+  MANAGED_REF_KIND,
+  readManagedObjectRef,
+  type ManagedObjectAddress
+} from "./ref.js"
 
 export type ManagedObjectSource =
   | { readonly kind: "tool"; readonly name: string; readonly call_id: string }
@@ -15,22 +19,11 @@ export interface ManagedObjectDescriptor {
   readonly source: ManagedObjectSource
 }
 
-export const managedObjectRefParts = (
-  ref: string
-): { owner: string; digest: string; format: "text" | "json" } | undefined => {
-  if (!ref.startsWith(MANAGED_OBJECT_PREFIX)) return undefined
-  const segments = ref.slice(MANAGED_OBJECT_PREFIX.length).split("/")
-  if (segments.length !== 3) return undefined
-  const [owner, digest, format] = segments
-  if (
-    owner === undefined ||
-    digest === undefined ||
-    !MANAGED_OBJECT_HASH.test(owner) ||
-    !MANAGED_OBJECT_HASH.test(digest) ||
-    (format !== "text" && format !== "json")
-  )
-    return undefined
-  return { owner, digest, format }
+export const managedObjectRefParts = (ref: string): ManagedObjectAddress | undefined => {
+  const read = readManagedObjectRef(ref)
+  return read.kind === MANAGED_REF_KIND.managed
+    ? { owner: read.owner, digest: read.digest, format: read.format }
+    : undefined
 }
 
 export const readManagedObjectDescriptor = (

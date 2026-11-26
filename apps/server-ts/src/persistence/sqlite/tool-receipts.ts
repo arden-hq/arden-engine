@@ -1,5 +1,5 @@
 import { stripChangeEvidence } from "../tools/change-evidence.js"
-import { detachedWorkflowCalls } from "./detached-workflow-calls.js"
+import { descendantCalls, detachedWorkflowCalls } from "./detached-workflow-calls.js"
 import { withChangeEvidence, refreshChangeEvidence } from "./change-evidence.js"
 import type { ToolResult } from "@arden-hq/loop"
 import { DateTime, Effect } from "effect"
@@ -550,7 +550,7 @@ export const settleUnstartedToolWorkForTerminalInTransaction = Effect.fn(
   const scope =
     owner === undefined
       ? sql`1 = 1`
-      : sql`substr(tool_call_id, 1, ${owner.scriptToolCallId.length + 1}) = ${`${owner.scriptToolCallId}:`}`
+      : sql`tool_call_id IN ${descendantCalls(sql, runId, owner.scriptToolCallId)}`
   const rows = yield* sql<UnstartedTerminalToolRow>`
     SELECT tool_call_id, changes_state
     FROM tool_calls

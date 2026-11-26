@@ -1,4 +1,5 @@
 import { ToolExecutionError, failedToolResult } from "@arden-hq/loop"
+import { NESTING } from "../persistence/tools/tool-roles.js"
 import { Cause, Context, Effect, Layer, Scope } from "effect"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { ChatMessage } from "../chat/message.js"
@@ -54,7 +55,11 @@ export class DeferredCalls extends Context.Service<
               name: call.toolName,
               args: call.arguments,
               changesState: call.changesState,
-              plan: { kind: "call", toolCallId: call.toolCallId }
+              plan: {
+                kind: "call",
+                toolCallId: call.toolCallId,
+                nesting: { kind: NESTING.approved }
+              }
             },
             (context) =>
               toolset.execute({

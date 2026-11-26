@@ -31,7 +31,7 @@ import {
   webUrl
 } from "./browser-support.js"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { BROWSER_TASK_TOOL, NESTED_CALL_MARKERS } from "../persistence/tools/tool-roles.js"
+import { BROWSER_TASK_TOOL, NESTED_CALL_MARKERS, NESTING } from "../persistence/tools/tool-roles.js"
 import {
   nestedCallIds,
   PREVIEW_CHARS,
@@ -220,7 +220,7 @@ const runNested = async (
   try {
     const result = await ctx.run.codeMode.call({
       approvalContinuation: "caller",
-      parentToolCallId: ctx.toolCallId,
+      parent: { toolCallId: ctx.toolCallId, nesting: { kind: NESTING.task } },
       toolCallId,
       name,
       args,

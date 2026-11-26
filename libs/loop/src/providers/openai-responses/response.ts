@@ -1,3 +1,4 @@
+import { syntheticOutputId } from "./output-id.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { clipLine } from "@arden-hq/std/text"
 import type {
@@ -23,7 +24,6 @@ import {
   normalizeOutputItem,
   PROVIDER_STATE_KEY,
   stringValue,
-  SYNTHETIC_OUTPUT_ID_PREFIX,
   WEB_SEARCH_TOOL_NAME,
   type OutputItem,
   type RawResponseEvent,
@@ -233,8 +233,8 @@ export const makeEventMapper = ({
 
   const fallbackItemId = (value: unknown): string =>
     hasOutputIndex(value)
-      ? `${SYNTHETIC_OUTPUT_ID_PREFIX}${value}`
-      : `${SYNTHETIC_OUTPUT_ID_PREFIX}event-${fallbackSequence++}`
+      ? syntheticOutputId(value)
+      : syntheticOutputId(`event-${fallbackSequence++}`)
 
   const upsert = (item: OutputItem): void => {
     const key = item.type === "function_call" ? item.call_id : item.id
@@ -263,9 +263,7 @@ export const makeEventMapper = ({
     }
     const responseItems =
       Array.isArray(raw.output) && raw.output.length > 0
-        ? raw.output.map((item, index) =>
-            normalizeOutputItem(item, `${SYNTHETIC_OUTPUT_ID_PREFIX}${index}`)
-          )
+        ? raw.output.map((item, index) => normalizeOutputItem(item, syntheticOutputId(index)))
         : [...items]
     const snapshot: ResponseShape = { output: responseItems, usage: usageFrom(raw.usage) }
     if (rawResponseText(snapshot) === null && outputText.length > 0) {
@@ -276,7 +274,7 @@ export const makeEventMapper = ({
             role: ROLE.assistant,
             content: [{ type: "output_text", text: outputText }]
           },
-          `${SYNTHETIC_OUTPUT_ID_PREFIX}text-${fallbackSequence++}`
+          syntheticOutputId(`text-${fallbackSequence++}`)
         )
       )
     }
@@ -287,7 +285,7 @@ export const makeEventMapper = ({
             type: "reasoning",
             summary: [{ type: "summary_text", text: reasoning }]
           },
-          `${SYNTHETIC_OUTPUT_ID_PREFIX}reasoning-${fallbackSequence++}`
+          syntheticOutputId(`reasoning-${fallbackSequence++}`)
         )
       )
     }

@@ -28,7 +28,6 @@ import { ModelProviderService } from "../models/provider.js"
 import { automationLimitPercent, quotaDecision, quotaLimits } from "../models/plan-limits.js"
 import { PlanLimitPause, awaitEnded, isNoModelProvider, jobResult } from "./runner.js"
 import { WorkStore } from "../persistence/work/store.js"
-import { taskOfJob } from "../persistence/space-job-id.js"
 import { StoragePolicyStore } from "../persistence/storage/store.js"
 import { ChatMessage } from "../chat/message.js"
 import { Memory } from "../memory/service.js"
@@ -208,8 +207,8 @@ export class AutomationRuntime extends Context.Service<
       const executeTask = Effect.fn("AutomationRuntime.executeTask")(function* (
         job: AutomationJobLease
       ) {
-        const itemId = taskOfJob(job.payload.automationId)
-        if (itemId === undefined) return yield* executeChat(job)
+        const itemId = job.payload.taskItemId
+        if (itemId === null) return yield* executeChat(job)
         if (!(yield* work.runsInChat(itemId))) {
           const settlement = yield* executeChat(job)
           if (yield* work.runsInChat(itemId))

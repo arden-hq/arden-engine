@@ -1,6 +1,8 @@
 import type { JobDriver } from "@arden-hq/jobs"
 import { Context, Effect, Schema } from "effect"
 import type { BrowserProcedureList } from "@arden-hq/protocol/browser-procedures"
+import { NESTING } from "../tools/tool-roles.js"
+import type { ToolCallPlan } from "../work/task-direction.js"
 import type {
   ProcedureEvidence,
   ProcedureJob,
@@ -119,3 +121,9 @@ export class BrowserProcedureStore extends Context.Service<
     readonly reconcile: () => Effect.Effect<void, BrowserProcedureStoreError>
   }
 >()("@arden-hq/server/persistence/BrowserProcedureStore") {}
+
+export const procedurePlan = (parentToolCallId: string): ToolCallPlan => ({
+  kind: "call",
+  toolCallId: parentToolCallId,
+  nesting: { kind: NESTING.task }
+})

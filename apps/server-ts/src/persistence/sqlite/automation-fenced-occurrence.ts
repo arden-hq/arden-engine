@@ -340,7 +340,7 @@ export const makeFencedOccurrences = ({
         : false
     yield* sql`DELETE FROM automation_event_queue WHERE id = ${fenced.parsed.queueId}`
     if (fenced.owner?.kind === OWNER_KIND.spaceReview && outcome === OUTCOME.failed)
-      yield* spaceJobs.retryReview(fenced.queue.task_id, endedAt)
+      yield* spaceJobs.retryReview(fenced.owner, endedAt)
     yield* consumeIdleInput({ sql, automationId: fenced.queue.task_id, context: fenced.context })
     if (taskItemId !== null && outcome === OUTCOME.failed) {
       yield* spaceJobs.failTask(taskItemId, run.error, endedAt, settledRunId)

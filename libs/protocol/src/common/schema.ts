@@ -3,7 +3,7 @@ import type { ApiErrorEnvelope } from "./errors.js"
 import type { AppSettingsTabId } from "./navigation.js"
 import type { Agrees, Assert } from "./type-agreement.js"
 import type { ConnectionState, RuntimeRunStatus } from "../chat/runtime.js"
-import type { SessionTriageDecision } from "../sessions/contracts.js"
+import { SESSION_PARENT_STEP, type SessionTriageDecision } from "../sessions/contracts.js"
 
 /** Shared schema helpers. All public object schemas retain additive fields. */
 export const extraFields = [Schema.Record(Schema.String, Schema.Unknown)] as const
@@ -296,7 +296,16 @@ const SessionThreadSourceSchema = withExtras({
   session_ref: Schema.NullOr(Schema.NonEmptyString)
 })
 
+const SessionParentStepSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(SESSION_PARENT_STEP.none) }),
+  Schema.Struct({
+    kind: Schema.Literal(SESSION_PARENT_STEP.step),
+    tool_call_id: Schema.NonEmptyString
+  })
+])
+
 export const SessionListItemSchema = withExtras({
+  parent_step: SessionParentStepSchema,
   current_activity: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({

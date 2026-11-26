@@ -89,11 +89,10 @@ export const ownerJoin = (
 ): Statement.Fragment => sql`
   LEFT JOIN scheduled_tasks AS task
     ON task.task_id = ${key} AND task.purpose IN ('user_automation', 'system')
-  LEFT JOIN space_tasks AS item
-    ON task.task_id IS NULL AND substr(${key}, 1, 5) = 'task:'
-      AND item.item_id = substr(${key}, 6)
-  LEFT JOIN spaces AS review_space
-    ON task.task_id IS NULL AND review_space.space_id = ${reviewSpaceIdSql(sql, key)}`
+  LEFT JOIN space_job_keys AS job_key
+    ON task.task_id IS NULL AND job_key.automation_id = ${key}
+  LEFT JOIN space_tasks AS item ON item.item_id = job_key.item_id
+  LEFT JOIN spaces AS review_space ON review_space.space_id = job_key.space_id`
 
 export const hasOwner = (sql: SqlClient.SqlClient): Statement.Fragment =>
   sql`(task.task_id IS NOT NULL OR item.item_id IS NOT NULL OR review_space.space_id IS NOT NULL)`
@@ -101,7 +100,8 @@ export const hasOwner = (sql: SqlClient.SqlClient): Statement.Fragment =>
 export const reviewSpaceIdSql = (
   sql: SqlClient.SqlClient,
   key: Statement.Fragment
-): Statement.Fragment => sql`CASE WHEN substr(${key}, 1, 6) = 'space:' THEN substr(${key}, 7) END`
+): Statement.Fragment =>
+  sql`(SELECT job_key.space_id FROM space_job_keys AS job_key WHERE job_key.automation_id = ${key})`
 
 export const reviewNameSql = (sql: SqlClient.SqlClient, space: string): Statement.Fragment =>
   sql`${sql.literal(space)}.name || ' worker'`

@@ -4,7 +4,7 @@ import type { SourceMetadata, SourceMetadataInput } from "@arden-hq/protocol/sou
 import { publicWebUrl } from "@arden-hq/std/url"
 import type { GoogleToolConnections } from "./google-accounts.js"
 import { googleCall, decodeGoogle } from "./google-request.js"
-import { parseMessageRef, parseThreadRef } from "./google-gmail-refs.js"
+import { GMAIL_REF_KIND, gmailRefKind, parseGmailRef } from "./google-gmail-refs.js"
 import { GMAIL_API, message, thread, header, messageDate } from "./google-gmail-mime.js"
 import { emailSource } from "./google-gmail-source.js"
 import { parseFileRef } from "./google-drive.js"
@@ -47,16 +47,17 @@ export function makeSourceReferences({
   const active = new Set<Promise<SourceMetadata>>()
   const readOne = async (input: SourceMetadataInput): Promise<SourceMetadata> => {
     const web = publicWebUrl(input.href ?? input.ref)
+    const gmailKind = gmailRefKind(input.ref)
+    const mailKind = gmailKind ?? GMAIL_REF_KIND.message
     let provider = input.provider
     if (provider === undefined) {
-      if (input.ref.startsWith("gmail-thread~") || /^[^\s:]+@[^\s:]+:[a-f0-9]+$/i.test(input.ref))
-        provider = "gmail"
+      if (gmailKind !== undefined) provider = "gmail"
       else if (web.kind === "ok") provider = "web"
       else provider = "unknown"
     }
     let kind = input.kind
     if (kind === undefined) {
-      if (provider === "gmail") kind = input.ref.startsWith("gmail-thread~") ? "thread" : "message"
+      if (provider === "gmail") kind = mailKind
       else kind = web.kind === "ok" ? "web_page" : "reference"
     }
     const identity = { ref: input.ref, provider, kind }
@@ -77,9 +78,7 @@ export function makeSourceReferences({
     let accountKey = ""
     if (provider === "gmail") {
       try {
-        const ref = input.ref.startsWith("gmail-thread~")
-          ? parseThreadRef(input.ref)
-          : parseMessageRef(input.ref)
+        const ref = parseGmailRef(mailKind, input.ref)
         const account = google
           .accounts()
           .find(
@@ -150,8 +149,8 @@ export function makeSourceReferences({
           }
         }
         if (provider === "gmail") {
-          const isThread = input.ref.startsWith("gmail-thread~")
-          const ref = isThread ? parseThreadRef(input.ref) : parseMessageRef(input.ref)
+          const isThread = mailKind === GMAIL_REF_KIND.thread
+          const ref = parseGmailRef(mailKind, input.ref)
           const url = new URL(
             `${GMAIL_API}/${isThread ? "threads" : "messages"}/${encodeURIComponent(ref.id)}`
           )

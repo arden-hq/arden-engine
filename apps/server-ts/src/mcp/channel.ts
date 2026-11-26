@@ -27,8 +27,7 @@ import {
   type McpEventError,
   type McpStreamSignal
 } from "./events/wire.js"
-
-const OWN_ID_PREFIX = "arden-mcp-"
+import { ownRequestId, RESPONSE_OWNER, responseOwner } from "./own-request-id.js"
 
 const DISCOVER_TIMEOUT_MS = 5_000
 
@@ -189,7 +188,7 @@ export class McpChannel {
     if (this.closed) {
       return Promise.reject(new McpEventRequestError(`MCP ${method} failed: closed`, undefined))
     }
-    const id = `${OWN_ID_PREFIX}${this.nextId++}`
+    const id = ownRequestId(this.nextId++)
     return new Promise<unknown>((resolve, reject) => {
       const settle = () => {
         timer.cancel()
@@ -292,7 +291,7 @@ export class McpChannel {
   }
 
   openStream(request: McpEventStreamRequest, handlers: McpEventStreamHandlers): McpEventStream {
-    const id = `${OWN_ID_PREFIX}${this.nextId++}`
+    const id = ownRequestId(this.nextId++)
     const cancel = () => this.cancel(id)
     if (this.closed) {
       handlers.onEnd({ kind: "ended" })
@@ -405,8 +404,9 @@ export class McpChannel {
       return
     }
     if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
-      if (typeof message.id === "string" && message.id.startsWith(OWN_ID_PREFIX)) {
-        const request = this.requests.get(message.id)
+      const owner = responseOwner(message.id)
+      if (owner.kind === RESPONSE_OWNER.channel) {
+        const request = this.requests.get(owner.id)
         if (request !== undefined) {
           if (isJSONRPCResultResponse(message)) request.resolve(message.result)
           else {
@@ -415,7 +415,7 @@ export class McpChannel {
           return
         }
         this.finish(
-          message.id,
+          owner.id,
           isJSONRPCErrorResponse(message)
             ? {
                 kind: "refused",

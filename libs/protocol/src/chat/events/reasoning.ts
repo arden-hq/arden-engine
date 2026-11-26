@@ -2,10 +2,12 @@ import { Schema } from "effect"
 import { event, optionalString } from "../../common/schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { CommonServerEventFields } from "../../common/event-fields.js"
+import { StreamRecordSchema, type StreamRecord } from "./text.js"
 
 export interface ReasoningMessageStartEvent extends CommonServerEventFields {
   readonly type: "REASONING_MESSAGE_START"
   readonly message_id: string
+  readonly record: StreamRecord
   readonly role?: string
 }
 
@@ -37,6 +39,7 @@ export type ReasoningStreamEvent =
 
 export const ReasoningMessageStartEventSchema = event("REASONING_MESSAGE_START", {
   message_id: Schema.String,
+  record: StreamRecordSchema,
   role: optionalString
 })
 

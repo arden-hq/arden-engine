@@ -1,4 +1,5 @@
 import type { MarketplaceSkill, SkillInstallReceipt } from "@arden-hq/protocol/skills"
+import { readMarketplaceSkillId } from "@arden-hq/protocol/effect/skills"
 import { Effect, Predicate } from "effect"
 import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
@@ -66,7 +67,10 @@ const install = Effect.fn("SkillMarketplace.install")(function* (
   root: string,
   id: string
 ) {
-  const skill = yield* resolveRemoteSkill(fetcher, id)
+  const address = readMarketplaceSkillId(id)
+  if (address === undefined)
+    return yield* skillError("install", "invalid", "Marketplace skill ID is invalid")
+  const skill = yield* resolveRemoteSkill(fetcher, address)
   const target = join(root, skill.name)
   const status = yield* pathStatus(target)
   if (status.kind === "present") {

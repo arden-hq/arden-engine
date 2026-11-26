@@ -208,6 +208,10 @@ export class ToolExecutionStore extends Context.Service<
     readonly admitPlanned: (
       call: Pick<ToolExecutionIdentity, "runId" | "toolCallId">
     ) => Effect.Effect<"current" | "needs_review", ToolExecutionStoreError>
+    readonly descends: (
+      call: Pick<ToolExecutionIdentity, "runId" | "toolCallId">,
+      ancestor: string
+    ) => Effect.Effect<boolean, ToolExecutionStoreError>
     readonly complete: (
       identity: ToolExecutionIdentity,
       result: ToolResult
