@@ -1,9 +1,10 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
+import { sameJson } from "@arden-hq/std/json"
 import { Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { AutomationTriggersSchema } from "./automation-schedule.js"
 import { sha256Hex } from "@arden-hq/std/hash"
-import { triggerRecord } from "../automations/trigger-record.js"
+import { triggerRecord, type TriggerRecord } from "../automations/trigger-record.js"
 
 export interface AutomationWriteSource {
   readonly runId: string
@@ -23,10 +24,14 @@ export interface InstructionRow {
   readonly instruction_revision_id: number | null
 }
 
-export type InstructionSnapshot = Pick<
+type StoredInstruction = Pick<
   InstructionRow,
   "prompt" | "model" | "context_mode" | "triggers" | "thread_id" | "cooldown_minutes"
 >
+
+interface InstructionSnapshot extends Omit<StoredInstruction, "triggers"> {
+  readonly triggers: ReadonlyArray<TriggerRecord>
+}
 
 export type InstructionDestination =
   | { readonly kind: "own" }
@@ -49,17 +54,16 @@ export const instructionDestination = Effect.fn("Automation.instructionDestinati
   return { kind: "yours" as const, publicRef: row.public_ref }
 })
 
-export const instructionPayload = (row: InstructionSnapshot): string =>
-  JSON.stringify({
-    prompt: row.prompt,
-    model: row.model,
-    context_mode: row.context_mode,
-    triggers: Schema.decodeUnknownSync(AutomationTriggersSchema)(parseJsonText(row.triggers)).map(
-      triggerRecord
-    ),
-    thread_id: row.thread_id,
-    cooldown_minutes: row.cooldown_minutes
-  })
+export const instructionSnapshot = (row: StoredInstruction): InstructionSnapshot => ({
+  prompt: row.prompt,
+  model: row.model,
+  context_mode: row.context_mode,
+  triggers: Schema.decodeUnknownSync(AutomationTriggersSchema)(parseJsonText(row.triggers)).map(
+    triggerRecord
+  ),
+  thread_id: row.thread_id,
+  cooldown_minutes: row.cooldown_minutes
+})
 
 export const instructionHash = (payload: string): string => sha256Hex(payload)
 
@@ -86,8 +90,7 @@ export const matchesInstructionReceipt = (input: {
     field(data, "model") !== input.instruction.model ||
     field(data, "cooldown_minutes") !== input.instruction.cooldown_minutes ||
     field(data, "history") !== (input.instruction.context_mode === "fresh" ? "fresh" : "chat") ||
-    JSON.stringify(field(data, "triggers")) !==
-      JSON.stringify(parseJsonText(input.instruction.triggers))
+    !sameJson(field(data, "triggers"), input.instruction.triggers)
   )
     return false
   if (input.destination === undefined) return false
@@ -111,7 +114,7 @@ export const prepareInstructionRevision = Effect.fn("Automation.prepareInstructi
     sql: SqlClient.SqlClient,
     input: {
       readonly automationId: string
-      readonly instruction: InstructionSnapshot
+      readonly instruction: StoredInstruction
       readonly previousRevisionId: number | null
       readonly promptAuthor: string | null
       readonly source: AutomationWriteSource | undefined
@@ -119,7 +122,7 @@ export const prepareInstructionRevision = Effect.fn("Automation.prepareInstructi
       readonly writtenAt: string
     }
   ) {
-    const payload = instructionPayload(input.instruction)
+    const payload = JSON.stringify(instructionSnapshot(input.instruction))
     const hash = instructionHash(payload)
     if (input.previousRevisionId !== null) {
       const [previous] = yield* sql<{ readonly instruction_hash: string }>`

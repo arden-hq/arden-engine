@@ -203,10 +203,7 @@ export const makeAutomationCatalog = ({
                 toolName: receipt.tool_name,
                 automationRef: yield* automationRefOf(sql, row.task_id),
                 destination: yield* instructionDestination(sql, row.task_id, parsed.thread_id),
-                instruction: {
-                  ...parsed,
-                  triggers: JSON.stringify(parsed.triggers)
-                }
+                instruction: parsed
               })
             )
               return yield* storeError(

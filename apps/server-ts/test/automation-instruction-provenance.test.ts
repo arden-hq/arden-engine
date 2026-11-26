@@ -1,4 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { engineOrderedJson } from "@arden-hq/std/json"
 import { Effect, Result, Schema } from "effect"
 import { AutomationTriggerSchema } from "@arden-hq/protocol/effect/automations"
 import { triggerRecord } from "../src/persistence/automations/trigger-record.js"
@@ -8,7 +9,9 @@ import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
+import { automationInstructionBackfill } from "../src/persistence/sqlite/automation-instruction-backfill.js"
 import { ToolExecutionStore } from "../src/persistence/tools/store.js"
+import { automationData } from "../src/tools/automation-tool-data.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { RECORDED_HISTORY_THROUGH } from "../src/persistence/history.js"
 import { changes, newAutomation, everyTrigger } from "./fixtures/automation-input.js"
@@ -168,6 +171,87 @@ it("a saved instruction cannot trust an unfinished or failed source tool call", 
     finished: true
   })
 })
+
+it.each(["matching", "different"])(
+  "backfill checks a %s flat write receipt against tagged stored triggers",
+  async (receipt) => {
+    const { source, revision } = await withTempDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const catalog = yield* AutomationCatalog
+        const sessions = yield* SessionStore
+        const chat = yield* ChatWriteStore
+        const tools = yield* ToolExecutionStore
+        const session = yield* sessions.create({ name: "Source" })
+        const prompt = "Record failures."
+        const started = yield* chat.start({
+          sessionId: session.sessionId,
+          clientId: "request",
+          requestHash: "request",
+          assistantMessageId: "assistant",
+          message: {
+            message_id: "request",
+            client_id: "request",
+            role: ROLE.user,
+            content: "Create the failure logger.",
+            created_at: AT
+          }
+        })
+        if (started._tag !== "Started") return yield* Effect.die("Run did not start")
+        const source = { runId: started.runId, toolCallId: "create" }
+        yield* tools.begin({
+          ...source,
+          sessionId: session.sessionId,
+          toolName: "automation_create",
+          arguments: { name: "Failure logger", prompt },
+          changesState: true
+        })
+        const automation = yield* catalog.create(
+          newAutomation({
+            name: "Failure logger",
+            prompt,
+            history: "fresh",
+            triggers: [everyTrigger("1d")],
+            idempotency_key: "55555555-5555-4555-8555-555555555555"
+          }),
+          "agent",
+          source
+        )
+        const data = automationData(automation, {
+          model_source: "unknown",
+          effective_model: null,
+          chat_ref: null,
+          action_mode: null
+        })
+        const result = engineOrderedJson({
+          data: {
+            ...data,
+            triggers:
+              receipt === "matching"
+                ? data.triggers
+                : data.triggers.map((trigger) => ({ ...trigger, every: "2d" }))
+          },
+          host: { mutation_receipt: { outcome: "applied" } }
+        })
+        yield* sql`UPDATE tool_calls SET status = 'completed', ended_at = started_at,
+          result_json = ${result} WHERE run_id = ${source.runId} AND tool_call_id = ${source.toolCallId}`
+        yield* sql`UPDATE scheduled_tasks SET instruction_revision_id = NULL
+          WHERE task_id = ${automation.task_id}`
+        const calls = yield* automationInstructionBackfill.chunk({ cursor: undefined, limit: 10 })
+        yield* automationInstructionBackfill.chunk({ cursor: calls.next, limit: 10 })
+        const [row] = yield* sql<{ readonly revision_id: number | null }>`
+          SELECT instruction_revision_id AS revision_id FROM scheduled_tasks
+          WHERE task_id = ${automation.task_id}`
+        if (row?.revision_id == null) return yield* Effect.die("Backfill created no revision")
+        return { source, revision: yield* catalog.instructionRevision(row.revision_id) }
+      })
+    )
+    expect(revision).toMatchObject({
+      author: "agent",
+      source: receipt === "matching" ? source : undefined
+    })
+  }
+)
 
 it("configuration history resolves its original instruction after later edits and toggles", async () => {
   const result = await withTempDatabase(

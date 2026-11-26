@@ -1,3 +1,4 @@
+import { COMPUTER_APP, isComputerStep } from "@arden-hq/protocol/computer"
 import { engineOrderedJson } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect, Option, Schema } from "effect"
@@ -8,7 +9,7 @@ import {
 } from "../managed-output/descriptor.js"
 import { ToolResultObjects } from "../managed-output/tool-result-objects.js"
 import { decodeJson, encodeJson } from "./json.js"
-import { JsonObjectSchema, type JsonObject } from "../json.js"
+import { isJsonObject, JsonObjectSchema, type JsonObject } from "../json.js"
 
 const ContentBlockSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
@@ -275,7 +276,7 @@ export const loadFullResult = Effect.fn("ToolResultStorage.loadFull")(function* 
         cause
       })
   })
-  const full = yield* decodeJson(PersistedToolResultSchema, text).pipe(
+  const decoded = yield* decodeJson(PersistedToolResultSchema, text).pipe(
     Effect.mapError(
       (cause) =>
         new StoredToolResultError({
@@ -285,11 +286,31 @@ export const loadFullResult = Effect.fn("ToolResultStorage.loadFull")(function* 
         })
     )
   )
+  const full = withTaggedComputerStep(decoded)
   const evidence = stored.data?.["change_evidence"]
   return evidence === undefined
     ? full
     : { ...full, data: { ...full.data, change_evidence: evidence } }
 })
+
+const withTaggedComputerStep = (result: PersistedToolResult): PersistedToolResult => {
+  const data = result.data
+  const step: unknown = data?.["computer"]
+  if (data == null || !isJsonObject(step)) return result
+  const storedApp: unknown = step["app"]
+  const app = isJsonObject(storedApp) ? storedApp : undefined
+  if (app?.["kind"] !== undefined) return result
+  const title = step["window"]
+  const computer: JsonObject = {
+    ...step,
+    app:
+      app === undefined
+        ? { kind: COMPUTER_APP.unidentified }
+        : { ...app, kind: COMPUTER_APP.identified },
+    window: typeof title === "string" ? { kind: "titled", title } : { kind: "untitled" }
+  }
+  return isComputerStep(computer) ? { ...result, data: { ...data, computer } } : result
+}
 
 /**
  * SQL for the stored row when it left fields out, else NULL: readers select it
