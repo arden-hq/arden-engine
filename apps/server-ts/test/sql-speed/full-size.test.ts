@@ -202,9 +202,9 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     ],
     "/spaces/work/attachments/:attachmentId": [`/spaces/work/attachments/1`],
     "/spaces/work/all": [
-      "/spaces/work/all",
-      `/spaces/work/all${q({ space_id: ids.space })}`,
-      `/spaces/work/all${q({ session_id: ids.chat })}`
+      `/spaces/work/all${q({ scope: "all", start: "first", limit: "50" })}`,
+      `/spaces/work/all${q({ scope: "space", space_id: ids.space, start: "first", limit: "50" })}`,
+      `/spaces/work/all${q({ scope: "chat", session_id: ids.chat, start: "first", limit: "50" })}`
     ],
     "/sessions/:sessionId/configuration-history": [`/sessions/${ids.chat}/configuration-history`],
     "/sessions": [

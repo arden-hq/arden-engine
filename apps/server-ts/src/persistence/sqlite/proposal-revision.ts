@@ -1,10 +1,8 @@
+import { TaskSourceRecordSchema } from "../work/task-record.js"
+import { decodeKeyedTaskDraftEffect } from "../work/task-input.js"
 import { captureMutationVersions } from "./mutation-links.js"
 import type { TaskProposal } from "@arden-hq/protocol/proposals"
-import {
-  SpaceTaskCaptureInputSchema,
-  SpaceTaskSourceSchema,
-  decodeCreateSpaceTaskInputEffect
-} from "@arden-hq/protocol/effect/spaces/work"
+import { SpaceTaskCaptureInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -38,8 +36,8 @@ export const makeProposalRevision = (options: {
   readonly writer: Writer
   readonly sql: SqlClient.SqlClient
   readonly canonicalizeSources: (
-    sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>
-  ) => Effect.Effect<ReadonlyArray<typeof SpaceTaskSourceSchema.Type>, TaskProposalStoreError>
+    sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>
+  ) => Effect.Effect<ReadonlyArray<typeof TaskSourceRecordSchema.Type>, TaskProposalStoreError>
   readonly read: (proposalId: string) => Effect.Effect<ProposalRow, TaskProposalStoreError>
   readonly project: (row: ProposalRow) => Effect.Effect<TaskProposal, TaskProposalStoreError>
   readonly changed: (row: ProposalRow) => Effect.Effect<void, TaskProposalStoreError, UnitOfWork>
@@ -55,7 +53,7 @@ export const makeProposalRevision = (options: {
     if (taskCapture.basis !== "inferred") {
       return yield* failure("invalid", "Revised Task proposals require inferred capture")
     }
-    const decodedSources = yield* Schema.decodeUnknownEffect(Schema.Array(SpaceTaskSourceSchema))(
+    const decodedSources = yield* Schema.decodeUnknownEffect(Schema.Array(TaskSourceRecordSchema))(
       request.sources,
       { onExcessProperty: "error" }
     ).pipe(Effect.mapError((cause) => failure("invalid", "Invalid revised Task evidence", cause)))
@@ -140,7 +138,7 @@ export const makeProposalRevision = (options: {
             task_item_id: context.task?.item_id ?? null,
             task_generation: context.task?.generation ?? null
           }
-          const input = yield* decodeCreateSpaceTaskInputEffect({
+          const input = yield* decodeKeyedTaskDraftEffect({
             ...request.input,
             key: row.stable_key
           }).pipe(Effect.mapError((cause) => failure("invalid", "Invalid revised Task", cause)))

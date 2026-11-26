@@ -1,7 +1,7 @@
+import { RetirementSourceRecordSchema } from "../work/task-record.js"
 import { assertCurrentTaskRevision } from "./work-history.js"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import { TaskProposalRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
 import { decodeChatToolEvidence, type ChatToolEvidenceRow } from "./chat-action-evidence.js"
 import { TaskProposalStoreError, type RetireTaskProposalInput } from "../proposals/store.js"
 import { isUserChatSession } from "./chat-ownership.js"
@@ -16,7 +16,7 @@ export const retireProposal = Effect.fn("TaskProposal.retireInTransaction")(func
   input: RetireTaskProposalInput
 ) {
   const sources = yield* Schema.decodeUnknownEffect(
-    Schema.NonEmptyArray(TaskProposalRetirementSourceSchema)
+    Schema.NonEmptyArray(RetirementSourceRecordSchema)
   )(input.sources, { onExcessProperty: "error" })
   if (
     input.reason.trim().length === 0 ||

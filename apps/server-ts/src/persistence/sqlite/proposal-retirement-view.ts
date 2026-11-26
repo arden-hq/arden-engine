@@ -1,8 +1,8 @@
+import { RetirementSourceRecordSchema, type RetirementSourceRecord } from "../work/task-record.js"
 import type {
   TaskProposalRetirement,
   TaskProposalRetirementEvidence
 } from "@arden-hq/protocol/proposals"
-import { TaskProposalRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { githubItemUrl } from "../connections/item-url.js"
@@ -10,10 +10,10 @@ import { decodeJson } from "./json.js"
 
 const StoredRetirementSchema = Schema.Struct({
   reason: Schema.String,
-  sources: Schema.optionalKey(Schema.Array(TaskProposalRetirementSourceSchema))
+  sources: Schema.optionalKey(Schema.Array(RetirementSourceRecordSchema))
 })
 
-type StoredSource = typeof TaskProposalRetirementSourceSchema.Type
+type StoredSource = RetirementSourceRecord
 
 const NO_RETIREMENT: TaskProposalRetirement = { reason: "", evidence: [] }
 

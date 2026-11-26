@@ -37,7 +37,5 @@
   "libs/protocol/src/sessions/focus/contracts.ts": 2,
   "libs/protocol/src/sessions/schema.ts": 59,
   "libs/protocol/src/sessions/todos/contracts.ts": 4,
-  "libs/protocol/src/sessions/todos/schema.ts": 4,
-  "libs/protocol/src/spaces/work/contracts.ts": 35,
-  "libs/protocol/src/spaces/work/schema.ts": 25
+  "libs/protocol/src/sessions/todos/schema.ts": 4
 }

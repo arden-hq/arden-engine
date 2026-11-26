@@ -1,4 +1,4 @@
-import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
+import { type TaskSourceRecord } from "./task-record.js"
 
 /**
  * The version of a Task with no saved history yet: an old Task the history
@@ -32,14 +32,14 @@ export interface TaskInferenceReview {
     readonly body: string | null
     readonly revision: number
     readonly status: string
-    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly sources: ReadonlyArray<TaskSourceRecord>
   }>
   readonly rejections: ReadonlyArray<{
     /** `proposal`: an offer the owner rejected. `expired`: an offer left unanswered. */
     readonly kind: "proposal" | "expired" | "stopped_task"
     readonly item_id: string | null
     readonly proposal_id: string | null
-    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly sources: ReadonlyArray<TaskSourceRecord>
     readonly reason: string
   }>
 }

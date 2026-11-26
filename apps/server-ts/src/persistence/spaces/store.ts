@@ -1,3 +1,4 @@
+import { type SnapshotRecord } from "../work/task-record.js"
 import type { MutationOperationIdentity } from "../tools/mutation-receipt.js"
 import type { RecordedHistoryInput, RecordedHistoryPage, RecordedHistoryError } from "../history.js"
 import { storeErrorFields } from "../errors.js"
@@ -12,7 +13,6 @@ import type {
 } from "@arden-hq/protocol/spaces"
 import { Context, Effect, Schema } from "effect"
 import type { StoredMarkLook } from "./mark.js"
-import type { SpaceSnapshot } from "@arden-hq/protocol/spaces/work"
 
 export const INSTRUCTIONS_SOURCE = { manual: "manual", generated: "generated" } as const
 
@@ -60,7 +60,7 @@ export interface SpaceDetailRecord {
   readonly conversation_session_id: string | null
   readonly agent: SpaceAgentRecord | null
   readonly sessions: ReadonlyArray<SpaceSessionRecord>
-  readonly work: SpaceSnapshot
+  readonly work: SnapshotRecord
 }
 
 export interface SpaceBindingRow {

@@ -1,12 +1,9 @@
+import type { RetirementSourceRecord } from "../persistence/work/task-record.js"
+import { KeyedTaskDraftSchema } from "../persistence/work/task-input.js"
 import { quoted } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { ChatActionRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
-import {
-  TASK_PROPOSAL_ORIGIN,
-  TASK_PROPOSAL_TASK,
-  type TaskProposalRetirementSource
-} from "@arden-hq/protocol/proposals"
-import { CreateSpaceTaskInputSchema } from "@arden-hq/protocol/effect/spaces/work"
+import { TASK_PROPOSAL_ORIGIN, TASK_PROPOSAL_TASK } from "@arden-hq/protocol/proposals"
 import { Effect, Schema, Struct } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { WorkStore } from "../persistence/work/store.js"
@@ -69,7 +66,7 @@ const evidence = Schema.Union([
 ])
 type CitedSource = typeof evidence.Type
 
-const taskInput = CreateSpaceTaskInputSchema.mapFields((fields) => ({
+const taskInput = KeyedTaskDraftSchema.mapFields((fields) => ({
   key: fields.key.pipe(
     Schema.annotateEncoded({
       description: "New stable Task key. Existing keys are refused."
@@ -402,7 +399,7 @@ const observedSource = (
   run: ServerRunContext,
   source: CitedSource,
   snapshot: Snapshot | undefined
-): TaskProposalRetirementSource => {
+): RetirementSourceRecord => {
   switch (source.kind) {
     case "chat":
       return { ...source, revision: source.turn_id }

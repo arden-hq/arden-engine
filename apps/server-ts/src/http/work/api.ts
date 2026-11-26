@@ -13,8 +13,8 @@ import {
   SpaceTaskCommentSchema,
   SpaceTaskSchema,
   SpaceWorkPageQuerySchema,
+  UpdateSpaceTaskRequestSchema,
   SpaceWorkPageSchema,
-  InternalUpdateSpaceTaskRequestSchema,
   MoveTaskToChatInputSchema,
   StopSpaceTaskInputSchema,
   StopSpaceTaskResponseSchema,
@@ -135,7 +135,7 @@ export class WorkApi extends HttpApiGroup.make("work", { topLevel: true }).add(
   }),
   HttpApiEndpoint.patch("update", "/spaces/work/:itemId", {
     params: { itemId: Schema.NonEmptyString },
-    payload: InternalUpdateSpaceTaskRequestSchema,
+    payload: UpdateSpaceTaskRequestSchema,
     success: SpaceTaskSchema,
     error: [
       StoreInvalid,

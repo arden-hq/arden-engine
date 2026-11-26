@@ -1,3 +1,6 @@
 export * from "./routes.js"
 export * from "./schema.js"
 export * from "./codecs.js"
+export * from "./page-schema.js"
+export * from "./input-schema.js"
+export * from "./change-schema.js"

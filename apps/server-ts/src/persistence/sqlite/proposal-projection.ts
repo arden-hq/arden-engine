@@ -5,6 +5,8 @@ import type {
   TaskProposalState
 } from "@arden-hq/protocol/proposals"
 import { Schema } from "effect"
+import { publicSource } from "../work/public.js"
+import type { TaskSourceRecord } from "../work/task-record.js"
 import type { ProposalRow } from "./task-proposals.js"
 
 export const SignalSnapshotSchema = Schema.Struct({
@@ -79,7 +81,9 @@ const placementOf = (row: ProposalRow): TaskProposalFields["placement"] | undefi
 
 export const proposalFieldsOf = (
   row: ProposalRow,
-  parts: Pick<TaskProposalFields, "capture" | "sources" | "signal">
+  parts: Pick<TaskProposalFields, "capture" | "signal"> & {
+    readonly sources: ReadonlyArray<TaskSourceRecord>
+  }
 ): TaskProposalFields | undefined => {
   const placement = placementOf(row)
   if (placement === undefined) return undefined
@@ -91,6 +95,7 @@ export const proposalFieldsOf = (
     body: row.body === null ? { kind: "plain" } : { kind: "detailed", text: row.body },
     owner: row.owner,
     ...parts,
+    sources: parts.sources.map(publicSource),
     origin:
       row.source_run_id === null ||
       row.source_session_id === null ||

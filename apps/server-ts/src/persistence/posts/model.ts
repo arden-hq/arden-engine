@@ -1,9 +1,7 @@
+import { TaskSourceRecordSchema } from "../work/task-record.js"
+import { TaskDraftSchema } from "../work/task-input.js"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
-import {
-  NewTaskInputSchema,
-  SpaceTaskCaptureInputSchema,
-  SpaceTaskSourceSchema
-} from "@arden-hq/protocol/effect/spaces/work"
+import { SpaceTaskCaptureInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Schema } from "effect"
 
 export const POST_TEXT_MAX = 1_500
@@ -11,7 +9,7 @@ export const POST_TASK_TITLE_MAX = 200
 export const POST_TASK_BRIEF_MAX = 2_000
 
 export const PostTaskSchema = Schema.Struct({
-  title: NewTaskInputSchema.fields.text.check(Schema.isMaxLength(POST_TASK_TITLE_MAX)),
+  title: TaskDraftSchema.fields.text.check(Schema.isMaxLength(POST_TASK_TITLE_MAX)),
   brief: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(POST_TASK_BRIEF_MAX))
 })
 export type PostTask = typeof PostTaskSchema.Type
@@ -75,7 +73,7 @@ export const postTaskParts = (
 })
 
 export const PostTaskPartsSchema = Schema.Struct({
-  input: NewTaskInputSchema,
-  taskSources: Schema.Array(SpaceTaskSourceSchema),
+  input: TaskDraftSchema,
+  taskSources: Schema.Array(TaskSourceRecordSchema),
   capture: SpaceTaskCaptureInputSchema
 })

@@ -1,17 +1,18 @@
 import { Effect, Schema } from "effect"
 import {
   AcknowledgeTaskResultInputSchema,
-  CreateChatTaskInputSchema,
-  CreateLooseTaskInputSchema,
   CreateSpaceTaskAttachmentInputSchema,
   CreateSpaceTaskCommentInputSchema,
-  CreateSpaceTaskInputSchema,
   MoveTaskToChatInputSchema,
-  NewTaskInputSchema,
   SpaceSnapshotSchema,
   SpaceTaskEventSchema,
   StopSpaceTaskInputSchema
 } from "./schema.js"
+import {
+  CreateChatTaskInputSchema,
+  CreateLooseTaskInputSchema,
+  NewTaskInputSchema
+} from "./input-schema.js"
 
 type EncodedText = Effect.Effect<string, Schema.SchemaError>
 type Decoded<S extends Schema.Decoder<unknown>> = Effect.Effect<S["Type"], Schema.SchemaError>
@@ -39,13 +40,6 @@ export const decodeSpaceTaskEventEffect = (value: unknown): Decoded<typeof Space
 export const decodeSpaceSnapshotEffect = (value: unknown): Decoded<typeof SpaceSnapshotSchema> =>
   Schema.decodeUnknownEffect(SpaceSnapshotSchema)(value)
 
-export const decodeCreateSpaceTaskInputEffect = (
-  value: unknown
-): Decoded<typeof CreateSpaceTaskInputSchema> =>
-  Schema.decodeUnknownEffect(CreateSpaceTaskInputSchema)(value, strict).pipe(
-    Effect.map((input) => (input.body?.trim() === "" ? { ...input, body: null } : input))
-  )
-
 export const decodeCreateSpaceTaskCommentInputEffect = (
   value: unknown
 ): Decoded<typeof CreateSpaceTaskCommentInputSchema> =>
@@ -58,16 +52,12 @@ export const decodeCreateSpaceTaskAttachmentInputEffect = (
 
 export const encodeNewTaskRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(NewTaskInputSchema)(value, strict).pipe(
-    Effect.map((input) =>
-      JSON.stringify(input.body?.trim() === "" ? { ...input, body: null } : input)
-    )
+    Effect.map((input) => JSON.stringify(input))
   )
 
 export const encodeCreateLooseTaskRequestEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(CreateLooseTaskInputSchema)(value, strict).pipe(
-    Effect.map((input) =>
-      JSON.stringify(input.body?.trim() === "" ? { ...input, body: null } : input)
-    )
+    Effect.map((input) => JSON.stringify(input))
   )
 
 export const encodeCreateSpaceTaskCommentRequestEffect = (value: unknown): EncodedText =>

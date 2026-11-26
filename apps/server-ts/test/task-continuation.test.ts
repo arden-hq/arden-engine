@@ -7,7 +7,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { afterAll, beforeAll, expect, it, vi } from "vitest"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
-import { WorkStore } from "../src/persistence/work/store.js"
+import { itemPage, WorkStore } from "../src/persistence/work/store.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-layer.js"
 import { readTaskWorkerContext } from "../src/persistence/sqlite/space-job-context.js"
@@ -61,7 +61,7 @@ it("persists the state record atomically and rejects stale edits", async () => {
           }
         )
         expect(yield* work.execution(task.item_id)).toEqual({ kind: "queued" })
-        const before = yield* work.page({ itemId: task.item_id })
+        const before = yield* work.page(itemPage(task.item_id))
         const updated = yield* work.update(
           { kind: "key", scope: { kind: "space", spaceId: space.space_id }, key: task.stable_key },
           task.updated_at,
@@ -69,7 +69,7 @@ it("persists the state record atomically and rejects stale edits", async () => {
             continuation_context: context
           }
         )
-        const after = yield* work.page({ itemId: task.item_id })
+        const after = yield* work.page(itemPage(task.item_id))
         expect(after.events).toEqual(before.events)
         expect(after.comments).toEqual(before.comments)
         expect(updated.updated_at).not.toBe(task.updated_at)
@@ -167,7 +167,7 @@ it("persists the state record atomically and rejects stale edits", async () => {
         const queued =
           yield* sql`SELECT 1 FROM automation_event_queue WHERE task_id = ${taskJobId(saved.item_id)}`
         expect(queued.length).toBe(1)
-        const current = (yield* work.page({ itemId: saved.item_id })).items[0]
+        const current = (yield* work.page(itemPage(saved.item_id))).items[0]
         if (current === undefined) throw new Error("Task missing")
         yield* work.update({ kind: "item", itemId: current.item_id }, current.updated_at, {
           continuation_context: null

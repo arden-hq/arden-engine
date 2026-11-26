@@ -1,6 +1,6 @@
+import { TaskResultRecordSchema } from "../work/task-record.js"
+import { type TaskResultRecord } from "../work/task-record.js"
 import { countsAsRun } from "./automation-skip-record.js"
-import type { SpaceTaskResult } from "@arden-hq/protocol/spaces/work"
-import { SpaceTaskResultSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { WorkStoreError } from "../work/store.js"
@@ -11,7 +11,7 @@ import { quietRunOutcome } from "./run-outcomes.js"
 export const readTaskResults = Effect.fn("SqliteWorkStore.readTaskResults")(function* (
   sql: SqlClient.SqlClient,
   itemIds: ReadonlyArray<string>
-): Effect.fn.Return<ReadonlyArray<SpaceTaskResult>, WorkStoreError> {
+): Effect.fn.Return<ReadonlyArray<TaskResultRecord>, WorkStoreError> {
   if (itemIds.length === 0) return []
   const rows = yield* sql<{ readonly result: string }>`
     WITH selected AS (SELECT item_id FROM space_tasks WHERE item_id IN ${sql.in(itemIds)}),
@@ -59,7 +59,7 @@ export const readTaskResults = Effect.fn("SqliteWorkStore.readTaskResults")(func
     WHERE latest.position = 1
   `.pipe(Effect.mapError((cause) => workError("storage", "Could not read Task results", cause)))
   return yield* Effect.forEach(rows, (row) =>
-    decodeJson(SpaceTaskResultSchema, row.result).pipe(
+    decodeJson(TaskResultRecordSchema, row.result).pipe(
       Effect.mapError((cause) => workError("storage", "Stored Task result is corrupt", cause))
     )
   )

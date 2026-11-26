@@ -110,7 +110,7 @@ const tables: Readonly<Record<string, RouteTable>> = {
   workRoutes: table(workRoutes, {
     taskChat: () => workRoutes.taskChat(itemId),
     resultRead: () => workRoutes.resultRead(itemId),
-    page: () => workRoutes.page(),
+    page: () => workRoutes.page({ scope: { kind: "all" }, start: { kind: "first" }, limit: 50 }),
     attachment: () => workRoutes.attachment(7),
     collection: () => workRoutes.collection(spaceId),
     looseCollection: () => workRoutes.looseCollection(),

@@ -1,6 +1,6 @@
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
-import { taskActivityWords } from "@arden-hq/protocol/spaces/work"
+import { activityWords } from "../persistence/work/public.js"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -297,7 +297,7 @@ const boardRows = (detail: SpaceDetailRecord) => {
 const taskStateWords = (task: SpaceDetailRecord["work"]["work_items"][number]): string[] => {
   if (task.status !== "open") return []
   const next = task.next_attempt_at === null ? [] : [`next check ${task.next_attempt_at}`]
-  const words = taskActivityWords(task)
+  const words = activityWords(task)
   const nextShown =
     task.activity === "waiting" || task.activity === "stopped" || words === undefined
   return [...(words === undefined ? [] : [words]), ...(nextShown ? next : [])]

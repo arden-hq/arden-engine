@@ -20,7 +20,7 @@ import {
   type SessionStoreError
 } from "../persistence/sessions/store.js"
 import { ToolExecutionStore } from "../persistence/tools/store.js"
-import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
+import { pageWithItem, WorkStore, type WorkStoreError } from "../persistence/work/store.js"
 import { toolFailure } from "./tool-failure.js"
 import {
   otherSpaceReach,
@@ -341,9 +341,7 @@ const resolveDestination = async (
     }
     case "task": {
       const page = await Effect.runPromise(
-        services.work
-          .page({ limit: 1, targetItemId: destination.item_id })
-          .pipe(Effect.mapError(workFailure)),
+        services.work.page(pageWithItem(destination.item_id)).pipe(Effect.mapError(workFailure)),
         { signal }
       )
       if (!page.items.some((item) => item.item_id === destination.item_id)) {

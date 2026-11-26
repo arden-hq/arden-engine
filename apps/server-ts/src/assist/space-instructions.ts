@@ -1,4 +1,4 @@
-import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
+import { type TaskRecord } from "../persistence/work/task-record.js"
 import { Effect } from "effect"
 
 import type { StructuredCompletion } from "../models/structured-completion.js"
@@ -57,7 +57,7 @@ const spaceBrief = (
   name: string,
   pagePath: string | null,
   pageContent: string | null,
-  tasks: ReadonlyArray<SpaceTask>
+  tasks: ReadonlyArray<TaskRecord>
 ): string => {
   const live = tasks.filter((task) => task.status === "open")
   return JSON.stringify({

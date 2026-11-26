@@ -1,18 +1,15 @@
+import type { TaskRecord } from "../persistence/work/task-record.js"
+import { TaskPatchSchema, type TaskPatch } from "../persistence/work/task-patch.js"
+import { KeyedTaskDraftSchema } from "../persistence/work/task-input.js"
 import { cutText } from "@arden-hq/std/text"
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolContext, type ToolResultOutput } from "@arden-hq/loop"
 import { taskDirectionReview } from "../persistence/work/task-direction.js"
 import type { TaskDirectionChanged } from "../persistence/work/task-direction.js"
-import {
-  taskActivityWords,
-  type SpaceTask,
-  type UpdateSpaceTaskPatch
-} from "@arden-hq/protocol/spaces/work"
+import { activityWords } from "../persistence/work/public.js"
 import type { TodoListItem } from "@arden-hq/protocol"
 import {
-  CreateSpaceTaskInputSchema,
   SpaceTaskCaptureInputSchema,
-  UpdateSpaceTaskPatchSchema,
   WorkTaskKeySchema
 } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema } from "effect"
@@ -63,7 +60,7 @@ const ExpectedUpdatedAtSchema = Schema.NonEmptyString.annotate({
     "Exact updated_at from task_get or space_board_read; a stale value rejects the change."
 })
 
-const patchFields = UpdateSpaceTaskPatchSchema.fields
+const patchFields = TaskPatchSchema.fields
 
 const continuationContext = patchFields.continuation_context.annotate({
   description:
@@ -76,27 +73,27 @@ const StartParametersSchema = Schema.Struct({
     description:
       "Why tracking is needed: explicit means the user asked to create or track a Task, or to keep working on something until it is done; long_horizon means ongoing ownership or later follow-up. Ordinary requests, complexity and tool count do not warrant a Task. Inferred capture is reserved for Space inference. Include one concrete reason."
   }),
-  key: CreateSpaceTaskInputSchema.fields.key.pipe(
+  key: KeyedTaskDraftSchema.fields.key.pipe(
     Schema.annotateEncoded({
       description:
         "Stable lowercase key for later changes. Check space_board_read or task_get first: a live Task with this key makes the call fail."
     })
   ),
-  text: CreateSpaceTaskInputSchema.fields.text.pipe(
+  text: KeyedTaskDraftSchema.fields.text.pipe(
     Schema.annotateEncoded({ description: TASK_TEXT_DESCRIPTION }),
     Schema.check(Schema.isMaxLength(80))
   ),
-  body: CreateSpaceTaskInputSchema.fields.body.annotate({
+  body: KeyedTaskDraftSchema.fields.body.annotate({
     description: `${TASK_BODY_DESCRIPTION} Null clears the body.`
   }),
-  owner: CreateSpaceTaskInputSchema.fields.owner.annotate({
+  owner: KeyedTaskDraftSchema.fields.owner.annotate({
     description: TASK_OWNER_DESCRIPTION
   }),
-  runs_in: CreateSpaceTaskInputSchema.fields.runs_in.annotate({
+  runs_in: KeyedTaskDraftSchema.fields.runs_in.annotate({
     description:
       'Where Arden works on it. Omit for "background", the default: it runs on its own and reports back; use it for work expected to span hours or several wakes. "chat" keeps working on it here, turn after turn, until it is done or needs the user: use it for short work the user is steering in this chat.'
   }),
-  token_budget: CreateSpaceTaskInputSchema.fields.token_budget.annotate({
+  token_budget: KeyedTaskDraftSchema.fields.token_budget.annotate({
     description: "A token cap across all of its runs. Set it only when the user asked for one."
   })
 })
@@ -120,7 +117,7 @@ const TaskGetParametersSchema = Schema.Struct({
   )
 )
 
-const ChangePatchSchema = UpdateSpaceTaskPatchSchema.mapFields(
+const ChangePatchSchema = TaskPatchSchema.mapFields(
   () => ({
     continuation_context: continuationContext,
     text: patchFields.text.pipe(
@@ -303,7 +300,7 @@ const jobPatchFields = new Set([
   "continuation_context"
 ])
 
-const refuseWidePatch = (patch: UpdateSpaceTaskPatch, ownTask: boolean): void => {
+const refuseWidePatch = (patch: TaskPatch, ownTask: boolean): void => {
   const refused = Object.keys(patch).filter((field) => {
     if (field === "status") return patch.status !== "done" && patch.status !== "cancelled"
     if (field === "body") return !ownTask
@@ -339,7 +336,7 @@ interface TaskUpdateConfirmation {
 
 const taskUpdateConfirmation = (
   task: { readonly item_id: string; readonly text: string },
-  patch: UpdateSpaceTaskPatch
+  patch: TaskPatch
 ): TaskUpdateConfirmation => {
   const link = namedLink(task.text, taskUrl(task))
   if (patch.completion_result !== undefined) {
@@ -391,12 +388,12 @@ const executionWords = (receipt: TaskExecutionReceipt): string => {
   }
 }
 
-const activityNote = (task: SpaceTask): string => {
-  const words = task.status === "open" ? taskActivityWords(task) : undefined
+const activityNote = (task: TaskRecord): string => {
+  const words = task.status === "open" ? activityWords(task) : undefined
   return words === undefined ? "" : `, ${words}`
 }
 
-const taskState = (run: ServerRunContext, task: SpaceTask): string =>
+const taskState = (run: ServerRunContext, task: TaskRecord): string =>
   [
     `${namedLink(task.text, taskUrl(task))} (${taskHandle(run, task)})`,
     `Status: ${task.status}${task.blocked ? `, waiting on ${task.waiting_on ?? "you"}` : ""}${activityNote(task)}; runs in ${task.runs_in === "chat" ? "its chat" : "the background"}; owner ${task.owner}.`,
@@ -410,7 +407,7 @@ export const readTaskAt = async (
   ctx: ToolContext<ServerRunContext>,
   spaceId: string | undefined,
   key: string
-): Promise<SpaceTask> => {
+): Promise<TaskRecord> => {
   const target = await resolveWorkTarget(services, ctx, spaceId, "refuse")
   return Effect.runPromise(
     (target.kind === "job"
@@ -455,7 +452,7 @@ const applyTaskChange = async (
     readonly space_id?: string | undefined
     readonly key: string
     readonly expected_updated_at: string
-    readonly patch: UpdateSpaceTaskPatch
+    readonly patch: TaskPatch
   },
   ctx: ToolContext<ServerRunContext>,
   effects: CallEffects
@@ -470,7 +467,7 @@ const applyTaskChange = async (
     block_reason: blockReason,
     ...rest
   } = input.patch
-  const patch: UpdateSpaceTaskPatch = asksUser ? rest : input.patch
+  const patch: TaskPatch = asksUser ? rest : input.patch
   if (asksUser && blockReason === undefined)
     throw new ToolExecutionError(
       "Say what you need from the user: set block_reason to one direct question or instruction. It reaches them as a question, and their answer resumes the Task.",
@@ -731,7 +728,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
           "Say what it waits for: waiting_on with block_reason, or next_attempt_at.",
           { preview: "Nothing to wait for", retryable: true }
         )
-      const patch: UpdateSpaceTaskPatch = {
+      const patch: TaskPatch = {
         ...rest,
         ...(waiting_on === undefined ? {} : { blocked: true, waiting_on })
       }

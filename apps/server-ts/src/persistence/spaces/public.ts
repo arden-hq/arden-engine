@@ -24,6 +24,7 @@ import {
   type SpacePage
 } from "@arden-hq/protocol/spaces"
 import { publicMark } from "./mark.js"
+import { publicSnapshot } from "../work/public.js"
 import {
   INSTRUCTIONS_SOURCE,
   type SpaceAgentRecord,
@@ -130,5 +131,5 @@ export const publicDetail = (detail: SpaceDetailRecord): SpaceDetail => ({
   instructions: publicInstructions(detail.space),
   agent: publicAgent(detail.agent),
   sessions: detail.sessions.map(publicSession),
-  work: detail.work
+  work: publicSnapshot(detail.work)
 })

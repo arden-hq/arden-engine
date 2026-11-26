@@ -278,12 +278,22 @@ it("a post waits while its chat has a turn open, with no failed attempt, and com
       )
       expect(yield* message(posted.sessionId, posted.messageId)).toBeUndefined()
       expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toEqual([])
-      expect((yield* work.page({ spaceId: main.space_id })).items).toEqual([])
+      expect(
+        (yield* work.page({
+          scope: { kind: "space", space_id: main.space_id },
+          start: { kind: "first" },
+          limit: 50
+        })).items
+      ).toEqual([])
       yield* sql`UPDATE chat_runs SET status = 'completed', ended_at = updated_at
         WHERE run_id = ${started.runId}`
       expect(yield* drain).toBe(1)
       expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toHaveLength(1)
-      const page = yield* work.page({ spaceId: main.space_id })
+      const page = yield* work.page({
+        scope: { kind: "space", space_id: main.space_id },
+        start: { kind: "first" },
+        limit: 50
+      })
       expect(page.items).toMatchObject([
         { text: "Pay the bill", body: "Pay it before Friday.", owner: "worker" }
       ])

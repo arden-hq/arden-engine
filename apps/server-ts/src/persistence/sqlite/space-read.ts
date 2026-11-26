@@ -1,9 +1,10 @@
+import { SnapshotRecordSchema } from "../work/task-record.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { openRunSince } from "./automation-running.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import type { SpaceAgentAvailability } from "@arden-hq/protocol/spaces"
 import { makeSpaceOverview } from "./space-overview.js"
-import { EvidenceSourceRefSchema, SpaceSnapshotSchema } from "@arden-hq/protocol/effect/spaces/work"
+import { EvidenceSourceRefSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Clock, DateTime, Effect, Schema } from "effect"
 import { SpaceStoreError, type SpaceDetailRecord, type SpaceStore } from "../spaces/store.js"
 import { previewLine } from "../transcript/preview-line.js"
@@ -348,7 +349,7 @@ export const makeSpaceReads = (
               last_error: workerLatestFailed ? (worker?.latest_error ?? "Space run failed") : null
             },
         sessions,
-        work: yield* Schema.decodeUnknownEffect(SpaceSnapshotSchema)({
+        work: yield* Schema.decodeUnknownEffect(SnapshotRecordSchema)({
           results: yield* readTaskResults(
             reader,
             workItems.map((item) => item.item_id)

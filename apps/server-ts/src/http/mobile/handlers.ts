@@ -1,4 +1,4 @@
-import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
+import { type TaskRecord } from "../../persistence/work/task-record.js"
 import type { SpaceSummary } from "@arden-hq/protocol/spaces"
 import { MOBILE_FILING, type MobileAsk } from "@arden-hq/protocol/mobile"
 import type { SessionListItem } from "@arden-hq/protocol/sessions"
@@ -65,7 +65,7 @@ export const MobileHandlers = HttpApiBuilder.group(
     ) {
       const tasks = yield* Effect.forEach(itemIds, (itemId) =>
         work.get({ kind: "item", itemId }).pipe(
-          Effect.map((task): [string, SpaceTask][] => [[itemId, task]]),
+          Effect.map((task): [string, TaskRecord][] => [[itemId, task]]),
           Effect.catch(() => Effect.succeed([]))
         )
       )

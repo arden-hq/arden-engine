@@ -1,4 +1,4 @@
-import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
+import { type TaskSourceRecord } from "../work/task-record.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { workError } from "./work-records.js"
@@ -8,7 +8,7 @@ export const assertItemEvidence = Effect.fn("Work.assertItemEvidence")(function*
   sql: SqlClient.SqlClient,
   options: {
     readonly proposalId: string | undefined
-    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly sources: ReadonlyArray<TaskSourceRecord>
   }
 ) {
   const items = options.sources.flatMap((source) =>

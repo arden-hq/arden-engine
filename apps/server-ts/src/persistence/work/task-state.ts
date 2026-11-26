@@ -1,13 +1,11 @@
-import type {
-  TaskStateRecordPatch,
-  TaskStateRejected,
-  TaskStateRunning
-} from "@arden-hq/protocol/spaces/work"
+import { type TaskJobRecord } from "./task-record.js"
+import { type TaskStateRecordPatch } from "./task-patch.js"
+import type { TaskStateRejected } from "@arden-hq/protocol/spaces/work"
 import { Effect, Schema } from "effect"
 
 export interface TaskStateRecord {
   readonly done: ReadonlyArray<string>
-  readonly in_progress: ReadonlyArray<TaskStateRunning>
+  readonly in_progress: ReadonlyArray<TaskJobRecord>
   readonly decided: ReadonlyArray<string>
   readonly rejected: ReadonlyArray<TaskStateRejected>
   readonly next: ReadonlyArray<string>

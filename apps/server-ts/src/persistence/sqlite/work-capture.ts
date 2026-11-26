@@ -1,19 +1,13 @@
+import { type TaskRecord, type TaskSourceRecord } from "../work/task-record.js"
+import { decodeKeyedTaskDraftEffect } from "../work/task-input.js"
+import { type ChatTaskDraft, type KeyedTaskDraft } from "../work/task-input.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText, firstLine } from "@arden-hq/std/text"
 import { captureMutationVersions } from "./mutation-links.js"
 import { assertRunTaskAuthority } from "./run-task-authority.js"
 import { readWorkState } from "./work-activity.js"
-import type {
-  CreateSpaceTaskInput,
-  SpaceTask,
-  SpaceTaskCaptureInput,
-  SpaceTaskSource,
-  CreateChatTaskInput
-} from "@arden-hq/protocol/spaces/work"
-import {
-  SpaceTaskCaptureInputSchema,
-  decodeCreateSpaceTaskInputEffect
-} from "@arden-hq/protocol/effect/spaces/work"
+import type { SpaceTaskCaptureInput } from "@arden-hq/protocol/spaces/work"
+import { SpaceTaskCaptureInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { WorkStore, WorkStoreError, type CreateTaskInput, type TaskScope } from "../work/store.js"
@@ -79,24 +73,24 @@ export interface WorkCaptureSql {
   readonly create: (
     scope: TaskScope,
     input: CreateTaskInput
-  ) => Effect.Effect<SpaceTask, WorkStoreError>
+  ) => Effect.Effect<TaskRecord, WorkStoreError>
   readonly createFromChat: (options: {
     readonly scope: TaskScope
-    readonly input: CreateSpaceTaskInput
+    readonly input: KeyedTaskDraft
     readonly sessionId: string
     readonly runId: string
     readonly toolCallId?: string
     readonly capture: SpaceTaskCaptureInput
-  }) => Effect.Effect<SpaceTask, WorkStoreError>
+  }) => Effect.Effect<TaskRecord, WorkStoreError>
   readonly createInChat: (
     sessionId: string,
-    input: CreateChatTaskInput
-  ) => Effect.Effect<SpaceTask, WorkStoreError>
+    input: ChatTaskDraft
+  ) => Effect.Effect<TaskRecord, WorkStoreError>
   readonly createInTransaction: (options: {
     readonly scope: TaskScope
-    readonly input: CreateSpaceTaskInput
+    readonly input: KeyedTaskDraft
     readonly actor: "user" | "worker"
-    readonly taskSources: ReadonlyArray<SpaceTaskSource>
+    readonly taskSources: ReadonlyArray<TaskSourceRecord>
     readonly capture: SpaceTaskCaptureInput
     readonly runId?: string
     readonly toolCallId?: string
@@ -105,7 +99,7 @@ export interface WorkCaptureSql {
     readonly fromChat?: string
     readonly originMessageId?: string
     readonly causedBy?: string
-  }) => Effect.Effect<SpaceTask, SqlError | WorkStoreError, UnitOfWork>
+  }) => Effect.Effect<TaskRecord, SqlError | WorkStoreError, UnitOfWork>
   readonly freeKey: (scope: TaskScope, text: string) => Effect.Effect<string, WorkStoreError>
 }
 
@@ -140,9 +134,9 @@ export const makeWorkCaptureSql = (options: {
 
   const createInTransaction = Effect.fn("Work.captureInTransaction")(function* (options: {
     readonly scope: TaskScope
-    readonly input: CreateSpaceTaskInput
+    readonly input: KeyedTaskDraft
     readonly actor: "user" | "worker"
-    readonly taskSources: ReadonlyArray<SpaceTaskSource>
+    readonly taskSources: ReadonlyArray<TaskSourceRecord>
     readonly capture: SpaceTaskCaptureInput
     readonly runId?: string
     readonly toolCallId?: string
@@ -165,7 +159,7 @@ export const makeWorkCaptureSql = (options: {
       originMessageId,
       causedBy = runId
     } = options
-    const validInput = yield* decodeCreateSpaceTaskInputEffect(input).pipe(
+    const validInput = yield* decodeKeyedTaskDraftEffect(input).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid Space task input", cause))
     )
     const validCapture = yield* Schema.decodeUnknownEffect(SpaceTaskCaptureInputSchema)(capture, {
@@ -305,13 +299,13 @@ export const makeWorkCaptureSql = (options: {
     scope: TaskScope,
     input: CreateTaskInput,
     actor: "user" | "worker",
-    taskSources: ReadonlyArray<SpaceTaskSource>,
+    taskSources: ReadonlyArray<TaskSourceRecord>,
     capture: SpaceTaskCaptureInput,
     runId?: string,
     fromChat?: string,
     originMessageId?: string,
     toolCallId?: string
-  ): Effect.fn.Return<SpaceTask, WorkStoreError> {
+  ): Effect.fn.Return<TaskRecord, WorkStoreError> {
     return yield* writer
       .transact(
         Effect.gen(function* () {

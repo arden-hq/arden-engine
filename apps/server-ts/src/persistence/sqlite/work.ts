@@ -1,3 +1,5 @@
+import { TaskRecordSchema } from "../work/task-record.js"
+import { type TaskCommentRecord, type TaskRecord } from "../work/task-record.js"
 import { countOf } from "@arden-hq/std/count"
 import { captureMutationVersions } from "./mutation-links.js"
 import { readRecordedHistory } from "./recorded-history.js"
@@ -11,19 +13,13 @@ import { TaskDirectionChanged } from "../work/task-direction.js"
 import { verifyTaskCompletion } from "./work-completion.js"
 import { makeFinishCheck, readTaskIntent } from "./task-plan.js"
 import { readWorkState } from "./work-activity.js"
+import { isTaskUnfinished, type CreateSpaceTaskCommentInput } from "@arden-hq/protocol/spaces/work"
+import { decodeCreateSpaceTaskCommentInputEffect } from "@arden-hq/protocol/effect/spaces/work"
 import {
-  isTaskUnfinished,
-  type CreateSpaceTaskCommentInput,
-  type SpaceTask,
-  type SpaceTaskComment,
-  type UpdateSpaceTaskPatch
-} from "@arden-hq/protocol/spaces/work"
-import {
-  SpaceTaskSchema,
-  InternalUpdateSpaceTaskRequestSchema,
-  decodeCreateSpaceTaskCommentInputEffect,
-  decodeUpdateSpaceTaskPatchEffect
-} from "@arden-hq/protocol/effect/spaces/work"
+  decodeTaskUpdateRequestEffect,
+  decodeUpdateSpaceTaskPatchEffect,
+  type TaskPatch
+} from "../work/task-patch.js"
 import { DateTime, Effect, Schema } from "effect"
 import { taskJobId } from "../space-job-id.js"
 import { renameOwnedJob } from "./job-labels.js"
@@ -81,9 +77,9 @@ const summarizedTaskFields = [
 const mutableTaskFields = [...summarizedTaskFields, "completed_at"] as const
 
 const normalizeBlockState = (
-  current: Pick<SpaceTask, "blocked" | "waiting_on">,
-  patch: UpdateSpaceTaskPatch
-): Effect.Effect<Pick<SpaceTask, "blocked" | "waiting_on">, WorkStoreError> => {
+  current: Pick<TaskRecord, "blocked" | "waiting_on">,
+  patch: TaskPatch
+): Effect.Effect<Pick<TaskRecord, "blocked" | "waiting_on">, WorkStoreError> => {
   if (!Object.hasOwn(patch, "blocked") && !Object.hasOwn(patch, "waiting_on")) {
     return Effect.succeed({ blocked: current.blocked, waiting_on: current.waiting_on })
   }
@@ -109,7 +105,7 @@ const normalizeBlockState = (
 
 const BLOCK_STRIKE_LIMIT = 3
 
-const taskChanged = (current: SpaceTask, next: SpaceTask): boolean =>
+const taskChanged = (current: TaskRecord, next: TaskRecord): boolean =>
   mutableTaskFields.some((field) => current[field] !== next[field])
 
 export const makeWorkStore = ({
@@ -201,19 +197,16 @@ export const makeWorkStore = ({
   const updateFor = Effect.fn("SqliteWorkStore.updateFor")(function* (
     address: TaskAddress,
     expectedUpdatedAt: string,
-    patch: UpdateSpaceTaskPatch,
+    patch: TaskPatch,
     actor: "user" | "worker",
     runId?: string,
     fromJob = false,
     toolCallId?: string
-  ): Effect.fn.Return<SpaceTask, WorkStoreError | TaskDirectionChanged> {
+  ): Effect.fn.Return<TaskRecord, WorkStoreError | TaskDirectionChanged> {
     const validPatch = yield* decodeUpdateSpaceTaskPatchEffect(patch).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid Space task update", cause))
     )
-    const validRequest = yield* Schema.decodeUnknownEffect(InternalUpdateSpaceTaskRequestSchema)({
-      expected_updated_at: expectedUpdatedAt,
-      ...validPatch
-    }).pipe(
+    const validRequest = yield* decodeTaskUpdateRequestEffect(expectedUpdatedAt, validPatch).pipe(
       Effect.mapError((cause) =>
         workError("invalid", "Expected work task timestamp is invalid", cause)
       )
@@ -360,7 +353,7 @@ export const makeWorkStore = ({
           const stopped = blockReason !== null && strikes >= BLOCK_STRIKE_LIMIT
           if (statusChanged && status === "done") yield* forgetBlocks(row.item_id)
 
-          const next = yield* Schema.decodeUnknownEffect(SpaceTaskSchema)({
+          const next = yield* Schema.decodeUnknownEffect(TaskRecordSchema)({
             ...candidate,
             completed_at: completedAt,
             updated_at: updatedAt,
@@ -570,7 +563,7 @@ export const makeWorkStore = ({
     actor: "user" | "worker",
     runId?: string,
     toolCallId?: string
-  ): Effect.fn.Return<SpaceTaskComment, WorkStoreError | TaskDirectionChanged> {
+  ): Effect.fn.Return<TaskCommentRecord, WorkStoreError | TaskDirectionChanged> {
     const valid = yield* decodeCreateSpaceTaskCommentInputEffect(input).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid Space task comment", cause))
     )
@@ -704,11 +697,11 @@ export const makeWorkStore = ({
     originAutomationId: string,
     key: string,
     expectedUpdatedAt: string,
-    patch: UpdateSpaceTaskPatch,
+    patch: TaskPatch,
     requestedSpaceId?: string,
     runId?: string,
     toolCallId?: string
-  ): Effect.fn.Return<SpaceTask, WorkStoreError | TaskDirectionChanged> {
+  ): Effect.fn.Return<TaskRecord, WorkStoreError | TaskDirectionChanged> {
     const target = yield* jobTarget(originAutomationId, key, requestedSpaceId)
     return yield* updateFor(target, expectedUpdatedAt, patch, "worker", runId, true, toolCallId)
   })
@@ -720,7 +713,7 @@ export const makeWorkStore = ({
     requestedSpaceId?: string,
     runId?: string,
     toolCallId?: string
-  ): Effect.fn.Return<SpaceTaskComment, WorkStoreError | TaskDirectionChanged> {
+  ): Effect.fn.Return<TaskCommentRecord, WorkStoreError | TaskDirectionChanged> {
     const target = yield* jobTarget(originAutomationId, key, requestedSpaceId)
     return yield* commentFor(target, input, "worker", runId, toolCallId)
   })
