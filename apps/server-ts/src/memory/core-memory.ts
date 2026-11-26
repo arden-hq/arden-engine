@@ -70,6 +70,15 @@ export const CORE_CONDENSE_ADVICE =
   "Condense wording first, then move project-specific, dated or rarely needed detail " +
   "to the page that owns it, leaving a short link. Keep every general fact and preference."
 
+export const coreCondenseNotice = (page: {
+  readonly path: string
+  readonly chars: number
+  readonly budget: number
+  readonly target: number
+}): string =>
+  `- ${page.path}: ${page.chars} characters; it is sent to every run, whole up to ${page.budget}. ` +
+  `Bring it to ${page.target} or fewer. ${CORE_CONDENSE_ADVICE}`
+
 /** How far a page body is over its limit, or undefined when it fits or has none. */
 export const overPageLimit = (page: {
   readonly path: string

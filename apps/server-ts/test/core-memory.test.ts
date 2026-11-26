@@ -1,9 +1,20 @@
 import { expect, it } from "vitest"
-import { coreCondenseTarget, createRefusal, crowdedCorePages } from "../src/memory/core-memory.js"
+import {
+  CORE_CONDENSE_ADVICE,
+  coreCondenseNotice,
+  coreCondenseTarget,
+  createRefusal,
+  crowdedCorePages
+} from "../src/memory/core-memory.js"
 const profile = (chars: number) => ({ path: "me.md", pageId: "me", chars })
 it("asks for condensing before the profile is full, and leaves room after one condense", () => {
   expect(crowdedCorePages([profile(8_100)])).toEqual([])
-  expect(crowdedCorePages([profile(8_998)])).toHaveLength(1)
+  const [page] = crowdedCorePages([profile(8_998)])
+  expect(page).toBeDefined()
+  if (page !== undefined) {
+    expect(coreCondenseNotice(page)).toContain(CORE_CONDENSE_ADVICE)
+    expect(coreCondenseNotice(page)).toContain("7200")
+  }
   expect(crowdedCorePages([profile(coreCondenseTarget(9_000))])).toEqual([])
 })
 it("allows each standing-facts page at the root, and no other root page", () => {

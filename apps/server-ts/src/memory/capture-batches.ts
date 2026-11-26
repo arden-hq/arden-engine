@@ -17,7 +17,7 @@ import type { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { captureBatchKey } from "../wiki/capture.js"
 import type { Wiki } from "../wiki/service.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
-import { crowdedCorePages } from "./core-memory.js"
+import { coreCondenseNotice, crowdedCorePages } from "./core-memory.js"
 
 const CAPTURE_RECORD_LIMIT = 40
 const CAPTURE_CHAR_LIMIT = 6_000
@@ -195,16 +195,7 @@ export const makeMemoryCaptureBatches = (input: {
         renderTranscript(header, excerpts, DateTime.toDate(yield* DateTime.now)),
         ...(crowded.length === 0
           ? []
-          : [
-              "",
-              "## Core Memory to condense",
-              "",
-              ...crowded.map(
-                (page) =>
-                  `- ${page.path}: ${page.chars} characters; it is sent to every run, whole up to ${page.budget}. ` +
-                  `Bring it to ${page.target} or fewer.`
-              )
-            ])
+          : ["", "## Core Memory to condense", "", ...crowded.map(coreCondenseNotice)])
       ].join("\n")
     }
   })
