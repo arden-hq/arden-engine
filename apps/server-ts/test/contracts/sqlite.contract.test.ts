@@ -82,9 +82,7 @@ it("publishes the settled run identity in a terminal lifecycle row", () =>
           type: "session_activity",
           session: {
             session_id: session.sessionId,
-            active_run_id: null,
-            latest_run_id: "settled-run",
-            is_active: false
+            run: { kind: "settled", run_id: "settled-run", status: "completed" }
           }
         }
       })

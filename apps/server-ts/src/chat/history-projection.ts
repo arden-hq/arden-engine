@@ -1,3 +1,4 @@
+import { RUNTIME_RUN } from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import {
   INTERACTION_KIND,
@@ -51,7 +52,6 @@ import type {
   ToolExecutionResultMetadata
 } from "../persistence/tools/history-queries.js"
 import { ChatHistoryError } from "./history-errors.js"
-import type { HistoryRows } from "./history-budget.js"
 import { conversationCall, surfaceOfCall, surfaceOfPart, type Surface } from "./surface.js"
 import { isAgentInstruction } from "@arden-hq/protocol/views"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
@@ -77,21 +77,6 @@ const StoredReplySchema = Schema.Union([
   Schema.NonEmptyArray(ReplyContextSchema)
 ])
 
-export const emptyHistory: HistoryRows = {
-  messages: [],
-  active_work_tail: null,
-  runtime: {
-    session_id: null,
-    latest_event_seq: 0,
-    checkpoint_seq: 0,
-    active_run: null,
-    blocking_work: false,
-    pending_approvals: [],
-    pending_connections: []
-  },
-  page: { has_more_before: false, has_more_after: false, before: null, after: null }
-}
-
 export const historyPage = (page: TranscriptPage): HistoryResponse["page"] => ({
   has_more_before: page.hasMoreBefore,
   has_more_after: page.hasMoreAfter,
@@ -107,22 +92,27 @@ export const activeRunSnapshot = (
   pendingConnections: HistoryResponse["runtime"]["pending_connections"],
   waitingToolCallIds: ReadonlyArray<string>
 ): HistoryResponse["runtime"]["active_run"] => {
-  if (run === null || !isActiveRunStatus(run.status)) return null
+  if (run === null || !isActiveRunStatus(run.status)) return { kind: RUNTIME_RUN.idle }
   return {
-    run_id: run.runId,
-    turn_id: run.turnId,
-    status: run.status,
-    started_at: DateTime.formatIso(run.startedAt),
-    updated_at: DateTime.formatIso(run.updatedAt),
-    ended_at: null,
-    stop_reason: null,
-    checkpoint_seq: checkpointSequence,
-    latest_event_seq: run.lastSequence ?? latestEventSequence,
-    error_code: null,
-    error_message: null,
-    pending_approvals: pendingApprovals.filter((approval) => approval.run_id === run.runId),
-    pending_connections: pendingConnections.filter((connection) => connection.run_id === run.runId),
-    waiting_tool_call_ids: [...waitingToolCallIds]
+    kind: RUNTIME_RUN.active,
+    run: {
+      run_id: run.runId,
+      turn_id: run.turnId,
+      status: run.status,
+      started_at: DateTime.formatIso(run.startedAt),
+      updated_at: DateTime.formatIso(run.updatedAt),
+      ended_at: null,
+      stop_reason: null,
+      checkpoint_seq: checkpointSequence,
+      latest_event_seq: run.lastSequence ?? latestEventSequence,
+      error_code: null,
+      error_message: null,
+      pending_approvals: pendingApprovals.filter((approval) => approval.run_id === run.runId),
+      pending_connections: pendingConnections.filter(
+        (connection) => connection.run_id === run.runId
+      ),
+      waiting_tool_call_ids: [...waitingToolCallIds]
+    }
   }
 }
 

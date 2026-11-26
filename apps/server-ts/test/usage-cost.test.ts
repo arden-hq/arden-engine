@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelProvider, Toolset } from "@arden-hq/loop"
@@ -159,7 +160,7 @@ const finishedResult = async (cost: number | undefined) => {
       await running.fetch("/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Cost" })
+        body: JSON.stringify(newChat({ name: "Cost" }))
       })
     ).json()) as { readonly session_id: string }
     const receipt = chatDecoders.receipt(

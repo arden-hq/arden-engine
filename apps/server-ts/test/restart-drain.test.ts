@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Schema } from "effect"
@@ -151,7 +152,7 @@ const startRun = async (server: ServerHandle): Promise<string> => {
     await server.fetch("/sessions", {
       method: "POST",
       headers,
-      body: JSON.stringify({ name: "Drain" })
+      body: JSON.stringify(newChat({ name: "Drain" }))
     })
   ).json()) as { readonly session_id: string }
   const receipt = chatDecoders.receipt(

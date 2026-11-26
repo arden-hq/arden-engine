@@ -275,28 +275,42 @@ export interface ReadResponse extends JsonRecord {
   readonly hasUnread: boolean
 }
 
-/** Camel-case query options for `GET /session/history`. */
+export const HISTORY_PAGE_LIMIT = 100
+
+export const HISTORY_WINDOW = {
+  latest: "latest",
+  before: "before",
+  after: "after",
+  around: "around",
+  aroundSeq: "around_seq"
+} as const
+
+export type TurnWorkWindow =
+  | { readonly kind: typeof HISTORY_WINDOW.latest }
+  | { readonly kind: typeof HISTORY_WINDOW.before; readonly cursor: string }
+  | { readonly kind: typeof HISTORY_WINDOW.after; readonly cursor: string }
+
+export type HistoryWindow =
+  | TurnWorkWindow
+  | { readonly kind: typeof HISTORY_WINDOW.around; readonly cursor: string }
+  | { readonly kind: typeof HISTORY_WINDOW.aroundSeq; readonly seq: number }
+
 export interface HistoryRouteOptions {
-  readonly sessionId?: string
-  readonly limit?: number
-  readonly before?: string
-  readonly after?: string
-  readonly around?: string
-  readonly aroundSeq?: number
+  readonly sessionId: string
+  readonly limit: number
+  readonly window: HistoryWindow
 }
 
-/** Camel-case query options for `GET /session/turn-work`. */
 export type TurnWorkView = "full" | "compact"
+
+export const TURN_WORK_VIEW = { full: "full", compact: "compact" } as const
 
 export interface TurnWorkRouteOptions {
   readonly sessionId: string
   readonly turnId: string
-  readonly limit?: number
-  readonly before?: string
-  /** Page forwards from this cursor; exclusive with `before`. */
-  readonly after?: string
-  /** `compact` rows carry what a trail row shows; the rest loads on demand. */
-  readonly view?: TurnWorkView
+  readonly limit: number
+  readonly window: TurnWorkWindow
+  readonly view: TurnWorkView
 }
 
 /** Options for `GET /session/turn-details`. */

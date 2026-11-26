@@ -11,6 +11,13 @@ import { ReceiptOutcomeSchema } from "../../execution/tool-effect.js"
 
 const ReceiptIdentifierSchema = Schema.NonEmptyString
 
+const ReceiptTitleSchema = Schema.optionalKey(
+  Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_TITLE_MAX))
+)
+const ReceiptHrefSchema = Schema.optionalKey(
+  Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_HREF_MAX))
+)
+
 const FileRevisionReconciliationSchema = Schema.Struct({
   kind: Schema.Literal("file_revision"),
   absolute_path: ReceiptIdentifierSchema,
@@ -29,15 +36,15 @@ const ReceiptResourceSchema = Schema.Union([
     before_version: ReceiptIdentifierSchema,
     after_version: ReceiptIdentifierSchema,
     domain: Schema.optionalKey(ChangeEntrySchema.fields.domain),
-    title: ChangeEntrySchema.fields.title,
-    href: ChangeEntrySchema.fields.href
+    title: ReceiptTitleSchema,
+    href: ReceiptHrefSchema
   }),
   Schema.Struct({
     kind: Schema.Literal("target"),
     resource_ref: ReceiptIdentifierSchema,
     domain: ChangeEntrySchema.fields.domain,
-    title: ChangeEntrySchema.fields.title,
-    href: ChangeEntrySchema.fields.href
+    title: ReceiptTitleSchema,
+    href: ReceiptHrefSchema
   })
 ])
 type ReceiptResource = typeof ReceiptResourceSchema.Type
@@ -53,8 +60,8 @@ const MutationReceiptV1Schema = Schema.Struct({
   reconcile: Schema.NullOr(FileRevisionReconciliationSchema),
   resource_kind: Schema.optionalKey(Schema.Literal("target")),
   domain: Schema.optionalKey(ChangeEntrySchema.fields.domain),
-  title: ChangeEntrySchema.fields.title,
-  href: ChangeEntrySchema.fields.href,
+  title: ReceiptTitleSchema,
+  href: ReceiptHrefSchema,
   resources: Schema.optionalKey(
     Schema.Array(ReceiptResourceSchema).check(
       Schema.isMinLength(1),

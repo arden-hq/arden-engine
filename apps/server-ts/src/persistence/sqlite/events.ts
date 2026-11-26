@@ -40,6 +40,7 @@ import type { PersistenceDeps } from "./deps.js"
 import { UnitOfWork } from "../unit-of-work.js"
 import { readLatestRunBoundary } from "./journal-run-boundary.js"
 import { withContentAnchor } from "../events/content-anchor.js"
+import { decodeStoredChatEvent } from "../events/stored-chat-event.js"
 import {
   projectionBytes,
   reduceActiveProjection,
@@ -78,11 +79,7 @@ const eventError = (
   message: string,
   cause?: unknown
 ): ChatEventStoreError =>
-  new ChatEventStoreError({
-    operation,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
+  new ChatEventStoreError({ operation, message, ...(cause === undefined ? {} : { cause }) })
 
 const mapError = (operation: ChatEventOperation, message: string) => (cause: unknown) =>
   cause instanceof ChatEventStoreError ? cause : eventError(operation, message, cause)
@@ -167,7 +164,7 @@ const decodeRecord = Effect.fn("SqliteChatEventStore.decodeRecord")(function* (
   record: JournalRecord,
   operation: "read" | "follow"
 ): Effect.fn.Return<SessionEventRecord, ChatEventStoreError> {
-  const event = yield* Schema.decodeUnknownEffect(ChatProjectionEventSchema)(record.data).pipe(
+  const event = yield* decodeStoredChatEvent(record.data, record.streamId).pipe(
     Effect.mapError((cause) => eventError(operation, "Stored Chat event is corrupt", cause))
   )
   if (event.type !== record.type) {

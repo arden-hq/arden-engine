@@ -3,37 +3,64 @@ import type { JsonRecord } from "../common/json.js"
 import type { RunApprovalWork } from "../runs/context.js"
 import type { RuleSavedIn } from "../runs/questions.js"
 
+export const APPROVAL_GRANT_FOLDER = { none: "none", folder: "folder" } as const
+
+export type ApprovalGrantFolder =
+  | { readonly kind: typeof APPROVAL_GRANT_FOLDER.none }
+  | { readonly kind: typeof APPROVAL_GRANT_FOLDER.folder; readonly folder: string }
+
+export const APPROVAL_ASKER = { chat: "chat", work: "work" } as const
+
+export type ApprovalAsker =
+  | { readonly kind: typeof APPROVAL_ASKER.chat }
+  | { readonly kind: typeof APPROVAL_ASKER.work; readonly work: RunApprovalWork }
+
+export const APPROVAL_PREVIEW = { none: "no_preview", preview: "preview" } as const
+
+export type ApprovalPreview =
+  | { readonly kind: typeof APPROVAL_PREVIEW.none }
+  | { readonly kind: typeof APPROVAL_PREVIEW.preview; readonly text: string }
+
+export const APPROVAL_DIFF = { none: "no_diff", diff: "diff" } as const
+
+export type ApprovalDiff =
+  | { readonly kind: typeof APPROVAL_DIFF.none }
+  | { readonly kind: typeof APPROVAL_DIFF.diff; readonly patch: string }
+
+export const APPROVAL_CARD = { plain: "plain", presented: "presented" } as const
+
+export type ApprovalCard =
+  | { readonly kind: typeof APPROVAL_CARD.plain }
+  | { readonly kind: typeof APPROVAL_CARD.presented; readonly presentation: ApprovalPresentation }
+
 export interface RuntimeApprovalSnapshot extends JsonRecord {
   readonly tool_id: string
-  /** The durable owner of this card's decision. Older snapshots omit it. */
-  readonly source?: "run" | "deferred"
+  readonly source: "run" | "deferred"
   readonly tool_name: string
-  readonly preview?: string | null
-  readonly diff?: string | null
+  readonly preview: ApprovalPreview
+  readonly diff: ApprovalDiff
   readonly status: "pending"
-  readonly requested_at?: string | null
-  readonly run_id?: string | null
-  readonly session_id?: string | null
-  readonly action?: string | null
-  readonly scope?: string | null
-  readonly expires_at?: string | null
-  readonly description?: string | null
-  /** Where the card's "Always allow" saves a rule: the run's own list, then
-   *  everywhere, each only while a tap there would save. Absent when none can. */
-  readonly rule_places?: ReadonlyArray<RuleSavedIn>
-  readonly can_attach_folder_to_space?: boolean
-  /** The folder those choices keep, written for the card. */
-  readonly grant_folder?: string
-  readonly parent_session_id?: string | null
-  readonly presentation?: ApprovalPresentation | null
-  /** The Task or Automation the asking run works for, on a card from another chat. */
-  readonly work?: RunApprovalWork
+  readonly requested_at: string
+  readonly run_id: string
+  readonly session_id: string
+  readonly action: string
+  readonly rule_places: ReadonlyArray<RuleSavedIn>
+  readonly can_attach_folder_to_space: boolean
+  readonly grant_folder: ApprovalGrantFolder
+  readonly card: ApprovalCard
+  readonly asker: ApprovalAsker
 }
+
+export const CONNECTION_ACCOUNT = { default: "default", account: "account" } as const
+
+export type ConnectionAccount =
+  | { readonly kind: typeof CONNECTION_ACCOUNT.default }
+  | { readonly kind: typeof CONNECTION_ACCOUNT.account; readonly ref: string }
 
 export interface RuntimeConnectionSnapshot extends JsonRecord {
   readonly tool_id: string
   readonly run_id: string
-  readonly session_id?: string
+  readonly session_id: string
   readonly integration_id: string
   readonly connection_id: string
   readonly label: string
@@ -44,36 +71,34 @@ export interface RuntimeConnectionSnapshot extends JsonRecord {
   readonly settings_tab: string
   readonly required_scopes: ReadonlyArray<string>
   readonly source: "recovery" | "suggestion"
-  readonly decision_delivery?: "blocking" | "deferred"
-  readonly account_ref?: string | null
+  readonly decision_delivery: "blocking" | "deferred"
+  readonly account: ConnectionAccount
 }
 
 export interface ActiveRunSnapshot extends JsonRecord {
   readonly run_id: string
   readonly turn_id: string
   readonly status: RuntimeRunStatus | string
-  readonly started_at?: string | null
-  readonly updated_at?: string | null
-  readonly ended_at?: string | null
-  readonly stop_reason?: string | null
+  readonly started_at: string
+  readonly updated_at: string
   readonly checkpoint_seq: number
   readonly latest_event_seq: number
-  readonly error_code?: string | null
-  readonly error_message?: string | null
   readonly pending_approvals: ReadonlyArray<RuntimeApprovalSnapshot>
   readonly pending_connections: ReadonlyArray<RuntimeConnectionSnapshot>
-  /**
-   * Calls of this run held before their effect began (a journaled
-   * TOOL_CALL_WAITING with no later start or result). Absent from older servers.
-   */
-  readonly waiting_tool_call_ids?: ReadonlyArray<string>
+  readonly waiting_tool_call_ids: ReadonlyArray<string>
 }
 
+export const RUNTIME_RUN = { idle: "idle", active: "active" } as const
+
+export type RuntimeRun =
+  | { readonly kind: typeof RUNTIME_RUN.idle }
+  | { readonly kind: typeof RUNTIME_RUN.active; readonly run: ActiveRunSnapshot }
+
 export interface SessionRuntimeSnapshot extends JsonRecord {
-  readonly session_id: string | null
+  readonly session_id: string
   readonly latest_event_seq: number
   readonly checkpoint_seq: number
-  readonly active_run: ActiveRunSnapshot | null
+  readonly active_run: RuntimeRun
   /**
    * Work that still owns the Session context, by the same predicates that make
    * the server refuse an edit or a clear. Wider than `active_run`: a stale

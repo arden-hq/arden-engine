@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -27,10 +28,12 @@ it(
       const created = await server.fetch("/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Pending" })
+        body: JSON.stringify(newChat({ name: "Pending" }))
       })
       expect(created.ok).toBe(true)
-      const listed = await server.fetch("/sessions")
+      const listed = await server.fetch(
+        "/sessions?scope=all&live=false&limit=100&sort=activity&filter=all&page=first"
+      )
       expect(listed.ok).toBe(true)
     } finally {
       await server?.stop().catch(() => undefined)

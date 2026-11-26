@@ -230,7 +230,7 @@ describe("folder grant on an approval card", () => {
     const added = await inDatabase("upload-add", uploadIn("add_folder"))
     expect(added.pending).toMatchObject({
       can_attach_folder_to_space: true,
-      grant_folder: expect.stringMatching(/\/videos$/)
+      grant_folder: { kind: "folder", folder: expect.stringMatching(/\/videos$/) }
     })
     expect(added.folders).toEqual([videos])
     const once = await inDatabase("upload-once", uploadIn("once"))
@@ -249,7 +249,7 @@ describe("folder grant on an approval card", () => {
     })
     expect(result.pending).toMatchObject({
       can_attach_folder_to_space: true,
-      grant_folder: expect.stringMatching(/\/margin$/)
+      grant_folder: { kind: "folder", folder: expect.stringMatching(/\/margin$/) }
     })
     expect(result.folders).toEqual([margin])
     expect({ nextAsks: result.nextAsks, secondInside: result.secondInside }).toEqual({

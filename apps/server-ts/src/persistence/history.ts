@@ -1,5 +1,7 @@
 import { Schema } from "effect"
 export {
+  RECORDED_HISTORY_NEXT,
+  RECORDED_HISTORY_THROUGH,
   RecordedHistoryEntrySchema,
   RecordedHistoryPageSchema,
   RecordedHistoryQuerySchema,

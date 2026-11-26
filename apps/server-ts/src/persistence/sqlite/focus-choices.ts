@@ -1,6 +1,6 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { FocusChoice } from "@arden-hq/protocol/sessions/focus-choices"
+import { FOCUS_CHOICE_STATUS, type FocusChoice } from "@arden-hq/protocol/sessions/focus-choices"
 import { isWrittenByPerson } from "../transcript/model.js"
 import {
   FocusChoiceSchema,
@@ -153,6 +153,8 @@ const project = Effect.fn("FocusChoice.project")(function* (
           label: storedTarget.label
         }
       : { kind: "create" as const, name: storedTarget.name }
+  const { decision, result_session_ref, settled_at } = row
+  const settled = row.status === FOCUS_CHOICE_STATUS.settled
   return yield* Schema.decodeUnknownEffect(FocusChoiceSchema)({
     choice_id: row.choice_id,
     question_id: row.question_id,
@@ -161,11 +163,9 @@ const project = Effect.fn("FocusChoice.project")(function* (
     revision: row.revision,
     target,
     status: row.status,
-    decision: row.decision,
-    result_session_ref: row.result_session_ref,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    settled_at: row.settled_at
+    ...(settled ? { decision, result_session_ref, settled_at } : {})
   }).pipe(Effect.mapError((cause) => failure("storage", "Stored Focus choice is corrupt", cause)))
 })
 
@@ -577,10 +577,7 @@ export const makeFocusChoiceStore = (options: {
             })
           }
           const choice = yield* readRow({ sql, spaceId, questionId }).pipe(Effect.flatMap(project))
-          if (choice.result_session_ref === null) {
-            return yield* failure("conflict", "This Focus choice was already resolved differently")
-          }
-          if (choice.decision !== input.decision) {
+          if (choice.status === FOCUS_CHOICE_STATUS.offered || choice.decision !== input.decision) {
             return yield* failure("conflict", "This Focus choice was already resolved differently")
           }
           const target = yield* decodeJson(internalTargetSchema, row.target_json).pipe(

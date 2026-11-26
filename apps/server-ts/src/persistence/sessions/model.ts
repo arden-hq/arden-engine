@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
 import { AutomationId } from "../automations/model.js"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
-import { SessionForkOriginSchema } from "@arden-hq/protocol/effect/common"
+import { SessionForkOriginSchema } from "./fork-origin.js"
 import { SpaceKindSchema } from "@arden-hq/protocol/effect/spaces"
 
 export const SessionHistoryHeaderSchema = Schema.Struct({

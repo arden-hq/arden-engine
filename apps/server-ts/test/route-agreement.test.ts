@@ -1,3 +1,4 @@
+import { HISTORY_WINDOW, TURN_WORK_VIEW } from "@arden-hq/protocol/chat"
 import { HttpApi } from "effect/unstable/httpapi"
 import { expect, it } from "vitest"
 import { automationRoutes } from "@arden-hq/protocol/automations"
@@ -76,8 +77,16 @@ const tables: Readonly<Record<string, RouteTable>> = {
     procedure: () => browserProcedureRoutes.procedure("procedure-1")
   }),
   chatRoutes: table(chatRoutes, {
-    history: () => chatRoutes.history({ sessionId }),
-    turnWork: () => chatRoutes.turnWork({ sessionId, turnId: "turn-1" }),
+    history: () =>
+      chatRoutes.history({ sessionId, limit: 100, window: { kind: HISTORY_WINDOW.latest } }),
+    turnWork: () =>
+      chatRoutes.turnWork({
+        sessionId,
+        turnId: "turn-1",
+        limit: 100,
+        window: { kind: HISTORY_WINDOW.latest },
+        view: TURN_WORK_VIEW.full
+      }),
     turnDetails: () => chatRoutes.turnDetails({ sessionId, turnId: "turn-1" }),
     toolCall: () => chatRoutes.toolCall({ sessionId, turnId: "turn-1", toolCallId: "call-1" }),
     toolResultValue: () =>
@@ -168,7 +177,15 @@ const tables: Readonly<Record<string, RouteTable>> = {
     sessionUsage: () => runRoutes.sessionUsage(sessionId)
   }),
   sessionRoutes: table(sessionRoutes, {
-    list: () => sessionRoutes.list(),
+    list: () =>
+      sessionRoutes.list({
+        scope: "all",
+        live: false,
+        limit: 100,
+        sort: "activity",
+        filter: { kind: "all" },
+        page: { kind: "first" }
+      }),
     item: () => sessionRoutes.item(sessionId),
     branch: () => sessionRoutes.branch(sessionId),
     model: () => sessionRoutes.model(sessionId),

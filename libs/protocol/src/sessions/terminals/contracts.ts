@@ -1,23 +1,33 @@
 import type { JsonRecord } from "../../common/json.js"
 
-/** A command Arden left running in a Chat, or one that has since ended. */
-export interface SessionTerminal extends JsonRecord {
+export const TERMINAL_STATE = { running: "running", exited: "exited" } as const
+
+export type TerminalExit =
+  | { readonly kind: "code"; readonly code: number }
+  | { readonly kind: "signal"; readonly signal: string }
+
+interface SessionTerminalFields extends JsonRecord {
   readonly id: number
-  /** The exec_command call that started it. */
   readonly tool_call_id: string
   readonly command: string
   readonly cwd: string
   readonly access: "sandbox" | "network" | "host"
-  /** Started with its input open, so typing reaches it. */
   readonly tty: boolean
-  readonly state: "running" | "exited"
-  readonly exit_code: number | null
-  readonly signal: string | null
   readonly started_at: string
-  readonly ended_at: string | null
-  /** Characters of output so far; grows while it runs. */
   readonly cursor: number
 }
+
+export interface RunningSessionTerminal extends SessionTerminalFields {
+  readonly state: typeof TERMINAL_STATE.running
+}
+
+export interface ExitedSessionTerminal extends SessionTerminalFields {
+  readonly state: typeof TERMINAL_STATE.exited
+  readonly exit: TerminalExit
+  readonly ended_at: string
+}
+
+export type SessionTerminal = RunningSessionTerminal | ExitedSessionTerminal
 
 export interface SessionTerminalsResponse extends JsonRecord {
   readonly terminals: ReadonlyArray<SessionTerminal>

@@ -382,7 +382,7 @@ it("ending Getting started tells clients the chat changed", async () => {
         WHERE record.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
           AND record.event_type = 'entity_changed'
           AND json_extract(record.data_json, '$.kind') = 'session'
-          AND json_extract(record.data_json, '$.id') = ${chat.sessionId}`
+          AND json_extract(record.data_json, '$.target.id') = ${chat.sessionId}`
       const before = (yield* told)[0]?.count ?? 0
       expect(yield* sessions.finishOnboarding(chat.sessionId)).toBe(true)
       expect((yield* told)[0]?.count).toBe(before + 1)

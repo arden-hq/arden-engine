@@ -1,10 +1,7 @@
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import {
-  ConnectionRequiredDataSchema,
-  pendingConnectionDecision
-} from "../../connections/recovery.js"
+import { ConnectionRequiredDataSchema, connectionId } from "../../connections/recovery.js"
 import type { EventDraft } from "../events/model.js"
 import type { ChatEventStore } from "../events/store.js"
 import { JsonObjectSchema } from "../json.js"
@@ -94,10 +91,7 @@ const cardClosedEvent = (
         type: "connection_resolved",
         run_id: card.run_id,
         tool_id: card.tool_call_id,
-        connection_id: pendingConnectionDecision(
-          { runId: card.run_id, sessionId: card.session_id, toolCallId: card.tool_call_id },
-          connection
-        ).snapshot.connection_id,
+        connection_id: connectionId(card.run_id, card.tool_call_id),
         approved,
         decision_route: decisionRoute
       }

@@ -231,8 +231,7 @@ export const makeCommunicationStore = ({
             }
             const envelope: CommunicationEnvelope = {
               kind: "arrival",
-              arrival: payload.arrival,
-              ...(payload.shown === false ? { shown: false } : {})
+              arrival: payload.arrival
             }
             yield* writeCommunicationEnvelopeInTransaction({
               sql,
@@ -241,7 +240,8 @@ export const makeCommunicationStore = ({
               messageId: `arrival:${delivery.deliveryId}`,
               envelope,
               createdAt: payload.arrival.occurred_at,
-              replace: false
+              replace: false,
+              quiet: payload.shown === false
             })
             const updated = yield* sql`UPDATE automation_deliveries SET status = 'delivered',
           delivered_at = ${payload.arrival.occurred_at},

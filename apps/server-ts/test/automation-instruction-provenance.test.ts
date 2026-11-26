@@ -10,9 +10,15 @@ import { AutomationId } from "../src/persistence/automations/model.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { ToolExecutionStore } from "../src/persistence/tools/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { RECORDED_HISTORY_THROUGH } from "../src/persistence/history.js"
 import { changes, newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 const AT = "2026-10-15T20:06:01.931Z"
+const wholeHistory = {
+  after_version: 0,
+  limit: 50,
+  through: RECORDED_HISTORY_THROUGH.head
+} as const
 
 it("a same-text owner save preserves an agent prompt's authorship and revision", async () => {
   const revisions = await withTempDatabase(
@@ -178,7 +184,7 @@ it("configuration history resolves its original instruction after later edits an
         "owner"
       )
       const id = AutomationId.make(automation.task_id)
-      const first = yield* catalog.history({ id })
+      const first = yield* catalog.history({ id, ...wholeHistory })
       yield* catalog.update(
         id,
         changes(
@@ -188,8 +194,14 @@ it("configuration history resolves its original instruction after later edits an
         "owner"
       )
       yield* catalog.toggle(id)
-      const current = yield* catalog.history({ id })
-      const original = yield* catalog.history({ id, through_version: first.through_version })
+      const current = yield* catalog.history({ id, ...wholeHistory })
+      const original = yield* catalog.history({
+        id,
+        after_version: 0,
+        limit: 50,
+        through: RECORDED_HISTORY_THROUGH.version,
+        through_version: first.through_version
+      })
       yield* catalog.update(
         id,
         changes(
@@ -198,7 +210,7 @@ it("configuration history resolves its original instruction after later edits an
         ),
         "owner"
       )
-      const noop = yield* catalog.history({ id })
+      const noop = yield* catalog.history({ id, ...wholeHistory })
       return { first, current, original, noop }
     })
   )

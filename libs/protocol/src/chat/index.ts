@@ -1,5 +1,12 @@
 import { ChangeEvidenceSchema } from "./change-evidence.js"
-export type { ChangeEvidence, ChangeEntry } from "./change-evidence.js"
+export type {
+  ChangeEvidence,
+  ChangeEntry,
+  ChangeEntryLink,
+  ChangeEntryPlace,
+  ChangeEntryTitle
+} from "./change-evidence.js"
+export { CHANGE_ENTRY_LINK, CHANGE_ENTRY_PLACE, CHANGE_ENTRY_TITLE } from "./change-evidence.js"
 import {
   decoderFor,
   makeEncoder,
@@ -65,11 +72,8 @@ import {
   mapReadResponse,
   mapRunsStatus
 } from "./facade-mappers.js"
-import {
-  PersistedChildAgentMetadataSchema,
-  ToolResultCostSchema,
-  ToolResultUsageSchema
-} from "./child-agent.js"
+export { historyWindow, turnWorkWindow } from "./facade-mappers.js"
+import { PersistedChildAgentMetadataSchema } from "./child-agent.js"
 import { CommunicationEnvelopeSchema } from "./communication-schema.js"
 import { ServerEventSchema } from "../events/schema.js"
 import { GmailSendReceiptSchema } from "./gmail-receipt.js"
@@ -176,8 +180,6 @@ export const chatDecoders = {
     "Invalid child-agent metadata",
     strict
   ),
-  toolResultUsage: decoderFor(ToolResultUsageSchema, "Invalid tool-result usage"),
-  toolResultCost: decoderFor(ToolResultCostSchema, "Invalid tool-result cost"),
   communication: decoderFor(CommunicationEnvelopeSchema, "Invalid communication envelope"),
   gmailSendReceipt: decoderFor(GmailSendReceiptSchema, "Invalid Gmail send receipt")
 } as const
@@ -226,7 +228,7 @@ export const chatRoutes = {
   connectionResume: "/connections/resume",
   cancel: "/cancel",
   runsStatus: "/chat/runs/status",
-  history(options: HistoryRouteOptions = {}): string {
+  history(options: HistoryRouteOptions): string {
     return runBoundary(encodeHistoryPathEffect(options), "Invalid history route", "encode")
   },
   turnWork(options: TurnWorkRouteOptions): string {

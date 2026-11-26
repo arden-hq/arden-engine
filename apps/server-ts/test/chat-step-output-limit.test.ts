@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
@@ -81,7 +82,7 @@ const chatTurn = async (provider: ModelProvider, modelHost: ModelHost): Promise<
     })
     const running = server
     const session = (await (
-      await running.fetch("/sessions", { method: "POST", headers, body: JSON.stringify({}) })
+      await running.fetch("/sessions", { method: "POST", headers, body: JSON.stringify(newChat()) })
     ).json()) as { readonly session_id: string }
     const receipt = chatDecoders.receipt(
       await (

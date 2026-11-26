@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
@@ -206,7 +207,7 @@ const chatOn = async (running: Running, model: string) => {
       await running.call(sessionRoutes.collection, {
         method: "POST",
         headers,
-        body: JSON.stringify({})
+        body: JSON.stringify(newChat())
       })
     ).body
   ).session_id
@@ -215,7 +216,7 @@ const chatOn = async (running: Running, model: string) => {
       await running.call(sessionRoutes.model(sessionId), {
         method: "PUT",
         headers,
-        body: sessionRequests.setModel(model)
+        body: sessionRequests.setModel({ kind: "pinned", model_id: model })
       })
     ).status
   ).toBe(200)

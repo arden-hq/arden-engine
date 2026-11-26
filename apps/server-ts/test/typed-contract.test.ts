@@ -98,7 +98,12 @@ it("an attempt whose Task row is gone still ends, and its chat is still a Task w
       }
     ],
     queued: 0,
-    presentation: { kind: "execution", label: "Task worker", title: "Task · Worker", owner: null },
+    presentation: {
+      kind: "execution",
+      label: "Task worker",
+      title: "Task · Worker",
+      owner: { kind: "none" }
+    },
     again: 0
   })
 })

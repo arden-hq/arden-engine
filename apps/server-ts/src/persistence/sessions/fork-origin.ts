@@ -1,9 +1,16 @@
 import { Schema } from "effect"
-import { SessionForkOriginSchema } from "@arden-hq/protocol/effect/common"
+import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import { isJsonObject } from "../json.js"
 
-export { SessionForkOriginSchema }
-export type { SessionForkOrigin } from "@arden-hq/protocol/sessions"
+export const SessionForkOriginSchema = Schema.Struct({
+  sourceSessionId: Schema.NonEmptyString,
+  sourceSessionRef: Schema.NullOr(Schema.NonEmptyString),
+  throughSequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(-1)),
+  sourceMessageId: Schema.NullOr(Schema.NonEmptyString),
+  createdAt: IsoDateTimeStringSchema
+})
+
+export type SessionForkOrigin = typeof SessionForkOriginSchema.Type
 
 const LegacyForkSchema = Schema.Struct({
   source_session_id: Schema.NonEmptyString,

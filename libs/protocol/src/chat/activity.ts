@@ -6,17 +6,22 @@ export interface RunActivity extends JsonRecord {
   readonly run_id: string
   readonly sequence: number
   readonly description: string | null
-  readonly active_tool_call_ids?: ReadonlyArray<string>
-  readonly run_purpose?: string | null
-  readonly operations?: ReadonlyArray<{ readonly id: string; readonly text: string | null }>
+  readonly active_tool_call_ids: ReadonlyArray<string>
+  readonly run_purpose: string | null
+  readonly operations: ReadonlyArray<RunActivityOperation>
   readonly purpose: string | null
+}
+
+interface RunActivityOperation {
+  readonly id: string
+  readonly text: string | null
 }
 
 export interface RunActivityProjection {
   readonly runId: string
   readonly sequence: number
   readonly purpose: string | null
-  readonly operations: ReadonlyArray<{ readonly id: string; readonly text: string | null }>
+  readonly operations: ReadonlyArray<RunActivityOperation>
 }
 
 export const reduceRunActivity = (
@@ -24,7 +29,7 @@ export const reduceRunActivity = (
   record: {
     readonly event: ChatProjectionEvent
     readonly sequence: number
-    readonly runId?: string | null
+    readonly fromOtherRun: boolean
   }
 ): RunActivityProjection | undefined => {
   const event = record.event
@@ -32,11 +37,7 @@ export const reduceRunActivity = (
   if (event.type === "RUN_STARTED") {
     return { runId: event.run_id, sequence: record.sequence, purpose: null, operations: [] }
   }
-  if (
-    current === undefined ||
-    record.sequence <= current.sequence ||
-    (record.runId != null && record.runId !== current.runId)
-  )
+  if (current === undefined || record.sequence <= current.sequence || record.fromOtherRun)
     return current
   if (event.type === "run_activity") {
     return event.run_id === current.runId
@@ -110,7 +111,6 @@ export const runActivityView = (
 export const runActivityProjection = (activity: RunActivity): RunActivityProjection => ({
   runId: activity.run_id,
   sequence: activity.sequence,
-  purpose: activity.run_purpose !== undefined ? activity.run_purpose : activity.purpose,
-  operations:
-    activity.operations ?? (activity.active_tool_call_ids ?? []).map((id) => ({ id, text: null }))
+  purpose: activity.run_purpose,
+  operations: activity.operations
 })

@@ -1,13 +1,13 @@
 import { ToolExecutionError, type ToolApprovalContext, type ToolContext } from "@arden-hq/loop"
-import type { AppDestination, NavigationRequestedEvent } from "@arden-hq/protocol"
+import type { NavigationRequestedEvent } from "@arden-hq/protocol"
+import { NAVIGATION_ASKED_BY } from "@arden-hq/protocol/common"
 import type { ApprovalPresentation, ChatReceipt } from "@arden-hq/protocol/chat"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
-import { type AutomationStoreError } from "../persistence/automations/store.js"
-import { SpaceStore, type SpaceStoreError } from "../persistence/spaces/store.js"
+import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
 import {
   SessionLifecycleEvents,
@@ -20,7 +20,7 @@ import {
   type SessionStoreError
 } from "../persistence/sessions/store.js"
 import { ToolExecutionStore } from "../persistence/tools/store.js"
-import { pageWithItem, WorkStore, type WorkStoreError } from "../persistence/work/store.js"
+import { WorkStore } from "../persistence/work/store.js"
 import { toolFailure } from "./tool-failure.js"
 import {
   otherSpaceReach,
@@ -28,19 +28,14 @@ import {
   unreachableSession,
   type ChatVerb
 } from "./session-visibility.js"
-import type { WikiError } from "../wiki/errors.js"
 import { Wiki } from "../wiki/service.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { handedCapture, readCapture, type StoredCapture } from "../persistence/sessions/capture.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
 import { chatHandoff } from "./chat-handoff.js"
-import {
-  placeResource,
-  SessionRefSchema,
-  ToolDestinationSchema,
-  type ToolDestination
-} from "./app-destination.js"
+import { placeResource, SessionRefSchema, ToolDestinationSchema } from "./app-destination.js"
+import { resolveDestination } from "./app-open-destination.js"
 
 const RenameParametersSchema = Schema.Struct({
   session_ref: SessionRefSchema,
@@ -114,18 +109,6 @@ const sessionFailure = (error: SessionStoreError): ToolExecutionError =>
 
 const sessionQueryFailure = (error: SessionQueryFailure): ToolExecutionError =>
   toolFailure(error, "Session unavailable")
-
-const automationFailure = (error: AutomationStoreError): ToolExecutionError =>
-  toolFailure(error, "Automation unavailable")
-
-const spaceFailure = (error: SpaceStoreError): ToolExecutionError =>
-  toolFailure(error, "Space unavailable")
-
-const workFailure = (error: WorkStoreError): ToolExecutionError =>
-  toolFailure(error, "Work unavailable")
-
-const wikiFailure = (error: WikiError): ToolExecutionError =>
-  toolFailure(error, "Memory unavailable")
 
 const eventFailure = (error: SessionLifecycleEventError): ToolExecutionError =>
   toolFailure(error, "App request unavailable")
@@ -298,92 +281,6 @@ const sourceRef = (sessionRef: string, name: string | undefined): SourceRef => (
   ref: sessionRef,
   title: name?.trim() || sessionRef
 })
-
-const resolveDestination = async (
-  services: SessionActionToolServices,
-  run: ServerRunContext,
-  destination: ToolDestination,
-  signal: AbortSignal
-): Promise<AppDestination> => {
-  switch (destination.kind) {
-    case "home":
-      return { kind: "home" }
-    case "session": {
-      const session = await resolveSession(
-        services,
-        { run, tool: "app_open", verb: "open", handed: false },
-        destination.session_ref,
-        signal
-      )
-      return { kind: "session", session_id: session.sessionId }
-    }
-    case "settings":
-      return {
-        kind: "settings",
-        ...(destination.tab === undefined ? {} : { tab: destination.tab })
-      }
-    case "automation": {
-      if (destination.automation_ref === undefined) return { kind: "automation" }
-      const automations = await Effect.runPromise(
-        services.automations.list().pipe(Effect.mapError(automationFailure)),
-        { signal }
-      )
-      const automation = automations.find(
-        (candidate) => candidate.automation_ref === destination.automation_ref
-      )
-      if (automation === undefined) {
-        throw new ToolExecutionError(`No Automation ${destination.automation_ref}`, {
-          preview: "Automation not found",
-          retryable: false
-        })
-      }
-      return { kind: "automation", task_id: automation.task_id }
-    }
-    case "task": {
-      const page = await Effect.runPromise(
-        services.work.page(pageWithItem(destination.item_id)).pipe(Effect.mapError(workFailure)),
-        { signal }
-      )
-      if (!page.items.some((item) => item.item_id === destination.item_id)) {
-        throw new ToolExecutionError(`No active Task ${destination.item_id}`, {
-          preview: "Task not found",
-          retryable: false
-        })
-      }
-      return { kind: "task", item_id: destination.item_id }
-    }
-    case "memory": {
-      if (destination.path === undefined) return { kind: "memory" }
-      const snapshot = await Effect.runPromise(
-        services.wiki.snapshot().pipe(Effect.mapError(wikiFailure)),
-        { signal }
-      )
-      const exists = snapshot.wholeSet.some(
-        (record) => record.page.lifecycle === "active" && record.resource.path === destination.path
-      )
-      if (!exists) {
-        throw new ToolExecutionError(`No active Memory page at ${destination.path}`, {
-          preview: "Memory page not found",
-          retryable: false
-        })
-      }
-      return { kind: "memory", path: destination.path }
-    }
-    case "space": {
-      const space = await Effect.runPromise(
-        services.spaces.get(destination.space_id).pipe(Effect.mapError(spaceFailure)),
-        { signal }
-      )
-      if (space === null) {
-        throw new ToolExecutionError(`No active Space ${destination.space_id}`, {
-          preview: "Space not found",
-          retryable: false
-        })
-      }
-      return { kind: "space", space_id: space.space_id }
-    }
-  }
-}
 
 const hasConnectionChoiceInRun = async (
   services: SessionActionToolServices,
@@ -775,7 +672,20 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
           data: { opened: false, reason: "connection_choice_pending" }
         }
       }
-      const destination = await resolveDestination(services, ctx.run, input.destination, ctx.signal)
+      const destination = await resolveDestination(
+        services,
+        input.destination,
+        async (sessionRef) =>
+          (
+            await resolveSession(
+              services,
+              { run: ctx.run, tool: "app_open", verb: "open", handed: false },
+              sessionRef,
+              ctx.signal
+            )
+          ).sessionId,
+        ctx.signal
+      )
       const mode = input.mode ?? "offer"
       const event: NavigationRequestedEvent = {
         type: "navigation_requested",
@@ -783,7 +693,7 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
         destination,
         label: input.label,
         mode,
-        tool_call_id: ctx.toolCallId
+        asked_by: { kind: NAVIGATION_ASKED_BY.tool_call, tool_call_id: ctx.toolCallId }
       }
       await recordApplied(
         effects,

@@ -1,21 +1,21 @@
 import { previewLine } from "@arden-hq/protocol/chat"
 import type { SpaceSummary } from "@arden-hq/protocol/spaces"
 import type { MobileAsk, MobileSpaces } from "@arden-hq/protocol/mobile"
-import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-import type { SessionListItem } from "@arden-hq/protocol/sessions"
+import { SESSION_RUN, type SessionListItem } from "@arden-hq/protocol/sessions"
+import { nameText, runIsActive } from "../sessions/session-states.js"
 import { chatName, SPACE_ASK, spaceState, isSystemRun } from "@arden-hq/protocol/views"
 
 type MobileSpace = MobileSpaces["spaces"][number]
 type MobileLooseChat = MobileSpaces["loose"][number]
 
 const isConversation = (session: SessionListItem): boolean =>
-  session.presentation?.kind === "conversation"
+  session.presentation.kind === "conversation"
 
 export const isSpaceHome = (session: SessionListItem): boolean =>
-  session.presentation?.kind === "conversation" && session.presentation.role === "space"
+  session.presentation.kind === "conversation" && session.presentation.role === "space"
 
 const isWorking = (session: SessionListItem): boolean =>
-  !isSystemRun(session.presentation) && isActiveRunStatus(session.run_status)
+  !isSystemRun(session.presentation) && runIsActive(session.run)
 
 const askLabel = (ask: MobileAsk): string => {
   const text = ask.kind === "question" ? ask.prompt : ask.title
@@ -60,12 +60,12 @@ export function looseChats(sessions: ReadonlyArray<SessionListItem>): MobileLoos
     )
     .map((session) => ({
       session_id: session.session_id,
-      title: chatName(session.name),
-      has_unread: session.has_unread === true,
+      title: chatName(nameText(session.name)),
+      has_unread: session.has_unread,
       run:
-        session.run_status === undefined || session.run_status === null
+        session.run.kind === SESSION_RUN.none
           ? { kind: "unrun" }
-          : { kind: "run", status: session.run_status },
+          : { kind: "run", status: session.run.status },
       working: isWorking(session),
       updated_at: session.last_activity
     }))

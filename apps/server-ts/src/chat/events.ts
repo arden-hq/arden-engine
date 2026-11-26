@@ -4,7 +4,7 @@ import type {
   StreamOverflowEvent,
   StreamSnapshotEvent
 } from "@arden-hq/protocol"
-import type { HistoryResponse } from "@arden-hq/protocol/chat"
+import { HISTORY_WINDOW, type HistoryResponse } from "@arden-hq/protocol/chat"
 import { randomUUID } from "node:crypto"
 import {
   Context,
@@ -47,7 +47,7 @@ const RESUME_SNAPSHOT_CAPACITY_BYTES = 8 * 1024 * 1024
 const RESUME_SNAPSHOT_CAPACITY_EVENTS = 4_096
 const RESUME_REPLAY_PAGE_SIZE = 1_000
 const RESUME_HISTORY_CAPACITY_BYTES = RESUME_SNAPSHOT_CAPACITY_BYTES / 2
-const RESUME_HISTORY_WINDOW_LIMIT = 100
+const RESUME_HISTORY = { limit: 100, window: { kind: HISTORY_WINDOW.latest } } as const
 
 export class ChatStreamError extends Schema.TaggedError<ChatStreamError>()("ChatStreamError", {
   message: Schema.String,
@@ -342,7 +342,7 @@ const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
   const { events, sessionId, timer } = input
   // Time spent waiting for a snapshot permit, or for the write queue.
   timer?.mark("resume_capture_queue")
-  const loaded = yield* input.history.read({ sessionId, limit: RESUME_HISTORY_WINDOW_LIMIT })
+  const loaded = yield* input.history.read({ sessionId, ...RESUME_HISTORY })
   timer?.mark("resume_history")
   const history = boundConversationWindow(loaded.history, RESUME_HISTORY_CAPACITY_BYTES)
   const checkpointSequence = history.runtime.checkpoint_seq

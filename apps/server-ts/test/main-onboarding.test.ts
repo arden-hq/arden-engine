@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -235,8 +236,10 @@ it("the onboarding route starts once in Main, answers 404 for an unknown chat an
     const work = (await post("/spaces", { name: "Work", instructions: { kind: "unwritten" } })) as {
       readonly space_id: string
     }
-    const inMain = (await post("/sessions", { space_id: main })) as { readonly session_id: string }
-    const outside = (await post("/sessions", { space_id: work.space_id })) as {
+    const inMain = (await post("/sessions", newChat({ spaceId: main }))) as {
+      readonly session_id: string
+    }
+    const outside = (await post("/sessions", newChat({ spaceId: work.space_id }))) as {
       readonly session_id: string
     }
     const first = await start(inMain.session_id)

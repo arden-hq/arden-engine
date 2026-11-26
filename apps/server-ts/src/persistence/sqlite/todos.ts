@@ -1,10 +1,10 @@
 import type { ChatProjectionEvent, TodoListItem } from "@arden-hq/protocol"
-import type {
-  EffectiveSessionTodo,
-  EffectiveSessionTodoResponse,
-  SetTodoOverrideRequest,
-  TodoLifecycleResponse,
-  TodoSnapshot
+import {
+  SESSION_TODO,
+  type EffectiveSessionTodoResponse,
+  type SetTodoOverrideRequest,
+  type TodoLifecycleResponse,
+  type TodoSnapshot
 } from "@arden-hq/protocol/sessions/todos"
 import {
   SetTodoOverrideRequestSchema,
@@ -13,7 +13,7 @@ import {
 import { TodoListItemSchema } from "@arden-hq/protocol/effect/common"
 import { DateTime, Effect, Schema } from "effect"
 import { TodoStore, TodoStoreError } from "../todos/store.js"
-import { assignTodoIds } from "../todos/items.js"
+import { assignTodoIds, explanationOf, explanationText } from "../todos/items.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { IdGenerator, type PersistenceDeps } from "./deps.js"
 
@@ -68,7 +68,7 @@ const decodeSnapshot = Effect.fn("SqliteTodoStore.decodeSnapshot")(function* (
   )
   return yield* Schema.decodeUnknownEffect(TodoSnapshotSchema)({
     items,
-    explanation: row.explanation,
+    explanation: explanationOf(row.explanation),
     updated_at: row.updated_at
   }).pipe(
     Effect.mapError((cause) =>
@@ -80,9 +80,9 @@ const decodeSnapshot = Effect.fn("SqliteTodoStore.decodeSnapshot")(function* (
 const decodeEffective = Effect.fn("SqliteTodoStore.decodeEffective")(function* (
   row: EffectiveTodoRow,
   id: string
-): Effect.fn.Return<EffectiveSessionTodo, TodoStoreError> {
+): Effect.fn.Return<EffectiveSessionTodoResponse, TodoStoreError> {
   const snapshot = yield* decodeSnapshot(row, "get", id)
-  return { ...snapshot, edited: row.edited !== 0 }
+  return { ...snapshot, kind: SESSION_TODO.list, edited: row.edited !== 0 }
 })
 
 const lifecycle = (id: string, cleared: boolean): TodoLifecycleResponse => ({
@@ -115,7 +115,7 @@ export const makeTodoStore = ({
       )
     )
     const row = rows[0]
-    return row === undefined ? null : yield* decodeEffective(row, id)
+    return row === undefined ? { kind: SESSION_TODO.none } : yield* decodeEffective(row, id)
   })
 
   const identified = Effect.fn("SqliteTodoStore.identified")(function* (
@@ -205,7 +205,7 @@ export const makeTodoStore = ({
           if (!completed) {
             yield* sql`
             INSERT INTO session_todos (session_id, edited, items_json, explanation, updated_at)
-            VALUES (${id}, 0, ${itemsJson}, ${input.explanation ?? null}, ${updatedAt})
+            VALUES (${id}, 0, ${itemsJson}, ${explanationText(input.explanation)}, ${updatedAt})
             ON CONFLICT(session_id, edited) DO UPDATE SET
               items_json = excluded.items_json,
               explanation = excluded.explanation,
@@ -218,7 +218,7 @@ export const makeTodoStore = ({
           }
           const snapshot = yield* Schema.decodeUnknownEffect(TodoSnapshotSchema)({
             items,
-            explanation: input.explanation ?? null,
+            explanation: input.explanation,
             updated_at: updatedAt
           }).pipe(
             Effect.mapError((cause) =>
@@ -234,7 +234,7 @@ export const makeTodoStore = ({
                     type: "todo_updated",
                     run_id: validRunId,
                     tool_call_id: validToolCallId,
-                    explanation: input.explanation ?? null,
+                    explanation: explanationText(input.explanation),
                     items
                   } satisfies ChatProjectionEvent
                 }
@@ -291,7 +291,7 @@ export const makeTodoStore = ({
           const updatedAt = DateTime.formatIso(yield* DateTime.now)
           const rows = yield* sql<TodoRow>`
         INSERT INTO session_todos (session_id, edited, items_json, explanation, updated_at)
-        SELECT ${id}, 1, ${itemsJson}, ${input.explanation ?? null}, ${updatedAt}
+        SELECT ${id}, 1, ${itemsJson}, ${explanationText(input.explanation)}, ${updatedAt}
         FROM sessions
         WHERE session_id = ${id}
         ON CONFLICT(session_id, edited) DO UPDATE SET

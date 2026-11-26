@@ -71,33 +71,30 @@ type ListedSession = Awaited<ReturnType<CliClient["listSessions"]>>["sessions"][
 
 export const listedSession = (messageCount: number): ListedSession => ({
   session_id: "session-1",
-  name: null,
+  public_ref: "ref-1",
+  name: { kind: "unnamed" },
   started_at: "2026-08-30T00:00:00.000Z",
   last_activity: "2026-08-30T00:00:00.000Z",
   message_count: messageCount,
   presentation: { kind: "conversation", role: "topic" },
-  public_ref: null,
-  last_accessed_at: null,
   has_unread: false,
-  space_id: null,
-  chat_model: null,
+  space: { kind: "none" },
+  chat_model: { kind: "inherited" },
   session_type: "chat",
-  origin_automation_id: null,
-  parent_session_id: null,
-  parent_tool_call_id: null,
-  parent_step: { kind: "none" },
-  parent_message_id: null,
-  parent_run_id: null,
-  active_run_id: null,
-  active_turn_id: null,
-  run_status: null,
+  origin_automation: { kind: "none" },
+  parent: { kind: "none" },
+  run: { kind: "none" },
   checkpoint_seq: 0,
   latest_event_seq: 0,
-  is_active: false,
   pending_approvals_count: 0,
   pending_connections_count: 0,
-  run_error_code: null,
-  run_stop_reason: null
+  triage: { kind: "none" },
+  fork: { kind: "none" },
+  thread_source: { kind: "none" },
+  origin: "ordinary",
+  current_activity: { kind: "idle" },
+  summary: { kind: "none" },
+  agent_workspace: { kind: "none" }
 })
 
 export const completedRun = (text = "Final answer"): RunDetail => ({
@@ -131,15 +128,13 @@ export const completedRun = (text = "Final answer"): RunDetail => ({
 export const defaultClient = (): CliClient => ({
   createSession: async () => ({
     session_id: "session-1",
-    name: "Arden CLI",
+    name: { kind: "named", name: "Arden CLI" },
     started_at: "2026-08-30T00:00:00.000Z",
     last_activity: "2026-08-30T00:00:00.000Z",
     message_count: 0,
-    space_id: null,
-    chat_model: null,
-    origin: null,
-    parent_session_id: null,
-    parent_message_id: null
+    space: { kind: "none" },
+    chat_model: { kind: "inherited" },
+    origin: "ordinary"
   }),
   submit: async () => ({
     runId: "run-1",

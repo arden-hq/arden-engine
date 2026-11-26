@@ -194,6 +194,10 @@ import { limitSettingsStates } from "./0193_limit_settings_states.js"
 import { skipRunWithEvent } from "./0194_skip_run_with_event.js"
 import { triggerContextStates } from "./0195_trigger_context_states.js"
 import { triggerStates } from "./0196_trigger_states.js"
+import { todoItemStates } from "./0197_todo_item_states.js"
+import { navigationStates } from "./0198_navigation_states.js"
+import { lifecycleEventLinks } from "./0199_lifecycle_event_links.js"
+import { sessionSnapshotStates } from "./0200_session_snapshot_states.js"
 
 /**
  * How a migration keeps every reference whole. A whole-database check reads
@@ -419,7 +423,11 @@ export const migrations: ReadonlyArray<Migration> = [
   limitSettingsStates,
   skipRunWithEvent,
   triggerContextStates,
-  triggerStates
+  triggerStates,
+  todoItemStates,
+  navigationStates,
+  lifecycleEventLinks,
+  sessionSnapshotStates
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

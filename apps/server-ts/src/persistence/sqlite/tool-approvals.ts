@@ -206,7 +206,7 @@ export const pendingDecisionDraft = Effect.fn("SqliteToolExecutionStore.pendingD
       )
       return {
         event: {
-          ...connectionNeededEvent(pendingConnectionDecision(input, data)),
+          ...connectionNeededEvent(pendingConnectionDecision(input, data, sourceKind)),
           decision_route: {
             source_kind: sourceKind,
             source_session_id: input.sessionId,

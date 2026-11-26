@@ -1,6 +1,6 @@
 import { cutText } from "@arden-hq/std/text"
 import { CLI_TOOL_VERSION, type CliTool, type CliToolsReport } from "@arden-hq/protocol/cli-tools"
-import type { TodoSnapshot } from "@arden-hq/protocol/sessions/todos"
+import { TODO_EXPLANATION, type TodoSnapshot } from "@arden-hq/protocol/sessions/todos"
 
 import type { AutomationOriginPolicy } from "../persistence/automations/catalog.js"
 import type { SessionRunReference } from "../persistence/runs/queries.js"
@@ -11,7 +11,7 @@ import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
 import { machineTimeZone } from "@arden-hq/std/time"
 import type { AutomationId } from "../persistence/automations/model.js"
 import type { ChatTaskContext } from "../persistence/work/store.js"
-import type { SessionForkOrigin } from "@arden-hq/protocol/sessions"
+import type { SessionForkOrigin } from "../persistence/sessions/fork-origin.js"
 import { currentMillis } from "../runtime/clock.js"
 import { chatHref } from "../sessions/chat-href.js"
 
@@ -165,7 +165,9 @@ export const renderTodoOverrideContext = (todo: TodoSnapshot | null): string | u
     ...(todo.items.length === 0
       ? ["- no current items"]
       : todo.items.map((item) => `- [${item.status}] ${jsonText(item.content, 500)}`)),
-    ...(todo.explanation === null ? [] : [`Explanation: ${jsonText(todo.explanation, 2_000)}`])
+    ...(todo.explanation.kind === TODO_EXPLANATION.none
+      ? []
+      : [`Explanation: ${jsonText(todo.explanation.text, 2_000)}`])
   ].join("\n")
   return renderPromptSection(
     "Todo list (edited by the user)",

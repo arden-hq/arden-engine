@@ -1,4 +1,6 @@
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { liveSessions } from "./session-list.js"
+import { activeRunId } from "@arden-hq/protocol/sessions"
 import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { grantedOnlyInTheApp, type ToolCatalogResponse } from "@arden-hq/protocol/tools"
@@ -284,9 +286,10 @@ export const requestResponder = (input: {
 
   const nextRunIn = async (sessionId: string): Promise<string | undefined> => {
     for (let attempt = 0; attempt < NEXT_RUN_ATTEMPTS; attempt += 1) {
-      const { sessions } = await input.client.listSessions({ live: true })
-      const active = sessions.find((session) => session.session_id === sessionId)?.active_run_id
-      if (typeof active === "string" && !runs.has(active)) return active
+      const { sessions } = await input.client.listSessions(liveSessions)
+      const session = sessions.find((candidate) => candidate.session_id === sessionId)
+      const active = session === undefined ? null : activeRunId(session.run)
+      if (active !== null && !runs.has(active)) return active
       await sleep(NEXT_RUN_POLL_MS)
     }
     return undefined

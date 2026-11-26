@@ -12,29 +12,42 @@ export type FocusChoiceTarget =
       readonly name: string
     }
 
-export interface FocusChoice extends JsonRecord {
+export const FOCUS_CHOICE_STATUS = { offered: "offered", settled: "settled" } as const
+
+export type FocusChoiceDecision = "continue_here" | "open_target"
+
+interface FocusChoiceFields extends JsonRecord {
   readonly choice_id: string
   readonly question_id: string
   readonly source_session_id: string
   readonly space_id: string
   readonly revision: number
   readonly target: FocusChoiceTarget
-  readonly status: "offered" | "settled"
-  readonly decision: "continue_here" | "open_target" | null
-  readonly result_session_ref: string | null
   readonly created_at: string
   readonly updated_at: string
-  readonly settled_at: string | null
 }
+
+export interface OfferedFocusChoice extends FocusChoiceFields {
+  readonly status: typeof FOCUS_CHOICE_STATUS.offered
+}
+
+export interface SettledFocusChoice extends FocusChoiceFields {
+  readonly status: typeof FOCUS_CHOICE_STATUS.settled
+  readonly decision: FocusChoiceDecision
+  readonly result_session_ref: string
+  readonly settled_at: string
+}
+
+export type FocusChoice = OfferedFocusChoice | SettledFocusChoice
 
 export interface ResolveFocusChoiceInput {
   readonly expected_revision: number
   readonly client_id: string
-  readonly decision: "continue_here" | "open_target"
+  readonly decision: FocusChoiceDecision
 }
 
 export interface ResolveFocusChoiceResponse extends JsonRecord {
-  readonly choice: FocusChoice
+  readonly choice: SettledFocusChoice
   readonly session_ref: string
   readonly created: boolean
 }

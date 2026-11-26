@@ -1,4 +1,5 @@
 import type { ChatProjectionEvent, EntityKind } from "@arden-hq/protocol"
+import { entityTarget, taskSpace } from "../event-links.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { ChatEventStore } from "../../events/store.js"
@@ -32,7 +33,11 @@ interface Tell {
 const LIST_LIMIT = 20
 
 const entityChanged = (context: TellContext, kind: EntityKind, id: string | null) =>
-  context.sessionEvents.appendEventInTransaction({ type: "entity_changed", kind, id })
+  context.sessionEvents.appendEventInTransaction({
+    type: "entity_changed",
+    kind,
+    target: entityTarget(id)
+  })
 
 const rowsOrList = (
   context: TellContext,
@@ -88,7 +93,7 @@ const tellTask = Effect.fn("Tells.task")(function* (context: TellContext, row: T
   )
   yield* context.sessionEvents.appendEventInTransaction({
     type: "work_changed",
-    space_id: current,
+    space: taskSpace(current),
     item_id: row.id,
     change: comment ? "comment" : "status"
   })
@@ -141,7 +146,7 @@ const tellVisibility = Effect.fn("Tells.visibility")(function* (
   if (task === undefined) return
   yield* context.sessionEvents.appendEventInTransaction({
     type: "task_visibility_changed",
-    space_id: task.space_id,
+    space: taskSpace(task.space_id),
     item_id: itemId
   })
 })

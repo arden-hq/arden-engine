@@ -1,12 +1,15 @@
 import { Schema } from "effect"
 import type { Agrees, Assert } from "../common/type-agreement.js"
 import { eventTypeLiterals } from "../common/event-types.js"
+import { ENTITY_TARGET, LINK, TASK_SPACE } from "../common/links.js"
+import { SessionListItemSchema } from "../sessions/state-schema.js"
 import type {
   AutomationEvent,
   RecordToldStatus,
   ServerEvent,
   TaskWorkChangedEvent
 } from "./contracts.js"
+import { NAVIGATION_ASKED_BY } from "../common/navigation.js"
 import type { JsonRecord } from "../common/json.js"
 import { AUTOMATION_RUN_OUTCOMES } from "../automations/outcome.js"
 
@@ -14,9 +17,7 @@ import { ChatServerEventSchema, StreamKeepaliveEventSchema } from "../chat/schem
 import {
   AppDestinationSchema,
   IsoDateTimeStringSchema,
-  SessionListItemSchema,
   event,
-  optionalNullableString,
   sessionEvent,
   NonNegativeIntSchema
 } from "../common/schema.js"
@@ -35,16 +36,25 @@ export const AutomationProgressEventSchema = event("automation_progress", {
   status: Schema.String
 })
 
+const LinkedChatSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(LINK.none) }),
+  Schema.Struct({ kind: Schema.Literal(LINK.chat), session_id: Schema.NonEmptyString })
+])
+
+const LinkedTaskSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(LINK.none) }),
+  Schema.Struct({ kind: Schema.Literal(LINK.task), item_id: Schema.NonEmptyString })
+])
+
+const TaskSpaceSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(TASK_SPACE.none) }),
+  Schema.Struct({ kind: Schema.Literal(TASK_SPACE.space), space_id: Schema.NonEmptyString })
+])
+
 export const AutomationFinishedEventSchema = event("automation_finished", {
   task_id: Schema.String,
-  purpose: Schema.optionalKey(
-    Schema.Literals(["user_automation", "space_review", "task_execution", "system"] as const)
-  ),
-  result: optionalNullableString,
-  outcome: Schema.optionalKey(Schema.Literals([...AUTOMATION_RUN_OUTCOMES, "completed"] as const)),
-  error: optionalNullableString,
-  run_id: optionalNullableString,
-  run_session_id: optionalNullableString
+  outcome: Schema.Literals([...AUTOMATION_RUN_OUTCOMES, "completed"] as const),
+  run_chat: LinkedChatSchema
 })
 
 const RecordToldStatusSchema = Schema.Literals([
@@ -67,9 +77,12 @@ export const RecordToldEventSchema = event("record_told", {
   unread: Schema.Boolean,
   title: Schema.String,
   text: Schema.String,
-  chat_session_id: optionalNullableString,
-  automation_id: optionalNullableString,
-  item_id: optionalNullableString
+  chat: LinkedChatSchema,
+  automation: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(LINK.none) }),
+    Schema.Struct({ kind: Schema.Literal(LINK.automation), automation_id: Schema.NonEmptyString })
+  ]),
+  task: LinkedTaskSchema
 })
 
 export const SessionCreatedEventSchema = event("session_created", {
@@ -97,8 +110,14 @@ export const NavigationRequestedEventSchema = event("navigation_requested", {
   origin_session_id: Schema.NonEmptyString,
   destination: AppDestinationSchema,
   label: Schema.NonEmptyString,
-  mode: Schema.optionalKey(Schema.Literals(["offer", "open"] as const)),
-  tool_call_id: Schema.optionalKey(Schema.NonEmptyString)
+  mode: Schema.Literals(["offer", "open"] as const),
+  asked_by: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(NAVIGATION_ASKED_BY.untracked) }),
+    Schema.Struct({
+      kind: Schema.Literal(NAVIGATION_ASKED_BY.tool_call),
+      tool_call_id: Schema.NonEmptyString
+    })
+  ])
 })
 
 export const McpServerChangedEventSchema = event("mcp_server_changed", {
@@ -114,23 +133,26 @@ export const EntityChangedEventSchema = event("entity_changed", {
     "task",
     "proposal"
   ] as const),
-  id: Schema.NullOr(Schema.NonEmptyString)
+  target: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(ENTITY_TARGET.many) }),
+    Schema.Struct({ kind: Schema.Literal(ENTITY_TARGET.one), id: Schema.NonEmptyString })
+  ])
 })
 
 /** One Task moved: a comment landed, or its status changed. */
 export const QuestionChangedEventSchema = sessionEvent("question_changed", Schema.NonEmptyString, {
   question_id: Schema.NonEmptyString,
   run_id: Schema.NonEmptyString,
-  item_id: Schema.NullOr(Schema.NonEmptyString)
+  task: LinkedTaskSchema
 })
 
 export const TaskVisibilityChangedEventSchema = event("task_visibility_changed", {
-  space_id: Schema.NullOr(Schema.NonEmptyString),
+  space: TaskSpaceSchema,
   item_id: Schema.NonEmptyString
 })
 
 export const WorkChangedEventSchema = event("work_changed", {
-  space_id: Schema.NullOr(Schema.NonEmptyString),
+  space: TaskSpaceSchema,
   item_id: Schema.NonEmptyString,
   change: Schema.Literals(["comment", "status"] as const)
 })
@@ -150,7 +172,7 @@ export const FocusChoiceChangedEventSchema = event("focus_choice_changed", {
 })
 
 const taskWorkEventFields = {
-  space_id: Schema.NullOr(Schema.NonEmptyString),
+  space: TaskSpaceSchema,
   item_id: Schema.NonEmptyString,
   task_name: Schema.NonEmptyString,
   run_session_id: Schema.NonEmptyString,

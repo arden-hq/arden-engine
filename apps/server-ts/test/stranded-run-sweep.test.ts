@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -248,7 +249,7 @@ describe("stranded Chat runs", () => {
         .fetch("/sessions", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: "Abort race" })
+          body: JSON.stringify(newChat({ name: "Abort race" }))
         })
         .then((response) => response.json())) as { readonly session_id: string }
       const receipt = chatDecoders.receipt(

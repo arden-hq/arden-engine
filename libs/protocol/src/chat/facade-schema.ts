@@ -6,8 +6,18 @@ import {
   withExtras
 } from "../common/schema.js"
 import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
-import { CHAT_QUEUE_LIMIT, CHAT_REPLY_QUOTES_MAX, chatReplyContexts } from "./contracts.js"
-import type { PreparedChatMessage, QueuedChatMessage, QueuedChatMessages } from "./contracts.js"
+import {
+  CHAT_QUEUE_LIMIT,
+  CHAT_REPLY_QUOTES_MAX,
+  HISTORY_WINDOW,
+  chatReplyContexts
+} from "./contracts.js"
+import type {
+  HistoryWindow,
+  PreparedChatMessage,
+  QueuedChatMessage,
+  QueuedChatMessages
+} from "./contracts.js"
 import {
   ChatCaptureViaSchema,
   ChatImageSchema,
@@ -161,36 +171,31 @@ export const CancelInputSchema = Schema.Struct({
   })
 )
 
+const pageLimit = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+
+const turnWorkWindowSchemas = [
+  Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.latest) }),
+  Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.before), cursor: chatIdentifier }),
+  Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.after), cursor: chatIdentifier })
+] as const
+
 export const HistoryRouteOptionsSchema = Schema.Struct({
-  sessionId: Schema.optionalKey(chatIdentifier),
-  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
-  before: Schema.optionalKey(chatIdentifier),
-  after: Schema.optionalKey(chatIdentifier),
-  around: Schema.optionalKey(chatIdentifier),
-  aroundSeq: Schema.optionalKey(NonNegativeIntSchema)
-}).check(
-  Schema.makeFilter((query) => {
-    const cursorCount = [query.before, query.after, query.around, query.aroundSeq].filter(
-      (value) => value !== undefined
-    ).length
-    return cursorCount <= 1 ? undefined : "history accepts only one paging cursor"
-  })
-)
+  sessionId: chatIdentifier,
+  limit: pageLimit,
+  window: Schema.Union([
+    ...turnWorkWindowSchemas,
+    Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.around), cursor: chatIdentifier }),
+    Schema.Struct({ kind: Schema.Literal(HISTORY_WINDOW.aroundSeq), seq: NonNegativeIntSchema })
+  ])
+})
 
 export const TurnWorkRouteOptionsSchema = Schema.Struct({
   sessionId: chatIdentifier,
   turnId: chatIdentifier,
-  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
-  before: Schema.optionalKey(chatIdentifier),
-  after: Schema.optionalKey(chatIdentifier),
-  view: Schema.optionalKey(TurnWorkViewSchema)
-}).check(
-  Schema.makeFilter((options) =>
-    options.before !== undefined && options.after !== undefined
-      ? { path: ["after"], issue: "before and after are exclusive" }
-      : undefined
-  )
-)
+  limit: pageLimit,
+  window: Schema.Union(turnWorkWindowSchemas),
+  view: TurnWorkViewSchema
+})
 
 const TurnDetailsRouteOptionsSchema = Schema.Struct({
   sessionId: chatIdentifier,
@@ -441,18 +446,21 @@ export const encodeCancelRequestEffect = (value: unknown): EncodedText =>
     )
   )
 
+const windowQuery = (query: URLSearchParams, window: HistoryWindow): void => {
+  query.set("window", window.kind)
+  if (window.kind === HISTORY_WINDOW.aroundSeq) query.set("seq", String(window.seq))
+  else if (window.kind !== HISTORY_WINDOW.latest) query.set("cursor", window.cursor)
+}
+
 export const encodeHistoryPathEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(HistoryRouteOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
-      const query = new URLSearchParams()
-      if (options.sessionId !== undefined) query.set("session_id", options.sessionId)
-      if (options.limit !== undefined) query.set("limit", String(options.limit))
-      if (options.before !== undefined) query.set("before", options.before)
-      if (options.after !== undefined) query.set("after", options.after)
-      if (options.around !== undefined) query.set("around", options.around)
-      if (options.aroundSeq !== undefined) query.set("around_seq", String(options.aroundSeq))
-      const suffix = query.toString()
-      return suffix.length === 0 ? "/session/history" : `/session/history?${suffix}`
+      const query = new URLSearchParams({
+        session_id: options.sessionId,
+        limit: String(options.limit)
+      })
+      windowQuery(query, options.window)
+      return `/session/history?${query.toString()}`
     })
   )
 
@@ -461,12 +469,11 @@ export const encodeTurnWorkPathEffect = (value: unknown): EncodedText =>
     Effect.map((options) => {
       const query = new URLSearchParams({
         session_id: options.sessionId,
-        turn_id: options.turnId
+        turn_id: options.turnId,
+        limit: String(options.limit),
+        view: options.view
       })
-      if (options.limit !== undefined) query.set("limit", String(options.limit))
-      if (options.before !== undefined) query.set("before", options.before)
-      if (options.after !== undefined) query.set("after", options.after)
-      if (options.view !== undefined) query.set("view", options.view)
+      windowQuery(query, options.window)
       return `/session/turn-work?${query.toString()}`
     })
   )

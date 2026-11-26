@@ -10,7 +10,12 @@ import {
 import { ApprovalPresentationSchema, type ApprovalPresentation } from "../approval-presentation.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { CommonServerEventFields } from "../../common/event-fields.js"
-import type { ConnectionAction, ConnectionState } from "../runtime.js"
+import {
+  CONNECTION_ACCOUNT,
+  type ConnectionAccount,
+  type ConnectionAction,
+  type ConnectionState
+} from "../runtime.js"
 import type { JsonRecord } from "../../common/json.js"
 import { RunApprovalWorkSchema, type RunApprovalWork } from "../../runs/context.js"
 import { RuleSavedInSchema, type RuleSavedIn } from "../../runs/questions.js"
@@ -84,6 +89,7 @@ export interface ApprovalResolvedEvent extends CommonServerEventFields {
 export interface ConnectionNeededEvent extends CommonServerEventFields {
   readonly type: "connection_needed"
   readonly run_id: string
+  readonly session_id: string
   readonly tool_id: string
   readonly integration_id: string
   readonly connection_id: string
@@ -95,7 +101,7 @@ export interface ConnectionNeededEvent extends CommonServerEventFields {
   readonly settings_tab: string
   readonly required_scopes: ReadonlyArray<string>
   readonly source: "recovery" | "suggestion"
-  readonly account_ref?: string | null
+  readonly account: ConnectionAccount
   readonly decision_route?: DecisionRoute
 }
 
@@ -141,9 +147,13 @@ export const ApprovalResolvedEventSchema = event("approval_resolved", {
   decision_route: Schema.optionalKey(DecisionRouteSchema)
 })
 
-export const ConnectionNeededEventSchema = event("connection_needed", {
+export const ConnectionAccountSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CONNECTION_ACCOUNT.default) }),
+  Schema.Struct({ kind: Schema.Literal(CONNECTION_ACCOUNT.account), ref: Schema.String })
+])
+
+export const ConnectionNeededEventSchema = sessionEvent("connection_needed", Schema.String, {
   run_id: Schema.String,
-  session_id: optionalNullableString,
   tool_id: Schema.String,
   integration_id: Schema.String,
   connection_id: Schema.String,
@@ -155,7 +165,7 @@ export const ConnectionNeededEventSchema = event("connection_needed", {
   settings_tab: Schema.String,
   required_scopes: Schema.Array(Schema.String),
   source: Schema.Literals(["recovery", "suggestion"] as const),
-  account_ref: optionalNullableString,
+  account: ConnectionAccountSchema,
   decision_route: Schema.optionalKey(DecisionRouteSchema)
 })
 

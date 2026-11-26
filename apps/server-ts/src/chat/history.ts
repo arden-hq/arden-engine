@@ -11,6 +11,7 @@ import type {
   ToolResultValueRouteOptions,
   ToolResultValueResponse
 } from "@arden-hq/protocol/chat"
+import { HISTORY_WINDOW, TURN_WORK_VIEW } from "@arden-hq/protocol/chat"
 import { readToolResult } from "@arden-hq/answer-ui/tool-result"
 import { Context, Effect, Layer, Predicate } from "effect"
 import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
@@ -40,7 +41,6 @@ import {
   activeRunSnapshot,
   compactTurnWork,
   contentText,
-  emptyHistory,
   historyPage,
   historyToolCallIds,
   historyToolCalls,
@@ -162,13 +162,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
           const timer = chatOpenTimer()
           const header = yield* sessions.loadHistoryHeader(input.sessionId)
           if (header === null) {
-            if (input.sessionId !== undefined) {
-              return yield* new ChatSessionNotFound({ sessionId: input.sessionId })
-            }
-            return {
-              history: emptyHistory,
-              budget: { model: null, inputTokens: 0, messageCount: 0 }
-            }
+            return yield* new ChatSessionNotFound({ sessionId: input.sessionId })
           }
 
           const sessionId = header.sessionId
@@ -329,7 +323,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             snapshot.results,
             parentSource
           )
-          return input.view === "compact" ? compactTurnWork(response) : response
+          return input.view === TURN_WORK_VIEW.compact ? compactTurnWork(response) : response
         })
         const getTurnDetails = Effect.fn("ChatHistory.getTurnDetails")(function* (
           input: TurnDetailsRouteOptions
@@ -354,8 +348,11 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               sessionId: input.sessionId,
               turnId: input.turnId,
               limit: TURN_WORK_PAGE_CARRIERS,
-              view: "compact",
-              ...(before === undefined ? {} : { before })
+              view: TURN_WORK_VIEW.compact,
+              window:
+                before === undefined
+                  ? { kind: HISTORY_WINDOW.latest }
+                  : { kind: HISTORY_WINDOW.before, cursor: before }
             })
             const page = yield* projectTurnWork(
               tools,

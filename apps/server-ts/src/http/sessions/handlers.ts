@@ -1,4 +1,23 @@
-import type { SessionListScope, SessionListSort } from "@arden-hq/protocol/sessions"
+import { listOptions, targetSessionId } from "./list-query.js"
+import {
+  BRANCH_REQUEST,
+  CLEARED,
+  PARENT_MESSAGE,
+  REVERT_TO,
+  RUNNING_WORK,
+  SEARCH_PREVIEW,
+  SESSION_LIST_NEXT,
+  SESSION_ORIGIN,
+  type SessionListSort
+} from "@arden-hq/protocol/sessions"
+import {
+  modelIdOf,
+  nameText,
+  sessionChatModel,
+  sessionName,
+  sessionSpace,
+  spaceIdOf
+} from "../../sessions/session-states.js"
 import { DateTime, Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import {
@@ -12,8 +31,7 @@ import { SessionReadState, SessionReadStateError } from "../../persistence/sessi
 import {
   SessionStore,
   SessionStoreError,
-  type SessionListEntry,
-  type SessionListQuery
+  type SessionListEntry
 } from "../../persistence/sessions/store.js"
 import { TranscriptQueries, type ChatSearchHit } from "../../persistence/transcript/queries.js"
 import {
@@ -77,7 +95,7 @@ const endRefusal = (
   switch (error._tag) {
     case "SessionStoreError":
       return error.reason === "conflict"
-        ? { detail: error.message, running: null }
+        ? { detail: error.message, running: { kind: RUNNING_WORK.none } }
         : storeErrorToHttp(error)
     case "RunQueryError":
     case "ScriptStoreError":
@@ -95,43 +113,6 @@ const artifactHttpError = (error: ConversationArtifactError) => {
   if (error.reason === "quota") return new HttpApiError.InternalServerError({})
   return storeErrorToHttp({ reason: error.reason, message: error.message })
 }
-
-const listOptions = (query: {
-  readonly space_id?: string
-  readonly scope?: SessionListScope
-  readonly live?: boolean | "true" | "false"
-  readonly parent_session_ids?: string
-  readonly limit?: number
-  readonly offset?: number
-  readonly sort?: SessionListSort
-  readonly cursor_at?: string
-  readonly cursor_id?: string
-  readonly session_ids?: string
-  readonly session_ref?: string
-}): SessionListQuery => ({
-  ...(query.session_ref === undefined ? {} : { sessionRef: query.session_ref }),
-  ...(query.space_id === undefined ? {} : { spaceId: query.space_id }),
-  ...(query.scope === undefined ? {} : { scope: query.scope }),
-  ...(query.live === undefined ? {} : { live: query.live === true || query.live === "true" }),
-  ...(query.parent_session_ids === undefined
-    ? {}
-    : {
-        parentSessionIds: query.parent_session_ids.split(",").filter((id) => id.length > 0)
-      }),
-  ...(query.limit === undefined ? {} : { limit: query.limit }),
-  ...(query.offset === undefined ? {} : { offset: query.offset }),
-  ...(query.sort === undefined ? {} : { sort: query.sort }),
-  ...(query.cursor_at === undefined || query.cursor_id === undefined
-    ? {}
-    : {
-        cursor: { at: query.cursor_at, sessionId: query.cursor_id }
-      }),
-  ...(query.session_ids === undefined
-    ? {}
-    : {
-        sessionIds: query.session_ids.split(",").filter((sessionId) => sessionId.length > 0)
-      })
-})
 
 /** Chats whose messages match that a find across all chats returns. The panel shows
  * about eight; the rest scroll, and `has_more` says there are more. */
@@ -213,7 +194,7 @@ export const SessionHandlers = HttpApiBuilder.group(
     const endChat = Effect.fn("SessionHandlers.endChat")(function* (
       sessionId: string,
       action: ChatEnd,
-      stop: boolean | "true" | "false" = false
+      stop: boolean | "true" | "false"
     ) {
       const ended = yield* chatStop
         .end({ sessionId, action, stop: stop === true || stop === "true" })
@@ -233,7 +214,7 @@ export const SessionHandlers = HttpApiBuilder.group(
         case "running":
           return yield* Effect.fail({
             detail: "The chat still has work running",
-            running: ended.running
+            running: { kind: RUNNING_WORK.running, work: ended.running }
           })
       }
     })
@@ -253,10 +234,13 @@ export const SessionHandlers = HttpApiBuilder.group(
         store.history({ id: params.sessionId, ...query }).pipe(Effect.catch(failStore))
       )
       .handle("clear", ({ payload }) =>
-        store.clear(payload?.session_id ?? undefined).pipe(
+        store.clear(targetSessionId(payload.target)).pipe(
           Effect.map((sessionId) => ({
             status: "cleared" as const,
-            session_id: sessionId ?? null
+            cleared:
+              sessionId === undefined
+                ? { kind: CLEARED.none }
+                : { kind: CLEARED.session, session_id: sessionId }
           })),
           Effect.mapError(storeErrorToHttp)
         )
@@ -264,9 +248,10 @@ export const SessionHandlers = HttpApiBuilder.group(
       .handle("revert", ({ payload }) =>
         store
           .revert({
-            sessionId: payload?.session_id ?? undefined,
-            turns: payload?.turns,
-            messageId: payload?.message_id ?? undefined
+            sessionId: targetSessionId(payload.target),
+            ...(payload.to.kind === REVERT_TO.turns
+              ? { turns: payload.to.turns }
+              : { messageId: payload.to.message_id })
           })
           .pipe(
             Effect.flatMap((reverted) =>
@@ -281,17 +266,17 @@ export const SessionHandlers = HttpApiBuilder.group(
           )
       )
       .handle("list", ({ query }) => {
-        const options = listOptions(query)
-        const sort = options.sort ?? "activity"
-        const limit = options.limit ?? 100
-        return store.list({ ...options, limit: limit + 1 }).pipe(
+        const { sort, limit } = query
+        return store.list({ ...listOptions(query), limit: limit + 1 }).pipe(
           Effect.map((rows) => {
             const sessions = rows.slice(0, limit)
             const last = sessions.at(-1)
             return {
               sessions: sessions.map(listedSessionToWire),
-              next_cursor:
-                rows.length > limit && last !== undefined ? sessionCursor(last, sort) : null
+              next:
+                rows.length > limit && last !== undefined
+                  ? { kind: SESSION_LIST_NEXT.more, cursor: sessionCursor(last, sort) }
+                  : { kind: SESSION_LIST_NEXT.end }
             }
           }),
           Effect.catch(failStore)
@@ -301,10 +286,10 @@ export const SessionHandlers = HttpApiBuilder.group(
         LocalCaller.pipe(
           Effect.flatMap((caller) =>
             creation({
-              name: payload.name ?? undefined,
-              spaceId: payload.space_id ?? undefined,
-              chatModel: payload.chat_model ?? undefined,
-              origin: payload.origin,
+              name: nameText(payload.name) ?? undefined,
+              spaceId: spaceIdOf(payload.space) ?? undefined,
+              chatModel: modelIdOf(payload.chat_model) ?? undefined,
+              origin: payload.origin === SESSION_ORIGIN.ordinary ? undefined : payload.origin,
               ...(caller === "cli" ? { commandLine: true as const } : {})
             })
           ),
@@ -321,9 +306,13 @@ export const SessionHandlers = HttpApiBuilder.group(
       .handle("branch", ({ params, payload }) =>
         Effect.gen(function* () {
           const branched = yield* store.branch(params.sessionId, {
-            name: payload.name ?? undefined,
-            upToMessageId: payload.up_to_message_id ?? undefined,
-            requestId: payload.request_id,
+            name: nameText(payload.name) ?? undefined,
+            upToMessageId:
+              payload.up_to.kind === PARENT_MESSAGE.message ? payload.up_to.message_id : undefined,
+            requestId:
+              payload.request.kind === BRANCH_REQUEST.keyed
+                ? payload.request.request_id
+                : undefined,
             shareResources: payload.share_resources,
             disposition: payload.disposition
           })
@@ -356,7 +345,10 @@ export const SessionHandlers = HttpApiBuilder.group(
       )
       .handle("model", ({ params, payload }) =>
         Effect.gen(function* () {
-          const selection = yield* models.setSessionModel(params.sessionId, payload.chat_model)
+          const selection = yield* models.setSessionModel(
+            params.sessionId,
+            modelIdOf(payload.chat_model)
+          )
           const header = yield* sessions.loadHistoryHeader(params.sessionId)
           if (header === null) return yield* new HttpApiError.NotFound({})
           const budget = yield* models.contextBudget({
@@ -366,7 +358,7 @@ export const SessionHandlers = HttpApiBuilder.group(
           })
           return {
             session_id: params.sessionId,
-            chat_model: selection.overrideModelId,
+            chat_model: sessionChatModel(selection.overrideModelId),
             context_budget: budget
           }
         }).pipe(
@@ -378,12 +370,12 @@ export const SessionHandlers = HttpApiBuilder.group(
         )
       )
       .handle("move", ({ params, payload }) =>
-        store.moveToSpace(params.sessionId, payload.space_id ?? undefined).pipe(
+        store.moveToSpace(params.sessionId, spaceIdOf(payload.space) ?? undefined).pipe(
           Effect.catch(failStore),
           Effect.flatMap((spaceId) =>
             spaceId === undefined
               ? Effect.fail(new HttpApiError.NotFound({}))
-              : Effect.succeed({ session_id: params.sessionId, space_id: spaceId })
+              : Effect.succeed({ session_id: params.sessionId, space: sessionSpace(spaceId) })
           )
         )
       )
@@ -424,7 +416,7 @@ export const SessionHandlers = HttpApiBuilder.group(
             chats: page.chats.map((chat) => {
               const base = {
                 session_id: chat.sessionId,
-                session_name: chat.sessionName,
+                session_name: sessionName(chat.sessionName),
                 name_ranges: chat.nameRanges,
                 last_activity: chat.lastActivity
               }
@@ -439,7 +431,10 @@ export const SessionHandlers = HttpApiBuilder.group(
                 : {
                     ...base,
                     match: "name" as const,
-                    preview: chat.preview === undefined ? null : line(chat.preview)
+                    preview:
+                      chat.preview === undefined
+                        ? { kind: SEARCH_PREVIEW.none }
+                        : { kind: SEARCH_PREVIEW.message, hit: line(chat.preview) }
                   }
             }),
             has_more: page.hasMore

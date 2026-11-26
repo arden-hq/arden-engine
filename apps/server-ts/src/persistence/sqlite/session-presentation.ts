@@ -6,6 +6,8 @@ import { ownerJoin } from "./automation-rows.js"
 import type { Statement } from "effect/unstable/sql/Statement"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
+const NO_OWNER = { kind: "none" } as const
+
 export const readableConversationSql = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`(session_type = 'chat' AND parent_session_id IS NULL AND parent_message_id IS NULL
     AND NOT EXISTS (SELECT 1 FROM space_job_keys AS job_key
@@ -60,7 +62,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
       title: row.name?.trim() || `${row.space_name || "Space"} worker`,
       owner:
         row.owner_space_id === null
-          ? null
+          ? NO_OWNER
           : { kind: "space", id: row.owner_space_id, name: row.space_name || "Space" }
     }
   }
@@ -90,7 +92,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
       title: row.name?.trim() || "Agent",
       owner:
         row.parent_session_id === null
-          ? null
+          ? NO_OWNER
           : {
               kind: "session",
               id: row.parent_session_id,
@@ -106,7 +108,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
         title: `${row.space_name || row.job_name || "Space"} · Worker run`,
         owner:
           row.owner_space_id === null
-            ? null
+            ? NO_OWNER
             : { kind: "space", id: row.owner_space_id, name: row.space_name || "Space" }
       }
     case "task_execution":
@@ -116,7 +118,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
         title: `${row.task_name || row.job_name || "Task"} · Worker`,
         owner:
           row.owner_task_id === null
-            ? null
+            ? NO_OWNER
             : { kind: "task", id: row.owner_task_id, name: row.task_name || row.job_name || "Task" }
       }
     case "user_automation":
@@ -126,7 +128,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
         title: row.name?.trim() || row.job_name || "Automation",
         owner:
           row.task_id === null
-            ? null
+            ? NO_OWNER
             : { kind: "automation", id: row.task_id, name: row.job_name || "Automation" }
       }
     case "system":
@@ -134,7 +136,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
         kind: "execution",
         label: "System",
         title: row.name?.trim() || row.job_name || "System run",
-        owner: null
+        owner: NO_OWNER
       }
     case null:
       return {
@@ -143,7 +145,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
         title: row.name?.trim() || "Run transcript",
         owner:
           row.parent_session_id === null
-            ? null
+            ? NO_OWNER
             : {
                 kind: "session",
                 id: row.parent_session_id,

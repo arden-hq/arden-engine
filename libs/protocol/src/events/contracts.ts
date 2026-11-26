@@ -1,4 +1,12 @@
-import type { AppDestination } from "../common/navigation.js"
+import type { AppDestination, NavigationAskedBy } from "../common/navigation.js"
+import type {
+  EntityChangeTarget,
+  LinkedAutomation,
+  LinkedChat,
+  LinkedTask,
+  TaskSpace
+} from "../common/links.js"
+export * from "../common/links.js"
 import type { CommonServerEventFields } from "../common/event-fields.js"
 import type { SessionListItem } from "../sessions/contracts.js"
 import type { ChatServerEvent, StreamKeepaliveEvent } from "../chat/events/stream.js"
@@ -20,16 +28,8 @@ export interface AutomationProgressEvent extends CommonServerEventFields {
 export interface AutomationFinishedEvent extends CommonServerEventFields {
   readonly type: "automation_finished"
   readonly task_id: string
-  /** Whose job it is: one of yours, a Space's or a Task's, or Arden's own. */
-  readonly purpose?: "user_automation" | "space_review" | "task_execution" | "system"
-  readonly result?: string | null
-  /** How the occurrence ended. `completed`: an event journaled before outcomes
-   *  were stored, when this said only that the run ended without failing. */
-  readonly outcome?: AutomationRunOutcome | "completed"
-  readonly error?: string | null
-  /** The settled Run and its chat, when the occurrence ran one. */
-  readonly run_id?: string | null
-  readonly run_session_id?: string | null
+  readonly outcome: AutomationRunOutcome | "completed"
+  readonly run_chat: LinkedChat
 }
 
 /** What a record says happened: a run's ending, or an entity's change. */
@@ -63,10 +63,9 @@ export interface RecordToldEvent extends CommonServerEventFields {
   readonly title: string
   /** Its words. */
   readonly text: string
-  /** Where to open it: the chat it was told in, or the run's own chat. */
-  readonly chat_session_id?: string | null
-  readonly automation_id?: string | null
-  readonly item_id?: string | null
+  readonly chat: LinkedChat
+  readonly automation: LinkedAutomation
+  readonly task: LinkedTask
 }
 
 export interface SessionCreatedEvent extends CommonServerEventFields {
@@ -105,7 +104,7 @@ export type EntityKind = "session" | "space" | "automation" | "permission" | "ta
 export interface EntityChangedEvent extends CommonServerEventFields {
   readonly type: "entity_changed"
   readonly kind: EntityKind
-  readonly id: string | null
+  readonly target: EntityChangeTarget
 }
 
 export interface NavigationRequestedEvent extends CommonServerEventFields {
@@ -113,12 +112,8 @@ export interface NavigationRequestedEvent extends CommonServerEventFields {
   readonly origin_session_id: string
   readonly destination: AppDestination
   readonly label: string
-  /** `offer` only suggests; `open` moves the viewer of the origin Session.
-   *  Absent on requests journaled before the choice existed: those opened. */
-  readonly mode?: "offer" | "open"
-  /** The `app_open` call that asked, so its transcript card can tell the
-   *  offer was already taken. */
-  readonly tool_call_id?: string
+  readonly mode: "offer" | "open"
+  readonly asked_by: NavigationAskedBy
 }
 
 export interface QuestionChangedEvent extends CommonServerEventFields {
@@ -126,18 +121,18 @@ export interface QuestionChangedEvent extends CommonServerEventFields {
   readonly question_id: string
   readonly run_id: string
   readonly session_id: string
-  readonly item_id: string | null
+  readonly task: LinkedTask
 }
 
 export interface TaskVisibilityChangedEvent extends CommonServerEventFields {
   readonly type: "task_visibility_changed"
-  readonly space_id: string | null
+  readonly space: TaskSpace
   readonly item_id: string
 }
 
 export interface WorkChangedEvent extends CommonServerEventFields {
   readonly type: "work_changed"
-  readonly space_id: string | null
+  readonly space: TaskSpace
   readonly item_id: string
   readonly change: "comment" | "status"
 }
@@ -160,7 +155,7 @@ export interface FocusChoiceChangedEvent extends CommonServerEventFields {
 
 interface TaskWorkEventFields extends CommonServerEventFields {
   readonly type: "task_work_changed"
-  readonly space_id: string | null
+  readonly space: TaskSpace
   readonly item_id: string
   readonly task_name: string
   readonly run_session_id: string

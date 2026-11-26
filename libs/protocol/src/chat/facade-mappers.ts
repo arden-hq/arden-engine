@@ -1,6 +1,9 @@
 import type { Schema } from "effect"
+import { HISTORY_WINDOW } from "./contracts.js"
 import type {
   ActiveRunSummary,
+  HistoryWindow,
+  TurnWorkWindow,
   CancelResponse,
   ChatAcknowledgement,
   ChatReceipt,
@@ -142,5 +145,35 @@ export const mapReadResponse = (response: ReadResponseWire): ReadResponse => {
     ...extras,
     sessionId: session_id,
     hasUnread: has_unread
+  }
+}
+
+type TurnWorkWindowQuery =
+  | { readonly window: typeof HISTORY_WINDOW.latest }
+  | {
+      readonly window: typeof HISTORY_WINDOW.before | typeof HISTORY_WINDOW.after
+      readonly cursor: string
+    }
+
+type HistoryWindowQuery =
+  | TurnWorkWindowQuery
+  | { readonly window: typeof HISTORY_WINDOW.around; readonly cursor: string }
+  | { readonly window: typeof HISTORY_WINDOW.aroundSeq; readonly seq: number }
+
+export const turnWorkWindow = (query: TurnWorkWindowQuery): TurnWorkWindow =>
+  query.window === HISTORY_WINDOW.latest
+    ? { kind: HISTORY_WINDOW.latest }
+    : { kind: query.window, cursor: query.cursor }
+
+export const historyWindow = (query: HistoryWindowQuery): HistoryWindow => {
+  switch (query.window) {
+    case HISTORY_WINDOW.around:
+      return { kind: HISTORY_WINDOW.around, cursor: query.cursor }
+    case HISTORY_WINDOW.aroundSeq:
+      return { kind: HISTORY_WINDOW.aroundSeq, seq: query.seq }
+    case HISTORY_WINDOW.latest:
+    case HISTORY_WINDOW.before:
+    case HISTORY_WINDOW.after:
+      return turnWorkWindow(query)
   }
 }

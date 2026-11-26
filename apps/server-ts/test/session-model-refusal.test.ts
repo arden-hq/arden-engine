@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -38,18 +39,18 @@ describe("a chat model the server does not list", () => {
       const created = await server.fetch("/sessions", {
         method: "POST",
         headers,
-        body: JSON.stringify({ chat_model: "nope" })
+        body: JSON.stringify(newChat({ model: "nope" }))
       })
       const session = await server.fetch("/sessions", {
         method: "POST",
         headers,
-        body: JSON.stringify({})
+        body: JSON.stringify(newChat())
       })
       const { session_id } = (await session.json()) as { readonly session_id: string }
       const changed = await server.fetch(`/sessions/${session_id}/model`, {
         method: "PUT",
         headers,
-        body: JSON.stringify({ chat_model: "nope" })
+        body: JSON.stringify(newChat({ model: "nope" }))
       })
       expect([
         { status: created.status, body: await created.json() },

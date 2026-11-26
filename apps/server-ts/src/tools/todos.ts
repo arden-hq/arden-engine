@@ -3,6 +3,12 @@ import { Effect, Schema, SchemaTransformation } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { TodoStore, TodoStoreError } from "../persistence/todos/store.js"
+import { explanationOf, explanationText } from "../persistence/todos/items.js"
+import {
+  TODO_REASON,
+  TODO_STATUS,
+  type TodoOverrideItemInput
+} from "@arden-hq/protocol/sessions/todos"
 import { toolFailure } from "./tool-failure.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt } from "./call-receipt.js"
@@ -71,6 +77,22 @@ const TodoItemSchema = TodoItemInputSchema.check(
   })
 )
 
+const overrideItem = ({
+  content,
+  status,
+  reason
+}: typeof TodoItemSchema.Type): TodoOverrideItemInput =>
+  status === TODO_STATUS.cancelled
+    ? {
+        content,
+        status,
+        reason:
+          reason === undefined
+            ? { kind: TODO_REASON.unstated }
+            : { kind: TODO_REASON.stated, text: reason }
+      }
+    : { content, status }
+
 const TodoUpdateParametersSchema = Schema.Struct({
   explanation: Schema.optionalKey(
     Schema.NullOr(Schema.Trim.check(Schema.isMaxLength(2_000))).annotate({
@@ -125,8 +147,8 @@ const makeTodoTool = ({ store }: { readonly store: TodoStore["Service"] }): Serv
         Effect.runPromise(
           store
             .setAgent(ctx.run.sessionId, ctx.run.runId, ctx.toolCallId, {
-              items: input.items,
-              explanation: input.explanation ?? null
+              items: input.items.map(overrideItem),
+              explanation: explanationOf(input.explanation ?? null)
             })
             .pipe(Effect.mapError(todoFailure)),
           { signal: ctx.signal }
@@ -138,7 +160,7 @@ const makeTodoTool = ({ store }: { readonly store: TodoStore["Service"] }): Serv
         preview: `${completed}/${snapshot.items.length} done`,
         data: {
           items: snapshot.items,
-          explanation: snapshot.explanation,
+          explanation: explanationText(snapshot.explanation),
           retired: completed === snapshot.items.length
         },
         host: appliedReceipt(ctx, {

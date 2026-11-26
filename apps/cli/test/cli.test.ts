@@ -108,7 +108,7 @@ describe("arden run", () => {
     let created: unknown
     const client: CliClient = {
       ...defaultClient(),
-      createSession: async (input = {}) => {
+      createSession: async (input) => {
         created = input
         return defaultClient().createSession(input)
       },
@@ -140,7 +140,12 @@ describe("arden run", () => {
         declined: []
       })
     ])
-    expect(created).toEqual({})
+    expect(created).toEqual({
+      name: { kind: "unnamed" },
+      space: { kind: "none" },
+      chat_model: { kind: "inherited" },
+      origin: "ordinary"
+    })
     expect(submittedPrompt).toBe("Prompt from stdin")
   })
 
@@ -647,8 +652,15 @@ describe("no empty chat is left behind", () => {
           throw new HeadlessHttpError(422, "POST", "/chat/message", "")
         },
         listSessions: async () => ({
-          sessions: [{ ...listedSession(messageCount), is_active: active }],
-          next_cursor: null
+          sessions: [
+            {
+              ...listedSession(messageCount),
+              run: active
+                ? { kind: "active", run_id: "run-1", turn_id: "turn-1", status: "running" }
+                : { kind: "none" }
+            }
+          ],
+          next: { kind: "end" }
         }),
         deleteSession: async (sessionId) => {
           deleted.push(sessionId)
@@ -668,7 +680,7 @@ describe("no empty chat is left behind", () => {
       wait: async () => {
         throw new Error("lost the connection")
       },
-      listSessions: async () => ({ sessions: [listedSession(0)], next_cursor: null }),
+      listSessions: async () => ({ sessions: [listedSession(0)], next: { kind: "end" } }),
       deleteSession: async (sessionId) => {
         deleted.push(sessionId)
       }
@@ -686,7 +698,7 @@ describe("no empty chat is left behind", () => {
       submit: async () => {
         throw new HeadlessHttpError(503, "POST", "/chat/message", "")
       },
-      listSessions: async () => ({ sessions: [listedSession(0)], next_cursor: null }),
+      listSessions: async () => ({ sessions: [listedSession(0)], next: { kind: "end" } }),
       deleteSession: async (sessionId) => {
         deleted.push(sessionId)
       }
@@ -987,7 +999,7 @@ describe("the model a Run runs on", () => {
     const created: Array<unknown> = []
     const client: CliClient = {
       ...defaultClient(),
-      createSession: async (input = {}) => {
+      createSession: async (input) => {
         created.push(input)
         return defaultClient().createSession(input)
       }
@@ -996,7 +1008,7 @@ describe("the model a Run runs on", () => {
     expect(
       await runCli(["run", "hi", ...URL_ARGS, "--model", "gemma-4"], listed.dependencies)
     ).toBe(0)
-    expect(created).toEqual([{ chat_model: "gemma-4" }])
+    expect(created).toMatchObject([{ chat_model: { kind: "pinned", model_id: "gemma-4" } }])
 
     const other = testIo({ client })
     expect(
@@ -1005,7 +1017,7 @@ describe("the model a Run runs on", () => {
         other.dependencies
       )
     ).toBe(2)
-    expect(created).toEqual([{ chat_model: "gemma-4" }])
+    expect(created).toMatchObject([{ chat_model: { kind: "pinned", model_id: "gemma-4" } }])
     expect(jsonLines(other.stdout())[0]).toMatchObject({
       status: "failed",
       exit_code: 2,

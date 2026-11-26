@@ -1,4 +1,7 @@
 import { abortAfter } from "@arden-hq/std/timer"
+import { latestChats, oneSession } from "./session-list.js"
+import { newChat, wholeFork } from "./session-requests.js"
+import { nameText, runIsActive, spaceIdOf } from "@arden-hq/protocol/sessions"
 import {
   HeadlessHttpError,
   HeadlessTimeoutError,
@@ -335,24 +338,21 @@ const resolveSession = async (
     case "existing":
       return { sessionId: target.sessionId, created: false }
     case "latest": {
-      const page = await client.listSessions({ scope: "primary", sort: "activity", limit: 1 })
+      const page = await client.listSessions(latestChats(1))
       const latest = page.sessions[0]
       if (latest === undefined) throw new UsageError("There is no chat to continue")
       return { sessionId: latest.session_id, created: false }
     }
     case "fork":
       return {
-        sessionId: (await client.branchSession(target.sessionId)).session_id,
+        sessionId: (await client.branchSession(target.sessionId, wholeFork)).session_id,
         created: false
       }
     case "new": {
       if (target.model !== undefined) await requireModel(client, target.model)
       const spaceId =
         target.space === undefined ? undefined : await resolveSpace(client, target.space)
-      const created = await client.createSession({
-        ...(spaceId === undefined ? {} : { space_id: spaceId }),
-        ...(target.model === undefined ? {} : { chat_model: target.model })
-      })
+      const created = await client.createSession(newChat({ spaceId, model: target.model }))
       return { sessionId: created.session_id, created: true }
     }
   }
@@ -375,9 +375,9 @@ const requireModel = async (client: CliClient, model: string): Promise<void> => 
 
 const discardIfEmpty = async (client: CliClient, sessionId: string): Promise<void> => {
   try {
-    const page = await client.listSessions({ sessionIds: [sessionId], scope: "all" })
+    const page = await client.listSessions(oneSession(sessionId))
     const session = page.sessions.find((candidate) => candidate.session_id === sessionId)
-    if (session === undefined || session.message_count > 0 || session.is_active) return
+    if (session === undefined || session.message_count > 0 || runIsActive(session.run)) return
     await client.deleteSession(sessionId)
   } catch {}
 }
@@ -673,17 +673,13 @@ export const sessionsCommand = async (
       dependencies,
       await resolveServer(options.urlArgument, dependencies)
     )
-    const page = await client.listSessions({
-      scope: "primary",
-      sort: "activity",
-      limit: options.limit
-    })
+    const page = await client.listSessions(latestChats(options.limit))
     const sessions = page.sessions.map((session) => ({
       session_id: session.session_id,
-      name: session.name,
-      space_id: session.space_id,
+      name: nameText(session.name),
+      space_id: spaceIdOf(session.space),
       last_activity: session.last_activity,
-      is_active: session.is_active,
+      is_active: runIsActive(session.run),
       pending_approvals: session.pending_approvals_count
     }))
     if (options.output === "json") {

@@ -1,4 +1,6 @@
 import { createHeadlessClient } from "@arden-hq/headless"
+import { liveSessions } from "../src/session-list.js"
+import { newChat, wholeFork } from "../src/session-requests.js"
 import { commandLineRoute } from "@arden-hq/protocol/daemon"
 import { describe, expect, it } from "vitest"
 
@@ -26,14 +28,15 @@ const CALLS: Record<keyof CliClient, (client: CliClient) => Promise<unknown>> = 
       client_id: "client-1",
       answer: { kind: "choice", choice_id: "work" }
     }),
-  branchSession: (client) => client.branchSession("session-1"),
+  branchSession: (client) => client.branchSession("session-1", wholeFork),
   cancel: (client) => client.cancel({ runId: "run-1" }),
-  createSession: (client) => client.createSession(),
+  createSession: (client) =>
+    client.createSession(newChat({ spaceId: undefined, model: undefined })),
   deleteSession: (client) => client.deleteSession("session-1"),
   health: (client) => client.health(),
   listModels: (client) => client.listModels(),
   listSpaces: (client) => client.listSpaces(),
-  listSessions: (client) => client.listSessions({ live: true }),
+  listSessions: (client) => client.listSessions(liveSessions),
   submit: (client) => client.submit({ sessionId: "session-1", message: "hi" }),
   wait: (client) => client.wait(RUN, { timeoutMs: 200 }),
   waitForRun: (client) => client.waitForRun("run-1", { timeoutMs: 200 })

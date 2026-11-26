@@ -7,6 +7,7 @@ import type {
   ToolCallRouteOptions,
   TurnWorkRouteOptions
 } from "@arden-hq/protocol/chat"
+import { historyWindow, turnWorkWindow } from "@arden-hq/protocol/chat"
 import { Effect, Option } from "effect"
 import { randomUUID } from "node:crypto"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
@@ -65,7 +66,7 @@ import { ModelStore } from "../../persistence/models/store.js"
 import { SessionStore } from "../../persistence/sessions/store.js"
 import { SummaryStore } from "../../persistence/summaries/store.js"
 import { WorkStore } from "../../persistence/work/store.js"
-import { makeSessionCreation } from "../../sessions/create.js"
+import { keptCapture, makeSessionCreation } from "../../sessions/create.js"
 
 const historyError = (
   error: ChatHistoryFailure
@@ -254,7 +255,7 @@ export const ChatHandlers = HttpApiBuilder.group(
               capture: "screenshot"
             })
             .pipe(Effect.mapError(messageError))
-          return { kind: "kept" as const, session_id: created.sessionId, line: null }
+          return keptCapture(created.sessionId)
         })
       )
       .handle("message", ({ payload }) => {
@@ -520,12 +521,9 @@ export const ChatHandlers = HttpApiBuilder.group(
       )
       .handle("history", ({ query }) => {
         const input: HistoryRouteOptions = {
-          ...(query.session_id === undefined ? {} : { sessionId: query.session_id }),
-          ...(query.limit === undefined ? {} : { limit: query.limit }),
-          ...(query.before === undefined ? {} : { before: query.before }),
-          ...(query.after === undefined ? {} : { after: query.after }),
-          ...(query.around === undefined ? {} : { around: query.around }),
-          ...(query.around_seq === undefined ? {} : { aroundSeq: query.around_seq })
+          sessionId: query.session_id,
+          limit: query.limit,
+          window: historyWindow(query)
         }
         return history.get(input).pipe(
           Effect.tapError((error) =>
@@ -541,10 +539,9 @@ export const ChatHandlers = HttpApiBuilder.group(
         const input: TurnWorkRouteOptions = {
           sessionId: query.session_id,
           turnId: query.turn_id,
-          ...(query.limit === undefined ? {} : { limit: query.limit }),
-          ...(query.before === undefined ? {} : { before: query.before }),
-          ...(query.after === undefined ? {} : { after: query.after }),
-          ...(query.view === undefined ? {} : { view: query.view })
+          limit: query.limit,
+          window: turnWorkWindow(query),
+          view: query.view
         }
         return history.getTurnWork(input).pipe(
           Effect.tapError((error) =>

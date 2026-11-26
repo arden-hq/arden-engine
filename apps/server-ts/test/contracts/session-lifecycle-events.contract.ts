@@ -79,7 +79,9 @@ export const sessionLifecycleEventsContract = (backend: ContractBackend) =>
             type: "navigation_requested",
             origin_session_id: origin.sessionId,
             destination: { kind: "home" },
-            label: "Home"
+            label: "Home",
+            mode: "open",
+            asked_by: { kind: "untracked" }
           })
           const [live] = yield* before.stream.pipe(Stream.take(1), Stream.runCollect)
           const replay = yield* sessionEvents.open(before.initialSequence)

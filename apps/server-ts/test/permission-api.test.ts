@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { permissionDecoders, permissionRoutes } from "@arden-hq/protocol/permissions"
 import { Schema } from "effect"
 import { expect, it } from "vitest"
@@ -16,7 +17,7 @@ it("exposes server-owned chat permissions and rejects unknown modes", async () =
     const created = await server.fetch("/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Permission test" })
+      body: JSON.stringify(newChat({ name: "Permission test" }))
     })
     expect(created.status).toBe(200)
     const session = Schema.decodeUnknownSync(Schema.Struct({ session_id: Schema.String }))(

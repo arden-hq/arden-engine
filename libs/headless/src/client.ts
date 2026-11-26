@@ -212,7 +212,7 @@ export class HeadlessClient {
     this.#fetch = options.fetch ?? globalThis.fetch
   }
 
-  async createSession(input: CreateSessionRequest = {}): Promise<CreateSessionResponse> {
+  async createSession(input: CreateSessionRequest): Promise<CreateSessionResponse> {
     return sessionDecoders.createResponse(
       await this.#requestJson(sessionRoutes.collection, {
         method: "POST",
@@ -223,7 +223,7 @@ export class HeadlessClient {
 
   async branchSession(
     sessionId: string,
-    input: BranchSessionRequest = {}
+    input: BranchSessionRequest
   ): Promise<BranchSessionResponse> {
     return sessionDecoders.branchResponse(
       await this.#requestJson(sessionRoutes.branch(sessionId), {
@@ -382,7 +382,7 @@ export class HeadlessClient {
     )
   }
 
-  async listSessions(options: SessionListOptions = {}): Promise<SessionListResponse> {
+  async listSessions(options: SessionListOptions): Promise<SessionListResponse> {
     return sessionDecoders.listResponse(
       await this.#requestJson(sessionRoutes.list(options), { method: "GET" })
     )

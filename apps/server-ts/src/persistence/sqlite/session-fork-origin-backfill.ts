@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { SessionForkOriginSchema } from "@arden-hq/protocol/effect/common"
+import { SessionForkOriginSchema } from "../sessions/fork-origin.js"
 import type { Backfill } from "./backfills/backfill.js"
 import { decodeJson } from "./json.js"
 import { JsonObjectSchema } from "../json.js"

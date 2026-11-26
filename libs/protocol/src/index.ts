@@ -1,5 +1,5 @@
 import { decoderFor, runBoundary } from "./common/boundary.js"
-import { decodeApiErrorEnvelope, normalizeApiError, ProtocolError } from "./common/errors.js"
+import { ProtocolError } from "./common/errors.js"
 import { encodeServerEventFrameEffect } from "./transport/sse-effect.js"
 import { ServerEventSchema } from "./events/schema.js"
 import {
@@ -102,7 +102,12 @@ export type {
   NavigationRequestedEvent,
   McpServerChangedEvent,
   EntityChangedEvent,
+  EntityChangeTarget,
   EntityKind,
+  LinkedAutomation,
+  LinkedChat,
+  LinkedTask,
+  TaskSpace,
   QuestionChangedEvent,
   TaskVisibilityChangedEvent,
   WorkChangedEvent,
@@ -145,8 +150,6 @@ export type * from "./visualizations/contracts.js"
 
 export {
   ProtocolError,
-  decodeApiErrorEnvelope,
-  normalizeApiError,
   decodeServerEventStream,
   decodeServerEventStreamBuffer,
   decodeSseFrameStream,
@@ -170,3 +173,4 @@ export function encodeServerEventFrame(
 ): string {
   return runBoundary(encodeServerEventFrameEffect(event, options), "Invalid server event", "encode")
 }
+export { ENTITY_TARGET, LINK, TASK_SPACE } from "./events/contracts.js"

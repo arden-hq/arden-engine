@@ -461,6 +461,14 @@ export const reduceActiveProjection = (
     (next.runId === undefined
       ? undefined
       : { runId: next.runId, sequence: 0, purpose: null, operations: [] })
-  const activity = reduceRunActivity(seed, record)
+  const activity = reduceRunActivity(seed, {
+    event: record.event,
+    sequence: record.sequence,
+    fromOtherRun:
+      seed !== undefined &&
+      record.runId !== undefined &&
+      record.runId !== null &&
+      record.runId !== seed.runId
+  })
   return activity === undefined ? next : { ...next, activity }
 }

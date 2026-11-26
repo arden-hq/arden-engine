@@ -1,3 +1,4 @@
+import { RUNTIME_RUN } from "@arden-hq/protocol/chat"
 import {
   INTERACTION_KIND,
   INTERACTION_OUTCOME,
@@ -47,16 +48,17 @@ export interface ConversationLookups {
 export function conversationPage({
   history,
   progress,
-  now,
   lookups = { sessionIds: new Map(), taskPlaces: new Map(), names: new Map() }
 }: {
   readonly history: HistoryResponse
   readonly progress: RunProgress | undefined
-  readonly now: string
   readonly lookups?: ConversationLookups
 }): Page {
   const active = history.runtime.active_run
-  const running = active !== null && isActiveRunStatus(active.status) ? active : undefined
+  const running =
+    active.kind === RUNTIME_RUN.active && isActiveRunStatus(active.run.status)
+      ? active.run
+      : undefined
   const items: MobileConversationItem[] = []
   const sentTo = new Map<string, Set<string>>()
   for (const message of history.messages) {
@@ -77,7 +79,7 @@ export function conversationPage({
     live:
       running === undefined
         ? { kind: "idle" }
-        : { kind: "running", text: liveText(progress), started_at: running.started_at ?? now },
+        : { kind: "running", text: liveText(progress), started_at: running.started_at },
     before:
       history.page.has_more_before &&
       history.page.before !== undefined &&

@@ -1,3 +1,14 @@
+import {
+  APPROVAL_ASKER,
+  APPROVAL_CARD,
+  APPROVAL_DIFF,
+  APPROVAL_PREVIEW,
+  type ApprovalAsker,
+  type ApprovalCard,
+  type ApprovalDiff,
+  type ApprovalPresentation,
+  type ApprovalPreview
+} from "@arden-hq/protocol/chat"
 import type { RuleSavedIn, RunApproval, RunApprovalWork } from "@arden-hq/protocol/runs"
 import { RuleSavedInSchema, RunOriginSchema } from "@arden-hq/protocol/effect/runs"
 import { sanitizeApprovalPresentation } from "@arden-hq/protocol/chat"
@@ -34,20 +45,13 @@ const text = (payload: Readonly<Record<string, unknown>>, field: string): string
 export const decodeRunApproval = Effect.fn("decodeRunApproval")(function* (row: ApprovalRow) {
   const payload = yield* decodeJson(JsonObjectSchema, row.payload_json ?? "{}")
   const data = payload.approval_data
-  const connectionDecision = isConnectionRequiredData(data)
+  const connection = isConnectionRequiredData(data)
     ? pendingConnectionDecision(
         { runId: row.run_id, sessionId: row.session_id, toolCallId: row.tool_call_id },
-        yield* Schema.decodeUnknownEffect(ConnectionRequiredDataSchema)(data)
-      )
+        yield* Schema.decodeUnknownEffect(ConnectionRequiredDataSchema)(data),
+        row.source ?? "run"
+      ).snapshot
     : null
-  const connection =
-    connectionDecision === null
-      ? null
-      : {
-          ...connectionDecision.snapshot,
-          decision_delivery:
-            row.source === "deferred" ? ("deferred" as const) : ("blocking" as const)
-        }
   const kind = connection ? "integration_connection" : row.kind
   const subject = kind === "subagent_result" ? text(payload, "task") : null
   return {
@@ -97,3 +101,19 @@ export const workOf = (json: string | null): RunApprovalWork | null => {
       return null
   }
 }
+
+export const askerOf = (json: string | null): ApprovalAsker => {
+  const work = workOf(json)
+  return work === null ? { kind: APPROVAL_ASKER.chat } : { kind: APPROVAL_ASKER.work, work }
+}
+
+export const approvalPreview = (text: string | null): ApprovalPreview =>
+  text === null ? { kind: APPROVAL_PREVIEW.none } : { kind: APPROVAL_PREVIEW.preview, text }
+
+export const approvalDiff = (patch: string | null): ApprovalDiff =>
+  patch === null ? { kind: APPROVAL_DIFF.none } : { kind: APPROVAL_DIFF.diff, patch }
+
+export const approvalCard = (presentation: ApprovalPresentation | undefined): ApprovalCard =>
+  presentation === undefined
+    ? { kind: APPROVAL_CARD.plain }
+    : { kind: APPROVAL_CARD.presented, presentation }

@@ -22,7 +22,7 @@ const resumeHistory = {
     session_id: "session-1",
     latest_event_seq: 1,
     checkpoint_seq: 0,
-    active_run: null,
+    active_run: { kind: "idle" },
     blocking_work: false,
     pending_approvals: [],
     pending_connections: []

@@ -1,5 +1,3 @@
-import { RunApprovalWorkSchema } from "../runs/context.js"
-import { RuleSavedInSchema } from "../runs/questions.js"
 import { Schema, SchemaTransformation } from "effect"
 import { eventTypeLiterals } from "../common/event-types.js"
 import type {
@@ -15,8 +13,6 @@ import type { TurnDetailsResponse, TurnWorkResponse } from "./history.js"
 import { CHAT_REPLY_QUOTES_MAX } from "./contracts.js"
 import type { ChatReceiptStatus, ToolCallResponse } from "./contracts.js"
 import {
-  ConnectionActionSchema,
-  ConnectionStateSchema,
   ToolOutcomeSchema,
   event,
   optionalBoolean,
@@ -28,7 +24,6 @@ import {
   withExtras,
   NonNegativeIntSchema
 } from "../common/schema.js"
-import { ApprovalPresentationSchema } from "./approval-presentation.js"
 import { ChatUpdateSchema, CommunicationEnvelopeSchema } from "./communication-schema.js"
 import { GmailSendReceiptSchema } from "./gmail-receipt.js"
 import {
@@ -47,6 +42,14 @@ export * from "./events/tool.js"
 export * from "./events/approval.js"
 export * from "./events/session.js"
 export * from "./interaction.js"
+export * from "./runtime-schema.js"
+export * from "./history-query-schema.js"
+import {
+  ActiveRunSnapshotSchema,
+  RuntimeApprovalSnapshotSchema,
+  RuntimeConnectionSnapshotSchema
+} from "./runtime-schema.js"
+import { RUNTIME_RUN } from "./runtime.js"
 import { AgentResultSchema, interactionSenderFields } from "./interaction.js"
 import {
   runLifecycleEventSchemas,
@@ -270,111 +273,17 @@ export const ChatReceiptStatusSchema = Schema.Literals([
   "interrupted"
 ] as const)
 
-export const RuntimeApprovalSnapshotSchema = withExtras({
-  tool_id: Schema.String,
-  source: Schema.optionalKey(Schema.Literals(["run", "deferred"] as const)),
-  tool_name: Schema.String,
-  preview: optionalNullableString,
-  diff: optionalNullableString,
-  status: Schema.Literal("pending"),
-  requested_at: optionalNullableString,
-  run_id: optionalNullableString,
-  session_id: optionalNullableString,
-  action: optionalNullableString,
-  scope: optionalNullableString,
-  expires_at: optionalNullableString,
-  description: optionalNullableString,
-  rule_places: Schema.optionalKey(Schema.Array(RuleSavedInSchema)),
-  can_attach_folder_to_space: optionalBoolean,
-  grant_folder: Schema.optionalKey(Schema.String),
-  parent_session_id: optionalNullableString,
-  presentation: Schema.optionalKey(Schema.NullOr(ApprovalPresentationSchema)),
-  work: Schema.optionalKey(RunApprovalWorkSchema)
-})
-
-export const RuntimeConnectionSnapshotSchema = withExtras({
-  tool_id: Schema.String,
-  run_id: Schema.String,
-  session_id: Schema.optionalKey(Schema.String),
-  integration_id: Schema.String,
-  connection_id: Schema.String,
-  label: Schema.String,
-  reason: ConnectionStateSchema,
-  detail: Schema.String,
-  capability: Schema.String,
-  action: ConnectionActionSchema,
-  settings_tab: Schema.String,
-  required_scopes: Schema.Array(Schema.String),
-  source: Schema.Literals(["recovery", "suggestion"] as const),
-  decision_delivery: Schema.optionalKey(Schema.Literals(["blocking", "deferred"] as const)),
-  account_ref: optionalNullableString
-})
-
-export const ActiveRunSnapshotSchema = withExtras({
-  run_id: Schema.String,
-  turn_id: Schema.NonEmptyString,
-  status: Schema.String,
-  started_at: optionalNullableString,
-  updated_at: optionalNullableString,
-  ended_at: optionalNullableString,
-  stop_reason: optionalNullableString,
-  checkpoint_seq: Schema.Int,
-  latest_event_seq: Schema.Int,
-  error_code: optionalNullableString,
-  error_message: optionalNullableString,
-  pending_approvals: Schema.Array(RuntimeApprovalSnapshotSchema),
-  pending_connections: Schema.Array(RuntimeConnectionSnapshotSchema),
-  waiting_tool_call_ids: Schema.optionalKey(Schema.Array(Schema.String))
-})
-
 export const SessionRuntimeSnapshotSchema = withExtras({
-  session_id: Schema.NullOr(Schema.String),
+  session_id: Schema.String,
   latest_event_seq: Schema.Int,
   checkpoint_seq: Schema.Int,
-  active_run: Schema.NullOr(ActiveRunSnapshotSchema),
+  active_run: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUNTIME_RUN.idle) }),
+    Schema.Struct({ kind: Schema.Literal(RUNTIME_RUN.active), run: ActiveRunSnapshotSchema })
+  ]),
   blocking_work: Schema.Boolean,
   pending_approvals: Schema.Array(RuntimeApprovalSnapshotSchema),
   pending_connections: Schema.Array(RuntimeConnectionSnapshotSchema)
-})
-
-const historyLimitSchema = Schema.NumberFromString.check(
-  Schema.isInt(),
-  Schema.isBetween({ minimum: 1, maximum: 100 })
-)
-const nonNegativeIntegerFromString = Schema.NumberFromString.check(
-  Schema.isInt(),
-  Schema.isGreaterThanOrEqualTo(0)
-)
-
-export const HistoryQuerySchema = withExtras({
-  session_id: Schema.optionalKey(Schema.NonEmptyString),
-  limit: Schema.optionalKey(historyLimitSchema),
-  before: Schema.optionalKey(Schema.NonEmptyString),
-  after: Schema.optionalKey(Schema.NonEmptyString),
-  around: Schema.optionalKey(Schema.NonEmptyString),
-  around_seq: Schema.optionalKey(nonNegativeIntegerFromString)
-}).check(
-  Schema.makeFilter((query) => {
-    const cursors = [query.before, query.after, query.around, query.around_seq].filter(
-      (value) => value !== undefined
-    )
-    return cursors.length <= 1
-      ? undefined
-      : { path: [], issue: "history accepts only one paging cursor" }
-  })
-)
-
-export const TurnWorkViewSchema = Schema.Literals(["full", "compact"] as const)
-
-export const TurnWorkQuerySchema = withExtras({
-  session_id: Schema.NonEmptyString,
-  turn_id: Schema.NonEmptyString,
-  limit: Schema.optionalKey(historyLimitSchema),
-  before: Schema.optionalKey(Schema.NonEmptyString),
-  after: Schema.optionalKey(Schema.NonEmptyString),
-  /** `compact` rows carry what a trail row shows; arguments and output past
-   *  a short prefix are fetched on demand through the tool-call route. */
-  view: Schema.optionalKey(TurnWorkViewSchema)
 })
 
 export const TurnDetailsQuerySchema = withExtras({

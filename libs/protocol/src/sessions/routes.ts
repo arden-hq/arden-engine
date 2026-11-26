@@ -3,25 +3,72 @@ import { FindQueryTextSchema, SessionExportFormatSchema } from "./schema.js"
 
 import { appendSearch, encodeRouteEffect, encodeSegment, routeSegment } from "../common/routes.js"
 import { NonNegativeIntSchema, PositiveIntSchema } from "../common/schema.js"
+import {
+  SESSION_LIST_FILTER,
+  SESSION_LIST_PAGE,
+  type SessionListFilter,
+  type SessionListPage
+} from "./contracts.js"
 import type { Effect } from "effect/Effect"
 
 const SessionIdSchema = routeSegment()
-const SessionListCursorSchema = Schema.Struct({
-  at: Schema.String,
-  session_id: routeSegment()
-})
 const SessionListOptionsSchema = Schema.Struct({
-  spaceId: Schema.optionalKey(routeSegment()),
-  scope: Schema.optionalKey(Schema.Literals(["primary", "agent", "all"] as const)),
-  live: Schema.optionalKey(Schema.Boolean),
-  parentSessionIds: Schema.optionalKey(Schema.Array(routeSegment())),
-  limit: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(500))),
-  offset: Schema.optionalKey(NonNegativeIntSchema),
-  sort: Schema.optionalKey(Schema.Literals(["activity", "accessed"] as const)),
-  cursor: Schema.optionalKey(SessionListCursorSchema),
-  sessionIds: Schema.optionalKey(Schema.Array(routeSegment())),
-  sessionRef: Schema.optionalKey(routeSegment())
+  scope: Schema.Literals(["primary", "agent", "all"] as const),
+  live: Schema.Boolean,
+  limit: PositiveIntSchema.check(Schema.isLessThanOrEqualTo(500)),
+  sort: Schema.Literals(["activity", "accessed"] as const),
+  filter: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SESSION_LIST_FILTER.all) }),
+    Schema.Struct({ kind: Schema.Literal(SESSION_LIST_FILTER.space), space_id: routeSegment() }),
+    Schema.Struct({
+      kind: Schema.Literal(SESSION_LIST_FILTER.children),
+      parent_session_ids: Schema.Array(routeSegment()).check(Schema.isMinLength(1))
+    }),
+    Schema.Struct({
+      kind: Schema.Literal(SESSION_LIST_FILTER.sessions),
+      session_ids: Schema.Array(routeSegment()).check(Schema.isMinLength(1))
+    }),
+    Schema.Struct({ kind: Schema.Literal(SESSION_LIST_FILTER.ref), session_ref: routeSegment() })
+  ]),
+  page: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SESSION_LIST_PAGE.first) }),
+    Schema.Struct({ kind: Schema.Literal(SESSION_LIST_PAGE.offset), offset: NonNegativeIntSchema }),
+    Schema.Struct({
+      kind: Schema.Literal(SESSION_LIST_PAGE.after),
+      cursor: Schema.Struct({ at: Schema.String, session_id: routeSegment() })
+    })
+  ])
 })
+
+const filterParams = (filter: SessionListFilter): ReadonlyArray<readonly [string, string]> => {
+  switch (filter.kind) {
+    case SESSION_LIST_FILTER.all:
+      return []
+    case SESSION_LIST_FILTER.space:
+      return [["space_id", filter.space_id]]
+    case SESSION_LIST_FILTER.children:
+      return [["parent_session_ids", filter.parent_session_ids.join(",")]]
+    case SESSION_LIST_FILTER.sessions:
+      return [["session_ids", filter.session_ids.join(",")]]
+    case SESSION_LIST_FILTER.ref:
+      return [["session_ref", filter.session_ref]]
+  }
+}
+
+const pageParams = (page: SessionListPage): ReadonlyArray<readonly [string, string | number]> => {
+  switch (page.kind) {
+    case SESSION_LIST_PAGE.first:
+      return []
+    case SESSION_LIST_PAGE.offset:
+      return [["offset", page.offset]]
+    case SESSION_LIST_PAGE.after:
+      return [
+        ["cursor_at", page.cursor.at],
+        ["cursor_id", page.cursor.session_id]
+      ]
+  }
+}
+
 const SessionExportRouteSchema = Schema.Struct({
   sessionId: routeSegment(),
   format: SessionExportFormatSchema
@@ -32,17 +79,14 @@ export const encodeSessionListPathEffect = (
 ): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(SessionListOptionsSchema, value, (options) =>
     appendSearch("/sessions", [
-      ["space_id", options.spaceId],
       ["scope", options.scope],
       ["live", options.live],
-      ["parent_session_ids", options.parentSessionIds?.join(",")],
       ["limit", options.limit],
-      ["offset", options.offset],
       ["sort", options.sort],
-      ["cursor_at", options.cursor?.at],
-      ["cursor_id", options.cursor?.session_id],
-      ["session_ids", options.sessionIds?.join(",")],
-      ["session_ref", options.sessionRef]
+      ["filter", options.filter.kind],
+      ...filterParams(options.filter),
+      ["page", options.page.kind],
+      ...pageParams(options.page)
     ])
   )
 

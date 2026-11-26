@@ -36,9 +36,12 @@ const readJournal = <E, R>(layer: Layer.Layer<SessionLifecycleEvents | Automatio
     ).pipe(Effect.provide(layer))
   )
 
-const snapshotKind = (
-  session: Pick<SessionListItem, "session_id" | "session_type" | "origin_automation_id">
-) =>
+const snapshotKind = ({
+  origin_automation_id,
+  ...session
+}: Pick<SessionListItem, "session_id" | "session_type"> & {
+  readonly origin_automation_id: string | null
+}) =>
   triggerFeedRecord({
     kind: "record",
     sequence: 7,
@@ -48,12 +51,30 @@ const snapshotKind = (
       type: "session_activity",
       session: {
         ...session,
+        public_ref: "ref",
+        presentation: { kind: "conversation", role: "topic" },
         started_at: "2026-09-28T10:00:00.000Z",
         last_activity: "2026-09-28T10:05:00.000Z",
-        name: null,
+        name: { kind: "unnamed" },
+        has_unread: false,
         message_count: 2,
-        run_status: "completed",
-        is_active: false
+        space: { kind: "none" },
+        chat_model: { kind: "inherited" },
+        origin_automation:
+          origin_automation_id === null
+            ? { kind: "none" }
+            : { kind: "automation", automation_id: origin_automation_id },
+        parent: { kind: "none" },
+        run: { kind: "settled", run_id: "r1", status: "completed" },
+        checkpoint_seq: 0,
+        latest_event_seq: 0,
+        pending_approvals_count: 0,
+        pending_connections_count: 0,
+        triage: { kind: "none" },
+        fork: { kind: "none" },
+        thread_source: { kind: "none" },
+        origin: "ordinary",
+        current_activity: { kind: "idle" }
       }
     }
   }).kind

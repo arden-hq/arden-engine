@@ -100,6 +100,8 @@ const SEARCH_CATCH_UP_MS = 180_000
 const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<string>>> => {
   const chats = [ids.chat, ids.fork, ids.agent, ids.channel, ids.thread]
   const q = (params: Record<string, string>) => `?${new URLSearchParams(params).toString()}`
+  const list = (params: Record<string, string>) =>
+    `/sessions${q({ scope: "all", live: "false", limit: "100", sort: "activity", filter: "all", page: "first", ...params })}`
   return {
     "/computer/setup": ["/computer/setup"],
     "/computer/preview": ["/computer/preview"],
@@ -134,9 +136,11 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/local-models": ["/local-models"],
     "/model-endpoints": ["/model-endpoints"],
     "/decisions/status": ["/decisions/status"],
-    "/session/history": chats.map((id) => `/session/history${q({ session_id: id })}`),
+    "/session/history": chats.map(
+      (id) => `/session/history${q({ session_id: id, limit: "100", window: "latest" })}`
+    ),
     "/session/turn-work": [
-      `/session/turn-work${q({ session_id: ids.chat, turn_id: ids.chatTurn })}`
+      `/session/turn-work${q({ session_id: ids.chat, turn_id: ids.chatTurn, limit: "100", window: "latest", view: "full" })}`
     ],
     "/session/turn-details": [
       `/session/turn-details${q({ session_id: ids.chat, turn_id: ids.chatTurn })}`
@@ -167,7 +171,7 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/browser-procedures": ["/browser-procedures"],
     "/browser-procedures/:id": [`/browser-procedures/${MISSING}`],
     "/automations/:taskId/configuration-history": [
-      `/automations/${ids.busyAutomation}/configuration-history`
+      `/automations/${ids.busyAutomation}/configuration-history${q({ after_version: "0", through: "head", limit: "50" })}`
     ],
     "/automations": ["/automations"],
     "/automations/event-catalog": ["/automations/event-catalog"],
@@ -178,13 +182,17 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
       (id) => `/automations/${id}/runs`
     ),
     "/automations/events": [`/automations/events${q({ after_seq: "0" })}`],
-    "/spaces/:spaceId/history": [`/spaces/${ids.space}/history`],
+    "/spaces/:spaceId/history": [
+      `/spaces/${ids.space}/history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
     "/spaces": ["/spaces"],
     "/spaces/overview": ["/spaces/overview"],
     "/spaces/archived": ["/spaces/archived"],
     "/spaces/:spaceId": [`/spaces/${ids.space}`],
     "/spaces/:spaceId/continuity/state": [`/spaces/${ids.space}/continuity/state`],
-    "/proposals/:proposalId/history": [`/proposals/${MISSING}/history`],
+    "/proposals/:proposalId/history": [
+      `/proposals/${MISSING}/history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
     "/proposals": [
       `/proposals${q({ place: "space", space_id: ids.space })}`,
       `/proposals${q({ place: "chat", session_id: ids.chat })}`
@@ -192,7 +200,9 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/proposals/:proposalId/recheck": [`/proposals/${MISSING}/recheck`],
     "/spaces/:spaceId/focus-choices/:questionId": [`/spaces/${ids.space}/focus-choices/${MISSING}`],
     "/sessions/:sessionId/answer-blocks": [`/sessions/${ids.chat}/answer-blocks`],
-    "/spaces/work/:itemId/history": [`/spaces/work/${ids.taskItem}/history`],
+    "/spaces/work/:itemId/history": [
+      `/spaces/work/${ids.taskItem}/history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
     "/spaces/work/:itemId/attempts": [`/spaces/work/${ids.taskItem}/attempts`],
     "/chat/questions": [
       "/chat/questions",
@@ -206,17 +216,18 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
       `/spaces/work/all${q({ scope: "space", space_id: ids.space, start: "first", limit: "50" })}`,
       `/spaces/work/all${q({ scope: "chat", session_id: ids.chat, start: "first", limit: "50" })}`
     ],
-    "/sessions/:sessionId/configuration-history": [`/sessions/${ids.chat}/configuration-history`],
+    "/sessions/:sessionId/configuration-history": [
+      `/sessions/${ids.chat}/configuration-history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
     "/sessions": [
-      "/sessions",
-      `/sessions${q({ scope: "all" })}`,
-      `/sessions${q({ scope: "agent" })}`,
-      `/sessions${q({ inbox: "true" })}`,
-      `/sessions${q({ live: "true" })}`,
-      `/sessions${q({ sort: "accessed" })}`,
-      `/sessions${q({ space_id: ids.space })}`,
-      `/sessions${q({ parent_session_ids: ids.chat })}`,
-      `/sessions${q({ session_ref: `ref-${ids.chat}` })}`
+      list({}),
+      list({ scope: "agent" }),
+      list({ inbox: "true" }),
+      list({ live: "true" }),
+      list({ sort: "accessed" }),
+      list({ filter: "space", space_id: ids.space }),
+      list({ filter: "children", parent_session_ids: ids.chat }),
+      list({ filter: "ref", session_ref: `ref-${ids.chat}` })
     ],
     "/sessions/:sessionId/export": [
       `/sessions/${ids.chat}/export${q({ format: "markdown" })}`,
