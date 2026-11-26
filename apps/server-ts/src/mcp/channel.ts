@@ -1,3 +1,5 @@
+import { parseJsonBody, parseJsonText } from "@arden-hq/protocol/common"
+import { after } from "@arden-hq/std/timer"
 import type {
   FetchLike,
   Transport,
@@ -190,7 +192,7 @@ export class McpChannel {
     const id = `${OWN_ID_PREFIX}${this.nextId++}`
     return new Promise<unknown>((resolve, reject) => {
       const settle = () => {
-        clearTimeout(timer)
+        timer.cancel()
         signal?.removeEventListener("abort", aborted)
         this.requests.delete(id)
       }
@@ -199,9 +201,8 @@ export class McpChannel {
         reject(error)
       }
       const aborted = () => fail(new McpEventRequestError(`MCP ${method} was cancelled`, undefined))
-      const timer = setTimeout(
-        () => fail(new McpEventRequestError(`MCP ${method} timed out`, undefined)),
-        timeoutMs
+      const timer = after(timeoutMs, () =>
+        fail(new McpEventRequestError(`MCP ${method} timed out`, undefined))
       )
       if (signal?.aborted === true) {
         aborted()
@@ -437,7 +438,7 @@ interface StatelessRequest {
 
 const statelessRequest = (body: RequestInit["body"]): StatelessRequest | undefined => {
   if (typeof body !== "string" || !body.includes(EVENTS_PROTOCOL_VERSION)) return undefined
-  const message: unknown = JSON.parse(body)
+  const message = parseJsonText(body)
   if (!Predicate.isObject(message)) return undefined
   const { id, method, params } = message
   if ((typeof id !== "string" && typeof id !== "number") || typeof method !== "string") {
@@ -490,7 +491,7 @@ const statelessResponse = async (response: Response, id: string | number): Promi
     headers.delete("mcp-session-id")
     return new Response(response.body, { status: response.status, headers })
   }
-  const body: unknown = await response.json().catch(() => undefined)
+  const body: unknown = await parseJsonBody(response).catch(() => undefined)
   const error =
     Predicate.isObject(body) && Predicate.isObject(body["error"]) ? body["error"] : undefined
   const statusCode = refusalCode(response.status)

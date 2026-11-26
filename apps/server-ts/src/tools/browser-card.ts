@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { quoted } from "@arden-hq/std/count"
 import { Schema } from "effect"
 import type { JsonObject } from "../persistence/json.js"
@@ -34,13 +35,8 @@ export const targetLabel = (
   const space = described.indexOf(" ")
   const role = space < 0 ? described : described.slice(0, space)
   const rest = space < 0 ? "" : described.slice(space + 1)
-  let name = ""
-  try {
-    const parsed: unknown = JSON.parse(rest)
-    if (typeof parsed === "string") name = parsed
-  } catch {
-    name = ""
-  }
+  const parsed = parseJsonTextOrUndefined(rest)
+  const name = typeof parsed === "string" ? parsed : ""
   return { role, name: name.trim() }
 }
 

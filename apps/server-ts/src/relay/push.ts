@@ -275,7 +275,7 @@ export const PUSH_RETRY = Schedule.exponential("1 second").pipe(
 export const runPushes = <E>(input: {
   readonly wakes: Queue.Dequeue<void>
   readonly reconcile: Effect.Effect<void, E>
-}) =>
+}): Effect.Effect<never, E, never> =>
   Queue.take(input.wakes).pipe(
     Effect.andThen(input.reconcile.pipe(Effect.retry(PUSH_RETRY))),
     Effect.forever

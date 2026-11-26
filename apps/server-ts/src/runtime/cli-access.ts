@@ -13,7 +13,7 @@ export const publishCliAccess = async (path: string, access: CliAccess): Promise
 export const withdrawCliAccess = async (path: string, capability: string): Promise<void> => {
   let current: CliAccess
   try {
-    current = daemonDecoders.cliAccess(JSON.parse(await readFile(path, "utf8")))
+    current = daemonDecoders.cliAccessText(await readFile(path, "utf8"))
   } catch {
     return
   }

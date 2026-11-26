@@ -69,7 +69,12 @@ const decodeWorkCursor = Effect.fn("SqliteWorkStore.decodeWorkCursor")(function*
   return decoded.value
 })
 
-export const makeWorkPage = ({ writer, reader }: Pick<PersistenceDeps, "writer" | "reader">) => {
+export const makeWorkPage = ({
+  writer,
+  reader
+}: Pick<PersistenceDeps, "writer" | "reader">): ((
+  options: SpaceWorkPageOptions
+) => Effect.Effect<SpaceWorkPage, WorkStoreError, never>) => {
   const sql = reader
   const sources = makeWorkSourceSql(sql)
   return Effect.fn("SqliteWorkStore.page")(function* (

@@ -1,3 +1,4 @@
+import { abortAfter } from "@arden-hq/std/timer"
 import {
   HeadlessHttpError,
   HeadlessTimeoutError,
@@ -29,6 +30,7 @@ import {
 } from "./command.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { progressLines, requestResponder, type RunResponder } from "./terminal.js"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 export type CliOutputFormat = "text" | "json" | "jsonl"
 
@@ -292,13 +294,12 @@ const readOutputSchema = async (
   }
   let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    parsed = parseJsonText(text)
   } catch (cause) {
     throw new UsageError(`The output schema ${path} is not JSON: ${errorMessage(cause)}`)
   }
-  if (!isJsonObject(parsed)) {
+  if (!isJsonObject(parsed))
     throw new UsageError(`The output schema ${path} must be a JSON Schema object`)
-  }
   return parsed
 }
 
@@ -496,12 +497,12 @@ export const runCommand = async (
   const requestCancel = (): Promise<void> => {
     if (submitted === undefined) return Promise.resolve()
     if (cancelPromise !== undefined) return cancelPromise
-    const controller = new AbortController()
-    const timeout = setTimeout(() => {
-      controller.abort(new Error("Cancellation was not acknowledged within 5 seconds"))
-    }, 5_000)
+    const timeout = abortAfter(
+      5_000,
+      () => new Error("Cancellation was not acknowledged within 5 seconds")
+    )
     cancelPromise = client
-      .cancel({ runId: submitted.runId }, { signal: controller.signal })
+      .cancel({ runId: submitted.runId }, { signal: timeout.signal })
       .then(
         () => undefined,
         (cause) => {
@@ -510,7 +511,7 @@ export const runCommand = async (
           )
         }
       )
-      .finally(() => clearTimeout(timeout))
+      .finally(() => timeout.cancel())
     return cancelPromise
   }
   const removeSigint = dependencies.onSigint(() => {
@@ -547,9 +548,7 @@ export const runCommand = async (
       await requestCancel()
       return stopped("interrupted", "Interrupted by SIGINT")
     }
-    if (options.detach) {
-      return finish(submittedReceipt(accepted))
-    }
+    if (options.detach) return finish(submittedReceipt(accepted))
 
     const writeProgress = progressWriter(dependencies, options.output)
     const respond = requestResponder({

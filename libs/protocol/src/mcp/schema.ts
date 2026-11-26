@@ -407,32 +407,44 @@ export const toMcpOAuthStart = (
   status: response.status
 })
 
-export const encodeMcpCreateServerRequestEffect = (value: unknown) =>
+export const encodeMcpCreateServerRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(McpCreateServerRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMcpUpdateServerRequestEffect = (value: unknown) =>
+export const encodeMcpUpdateServerRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(McpUpdateServerRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMcpSetEnabledRequestEffect = (value: unknown) =>
+export const encodeMcpSetEnabledRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(McpSetEnabledRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMcpOfferDeclineRequestEffect = (value: unknown) =>
+export const encodeMcpOfferDeclineRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(McpOfferDeclineRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeMcpServerPathEffect = (value: unknown) =>
+export const encodeMcpServerPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(McpServerNameSchema)(value).pipe(
     Effect.map((name) => `${collectionPath}/${encodeURIComponent(name)}`)
   )
 
-export const encodeMcpPresetPathEffect = (value: unknown) =>
+export const encodeMcpPresetPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(McpPresetIdSchema)(value).pipe(
     Effect.map((presetId) => `/mcp/presets/${encodeURIComponent(presetId)}`)
   )
@@ -464,12 +476,16 @@ export const toGitHubConnectionState = (
       : { readOnly: response.connection.read_only, source: response.connection.source }
 })
 
-export const encodeGitHubConnectRequestEffect = (value: unknown) =>
+export const encodeGitHubConnectRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(GitHubConnectRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeGitHubReadOnlyRequestEffect = (value: unknown) =>
+export const encodeGitHubReadOnlyRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(GitHubReadOnlyRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )

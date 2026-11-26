@@ -5,10 +5,10 @@ import { IsoDateTimeStringSchema, withExtras } from "../../common/schema.js"
 
 export const strict = { onExcessProperty: "error" } as const
 
-export const boundedText = (maximum: number) =>
+export const boundedText = (maximum: number): Schema.String =>
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(maximum))
 
-export const trimmedText = (maximum: number) =>
+export const trimmedText = (maximum: number): Schema.Trim =>
   Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(maximum))
 
 export const WikiPageIdSchema = trimmedText(512).check(nonRelativePathSegment)

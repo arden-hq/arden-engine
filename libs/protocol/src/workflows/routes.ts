@@ -2,6 +2,7 @@ import { Schema } from "effect"
 
 import { appendSearch, encodeRouteEffect, encodeSegment, routeSegment } from "../common/routes.js"
 import { WorkflowRefSchema } from "./schema.js"
+import type { Effect } from "effect/Effect"
 
 const RouteTargetSchema = Schema.Struct({
   workflowRef: WorkflowRefSchema,
@@ -16,10 +17,16 @@ const routePathEffect = (value: unknown, action: "" | "/retry" | "/cancel") =>
   )
 
 /** Encode `GET /scripts/:workflowRef`. */
-export const encodeScriptItemPathEffect = (value: unknown) => routePathEffect(value, "")
+export const encodeScriptItemPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => routePathEffect(value, "")
 
 /** Encode `POST /scripts/:workflowRef/retry`. */
-export const encodeScriptRetryPathEffect = (value: unknown) => routePathEffect(value, "/retry")
+export const encodeScriptRetryPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => routePathEffect(value, "/retry")
 
 /** Encode `POST /scripts/:workflowRef/cancel`. */
-export const encodeScriptCancelPathEffect = (value: unknown) => routePathEffect(value, "/cancel")
+export const encodeScriptCancelPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => routePathEffect(value, "/cancel")

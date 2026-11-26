@@ -84,7 +84,9 @@ export const folderGrantFor = async (
     : undefined
 }
 
-export const grantData = (grant: FolderGrant) =>
+export const grantData = (
+  grant: FolderGrant
+): { space_folder_grant: { _tag: "SpaceFolderGrant"; space_id: string; local_folder: string } } =>
   ({
     space_folder_grant: {
       _tag: "SpaceFolderGrant",

@@ -88,7 +88,9 @@ export const WikiRenameRequestSchema = Schema.Struct({
 })
 
 /** Encode the public create input into the server's revision-aware request body. */
-export const encodeCreateWikiRequestEffect = (value: unknown) =>
+export const encodeCreateWikiRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiCreateRequestContextSchema)(value, strict).pipe(
     Effect.map(({ repositoryHead, input }) => ({
       path: input.path,
@@ -106,7 +108,9 @@ export const encodeCreateWikiRequestEffect = (value: unknown) =>
   )
 
 /** Encode a page edit while deriving both optimistic-concurrency guards. */
-export const encodeUpdateWikiRequestEffect = (value: unknown) =>
+export const encodeUpdateWikiRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiUpdateRequestContextSchema)(value, strict).pipe(
     Effect.map(({ page, content }) => ({
       content,
@@ -119,7 +123,9 @@ export const encodeUpdateWikiRequestEffect = (value: unknown) =>
     Effect.map(JSON.stringify)
   )
 
-export const encodeWikiVersionRequestEffect = (value: unknown) =>
+export const encodeWikiVersionRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiPageGuardSchema)(value, strict).pipe(
     Effect.map((page) => ({
       expected_version: page.version,
@@ -131,7 +137,9 @@ export const encodeWikiVersionRequestEffect = (value: unknown) =>
     Effect.map(JSON.stringify)
   )
 
-export const encodeWikiHistoryRestoreRequestEffect = (value: unknown) =>
+export const encodeWikiHistoryRestoreRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiHistoryRestoreRequestContextSchema)(value, strict).pipe(
     Effect.map(({ page, side }) => ({
       expected_version: page.version,
@@ -144,7 +152,9 @@ export const encodeWikiHistoryRestoreRequestEffect = (value: unknown) =>
     Effect.map(JSON.stringify)
   )
 
-export const encodeRenameWikiRequestEffect = (value: unknown) =>
+export const encodeRenameWikiRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiRenameRequestContextSchema)(value, strict).pipe(
     Effect.map(({ page, input }) => ({
       page_id: page.pageId,

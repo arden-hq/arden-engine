@@ -4,6 +4,7 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { revokeAutomationWork } from "./automation-authority.js"
 import { userAutomationSql } from "./authority-sql.js"
+import type { Statement } from "effect/unstable/sql/Statement"
 
 export const deleteAutomationRow = Effect.fn("AutomationRemoval.delete")(function* (options: {
   readonly sql: SqlClient.SqlClient
@@ -28,7 +29,10 @@ export const deleteAutomationRow = Effect.fn("AutomationRemoval.delete")(functio
       AND (archived_at IS NULL OR json_extract(metadata, '$.archived_with_space') = 1)`
 })
 
-export const automationsOfChat = (sql: SqlClient.SqlClient, sessionId: string) =>
+export const automationsOfChat = (
+  sql: SqlClient.SqlClient,
+  sessionId: string
+): Statement<{ readonly task_id: string; readonly name: string; readonly running: number }> =>
   sql<{
     readonly task_id: string
     readonly name: string

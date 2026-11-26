@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import type { CommunicationDoor } from "@arden-hq/protocol/chat"
 import type { RunContext, RunOrigin } from "@arden-hq/protocol/runs"
 import { automationRepeats } from "@arden-hq/protocol/automations"
@@ -223,17 +224,10 @@ const automationRunRepeats = Effect.fn("RunEnding.repeats")(function* (
   const row = rows[0]
   if (row === undefined || row.source === "manual") return false
   return (
-    row.again === 1 || (row.triggers !== null && automationRepeats(storedTriggers(row.triggers)))
+    row.again === 1 ||
+    (row.triggers !== null && automationRepeats(parseJsonTextOrUndefined(row.triggers)))
   )
 })
-
-const storedTriggers = (text: string): unknown => {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
 
 const entityTwinAt = Effect.fn("RunEnding.twin")(function* (
   sql: SqlClient.SqlClient,

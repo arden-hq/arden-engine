@@ -28,6 +28,7 @@ import { emailItemEventProducer, githubItemEventProducer } from "./producers/con
 import { mcpEventProducer } from "./producers/mcp-event.js"
 import { taskEventProducer } from "./producers/task.js"
 import { wikiEventProducer } from "./producers/wiki.js"
+import type { GoogleConnectionError } from "../google/errors.js"
 
 const producers: { readonly [T in AutomationEventType]: AutomationEventProducer<T> } = {
   event_approaching: calendarEventProducer,
@@ -91,7 +92,7 @@ export const eventTriggerMatches = (
 export const availableAutomationEvents = (
   google: GoogleConnections["Service"],
   mcp: McpConnections["Service"]
-) =>
+): Effect.Effect<readonly AutomationEventCatalogEntry[], GoogleConnectionError, never> =>
   Effect.all([google.list(), mcp.snapshot()]).pipe(
     Effect.map(([response, mcpServers]): ReadonlyArray<AutomationEventCatalogEntry> =>
       automationEventProducers

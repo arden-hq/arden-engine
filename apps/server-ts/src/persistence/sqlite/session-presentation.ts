@@ -3,8 +3,10 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { JobPurpose } from "../job-classification.js"
 import { ownerJoin } from "./automation-rows.js"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export const readableConversationSql = (sql: SqlClient.SqlClient) =>
+export const readableConversationSql = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`(session_type = 'chat' AND parent_session_id IS NULL AND parent_message_id IS NULL
     AND COALESCE(substr(origin_automation_id, 1, 6), '') != 'space:')`
 

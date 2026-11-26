@@ -11,6 +11,7 @@ import { isRecord } from "@arden-hq/std/json"
 
 import type { JsonValue, ProviderToolCall } from "../../contracts/messages.js"
 import type { ToolDeclaration, ToolSearch } from "../../contracts/tools.js"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 /** The search tool's name on every wire, in history, and in the host's tool words. */
 export const TOOL_SEARCH_TOOL_NAME = "tool_search"
@@ -42,7 +43,7 @@ const searchInput = (raw: unknown): SearchInput => {
   let decoded: unknown = raw
   if (typeof raw === "string") {
     try {
-      decoded = JSON.parse(raw)
+      decoded = parseJsonText(raw)
     } catch {
       return { ok: false, error: `tool_search arguments are not valid JSON. ${RETRY_HINT}` }
     }
@@ -61,7 +62,7 @@ const recordedArguments = (raw: unknown): Readonly<Record<string, JsonValue>> =>
   let decoded: unknown = raw
   if (typeof raw === "string") {
     try {
-      decoded = JSON.parse(raw)
+      decoded = parseJsonText(raw)
     } catch {
       return {}
     }

@@ -128,7 +128,14 @@ export const readerPosition = <R extends Reader>(reader: R) => {
   return { start, read, advance, on }
 }
 
-export const makeReaderPositions = ({ writer }: { readonly writer: Writer }) =>
+export const makeReaderPositions = ({
+  writer
+}: {
+  readonly writer: Writer
+}): {
+  readonly maintenance: ReaderPosition<string | null>
+  readonly dailySummary: ReaderPosition<string>
+} =>
   ReaderPositions.of({
     maintenance: readerPosition("maintenance").on(writer),
     dailySummary: readerPosition("dailySummary").on(writer)

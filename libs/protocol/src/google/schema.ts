@@ -168,7 +168,9 @@ export const toGoogleDisconnectReceipt = (
   accountId: response.account_id
 })
 
-export const encodeGoogleOAuthPathEffect = (value: unknown) =>
+export const encodeGoogleOAuthPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(GoogleServiceIdSchema)(value).pipe(
     Effect.map((service) => `${googlePath}/${encodeSegment(service)}/oauth`)
   )
@@ -182,7 +184,9 @@ export const GoogleGrantSchema = Schema.Literals([
   "drive_manage"
 ] as const)
 
-export const encodeGoogleGrantPathEffect = (value: unknown) =>
+export const encodeGoogleGrantPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(Schema.Tuple([GoogleAccountIdSchema, GoogleGrantSchema]))(
     value,
     strict
@@ -193,7 +197,9 @@ export const encodeGoogleGrantPathEffect = (value: unknown) =>
     )
   )
 
-export const encodeGoogleAccountPathEffect = (value: unknown) =>
+export const encodeGoogleAccountPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(Schema.Tuple([GoogleServiceIdSchema, GoogleAccountIdSchema]))(
     value,
     strict

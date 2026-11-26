@@ -3,6 +3,7 @@ import type { SqlClient, Statement } from "effect/unstable/sql"
 import { causedChainDepth } from "../automations/chain-depth.js"
 import type { RunCause } from "../runs/queries.js"
 import { SessionLifecycleEventError } from "../sessions/events.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 const delegationRoot = (run: string): string =>
   `FROM chat_runs AS root
@@ -52,7 +53,7 @@ export const taskWakeDepth = (
 export const taskStepDepth = (
   sql: SqlClient.SqlClient,
   step: { readonly itemId: string; readonly afterRunId?: string | undefined }
-) =>
+): Effect.Effect<number, SqlError, never> =>
   step.afterRunId === undefined
     ? sql<{
         readonly depth: number
@@ -63,7 +64,10 @@ export const taskStepDepth = (
         Effect.map((cause) => causedChainDepth(cause.automationId ?? null, cause.wakeDepth))
       )
 
-export const readCause = (sql: SqlClient.SqlClient, runId: string) =>
+export const readCause = (
+  sql: SqlClient.SqlClient,
+  runId: string
+): Effect.Effect<RunCause, SqlError, never> =>
   sql<{
     readonly automation_id: string | null
     readonly chain_depth: number

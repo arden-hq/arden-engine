@@ -31,6 +31,7 @@ import { OpenAiResponsesProviderError, statusFailureCode } from "./errors.js"
 import { asRecord, type RawResponseEvent } from "./items.js"
 import { makePayload, responsesRoute } from "./request.js"
 import { makeEventMapper } from "./response.js"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 export { OpenAiResponsesProviderError, statusFailureCode } from "./errors.js"
 export { makePayload, type ResponsesPayload } from "./request.js"
@@ -89,7 +90,7 @@ const rawEvent = (event: SseEvent): RawResponseEvent => {
   if (event.data.trim().length === 0) return { type: event.event }
   let decoded: unknown
   try {
-    decoded = JSON.parse(event.data)
+    decoded = parseJsonText(event.data)
   } catch {
     throw new SemanticResponseError("OpenAI returned an invalid SSE event")
   }

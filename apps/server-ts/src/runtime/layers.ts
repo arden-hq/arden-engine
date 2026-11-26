@@ -1,5 +1,5 @@
 import { Context, Effect, Exit, Layer, Schema, Scope } from "effect"
-import * as Http from "effect/unstable/http"
+import { HttpServer } from "effect/unstable/http"
 import type { HostedServerOptions } from "../config/options.js"
 import { ServerConfig, layer } from "../config/service.js"
 import { serverLayer } from "../http/server.js"
@@ -10,7 +10,7 @@ import { decodeModelHostSource } from "../models/host.js"
 import { Diagnostics, diagnosticsLayer } from "./diagnostics.js"
 
 export interface OpenServer {
-  readonly address: Http.HttpServer.TcpAddress
+  readonly address: HttpServer.TcpAddress
   readonly scope: Scope.Closeable
   readonly context: Context.Context<ChatMessage | ModelProviderSwitch>
 }
@@ -37,7 +37,7 @@ export const openServer = (options: HostedServerOptions, scope: Scope.Closeable)
       serverLayer(config, { ...options, modelHost, localAccess }),
       scope
     )
-    const server = Context.get(context, Http.HttpServer.HttpServer)
+    const server = Context.get(context, HttpServer.HttpServer)
 
     if (server.address._tag !== "TcpAddress") {
       return yield* Effect.fail(new Error("Arden server requires a TCP listener"))
@@ -57,4 +57,5 @@ export const openServer = (options: HostedServerOptions, scope: Scope.Closeable)
     )
   )
 
-export const closeServer = (server: OpenServer) => Scope.close(server.scope, Exit.void)
+export const closeServer = (server: OpenServer): Effect.Effect<void, never, never> =>
+  Scope.close(server.scope, Exit.void)

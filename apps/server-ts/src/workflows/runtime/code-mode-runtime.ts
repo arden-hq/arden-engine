@@ -1,3 +1,5 @@
+import { parseJsonText, parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { after, type Timer } from "@arden-hq/std/timer"
 import { formatBytes } from "@arden-hq/std/count"
 import { getQuickJS, type QuickJSDeferredPromise, type QuickJSHandle } from "quickjs-emscripten"
 import { Predicate, Schema } from "effect"
@@ -216,10 +218,8 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
         }
       } satisfies HostEnvelope)
     }
-    let args: unknown
-    try {
-      args = JSON.parse(argsJson)
-    } catch {
+    const args = parseJsonTextOrUndefined(argsJson)
+    if (args === undefined) {
       return safeJson({
         ok: false,
         error: { message: "Tool arguments must be valid JSON" }
@@ -308,7 +308,7 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
     return false
   })
 
-  let timer: NodeJS.Timeout | undefined
+  let timer: Timer | undefined
   let abortListener: (() => void) | undefined
   liveRuntimes += 1
   try {
@@ -487,7 +487,7 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
     pumpJobs()
 
     const timeout = new Promise<"timed_out">((resolve) => {
-      timer = setTimeout(() => resolve("timed_out"), Math.max(0, deadline - currentMillis()))
+      timer = after(Math.max(0, deadline - currentMillis()), () => resolve("timed_out"))
     })
     const aborted = new Promise<"aborted">((resolve) => {
       if (options.signal.aborted) {
@@ -518,11 +518,9 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
         interrupted === "aborted" ? "cancelled" : (interrupted ?? "runtime")
       )
     }
-    const decoded: unknown = JSON.parse(context.getString(outcome.result.value))
+    const decoded = parseJsonText(context.getString(outcome.result.value))
     outcome.result.value.dispose()
-    if (!isGuestEnvelope(decoded)) {
-      return failed("Code Mode returned an invalid result")
-    }
+    if (!isGuestEnvelope(decoded)) return failed("Code Mode returned an invalid result")
     const envelope: GuestEnvelope = decoded
     if (!envelope.ok) {
       const terminal = terminalInterrupt(options.signal, deadline, interrupted)
@@ -537,7 +535,7 @@ export async function executeCodeMode(options: CodeModeOptions): Promise<CodeMod
     }
     return { status: "completed", value: envelope.value ?? null, calls }
   } finally {
-    if (timer !== undefined) clearTimeout(timer)
+    timer?.cancel()
     if (abortListener !== undefined) options.signal.removeEventListener("abort", abortListener)
     runtime.removeInterruptHandler()
     cleanup()

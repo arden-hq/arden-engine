@@ -5,6 +5,7 @@ import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sess
 import { toldKey, UnitOfWork } from "../unit-of-work.js"
 import { runColumns, runDestinationSessionId, type RunColumns } from "./run-destination.js"
 import { taskOpenSql } from "./task-status-sql.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const questionTaskAuthorityPredicate = (
   sql: SqlClient.SqlClient,
@@ -21,7 +22,10 @@ const questionTaskAuthorityPredicate = (
   )
 )`
 
-export const runAsksVisiblePredicate = (sql: SqlClient.SqlClient, run: RunColumns) =>
+export const runAsksVisiblePredicate = (
+  sql: SqlClient.SqlClient,
+  run: RunColumns
+): Statement.Statement<Row> =>
   sql`${questionTaskAuthorityPredicate(sql, run.metadata)}
     AND EXISTS (
       SELECT 1 FROM sessions AS question_destination
@@ -40,7 +44,7 @@ export const questionVisiblePredicate = (options: {
   readonly run: RunColumns
   readonly resolution: Statement.Fragment
   readonly closedAt: Statement.Fragment
-}) => {
+}): Statement.Statement<Row> => {
   const { sql, run, resolution, closedAt } = options
   return sql`${resolution} IS NULL AND ${closedAt} IS NULL
     AND ${runAsksVisiblePredicate(sql, run)}`

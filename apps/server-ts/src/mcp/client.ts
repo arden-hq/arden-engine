@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js"
@@ -62,19 +63,19 @@ const promiseWithTimeout = async <A>(
   timeoutMs: number,
   onTimeout: () => void | Promise<void>
 ): Promise<A> => {
-  let timer: ReturnType<typeof setTimeout> | undefined
+  let timer: Timer | undefined
   const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
+    timer = after(timeoutMs, () => {
       void Promise.resolve(onTimeout()).then(
         () => reject(new McpTimeoutError(timeoutMs)),
         (cause: unknown) => reject(new McpTimeoutError(timeoutMs, { cause }))
       )
-    }, timeoutMs)
+    })
   })
   try {
     return await Promise.race([promise, timeout])
   } finally {
-    if (timer !== undefined) clearTimeout(timer)
+    timer?.cancel()
   }
 }
 

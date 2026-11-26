@@ -6,6 +6,7 @@ import type { WorkOwner } from "./automation-rows.js"
 import { nextId } from "./deps.js"
 import { insertSession } from "./session-insert.js"
 import { spaceJobId } from "../space-job-id.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export const attemptRunSessionId = (trunk: string, attemptId: number): string =>
   `${trunk}::i${attemptId}`
@@ -21,7 +22,7 @@ export const recordReviewChat = (
   spaceId: string,
   sessionId: string,
   mode: "keep" | "replace"
-) =>
+): Effect.Effect<void, SqlError, never> =>
   (mode === "keep"
     ? sql`INSERT INTO space_review_chats (space_id, session_id) VALUES (${spaceId}, ${sessionId})
         ON CONFLICT(space_id) DO NOTHING`
@@ -34,7 +35,7 @@ export const followSpaceName = (
   spaceId: string,
   before: string,
   after: string
-) =>
+): Effect.Effect<void, SqlError, never> =>
   sql`UPDATE sessions SET name = ${`${after} worker`}
     WHERE origin_automation_id = ${spaceJobId(spaceId)} AND session_type = 'channel'
       AND name = ${`${before} worker`}`.pipe(Effect.asVoid)

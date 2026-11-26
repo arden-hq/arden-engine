@@ -99,7 +99,9 @@ export const ScriptRetryRequestSchema = Schema.Struct({
   expected_version: PositiveIntSchema
 })
 
-export const encodeScriptRetryRequestEffect = (value: unknown) =>
+export const encodeScriptRetryRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ScriptRetryRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )

@@ -16,8 +16,10 @@ import { triggerChangeText } from "./automation-chat-quiet.js"
 import { enqueue, freshRow } from "./automation-enqueue.js"
 import { eventFromSnapshot, matchEvent } from "./automation-listening.js"
 import type { SqlClient } from "effect/unstable/sql"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export const dropMeasuredRows = (sql: SqlClient.SqlClient, automationId: string) =>
+export const dropMeasuredRows = (sql: SqlClient.SqlClient, automationId: string): Statement<Row> =>
   sql`DELETE FROM automation_event_queue
     WHERE task_id = ${automationId} AND ${freshRow(sql)}
       AND (source IN ('idle', 'count') OR (source = 'event' AND event_key LIKE 'chat.quiet:%'))`

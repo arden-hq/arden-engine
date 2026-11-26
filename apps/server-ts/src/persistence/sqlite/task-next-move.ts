@@ -24,6 +24,7 @@ import {
   TASK_RETRY_LADDER_MS,
   TASK_STILL_LADDER_MS
 } from "../automations/retry-ladders.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 export type TaskStopCause = TransientRunErrorCode | "request_invalid" | "stalled" | "failed"
 const STUCK_AFTER_WAKES = 3
@@ -182,7 +183,10 @@ const recordChangedAtSql = (sql: SqlClient.SqlClient, itemId: Statement.Fragment
 const taskMovedAtSql = (sql: SqlClient.SqlClient, itemId: Statement.Fragment) =>
   sql`MAX(${firmlyMovedAtSql(sql, itemId)}, ${recordChangedAtSql(sql, itemId)})`
 
-export const stallStreakSql = (sql: SqlClient.SqlClient, itemId: string) => sql`(
+export const stallStreakSql = (
+  sql: SqlClient.SqlClient,
+  itemId: string
+): Statement.Statement<Row> => sql`(
   SELECT COUNT(*) FROM space_task_events
   WHERE item_id = ${itemId} AND event_type = 'stalled'
     AND created_at > ${taskMovedAtSql(sql, sql`${itemId}`)})`

@@ -81,7 +81,7 @@ export const logStoreFailure = (error: StoreFailure): Effect.Effect<void> =>
     : Effect.void
 
 export const failInternal =
-  (what: string) =>
+  (what: string): ((error: unknown) => Effect.Effect<never, HttpApiError.InternalServerError>) =>
   (error: unknown): Effect.Effect<never, HttpApiError.InternalServerError> =>
     Effect.logError(`${what} answered 500`, error).pipe(
       Effect.andThen(Effect.fail(new HttpApiError.InternalServerError({})))

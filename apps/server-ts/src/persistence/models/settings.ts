@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import type {
   ModelAssignment,
   ModelCatalog,
@@ -249,12 +250,7 @@ export const selectRole = (
   resolveAssignment(snapshot(stored, runtime.defaults).effective.roles[role], runtime)
 
 export const migrateLegacyRoles = (json: string): string => {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    return json
-  }
+  const parsed = parseJsonTextOrUndefined(json)
   if (typeof parsed !== "object" || parsed === null) return json
   const overrides = (parsed as { roleOverrides?: unknown }).roleOverrides
   if (typeof overrides !== "object" || overrides === null || !("workflow" in overrides)) return json

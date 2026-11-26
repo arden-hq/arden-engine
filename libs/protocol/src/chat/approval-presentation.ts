@@ -309,7 +309,9 @@ const sanitizeEditable = (value: unknown): ApprovalPresentationEditable | undefi
   }
   const encoded = JSON.stringify(value.arguments)
   if (encoded.length > APPROVAL_PRESENTATION_LIMITS.editableArguments) return undefined
-  const decoded = Schema.decodeUnknownOption(EditableArgumentsSchema)(JSON.parse(encoded))
+  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(EditableArgumentsSchema))(
+    encoded
+  )
   return decoded._tag === "Some" ? { fields, arguments: decoded.value } : undefined
 }
 

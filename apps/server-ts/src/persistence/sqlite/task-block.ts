@@ -6,7 +6,10 @@ export const BUDGET_SPENT = "Arden used the whole token budget. Raise the cap to
 export const blockTaskOnYou = (
   sql: SqlClient.SqlClient,
   input: { readonly where: Statement.Fragment; readonly at: string; readonly fence: boolean }
-) => sql<{ readonly item_id: string; readonly space_id: string | null }>`
+): Statement.Statement<{ readonly item_id: string; readonly space_id: string | null }> => sql<{
+  readonly item_id: string
+  readonly space_id: string | null
+}>`
   UPDATE space_tasks SET blocked = 1, waiting_on = 'you', next_attempt_at = NULL,
     generation = generation + ${input.fence ? 1 : 0}, updated_at = MAX(updated_at, ${input.at})
   WHERE ${input.where}

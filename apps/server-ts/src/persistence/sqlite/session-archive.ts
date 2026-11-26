@@ -16,8 +16,12 @@ import { storeError, sessionIdSchema } from "./session-rows.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { chatArrivalWaitingSql } from "./chat-arrival-waiting.js"
 import { userAutomationSql } from "./authority-sql.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export const chatHasActiveWork = (sql: SqlClient.SqlClient, session: Statement.Fragment) => sql`(
+export const chatHasActiveWork = (
+  sql: SqlClient.SqlClient,
+  session: Statement.Fragment
+): Statement.Statement<Row> => sql`(
   EXISTS (SELECT 1 FROM chat_runs AS active_run
     WHERE active_run.session_id = ${session}.session_id
       AND active_run.status IN ${activeRunStatusList})

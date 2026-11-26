@@ -1,3 +1,5 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
+import { after, every, type Timer } from "@arden-hq/std/timer"
 import { ladderDelayMs } from "@arden-hq/std/retry"
 import {
   addDeviceMessage,
@@ -93,8 +95,8 @@ export class RelayConnector {
   #stopped = false
   #attempt = 0
   #heard = 0
-  #heartbeat: ReturnType<typeof setInterval> | undefined
-  #retry: ReturnType<typeof setTimeout> | undefined
+  #heartbeat: Timer | undefined
+  #retry: Timer | undefined
   #offer:
     | { readonly token: Uint8Array; readonly expires: number; readonly link: string }
     | undefined
@@ -129,8 +131,8 @@ export class RelayConnector {
 
   stop(): void {
     this.#stopped = true
-    clearTimeout(this.#retry)
-    clearInterval(this.#heartbeat)
+    this.#retry?.cancel()
+    this.#heartbeat?.cancel()
     this.#offerWaiter?.settle(false)
     for (const phone of this.#phones.values()) phone.close()
     this.#phones.clear()
@@ -149,11 +151,11 @@ export class RelayConnector {
     const hash = pairTokenHash(token)
     this.#offerWaiter?.settle(false)
     const accepted = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), ConnectorLimits.pairOfferWaitMs)
+      const timer = after(ConnectorLimits.pairOfferWaitMs, () => resolve(false))
       this.#offerWaiter = {
         hash,
         settle: (ok) => {
-          clearTimeout(timer)
+          timer.cancel()
           this.#offerWaiter = undefined
           resolve(ok)
         }
@@ -287,18 +289,18 @@ export class RelayConnector {
       if (isBinary) this.#onFrame(bytesOf(data))
     })
     socket.on("open", () => {
-      clearInterval(this.#heartbeat)
-      this.#heartbeat = setInterval(() => {
+      this.#heartbeat?.cancel()
+      const beat = (): void => {
         if (currentMillis() - this.#heard > ConnectorLimits.silentMs) socket.terminate()
         else if (socket.readyState === WebSocket.OPEN) socket.send("ping")
-      }, ConnectorLimits.pingMs)
-      this.#heartbeat.unref?.()
+      }
+      this.#heartbeat = every(ConnectorLimits.pingMs, beat, { unref: true })
     })
     socket.on("error", () => {})
     socket.on("close", (code: number) => {
       if (this.#socket !== socket) return
       this.#socket = undefined
-      clearInterval(this.#heartbeat)
+      this.#heartbeat?.cancel()
       this.#dropAllLinks()
       this.#online.clear()
       this.#setState("connecting")
@@ -306,15 +308,12 @@ export class RelayConnector {
       this.#attempt += 1
       const delay = ladderDelayMs(ConnectorLimits.backoffMs, this.#attempt)
       this.#options.log("info", "Relay connection closed", { code, retryMs: delay })
-      this.#retry = setTimeout(() => this.#connect(), delay)
-      this.#retry.unref?.()
+      this.#retry = after(delay, () => this.#connect(), { unref: true })
     })
   }
 
   #send(header: ClientHeader, body?: Uint8Array): void {
-    const socket = this.#socket
-    if (socket?.readyState !== WebSocket.OPEN) return
-    socket.send(encodeFrame(header, body))
+    if (this.#socket?.readyState === WebSocket.OPEN) this.#socket.send(encodeFrame(header, body))
   }
 
   #onFrame(data: Uint8Array): void {
@@ -567,7 +566,7 @@ const bytesOf = (data: RawData): Uint8Array => {
 
 const parseJson = (bytes: Uint8Array): unknown => {
   try {
-    return JSON.parse(fromUtf8(bytes))
+    return parseJsonText(fromUtf8(bytes))
   } catch {
     return undefined
   }

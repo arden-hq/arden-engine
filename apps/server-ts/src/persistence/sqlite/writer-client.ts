@@ -49,7 +49,9 @@ const rollbackOnFailedCommit = <C extends SqlClient.SqlClient>(client: C, retrie
   })
 }
 
-export const sqliteWriterLayer = (config: SqliteThreadClientConfig) =>
+export const sqliteWriterLayer = (
+  config: SqliteThreadClientConfig
+): Layer.Layer<SqlClient.SqlClient, never, never> =>
   Layer.effectContext(
     Effect.map(makeSqliteThreadClient({ ...config, busyTimeout: 0 }), (client) => {
       const retries = Math.ceil(

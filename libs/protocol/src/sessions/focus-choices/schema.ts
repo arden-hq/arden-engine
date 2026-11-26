@@ -67,7 +67,9 @@ export type ResolveFocusChoiceResponseAgrees = Assert<
   Agrees<typeof ResolveFocusChoiceResponseSchema.Type, ResolveFocusChoiceResponse>
 >
 
-export const encodeResolveFocusChoiceRequestEffect = (value: unknown) =>
+export const encodeResolveFocusChoiceRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ResolveFocusChoiceInputSchema)(value, {
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))

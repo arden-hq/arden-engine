@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { AutomationTriggersSchema } from "./automation-schedule.js"
@@ -52,9 +53,7 @@ export const instructionPayload = (row: InstructionSnapshot): string =>
     prompt: row.prompt,
     model: row.model,
     context_mode: row.context_mode,
-    triggers: Schema.decodeUnknownSync(AutomationTriggersSchema)(
-      JSON.parse(row.triggers) as unknown
-    ),
+    triggers: Schema.decodeUnknownSync(AutomationTriggersSchema)(parseJsonText(row.triggers)),
     thread_id: row.thread_id,
     cooldown_minutes: row.cooldown_minutes
   })
@@ -87,7 +86,7 @@ export const matchesInstructionReceipt = (input: {
     JSON.stringify(field(data, "triggers")) !==
       JSON.stringify(
         Schema.decodeUnknownSync(AutomationTriggersSchema)(
-          JSON.parse(input.instruction.triggers) as unknown
+          parseJsonText(input.instruction.triggers)
         )
       )
   )

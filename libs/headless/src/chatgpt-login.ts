@@ -1,3 +1,5 @@
+import { parseJsonBody, parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { after } from "@arden-hq/std/timer"
 import { writeAtomic } from "@arden-hq/std/atomic-file"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { isRecord } from "@arden-hq/std/json"
@@ -147,12 +149,11 @@ export const startChatGptLogin = async ({
   }
   const address = server.address()
   redirectUri = `http://localhost:${typeof address === "object" && address !== null ? address.port : port}${CALLBACK_PATH}`
-  const timer = setTimeout(
-    () => settle({ ok: false, error: new ChatGptLoginError("timeout") }),
-    timeoutMs
+  const timer = after(timeoutMs, () =>
+    settle({ ok: false, error: new ChatGptLoginError("timeout") })
   )
   const tokens = settled.then((outcome) => {
-    clearTimeout(timer)
+    timer.cancel()
     server.close()
     server.closeAllConnections()
     if (!outcome.ok) throw outcome.error
@@ -308,7 +309,7 @@ export const chatGptLoginFile = (folder: string): ChatGptLoginStore => {
         if (isRecord(cause) && cause["code"] === "ENOENT") return undefined
         throw new ChatGptLoginError("unreadable_store")
       }
-      const tokens = storedTokens(parseJson(text))
+      const tokens = storedTokens(parseJsonTextOrUndefined(text))
       if (tokens === undefined) throw new ChatGptLoginError("unreadable_store")
       return tokens
     },
@@ -341,7 +342,7 @@ const postToken = async (
 
 const bodyOf = async (response: Response): Promise<unknown> => {
   try {
-    return await response.json()
+    return await parseJsonBody(response)
   } catch {
     throw new ChatGptLoginError("token_exchange")
   }
@@ -374,7 +375,7 @@ const claimsOf = (token: unknown): Readonly<Record<string, unknown>> | undefined
   if (typeof token !== "string") return undefined
   const parts = token.split(".")
   if (parts.length !== 3) return undefined
-  const claims = parseJson(Buffer.from(parts[1] ?? "", "base64url").toString("utf8"))
+  const claims = parseJsonTextOrUndefined(Buffer.from(parts[1] ?? "", "base64url").toString("utf8"))
   return isRecord(claims) ? claims : undefined
 }
 
@@ -419,14 +420,6 @@ const storedTokens = (value: unknown): ChatGptTokens | undefined => {
 
 const nonEmpty = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined
-
-const parseJson = (text: string): unknown => {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
 
 const toLoginError = (cause: unknown): Error =>
   cause instanceof ChatGptLoginError ? cause : new ChatGptLoginError("token_exchange")

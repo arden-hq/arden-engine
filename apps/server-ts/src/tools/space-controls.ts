@@ -42,7 +42,7 @@ const publicSpace = ({ page_id: _pageId, ...space }: PersistedSpace) => space
 export const requireChat = async (
   services: Pick<Services, "runs">,
   ctx: ToolContext<ServerRunContext>
-) => {
+): Promise<void> => {
   const [run, liveness] = await Effect.runPromise(
     Effect.all([services.runs.get(ctx.run.runId), services.runs.liveness(ctx.run.runId)]).pipe(
       Effect.mapError((cause) => failure(cause))

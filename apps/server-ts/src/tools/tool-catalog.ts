@@ -283,7 +283,7 @@ export const ownedToolNames = (
     .map((tool) => tool.definition.name)
 
 export const refusalText =
-  (authority: RunAuthority) =>
+  (authority: RunAuthority): ((name: string, reason: "scope" | "denied") => string) =>
   (name: string, reason: "scope" | "denied"): string => {
     if (reason === "denied")
       return renderRefusal({

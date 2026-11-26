@@ -9,7 +9,10 @@ export interface CompletedModelRequest {
 }
 
 export const observeModelRequests =
-  (sessionId: string, onComplete: ((input: CompletedModelRequest) => void) | undefined) =>
+  (
+    sessionId: string,
+    onComplete: ((input: CompletedModelRequest) => void) | undefined
+  ): ((stream: ModelProvider["stream"]) => ModelProvider["stream"]) =>
   (stream: ModelProvider["stream"]): ModelProvider["stream"] =>
     async function* (request) {
       const startedAt = currentMillis()

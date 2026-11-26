@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { Predicate, Schema } from "effect"
 
 import {
@@ -113,7 +114,7 @@ const jwtIdentity = (value: unknown): string | undefined => {
   const payload = value.split(".")[1]
   if (payload === undefined) return undefined
   try {
-    const decoded: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))
+    const decoded = parseJsonText(Buffer.from(payload, "base64url").toString("utf8"))
     return recordIdentity(decoded)
   } catch {
     return undefined

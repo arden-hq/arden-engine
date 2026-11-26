@@ -154,7 +154,12 @@ export const eventTimes = (
   }
 }
 
-export const meetRequest = () => ({
+export const meetRequest = (): {
+  createRequest: {
+    requestId: `${string}-${string}-${string}-${string}-${string}`
+    conferenceSolutionKey: { type: string }
+  }
+} => ({
   createRequest: {
     requestId: randomUUID(),
     conferenceSolutionKey: { type: "hangoutsMeet" }
@@ -236,7 +241,10 @@ export const rsvpFor = (
     readonly rawTarget: unknown
   },
   input: { readonly response: RsvpAnswer; readonly comment?: string | undefined }
-) => {
+): {
+  readonly attendees: ReadonlyArray<Readonly<Record<string, unknown>>>
+  readonly attendeesOmitted: true
+} => {
   const plan = planRsvp({
     organizerIsSelf: current.target.organizer?.self === true,
     attendees: Predicate.hasProperty(current.rawTarget, "attendees")

@@ -2,8 +2,11 @@ import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { InboxStoreError, type InboxPlanLimitEntry } from "../inbox/store.js"
 import { NOTICE_NAMESPACE } from "./limit-settings.js"
+import type { Statement } from "effect/unstable/sql/Statement"
 
-export const planLimitNoticeRows = (sql: SqlClient.SqlClient) =>
+export const planLimitNoticeRows = (
+  sql: SqlClient.SqlClient
+): Statement<{ readonly state: string }> =>
   sql<{
     readonly state: string
   }>`SELECT state FROM monitor_state WHERE namespace = ${NOTICE_NAMESPACE}`

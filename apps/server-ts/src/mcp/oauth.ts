@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 import { mcpOAuthRedirectUri } from "@arden-hq/protocol/mcp"
 import type {
   OAuthClientProvider,
@@ -421,7 +422,7 @@ interface PendingCallback {
   readonly name: string
   readonly complete: (code: string) => Promise<void>
   readonly fail: () => Promise<void>
-  readonly timeout: ReturnType<typeof setTimeout>
+  readonly timeout: Timer
 }
 
 const callbackPage = (title: string, detail: string): string => `<!doctype html>
@@ -464,7 +465,7 @@ export class McpOAuthCallbacks {
         if (state === null || pending === undefined) {
           return page(400, "Connection failed", "The authorization request expired.")
         }
-        clearTimeout(pending.timeout)
+        pending.timeout.cancel()
         this.pending.delete(state)
         if (oauthError !== null || code === null) {
           void pending.fail().catch(() => undefined)
@@ -478,7 +479,7 @@ export class McpOAuthCallbacks {
         const pending = [...this.pending.values()]
         this.pending.clear()
         for (const callback of pending) {
-          clearTimeout(callback.timeout)
+          callback.timeout.cancel()
           void callback.fail().catch(() => undefined)
         }
       }
@@ -493,25 +494,25 @@ export class McpOAuthCallbacks {
     fail: () => Promise<void>
   ): void {
     const existing = this.pending.get(state)
-    if (existing !== undefined) clearTimeout(existing.timeout)
-    const timeout = setTimeout(() => {
+    existing?.timeout.cancel()
+    const timeout = after(CALLBACK_TIMEOUT_MS, () => {
       this.pending.delete(state)
       void fail().catch(() => undefined)
-    }, CALLBACK_TIMEOUT_MS)
+    })
     this.pending.set(state, { name, complete, fail, timeout })
   }
 
   cancel(name: string): void {
     for (const [state, pending] of this.pending) {
       if (pending.name !== name) continue
-      clearTimeout(pending.timeout)
+      pending.timeout.cancel()
       this.pending.delete(state)
     }
   }
 
   async close(): Promise<void> {
     await this.startPromise?.catch(() => undefined)
-    for (const pending of this.pending.values()) clearTimeout(pending.timeout)
+    for (const pending of this.pending.values()) pending.timeout.cancel()
     this.pending.clear()
     const listener = this.listener
     this.listener = undefined

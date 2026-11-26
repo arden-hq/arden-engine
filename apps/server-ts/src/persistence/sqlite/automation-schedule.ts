@@ -18,7 +18,10 @@ import { decodeJson } from "./json.js"
 
 export const AutomationTriggersSchema = Schema.Array(AutomationTriggerSchema)
 
-export const listenerTriggers = (row: { readonly task_id: string; readonly triggers: string }) =>
+export const listenerTriggers = (row: {
+  readonly task_id: string
+  readonly triggers: string
+}): Effect.Effect<readonly AutomationTrigger[] | undefined, never, never> =>
   decodeJson(AutomationTriggersSchema, row.triggers).pipe(
     Effect.catch((cause) =>
       Effect.logWarning("Skipping Automation with corrupt stored triggers", {

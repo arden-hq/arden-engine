@@ -1,3 +1,4 @@
+import { parseJsonText, parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 /**
  * "Desk" became "Space" (migration 0141). This converts one stored value from
  * the old words to the new ones. Migration 0141 and the space_words backfill
@@ -26,14 +27,7 @@ const looksLikeJson = (text: string): boolean => {
   return start === "{" || start === "["
 }
 
-const parsesAsJson = (text: string): boolean => {
-  try {
-    JSON.parse(text)
-    return true
-  } catch {
-    return false
-  }
-}
+const parsesAsJson = (text: string): boolean => parseJsonTextOrUndefined(text) !== undefined
 
 const convertString = (text: string): string => {
   if (!hasOldWord(text)) return text
@@ -53,7 +47,7 @@ const convertJsonText = (text: string): string => {
     let end = quote + 1
     while (text[end] !== '"') end += text[end] === "\\" ? 2 : 1
     const token = text.slice(quote, end + 1)
-    const decoded: unknown = JSON.parse(token)
+    const decoded: unknown = parseJsonText(token)
     const converted = typeof decoded === "string" ? convertString(decoded) : decoded
     out += text.slice(index, quote) + (converted === decoded ? token : JSON.stringify(converted))
     index = end + 1

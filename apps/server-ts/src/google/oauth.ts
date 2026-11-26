@@ -1,3 +1,5 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
+import { after, type Timer } from "@arden-hq/std/timer"
 import type {
   GoogleOAuthClient,
   GoogleOAuthStartResponse,
@@ -92,7 +94,7 @@ interface PendingAuthorization {
   readonly verifier: string
   readonly redirectUri: string
   readonly listener: LoopbackListener
-  readonly timer: ReturnType<typeof setTimeout>
+  readonly timer: Timer
 }
 
 const codeChallenge = (verifier: string): string => sha256Base64Url(verifier)
@@ -129,7 +131,7 @@ const requestJson = async (
   }
   let body: unknown
   try {
-    body = await response.json()
+    body = await parseJsonBody(response)
   } catch (cause) {
     throw new GoogleConnectionError({
       reason: "invalid_response",
@@ -171,7 +173,7 @@ export const makeGoogleOAuth = ({
     if (authorization === undefined) return
     pending.delete(service)
     authorization.controller.abort()
-    clearTimeout(authorization.timer)
+    authorization.timer.cancel()
     await authorization.listener.close()
   }
 
@@ -379,7 +381,7 @@ export const makeGoogleOAuth = ({
       })
     }
     const redirectUri = listener.redirectUri
-    const timer = setTimeout(() => void closePending(service), CALLBACK_TIMEOUT_MS)
+    const timer = after(CALLBACK_TIMEOUT_MS, () => void closePending(service))
     const parameters = authorizationParameters({ service, incremental })
     const authorization: PendingAuthorization = {
       controller: new AbortController(),

@@ -28,7 +28,7 @@ export const storeError = (
   message: string,
   spaceId?: string,
   cause?: unknown
-) =>
+): SpaceStoreError =>
   new SpaceStoreError({
     operation,
     reason,

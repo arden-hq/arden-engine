@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
@@ -137,10 +138,12 @@ const revokeAttempts = `CREATE TRIGGER desk_revoke_task_attempts AFTER UPDATE OF
               (SELECT item_id FROM desk_tasks WHERE desk_id = NEW.desk_id);
       END`
 
+const HOME_DIRECTORY_SHORTCUT = "~"
+
 const canonical = (folder: string): string | undefined => {
   const home = homedir()
   let expanded = folder
-  if (folder === "~") expanded = home
+  if (folder === HOME_DIRECTORY_SHORTCUT) expanded = home
   else if (folder.startsWith("~/")) expanded = path.join(home, folder.slice(2))
   if (!path.isAbsolute(expanded)) return undefined
   const resolved = path.resolve(expanded)
@@ -153,7 +156,7 @@ const canonical = (folder: string): string | undefined => {
 
 const folders = (raw: unknown): ReadonlyArray<string> => {
   if (typeof raw !== "string") return []
-  const parsed: unknown = JSON.parse(raw)
+  const parsed: unknown = parseMigrationJson(raw)
   return Array.isArray(parsed)
     ? parsed.filter((item): item is string => typeof item === "string")
     : []

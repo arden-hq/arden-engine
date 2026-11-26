@@ -1,3 +1,4 @@
+import { after } from "@arden-hq/std/timer"
 import {
   CONFIGURED_SERVER_EXIT,
   daemonDecoders,
@@ -154,9 +155,9 @@ export const startConfiguredServer = (
 const stopChild = (child: ChildProcess): Promise<void> =>
   new Promise((resolve) => {
     if (child.exitCode !== null || child.signalCode !== null) return resolve()
-    const kill = setTimeout(() => child.kill("SIGKILL"), STOP_TIMEOUT_MS)
+    const kill = after(STOP_TIMEOUT_MS, () => child.kill("SIGKILL"))
     child.once("exit", () => {
-      clearTimeout(kill)
+      kill.cancel()
       resolve()
     })
     child.kill("SIGTERM")
@@ -164,14 +165,14 @@ const stopChild = (child: ChildProcess): Promise<void> =>
 
 /** The server's own access file, read the way the CLI reads the app's. */
 const connectionOf = async (ready: ConfiguredServerReady): Promise<ConfiguredServerConnection> => {
-  const access = daemonDecoders.cliAccess(JSON.parse(await readFile(ready.accessFile, "utf8")))
+  const access = daemonDecoders.cliAccessText(await readFile(ready.accessFile, "utf8"))
   return { url: new URL(ready.url), headers: { [LOCAL_CAPABILITY_HEADER]: access.capability } }
 }
 
 /** The ready line, or undefined when the first line is not one. */
 const readyFrom = (line: string): ConfiguredServerReady | undefined => {
   try {
-    return daemonDecoders.configuredServerReady(JSON.parse(line))
+    return daemonDecoders.configuredServerReadyText(line)
   } catch {
     return undefined
   }

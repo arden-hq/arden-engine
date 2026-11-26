@@ -22,7 +22,9 @@ export type SavedAnswerBlockAgrees = Assert<
   Agrees<typeof SavedAnswerBlockSchema.Type, SavedAnswerBlock>
 >
 
-export const encodeSaveAnswerBlockRequestEffect = (value: unknown) =>
+export const encodeSaveAnswerBlockRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(SaveAnswerBlockInputSchema)(value, {
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))

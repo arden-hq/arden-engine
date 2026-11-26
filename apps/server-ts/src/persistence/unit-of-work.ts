@@ -11,8 +11,11 @@ export class UnitOfWork extends Context.Service<
 
 export type Told = Map<string, number>
 
-export const rememberTold = (told: Told, key: string, through = Number.POSITIVE_INFINITY) =>
-  void told.set(key, Math.max(told.get(key) ?? Number.NEGATIVE_INFINITY, through))
+export const rememberTold = (
+  told: Told,
+  key: string,
+  through = Number.POSITIVE_INFINITY
+): undefined => void told.set(key, Math.max(told.get(key) ?? Number.NEGATIVE_INFINITY, through))
 
 export const makeUnitOfWork = (
   afterCommit: (notify: Effect.Effect<void>) => Effect.Effect<void>

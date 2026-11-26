@@ -1,3 +1,4 @@
+import { after, type Timer } from "@arden-hq/std/timer"
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js"
@@ -106,7 +107,7 @@ export interface RuntimeEntry {
   readonly tools: ReadonlyArray<McpToolBinding>
   readonly events: ReadonlyArray<McpEvent>
   readonly retryAttempt: number
-  readonly retryTimer?: ReturnType<typeof setTimeout>
+  readonly retryTimer?: Timer
 }
 
 export interface McpLiveEvents {
@@ -155,9 +156,7 @@ interface ConnectOptions {
   readonly refreshPath?: boolean
 }
 
-export const cancelRetry = (entry: RuntimeEntry): void => {
-  if (entry.retryTimer !== undefined) clearTimeout(entry.retryTimer)
-}
+export const cancelRetry = (entry: RuntimeEntry): void => entry.retryTimer?.cancel()
 
 export type McpRuntime = ReturnType<typeof makeMcpRuntime>
 
@@ -364,11 +363,11 @@ export const makeMcpRuntime = ({
       })
       return
     }
-    const retryTimer = setTimeout(() => {
+    const retryTimer = after(reconnectDelayMs(attempt), () => {
       void connect(active.config, { status: "reconnecting", retryAttempt: attempt }).catch(
         () => undefined
       )
-    }, reconnectDelayMs(attempt))
+    })
     publish({
       config: active.config,
       generation: active.generation,
@@ -387,7 +386,7 @@ export const makeMcpRuntime = ({
   ): Promise<RuntimeEntry> => {
     if (shuttingDown) return requireRuntime(config.name, "reconnect")
     const previous = runtimes.get(config.name)
-    if (previous?.retryTimer !== undefined) clearTimeout(previous.retryTimer)
+    previous?.retryTimer?.cancel()
     const generation = nextGeneration++
     publish({
       config,
@@ -572,9 +571,9 @@ export const makeMcpRuntime = ({
       })
       if (retryMs !== undefined) {
         const nextAttempt = retryAttempt + 1
-        const retryTimer = setTimeout(() => {
+        const retryTimer = after(retryMs, () => {
           void connect(config, { status, retryAttempt: nextAttempt }).catch(() => undefined)
-        }, retryMs)
+        })
         return publish({
           config,
           generation,
@@ -693,7 +692,7 @@ export const makeMcpRuntime = ({
       shuttingDown = true
       await Promise.all(
         [...runtimes.values()].map((entry) => {
-          if (entry.retryTimer !== undefined) clearTimeout(entry.retryTimer)
+          entry.retryTimer?.cancel()
           return closeMcpClient(entry)
         })
       )

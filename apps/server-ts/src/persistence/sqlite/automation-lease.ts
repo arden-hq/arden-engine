@@ -8,7 +8,10 @@ import { ownerJoin } from "./automation-rows.js"
 import { attemptRunSessionIdSql } from "./owner-chat.js"
 import { readScheduledIdentity } from "./run-context.js"
 
-export const parseLease = (input: { readonly id: string; readonly token: string }) => {
+export const parseLease = (input: {
+  readonly id: string
+  readonly token: string
+}): { queueId: number; runId: number; claimAttempt: number } => {
   const queueId = Number(input.id)
   const separator = input.token.indexOf("|")
   const runId = Number(separator < 0 ? "" : input.token.slice(0, separator))

@@ -104,7 +104,9 @@ const chatSettled = Effect.fn("Chat.settled")(function* (
 /** What the Space review's snapshot holds of each chat: what the owner said, and what waits to be
  * said. A Task or helper result landing in the chat leaves it unchanged; a new owner turn does
  * not, so an offer is refused until the worker has read it. */
-export const ownerTurnFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
+export const ownerTurnFingerprint = (
+  chats: ReadonlyArray<ChatSettledState>
+): { session_id: string; owner_turn_id: string | null; pending: number }[] =>
   chats.map((chat) => ({
     session_id: chat.session_id,
     owner_turn_id: chat.owner_turn_id,
@@ -112,7 +114,9 @@ export const ownerTurnFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
   }))
 
 /** What the Space review's wake fingerprint holds of each chat: its latest run and state. */
-export const settledFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
+export const settledFingerprint = (
+  chats: ReadonlyArray<ChatSettledState>
+): { session_id: string; run_id: string | null; state: string | null; pending: number }[] =>
   chats.map((chat) => ({
     session_id: chat.session_id,
     run_id: chat.run_id,

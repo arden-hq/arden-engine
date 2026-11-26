@@ -225,17 +225,23 @@ export const SpaceDetailSchema: Schema.Codec<SpaceDetail> = withExtras({
   )
 )
 
-export const encodeCreateSpaceRequestEffect = (value: unknown) =>
+export const encodeCreateSpaceRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(CreateSpaceInputSchema)(value, strict).pipe(Effect.map(JSON.stringify))
 
-export const encodeUpdateSpaceRequestEffect = (value: unknown) =>
+export const encodeUpdateSpaceRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(UpdateSpaceInputSchema)(value, strict).pipe(Effect.map(JSON.stringify))
 
 export const PinnedSpacesInputSchema: Schema.Codec<PinnedSpacesInput> = Schema.Struct({
   space_ids: Schema.Array(Schema.NonEmptyString)
 })
 
-export const encodePinnedSpacesRequestEffect = (value: unknown) =>
+export const encodePinnedSpacesRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(PinnedSpacesInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )

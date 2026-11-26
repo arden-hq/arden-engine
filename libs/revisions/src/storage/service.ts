@@ -1,5 +1,5 @@
 import { isWithin } from "@arden-hq/std/paths"
-import { Context, Effect, FileSystem, Layer, Option, Path, Semaphore } from "effect"
+import { Context, Effect, FileSystem, Layer, Option, Path, Schema, Semaphore } from "effect"
 
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
 import {
@@ -195,16 +195,17 @@ const metadataScanConcurrency = 16
 const encodeRef = (commitId: string): Uint8Array =>
   new TextEncoder().encode(`{"commit_id":"${commitId}","version":2}\n`)
 
+const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
+
 const decodeRefId = Effect.fn("RevisionStorage.decodeRefId")(function* (
   content: Uint8Array
 ): Effect.fn.Return<string, StorageError> {
   const record: unknown = yield* Effect.try({
-    try: () => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(content)),
+    try: () => decodeJsonText(new TextDecoder("utf-8", { fatal: true }).decode(content)),
     catch: (cause) => storageFailure("decode current ref", cause)
   })
-  if (typeof record !== "object" || record === null || Array.isArray(record)) {
+  if (typeof record !== "object" || record === null || Array.isArray(record))
     return yield* new RevisionStorageError({ message: "decode current ref: invalid ref shape" })
-  }
   const value = record as Record<string, unknown>
   if (value.version !== 2) {
     return yield* new RevisionStorageError({

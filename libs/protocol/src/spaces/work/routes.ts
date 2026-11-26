@@ -11,36 +11,52 @@ const SessionIdSchema = routeSegment()
 const chatTaskPath = (sessionId: string): string =>
   `/sessions/${encodeSegment(sessionId)}/chat-task`
 
-export const encodeChatTaskPathEffect = (value: unknown) =>
+export const encodeChatTaskPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(SessionIdSchema, value, chatTaskPath)
 
 const workCollectionPath = (spaceId: string): string => `/spaces/${encodeSegment(spaceId)}/work`
 
 const workItemPath = (itemId: string): string => `/spaces/work/${encodeSegment(itemId)}`
 
-export const encodeWorkCollectionPathEffect = (value: unknown) =>
+export const encodeWorkCollectionPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(SpaceIdSchema, value, workCollectionPath)
 
-export const encodeWorkItemPathEffect = (value: unknown) =>
+export const encodeWorkItemPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(ItemIdSchema, value, workItemPath)
 
-export const encodeWorkStopPathEffect = (value: unknown) =>
+export const encodeWorkStopPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(ItemIdSchema, value, (itemId) => `${workItemPath(itemId)}/stop`)
 
-export const encodeWorkCommentPathEffect = (value: unknown) =>
+export const encodeWorkCommentPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(ItemIdSchema, value, (itemId) => `${workItemPath(itemId)}/comments`)
 
-export const encodeWorkAttachmentUploadPathEffect = (value: unknown) =>
+export const encodeWorkAttachmentUploadPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(ItemIdSchema, value, (itemId) => `${workItemPath(itemId)}/attachments`)
 
-export const encodeWorkAttachmentPathEffect = (value: unknown) =>
+export const encodeWorkAttachmentPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(
     PositiveIntSchema,
     value,
     (attachmentId) => `/spaces/work/attachments/${attachmentId}`
   )
 
-export const encodeWorkPagePathEffect = (value: unknown) =>
+export const encodeWorkPagePathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(SpaceWorkPageOptionsSchema)(value, {
     onExcessProperty: "error"
   }).pipe(
@@ -58,9 +74,13 @@ export const encodeWorkPagePathEffect = (value: unknown) =>
     })
   )
 
-export const encodeTaskChatPathEffect = (value: unknown) =>
+export const encodeTaskChatPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(routeSegment(), value, (itemId) => `/spaces/work/${encodeSegment(itemId)}/chat`)
-export const encodeTaskResultReadPathEffect = (value: unknown) =>
+export const encodeTaskResultReadPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(
     routeSegment(),
     value,

@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { grantedOnlyInTheApp, type ToolCatalogResponse } from "@arden-hq/protocol/tools"
@@ -45,12 +46,7 @@ export const progressLines = (): ((event: HeadlessRunEvent) => string | undefine
 const KEY_ARGUMENTS = ["command", "cmd", "query", "q", "path", "url", "prompt", "name"] as const
 
 const keyArgument = (args: string): string | undefined => {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(args)
-  } catch {
-    return undefined
-  }
+  const parsed = parseJsonTextOrUndefined(args)
   if (typeof parsed !== "object" || parsed === null) return undefined
   const fields: Readonly<Record<string, unknown>> = { ...parsed }
   const value = KEY_ARGUMENTS.map((key) => fields[key]).find(

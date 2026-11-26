@@ -95,12 +95,16 @@ export const NewPermissionRuleSchema: Schema.Codec<NewPermissionRule> = Schema.S
 /** `PATCH /permissions/rules/:ruleId` body: the rule's new decision. */
 export const PermissionRuleDecisionPatchSchema = Schema.Struct({ decision: RuleDecisionSchema })
 
-export const encodeSpaceRulesPathEffect = (value: unknown) =>
+export const encodeSpaceRulesPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(PermissionIdSchema)(value).pipe(
     Effect.map((id) => `/permissions/rules/spaces/${encodeURIComponent(id)}`)
   )
 
-export const encodePermissionRulePathEffect = (value: unknown) =>
+export const encodePermissionRulePathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(PermissionIdSchema)(value).pipe(
     Effect.map((id) => `/permissions/rules/${encodeURIComponent(id)}`)
   )

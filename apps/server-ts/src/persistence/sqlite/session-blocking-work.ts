@@ -1,14 +1,16 @@
 import { SqlClient } from "effect/unstable/sql"
 import { activeRunStatusList, liveToolStatusList, unresolvedToolStatusList } from "./status-sets.js"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export const activeSessionRunPredicate = (sql: SqlClient.SqlClient) =>
+export const activeSessionRunPredicate = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`EXISTS (
     SELECT 1 FROM chat_runs AS run
     WHERE run.session_id = s.session_id
       AND run.status IN ${activeRunStatusList}
   )`
 
-export const activeSessionExternalWorkPredicate = (sql: SqlClient.SqlClient) =>
+export const activeSessionExternalWorkPredicate = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`(
     EXISTS (
       SELECT 1 FROM tool_calls AS tool_call
@@ -30,7 +32,7 @@ export const activeSessionExternalWorkPredicate = (sql: SqlClient.SqlClient) =>
     )
   )`
 
-export const sessionBlockingWorkPredicate = (sql: SqlClient.SqlClient) =>
+export const sessionBlockingWorkPredicate = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`(
     ${activeSessionRunPredicate(sql)} OR ${activeSessionExternalWorkPredicate(sql)}
   )`

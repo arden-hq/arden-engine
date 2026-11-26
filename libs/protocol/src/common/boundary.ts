@@ -48,7 +48,10 @@ export const projectedDecoderFor = <T, A>(
 
 /** Bind one internal request serializer to a plain `(input) => string` API. */
 export const makeEncoder =
-  <A>(encode: (value: A) => Effect.Effect<string, unknown>, message: string) =>
+  <A>(
+    encode: (value: A) => Effect.Effect<string, unknown>,
+    message: string
+  ): ((value: A) => string) =>
   (value: A): string =>
     runBoundary(encode(value), message, "encode")
 

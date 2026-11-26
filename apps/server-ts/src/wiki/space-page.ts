@@ -97,7 +97,10 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
 })
 
 /** Logs a Space left without a page; the start check gives it one. */
-export const logNoSpacePage = (spaceId: string, error: WikiError) =>
+export const logNoSpacePage = (
+  spaceId: string,
+  error: WikiError
+): Effect.Effect<void, never, never> =>
   Effect.logWarning("A Space has no Memory page; the next start tries again", {
     spaceId,
     reason: error.reason,

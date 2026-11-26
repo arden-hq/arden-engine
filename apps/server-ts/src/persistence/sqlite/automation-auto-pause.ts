@@ -9,6 +9,8 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { recordAutomationEvent } from "./entity-events.js"
 import { userAutomationSql } from "./authority-sql.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const FAILURES_BEFORE_GIVING_UP = 3
 
@@ -81,11 +83,11 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
 })
 
 /** Ends the failure streak: a run did its work, the Automation gave up, or the owner resumed it. */
-export const endStreak = (sql: SqlClient.SqlClient, automationId: string) =>
+export const endStreak = (sql: SqlClient.SqlClient, automationId: string): Statement<Row> =>
   sql`UPDATE scheduled_tasks SET failed_runs = 0, failed_item = NULL WHERE task_id = ${automationId}`
 
 /** A run did its work: the next provider pause starts its waits over. */
-export const endAutoResumes = (sql: SqlClient.SqlClient, automationId: string) =>
+export const endAutoResumes = (sql: SqlClient.SqlClient, automationId: string): Statement<Row> =>
   sql`UPDATE scheduled_tasks SET auto_resumes = 0
     WHERE task_id = ${automationId} AND auto_resumes != 0`
 

@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { realpathSync } from "node:fs"
 import { chmod, lstat, readFile, readdir, rm, unlink } from "node:fs/promises"
 import path from "node:path"
@@ -114,7 +115,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     const refInfo = await lstat(refFile)
     if (refInfo.isSymbolicLink() || !refInfo.isFile())
       throw new Error("Unsafe managed-output owner ref")
-    const saved: unknown = JSON.parse(await readFile(refFile, "utf8"))
+    const saved: unknown = parseJsonText(await readFile(refFile, "utf8"))
     if (JSON.stringify(saved) !== JSON.stringify(record)) {
       throw new Error("Managed-output owner ref differs")
     }
@@ -186,7 +187,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     const refInfo = await lstat(refFile)
     if (refInfo.isSymbolicLink() || !refInfo.isFile())
       throw new Error("Unsafe managed-output owner ref")
-    const saved: unknown = JSON.parse(await readFile(refFile, "utf8"))
+    const saved: unknown = parseJsonText(await readFile(refFile, "utf8"))
     if (
       typeof saved !== "object" ||
       saved === null ||
@@ -252,7 +253,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     try {
       const info = await lstat(refFile)
       if (info.isSymbolicLink() || !info.isFile()) return undefined
-      const saved: unknown = JSON.parse(await readFile(refFile, "utf8"))
+      const saved: unknown = parseJsonText(await readFile(refFile, "utf8"))
       return typeof saved === "object" &&
         saved !== null &&
         "bytes" in saved &&

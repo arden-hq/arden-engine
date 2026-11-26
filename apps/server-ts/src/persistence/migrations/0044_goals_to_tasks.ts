@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
@@ -17,6 +18,17 @@ export const goalsToTasks: Migration = {
   }
 }
 
+const GOAL_PAUSED = "paused"
+const GOAL_BLOCKED = "blocked"
+const GOAL_BUDGET_LIMITED = "budget_limited"
+const GOAL_COMPLETE = "complete"
+
+const TASK_STATUS = { open: "open", deferred: "deferred", done: "done" } as const
+type TaskStatus = (typeof TASK_STATUS)[keyof typeof TASK_STATUS]
+
+const EVIDENCE_KIND = { completionReport: "completion_report" } as const
+type EvidenceKind = (typeof EVIDENCE_KIND)[keyof typeof EVIDENCE_KIND]
+
 interface GoalRow {
   readonly session_id: string
   readonly focus_id: string
@@ -33,7 +45,7 @@ interface GoalRow {
 }
 
 interface Evidence {
-  readonly kind?: string
+  readonly kind?: EvidenceKind | string
   readonly text: string
   readonly created_at?: string
 }
@@ -59,7 +71,7 @@ const clip = (value: string, limit: number): string =>
 
 const readEvidence = (json: string): ReadonlyArray<Evidence> => {
   try {
-    const parsed: unknown = JSON.parse(json)
+    const parsed = parseMigrationJson(json)
     if (!Array.isArray(parsed)) return []
     return parsed.flatMap((item: unknown) =>
       typeof item === "object" &&
@@ -90,7 +102,7 @@ const convertGoal = (database: DatabaseSync, goal: GoalRow, now: string): void =
 
   const evidence = readEvidence(goal.evidence_json)
   const question =
-    goal.status === "blocked" && goal.blocked_question_id !== null
+    goal.status === GOAL_BLOCKED && goal.blocked_question_id !== null
       ? (database
           .prepare(
             `SELECT question_id, json_extract(content, '$.prompt') AS prompt FROM run_questions
@@ -101,23 +113,23 @@ const convertGoal = (database: DatabaseSync, goal: GoalRow, now: string): void =
           | undefined)
       : undefined
   const blockedLine = (() => {
-    if (goal.status === "budget_limited") return BUDGET_SPENT
-    if (goal.status !== "blocked") return null
+    if (goal.status === GOAL_BUDGET_LIMITED) return BUDGET_SPENT
+    if (goal.status !== GOAL_BLOCKED) return null
     if (question?.prompt) return clip(`Answer in this chat: ${question.prompt}`, RESULT_LIMIT)
     return clip(goal.blocked_reason?.trim() || "Arden could not go on.", RESULT_LIMIT)
   })()
-  const status = (() => {
+  const status = ((): TaskStatus => {
     switch (goal.status) {
-      case "paused":
-        return "deferred"
-      case "complete":
-        return "done"
+      case GOAL_PAUSED:
+        return TASK_STATUS.deferred
+      case GOAL_COMPLETE:
+        return TASK_STATUS.done
       default:
-        return "open"
+        return TASK_STATUS.open
     }
   })()
   const taken =
-    status !== "done" &&
+    status !== TASK_STATUS.done &&
     database
       .prepare(
         `SELECT 1 FROM desk_tasks WHERE home_session_id = ? AND runs_in = 'chat'
@@ -151,7 +163,7 @@ const convertGoal = (database: DatabaseSync, goal: GoalRow, now: string): void =
       blockedLine === null ? null : "you",
       goal.created_at,
       goal.updated_at,
-      status === "done" ? goal.updated_at : null,
+      status === TASK_STATUS.done ? goal.updated_at : null,
       seq,
       blockedLine === null ? 0 : 1,
       blockedLine === null ? null : "you",
@@ -166,7 +178,7 @@ const convertGoal = (database: DatabaseSync, goal: GoalRow, now: string): void =
   event.run(goal.desk_id, itemId, "created", "Started as a Goal.", "summary", null, goal.created_at)
   for (const item of evidence) {
     const at = item.created_at ?? goal.updated_at
-    if (item.kind === "completion_report" && status === "done") {
+    if (item.kind === EVIDENCE_KIND.completionReport && status === TASK_STATUS.done) {
       const result = clip(item.text.split("\n")[0]?.trim() || "Done.", RESULT_LIMIT)
       event.run(goal.desk_id, itemId, "done", item.text, "result", result, at)
     } else {
@@ -246,7 +258,7 @@ const renameGoalToolSettings = (database: DatabaseSync): void => {
     .get()
   const stored = row?.["overrides_json"]
   if (typeof stored !== "string") return
-  const overrides: unknown = JSON.parse(stored)
+  const overrides: unknown = parseMigrationJson(stored)
   if (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)) return
   const next: Record<string, unknown> = { ...overrides }
   for (const [old, name] of Object.entries(GOAL_TOOLS)) {

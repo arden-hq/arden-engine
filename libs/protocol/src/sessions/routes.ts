@@ -3,6 +3,7 @@ import { FindQueryTextSchema, SessionExportFormatSchema } from "./schema.js"
 
 import { appendSearch, encodeRouteEffect, encodeSegment, routeSegment } from "../common/routes.js"
 import { NonNegativeIntSchema, PositiveIntSchema } from "../common/schema.js"
+import type { Effect } from "effect/Effect"
 
 const SessionIdSchema = routeSegment()
 const SessionListCursorSchema = Schema.Struct({
@@ -26,7 +27,9 @@ const SessionExportRouteSchema = Schema.Struct({
   format: SessionExportFormatSchema
 })
 
-export const encodeSessionListPathEffect = (value: unknown) =>
+export const encodeSessionListPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(SessionListOptionsSchema, value, (options) =>
     appendSearch("/sessions", [
       ["space_id", options.spaceId],
@@ -48,12 +51,21 @@ const sessionPath = (sessionId: string): string => `/sessions/${encodeSegment(se
 const sessionPathEffect = (value: unknown, suffix = "") =>
   encodeRouteEffect(SessionIdSchema, value, (sessionId) => `${sessionPath(sessionId)}${suffix}`)
 
-export const encodeSessionItemPathEffect = (value: unknown) => sessionPathEffect(value)
-export const encodeSessionBranchPathEffect = (value: unknown) => sessionPathEffect(value, "/branch")
-export const encodeSessionModelPathEffect = (value: unknown) => sessionPathEffect(value, "/model")
-export const encodeSessionMoveToSpacePathEffect = (value: unknown) =>
-  sessionPathEffect(value, "/space")
-export const encodeSessionExportPathEffect = (value: unknown) =>
+export const encodeSessionItemPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value)
+export const encodeSessionBranchPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value, "/branch")
+export const encodeSessionModelPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value, "/model")
+export const encodeSessionMoveToSpacePathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value, "/space")
+export const encodeSessionExportPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(SessionExportRouteSchema, value, ({ sessionId, format }) =>
     appendSearch(`${sessionPath(sessionId)}/export`, [["format", format]])
   )
@@ -61,26 +73,38 @@ const ChatFindRouteSchema = Schema.Struct({
   sessionId: routeSegment(),
   query: FindQueryTextSchema
 })
-export const encodeChatFindPathEffect = (value: unknown) =>
+export const encodeChatFindPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(ChatFindRouteSchema, value, ({ sessionId, query }) =>
     appendSearch(`${sessionPath(sessionId)}/find`, [["q", query]])
   )
-export const encodeChatSearchPathEffect = (value: unknown) =>
+export const encodeChatSearchPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(FindQueryTextSchema, value, (query) =>
     appendSearch("/sessions/search", [["q", query]])
   )
-export const encodeSessionTriagePathEffect = (value: unknown) => sessionPathEffect(value, "/triage")
-export const encodeSessionRestorePathEffect = (value: unknown) =>
-  sessionPathEffect(value, "/restore")
-export const encodeSessionContinuePathEffect = (value: unknown) =>
-  sessionPathEffect(value, "/continue")
-export const encodeSessionOnboardingPathEffect = (value: unknown) =>
-  sessionPathEffect(value, "/onboarding")
+export const encodeSessionTriagePathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value, "/triage")
+export const encodeSessionRestorePathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value, "/restore")
+export const encodeSessionContinuePathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value, "/continue")
+export const encodeSessionOnboardingPathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionPathEffect(value, "/onboarding")
 const SessionEndRouteSchema = Schema.Struct({ sessionId: routeSegment(), stop: Schema.Boolean })
 const sessionEndPathEffect = (value: unknown, suffix: string) =>
   encodeRouteEffect(SessionEndRouteSchema, value, ({ sessionId, stop }) =>
     appendSearch(`${sessionPath(sessionId)}${suffix}`, [["stop", stop ? true : undefined]])
   )
-export const encodeSessionArchivePathEffect = (value: unknown) => sessionEndPathEffect(value, "")
-export const encodeSessionPermanentDeletePathEffect = (value: unknown) =>
-  sessionEndPathEffect(value, "/permanent")
+export const encodeSessionArchivePathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionEndPathEffect(value, "")
+export const encodeSessionPermanentDeletePathEffect = (
+  value: unknown
+): Effect<string, Schema.SchemaError, never> => sessionEndPathEffect(value, "/permanent")

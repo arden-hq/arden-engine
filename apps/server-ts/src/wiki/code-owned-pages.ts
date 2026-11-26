@@ -33,7 +33,15 @@ const CODE_OWNED_PAGES: ReadonlyMap<
   ]
 ])
 
-export const codeOwnedPage = (path: string) => CODE_OWNED_PAGES.get(path.toLowerCase())
+export const codeOwnedPage = (
+  path: string
+):
+  | {
+      readonly madeBy: WikiCommitOrigin["kind"]
+      readonly holds: string
+      readonly plainTitle?: string
+    }
+  | undefined => CODE_OWNED_PAGES.get(path.toLowerCase())
 
 export const isCodeOwnedPage = (path: string): boolean => CODE_OWNED_PAGES.has(path.toLowerCase())
 

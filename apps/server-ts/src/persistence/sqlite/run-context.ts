@@ -15,6 +15,7 @@ import { executionBudgetExpired, executionBudgetMissing } from "./execution-budg
 import { taskHasHold } from "./task-hold-state.js"
 import { taskOpenSql } from "./task-status-sql.js"
 import { userChatSql } from "./chat-ownership.js"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const taskBindingRevoked = (sql: SqlClient.SqlClient, metadata: Statement.Fragment) => sql`(
   json_extract(${metadata}, '$.run_context.task.item_id') IS NOT NULL
@@ -50,7 +51,7 @@ export const runAuthorityState = (
   metadata: Statement.Fragment,
   runId: Statement.Fragment,
   sessionId: Statement.Fragment
-) => sql`(CASE
+): Statement.Statement<Row> => sql`(CASE
   WHEN ${executionBudgetExpired(sql, metadata)} OR ${runPolicyRevoked(sql, metadata, sessionId)} THEN 'revoked'
   WHEN NOT ${taskBindingRevoked(sql, metadata)} THEN 'active'
   WHEN ${taskBindingSettling(sql, metadata, runId)} THEN 'settling'
@@ -127,8 +128,10 @@ export const assertRunModelAuthority = Effect.fn(function* (
   }
 })
 
-export const queueOccurrenceId = (row: { readonly id: number; readonly created_at: string }) =>
-  `queue:${row.id}@${row.created_at}`
+export const queueOccurrenceId = (row: {
+  readonly id: number
+  readonly created_at: string
+}): string => `queue:${row.id}@${row.created_at}`
 
 export const scheduledRunOrigin = (options: {
   readonly job: JobClassification

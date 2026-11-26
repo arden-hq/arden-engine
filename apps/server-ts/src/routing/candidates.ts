@@ -68,7 +68,9 @@ export const loadOfferSpaces = Effect.fn("Router.offerSpaces")(function* (
   return listed
 })
 
-export const renderOfferSpaces = (spaces: ReadonlyArray<OfferSpace>) => {
+export const renderOfferSpaces = (
+  spaces: ReadonlyArray<OfferSpace>
+): { text: string; ids: { readonly id: string; readonly spaceId: string }[] } => {
   const ids: Array<{ readonly id: string; readonly spaceId: string }> = []
   const text = spaces
     .flatMap((space) => [

@@ -1,3 +1,5 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
+import { abortAfter } from "@arden-hq/std/timer"
 import type { DecodedServerEventFrame } from "@arden-hq/protocol"
 import {
   chatDecoders,
@@ -154,13 +156,10 @@ const responseDetail = (response: Response): Promise<string> =>
     () => ""
   )
 
-const responseJson = async (response: Response): Promise<unknown> => {
-  try {
-    return await response.json()
-  } catch (cause) {
+const responseJson = (response: Response): Promise<unknown> =>
+  parseJsonBody(response).catch((cause: unknown) => {
     throw new HeadlessProtocolError("Arden returned invalid JSON", cause)
-  }
-}
+  })
 
 const responseChunks = async function* (
   body: ReadableStream<Uint8Array>
@@ -452,19 +451,13 @@ export class HeadlessClient {
   }
 
   async #waitFor(run: RunIdentity, options: WaitForRunOptions): Promise<RunDetail> {
-    const timeoutController = new AbortController()
-    const timeoutMs = options.timeoutMs
-    const timeout =
-      timeoutMs === undefined
-        ? undefined
-        : setTimeout(() => {
-            timeoutController.abort(new HeadlessTimeoutError(timeoutMs))
-          }, timeoutMs)
-    timeout?.unref()
+    const timeout = abortAfter(options.timeoutMs, (ms) => new HeadlessTimeoutError(ms), {
+      unref: true
+    })
     const signal =
       options.signal === undefined
-        ? timeoutController.signal
-        : AbortSignal.any([options.signal, timeoutController.signal])
+        ? timeout.signal
+        : AbortSignal.any([options.signal, timeout.signal])
     const reconnectDelayMs = options.reconnectDelayMs ?? 100
 
     try {
@@ -509,7 +502,7 @@ export class HeadlessClient {
       throwIfAborted(signal)
       throw cause
     } finally {
-      if (timeout !== undefined) clearTimeout(timeout)
+      timeout.cancel()
     }
   }
 

@@ -5,6 +5,8 @@ import { SessionStore } from "../persistence/sessions/store.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { SessionFileCleanup } from "../storage/session-file-cleanup.js"
 import { ChatStop } from "./chat-stop.js"
+import type { SessionStoreError } from "../persistence/sessions/store.js"
+import type { ConversationArtifactError } from "../artifacts/conversation.js"
 
 interface ForkServices {
   readonly store: SessionStore["Service"]
@@ -13,7 +15,17 @@ interface ForkServices {
   readonly cleanup: SessionFileCleanup["Service"]
 }
 
-export const makeForkPreparation = ({ store, artifacts, stop, cleanup }: ForkServices) => {
+export const makeForkPreparation = ({
+  store,
+  artifacts,
+  stop,
+  cleanup
+}: ForkServices): {
+  finishOrDiscard: (fork: {
+    readonly sourceSessionId: string
+    readonly childSessionId: string
+  }) => Effect.Effect<boolean, SessionStoreError | ConversationArtifactError, never>
+} => {
   const discard = Effect.fn("SessionFork.discard")(function* (childSessionId: string) {
     const [found] = yield* store.preparingForks({ childSessionId })
     if (found === undefined) return

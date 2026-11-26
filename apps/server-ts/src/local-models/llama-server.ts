@@ -1,3 +1,5 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { after } from "@arden-hq/std/timer"
 import { ladderDelayMs } from "@arden-hq/std/retry"
 import { sleep } from "@arden-hq/std/sleep"
 import type { LocalModelRuntime } from "@arden-hq/protocol/local-models"
@@ -104,9 +106,9 @@ const stopChild = (running: Running) =>
   Effect.promise(async () => {
     if (running.child.exitCode !== null || running.child.signalCode !== null) return
     running.child.kill("SIGTERM")
-    const timer = setTimeout(() => running.child.kill("SIGKILL"), STOP_TIMEOUT_MS)
+    const timer = after(STOP_TIMEOUT_MS, () => running.child.kill("SIGKILL"))
     await running.exited
-    clearTimeout(timer)
+    timer.cancel()
   })
 
 export const llamaServerLayer = (options: {
@@ -285,12 +287,8 @@ export const llamaServerLayer = (options: {
               signal: init.signal === undefined ? signal : AbortSignal.any([signal, init.signal])
             })
             const text = await response.text()
-            let body: unknown = text
-            try {
-              body = JSON.parse(text)
-            } catch {
-              // A non-JSON body (a plain error line) stays text.
-            }
+            const parsed = parseJsonTextOrUndefined(text)
+            const body = parsed === undefined ? text : parsed
             return { status: response.status, body, generation: target.generation }
           },
           catch: (cause) =>

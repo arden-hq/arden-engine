@@ -1,5 +1,6 @@
 import { toB64url, utf8 } from "@arden-hq/relay-protocol"
 import type { Pusher, PushRequest, PushResult } from "../core/pusher.js"
+import { parseJsonText } from "@arden-hq/std/json-text"
 
 // The APNs sender, free of any host: a provider token signed with WebCrypto
 // (Bun and Workers both have it) and an injected HTTP/2 transport, since APNs
@@ -131,7 +132,7 @@ const mapApnsResponse = (response: ApnsHttpResponse): PushResult => {
 
 const appleReason = (body: string): string | undefined => {
   try {
-    const parsed: unknown = JSON.parse(body)
+    const parsed: unknown = parseJsonText(body)
     if (typeof parsed !== "object" || parsed === null) return undefined
     const reason: unknown = Reflect.get(parsed, "reason")
     return typeof reason === "string" && reason.length <= 64 ? reason : undefined

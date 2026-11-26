@@ -1,3 +1,4 @@
+import { abortAfter } from "@arden-hq/std/timer"
 import { clipLine } from "@arden-hq/std/text"
 import { countOf, formatBytes } from "@arden-hq/std/count"
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -440,10 +441,9 @@ const makeWebFetchTool = (): ServerTool =>
     },
     execute: async (input, ctx) => {
       const requested = canonicalUrl(input.url)
-      const timeout = new AbortController()
-      const timer = setTimeout(
-        () => timeout.abort(new Error("web_fetch timeout")),
-        input.timeout_seconds * 1_000
+      const timeout = abortAfter(
+        input.timeout_seconds * 1_000,
+        () => new Error("web_fetch timeout")
       )
       const signal = AbortSignal.any([ctx.signal, timeout.signal])
       try {
@@ -501,7 +501,7 @@ const makeWebFetchTool = (): ServerTool =>
           "Fetch failed"
         )
       } finally {
-        clearTimeout(timer)
+        timeout.cancel()
       }
     }
   })

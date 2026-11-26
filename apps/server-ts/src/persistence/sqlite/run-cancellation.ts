@@ -5,9 +5,12 @@ import { closeRunAsks } from "./run-asks.js"
 import { appendRunsFencedInTransaction } from "./run-fenced.js"
 import { runDescendants } from "./tree-walk.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export const runCancellationRequested = (sql: SqlClient.SqlClient, metadata: Statement.Fragment) =>
-  sql`json_extract(${metadata}, '$.cancelled_by_run_id') IS NOT NULL`
+export const runCancellationRequested = (
+  sql: SqlClient.SqlClient,
+  metadata: Statement.Fragment
+): Statement.Statement<Row> => sql`json_extract(${metadata}, '$.cancelled_by_run_id') IS NOT NULL`
 
 export const fenceRunCancellation = Effect.fn("RunCancellation.fence")(function* (options: {
   readonly sql: SqlClient.SqlClient

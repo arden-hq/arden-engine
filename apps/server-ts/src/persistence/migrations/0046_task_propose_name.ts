@@ -1,3 +1,4 @@
+import { parseMigrationJson } from "./json.js"
 import type { Migration } from "./index.js"
 
 export const taskProposeName: Migration = {
@@ -10,7 +11,7 @@ export const taskProposeName: Migration = {
       .get()
     const stored = row?.["overrides_json"]
     if (typeof stored !== "string") return
-    const overrides: unknown = JSON.parse(stored)
+    const overrides: unknown = parseMigrationJson(stored)
     if (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)) return
     const next: Record<string, unknown> = { ...overrides }
     if ("desk_task_infer" in next) {

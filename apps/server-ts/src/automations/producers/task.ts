@@ -39,7 +39,7 @@ const taskChangedEvent = (row: TaskFeedRow): AutomationTriggerEvent | undefined 
         status: row.status,
         blocked: row.blocked,
         space: row.spaceName ?? "",
-        space_id: row.spaceId ?? "",
+        ...(row.spaceId === undefined ? {} : { space_id: row.spaceId }),
         summary: row.summary,
         link
       }

@@ -1,4 +1,6 @@
 import type { SqlClient } from "effect/unstable/sql"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 const citedItem = (sql: SqlClient.SqlClient) => sql`(SELECT item.item_id
   FROM (SELECT json_extract(cited.value, '$.item_id') AS item_id
@@ -7,7 +9,7 @@ const citedItem = (sql: SqlClient.SqlClient) => sql`(SELECT item.item_id
     ORDER BY cited.key LIMIT 1) AS first
   JOIN connection_items AS item ON item.item_id = first.item_id)`
 
-export const homeOfferJson = (sql: SqlClient.SqlClient) => sql`json_object(
+export const homeOfferJson = (sql: SqlClient.SqlClient): Statement<Row> => sql`json_object(
   'offer_id', offer.proposal_id, 'text', offer.text,
   'why', json_extract(offer.capture_json, '$.reason'),
   'item', CASE WHEN offer.signal_json IS NULL THEN NULL ELSE json_object('item_id', ${citedItem(sql)},

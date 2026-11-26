@@ -103,7 +103,7 @@ export const ContextExperiments = Context.Reference<ReturnType<typeof makeContex
   { defaultValue: () => makeContextExperiments() }
 )
 /** `memory: false` keeps Memory recall and related chats out of every prompt. */
-export const contextExperimentsLayer = (memory: boolean) =>
+export const contextExperimentsLayer = (memory: boolean): Layer.Layer<never, never, never> =>
   Layer.sync(ContextExperiments, () =>
     makeContextExperiments(
       undefined,

@@ -47,7 +47,9 @@ export const TerminalActionResponseSchema: Schema.Codec<TerminalActionResponse> 
   ok: Schema.Literal(true)
 })
 
-export const encodeTerminalInputRequestEffect = (value: unknown) =>
+export const encodeTerminalInputRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(TerminalInputRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )

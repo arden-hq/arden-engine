@@ -5,6 +5,8 @@ import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { PROMPTS } from "../prompts/catalog.js"
 import type { Wiki } from "../wiki/service.js"
+import type { PersistedSpace, SpaceStoreError } from "../persistence/spaces/store.js"
+import type { StructuredCompletionError } from "../models/structured-completion.js"
 
 const TASK_LIMIT = 40
 const PAGE_CONTENT_LIMIT = 8_000
@@ -15,7 +17,15 @@ export interface SpaceInstructionsDependencies {
   readonly wiki: Wiki["Service"]
 }
 
-export const makeSpaceInstructions = (dependencies: SpaceInstructionsDependencies) =>
+export const makeSpaceInstructions = (
+  dependencies: SpaceInstructionsDependencies
+): ((
+  spaceId: string
+) => Effect.Effect<
+  PersistedSpace | undefined,
+  StructuredCompletionError | SpaceStoreError,
+  never
+>) =>
   Effect.fn("SpaceInstructions.generate")(function* (spaceId: string) {
     const space = yield* dependencies.store.get(spaceId)
     if (space === null) return undefined

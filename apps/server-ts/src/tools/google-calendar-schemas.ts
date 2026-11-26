@@ -206,7 +206,13 @@ export const DeleteParametersSchema = Schema.Struct({
   scope: scopeSchema
 })
 
-export const readParametersSchema = (emails: ReadonlyArray<string>) =>
+export const readParametersSchema = (
+  emails: ReadonlyArray<string>
+): Schema.Struct<{
+  readonly event_id: Schema.String
+  readonly account: Schema.String
+  readonly calendar_id: Schema.optionalKey<Schema.String>
+}> =>
   Schema.Struct({
     event_id: Schema.String.annotate({
       description:
@@ -216,7 +222,9 @@ export const readParametersSchema = (emails: ReadonlyArray<string>) =>
     calendar_id: calendarIdSchema("read from")
   })
 
-export const listCalendarsParametersSchema = (emails: ReadonlyArray<string>) =>
+export const listCalendarsParametersSchema = (
+  emails: ReadonlyArray<string>
+): Schema.Struct<{ readonly account_ref: Schema.optionalKey<Schema.String> }> =>
   Schema.Struct({ account_ref: accountRefSchema(emails) })
 
 const EventRefSchema = Schema.String.annotate({

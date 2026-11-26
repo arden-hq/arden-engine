@@ -11,6 +11,8 @@ import { triggerContextForClaim } from "./automation-occurrence.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { decodeJson, encodeJson } from "./json.js"
+import type { Statement } from "effect/unstable/sql/Statement"
+import type { Row } from "effect/unstable/sql/SqlConnection"
 
 export interface QueueWriter {
   readonly sql: SqlClient.SqlClient
@@ -52,7 +54,7 @@ const runsAtOnce = (source: AutomationQueueSource): boolean =>
 const firedByTrigger = (source: AutomationQueueSource): boolean =>
   source === "event" || source === "idle" || source === "count"
 
-export const freshRow = (sql: SqlClient.SqlClient) =>
+export const freshRow = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`claimed_at IS NULL AND attempt_count = 0
     AND json_extract(context, '$.automation_run_id') IS NULL`
 

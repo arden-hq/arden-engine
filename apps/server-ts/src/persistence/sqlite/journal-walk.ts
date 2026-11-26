@@ -3,6 +3,7 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { PersistenceDeps } from "./deps.js"
 import { pauseBetweenBatches, runIsActive } from "./background-pause.js"
 import { journalRunIdSql } from "./journal-run-boundary.js"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 /** Rows read, and at most deleted, per write transaction. */
 const WALK_BATCH_ROWS = 2_000
@@ -31,7 +32,7 @@ interface CursorRow {
 }
 
 /** The pause between batches of background journal work. */
-export const batchPause = (reader: SqlClient.SqlClient) =>
+export const batchPause = (reader: SqlClient.SqlClient): Effect.Effect<void, SqlError, never> =>
   runIsActive(reader).pipe(Effect.flatMap(pauseBetweenBatches))
 
 /** The saved position of a walk. Rowids only change in a VACUUM (Arden runs

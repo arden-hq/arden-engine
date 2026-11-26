@@ -17,7 +17,16 @@ export const setAutomationLimits = async (
     readonly max_tokens_per_run: number | null | undefined
     readonly signal: AbortSignal
   }
-) => {
+): Promise<{
+  result: string
+  preview: string
+  data: {
+    automation_ref: string
+    pause_at_percent: number | null
+    effective_pause_at_percent: number | null
+    max_tokens_per_run: number | null
+  }
+}> => {
   const failure = (error: Parameters<typeof toolFailure>[0]) =>
     toolFailure(error, "Limits not saved")
   const before = await Effect.runPromise(limits.settings().pipe(Effect.mapError(failure)), {

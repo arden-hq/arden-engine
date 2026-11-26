@@ -155,7 +155,9 @@ export type ResolveTaskProposalResponseAgrees = Assert<
   Agrees<typeof ResolveTaskProposalResponseSchema.Type, ResolveTaskProposalResponse>
 >
 
-export const encodeResolveTaskProposalRequestEffect = (value: unknown) =>
+export const encodeResolveTaskProposalRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ResolveTaskProposalInputSchema)(value, {
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))
@@ -202,7 +204,9 @@ export const TaskProposalReviewSchema = Schema.Struct({
 
 export const TaskProposalReviewStatusSchema = Schema.NullOr(TaskProposalReviewSchema)
 
-export const encodeRecheckTaskProposalRequestEffect = (value: unknown) =>
+export const encodeRecheckTaskProposalRequestEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(RecheckTaskProposalInputSchema)(value, {
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))

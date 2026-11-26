@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { Backfill } from "./backfills/backfill.js"
@@ -107,8 +108,8 @@ export const automationInstructionBackfill: Backfill = {
         resultJson !== undefined &&
         (yield* Effect.try(() =>
           matchesInstructionReceipt({
-            result: JSON.parse(resultJson) as unknown,
-            args: JSON.parse(candidate.arguments_json) as unknown,
+            result: parseJsonText(resultJson),
+            args: parseJsonText(candidate.arguments_json),
             toolName: candidate.tool_name,
             automationRef: row.automation_ref,
             destination,

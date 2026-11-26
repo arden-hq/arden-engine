@@ -84,7 +84,9 @@ export const WikiDiffQuerySchema = Schema.Struct({
 
 const encodePagePath = (pageId: string) => `/admin/wiki/pages/${encodeURIComponent(pageId)}`
 
-export const encodeWikiPagesPathEffect = (value: unknown) =>
+export const encodeWikiPagesPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiPageListOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
       const query = new URLSearchParams()
@@ -96,20 +98,28 @@ export const encodeWikiPagesPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeWikiPagePathEffect = (value: unknown) =>
+export const encodeWikiPagePathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiPageIdSchema)(value, strict).pipe(Effect.map(encodePagePath))
 
-export const encodeWikiArchivePathEffect = (value: unknown) =>
+export const encodeWikiArchivePathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiPageIdSchema)(value, strict).pipe(
     Effect.map((pageId) => `${encodePagePath(pageId)}/archive`)
   )
 
-export const encodeWikiRestoreArchivedPathEffect = (value: unknown) =>
+export const encodeWikiRestoreArchivedPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiPageIdSchema)(value, strict).pipe(
     Effect.map((pageId) => `${encodePagePath(pageId)}/restore`)
   )
 
-export const encodeWikiHistoryPathEffect = (value: unknown) =>
+export const encodeWikiHistoryPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(
     Schema.Struct({
       pageId: WikiPageIdSchema,
@@ -122,7 +132,9 @@ export const encodeWikiHistoryPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeWikiHistoryRestorePathEffect = (value: unknown) =>
+export const encodeWikiHistoryRestorePathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(
     Schema.Struct({
       pageId: WikiPageIdSchema,
@@ -135,7 +147,9 @@ export const encodeWikiHistoryRestorePathEffect = (value: unknown) =>
     )
   )
 
-export const encodeWikiDiffPathEffect = (value: unknown) =>
+export const encodeWikiDiffPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(
     Schema.Struct({
       pageId: WikiPageIdSchema,
@@ -154,7 +168,9 @@ export const encodeWikiDiffPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeWikiVersionDiffPathEffect = (value: unknown) =>
+export const encodeWikiVersionDiffPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(
     Schema.Struct({
       pageId: WikiPageIdSchema,
@@ -167,7 +183,9 @@ export const encodeWikiVersionDiffPathEffect = (value: unknown) =>
     })
   )
 
-export const encodeWikiLinksPathEffect = (value: unknown) =>
+export const encodeWikiLinksPathEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiPageIdSchema)(value, strict).pipe(
     Effect.map((pageId) => `${encodePagePath(pageId)}/links`)
   )

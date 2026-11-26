@@ -36,7 +36,12 @@ const localPageTarget = (url: string): string | undefined => {
   return url.startsWith("/") || url.startsWith("~") ? url : undefined
 }
 
-export const localPages = (paths: LocalPathServices) => {
+export const localPages = (
+  paths: LocalPathServices
+): {
+  requirement: (url: string, ctx: ToolCtx) => Promise<ServerApprovalPrompt | undefined>
+  target: (url: string, ctx: ToolCtx, waived: boolean) => Promise<string>
+} => {
   const pageOf = async (url: string, ctx: ToolCtx): Promise<LocalPage | undefined> => {
     const target = localPageTarget(url)
     if (target === undefined) return undefined

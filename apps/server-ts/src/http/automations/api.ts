@@ -16,7 +16,7 @@ import {
   UpdateAutomationInputSchema
 } from "@arden-hq/protocol/effect/automations"
 import { Schema } from "effect"
-import * as Sse from "effect/unstable/encoding/Sse"
+import { Event as SseEvent } from "effect/unstable/encoding/Sse"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 import { SessionLifecycleEventError } from "../../persistence/sessions/events.js"
 import { completionErrors, storeErrors } from "../errors.js"
@@ -128,7 +128,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations", { topLevel:
     HttpApiEndpoint.get("events", "/automations/events", {
       query: automationEventQuery,
       success: HttpApiSchema.StreamSse({
-        events: Sse.Event,
+        events: SseEvent,
         error: SessionLifecycleEventError
       }),
       error: [HttpApiError.BadRequestNoContent, HttpApiError.InternalServerErrorNoContent]

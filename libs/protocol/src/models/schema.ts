@@ -331,12 +331,16 @@ export const ModelResetRequestSchema = Schema.Struct({
   scope: Schema.Literals(["chat", "roles"])
 })
 
-export const encodeModelResetEffect = (value: unknown) =>
+export const encodeModelResetEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ModelResetRequestSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
   )
 
-export const encodeModelSettingsPatchEffect = (value: unknown) =>
+export const encodeModelSettingsPatchEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ModelSettingsPatchSchema)(value, strict).pipe(
     Effect.map(encodeSettingsPatch),
     Effect.map(JSON.stringify)

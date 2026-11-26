@@ -13,6 +13,7 @@ import {
 } from "effect/unstable/http"
 import { timingSafeEqual } from "node:crypto"
 import { textBefore } from "../../lib/text.js"
+import type { Layer } from "effect/Layer"
 
 const isLoopbackHostHeader = (value: string | undefined): boolean => {
   if (value === undefined) return false
@@ -51,7 +52,9 @@ const matchesLocalCapability = (expected: string, provided: string | undefined):
   )
 }
 
-export const makeLocalOnlyMiddleware = (access?: LocalAccess) => {
+export const makeLocalOnlyMiddleware = (
+  access?: LocalAccess
+): Layer<never, never, HttpRouter.HttpRouter> => {
   const renderer =
     access === undefined
       ? undefined

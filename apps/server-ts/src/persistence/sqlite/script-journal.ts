@@ -1,3 +1,4 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import { Effect, Option, Schema } from "effect"
@@ -67,12 +68,8 @@ const outputCheck = (
   if (schema === undefined) return (text) => ({ valid: true, value: text })
   const validate = new AjvJsonSchemaValidator().getValidator<Schema.Json>(schema)
   return (text) => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return { valid: false }
-    }
+    const parsed = parseJsonTextOrUndefined(text)
+    if (parsed === undefined) return { valid: false }
     const checked = validate(parsed)
     return checked.valid ? { valid: true, value: checked.data } : { valid: false }
   }

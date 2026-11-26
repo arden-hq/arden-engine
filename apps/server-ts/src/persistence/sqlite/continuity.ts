@@ -1,3 +1,4 @@
+import { parseJsonText } from "@arden-hq/protocol/common"
 import type { CommunicationEnvelope } from "@arden-hq/protocol/chat"
 import { Clock, DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -24,7 +25,7 @@ interface SeenRow {
 }
 
 const decodePayload = (value: string): CommunicationDeliveryPayload => {
-  const parsed: unknown = JSON.parse(value)
+  const parsed: unknown = parseJsonText(value)
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error("Communication delivery payload is not an object")
   }

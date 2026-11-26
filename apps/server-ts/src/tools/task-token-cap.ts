@@ -4,6 +4,8 @@ import type { UpdateSpaceTaskPatch } from "@arden-hq/protocol/spaces/work"
 import { Effect } from "effect"
 import type { TaskAddress, WorkStore, WorkStoreError } from "../persistence/work/store.js"
 import type { ServerApprovalPrompt } from "./define.js"
+import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
+import type { TaskDirectionChanged } from "../persistence/work/task-direction.js"
 
 const tokenCapWords = (tokenBudget: number | null): string =>
   tokenBudget === null ? "no token cap" : countOf(tokenBudget, "token")
@@ -54,7 +56,7 @@ export const saveCap = (
   address: TaskAddress,
   cap: number | null,
   run: { readonly runId: string; readonly toolCallId: string }
-) =>
+): Effect.Effect<SpaceTask, WorkStoreError | TaskDirectionChanged, never> =>
   work
     .get(address)
     .pipe(

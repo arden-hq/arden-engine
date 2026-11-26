@@ -1,3 +1,4 @@
+import { parseJsonBody } from "@arden-hq/protocol/common"
 import { HttpStatusError, retrying } from "@arden-hq/loop/provider-kit"
 import { retryAfterHints } from "@arden-hq/std/retry"
 import { makeCodexApprovalReview } from "./approval-review.js"
@@ -9,8 +10,14 @@ import {
   MODEL_PROVIDER_PROTOCOL
 } from "@arden-hq/loop"
 import { Effect, Predicate } from "effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import { HttpClient } from "effect/unstable/http/HttpClient"
+import {
+  bodyFormData,
+  get as getRequest,
+  type HttpClientRequest,
+  post as postRequest,
+  setHeaders
+} from "effect/unstable/http/HttpClientRequest"
 import { release } from "node:os"
 import { resolveCodexClientVersion, type HttpGet } from "./version.js"
 import type { ModelHost } from "../../models/host.js"
@@ -42,17 +49,14 @@ interface CatalogModel {
 }
 
 const nodeHttpGet: HttpGet = (url, options) =>
-  nodeHttp(
-    HttpClientRequest.get(url).pipe(HttpClientRequest.setHeaders(options.headers ?? {})),
-    options.signal
-  )
+  nodeHttp(getRequest(url).pipe(setHeaders(options.headers ?? {})), options.signal)
 
 const nodeHttp = (
-  request: HttpClientRequest.HttpClientRequest,
+  request: HttpClientRequest,
   signal: AbortSignal | undefined
 ): Promise<Response> => {
   const program = Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient
+    const client = yield* HttpClient
     const response = yield* client.execute(request)
     const body = yield* response.text
     return new Response(body, {
@@ -186,7 +190,7 @@ const fetchLiveCatalog = async (
     if (response.status === 401 || response.status === 403) throw new CodexAuthenticationError()
   }
   if (!response.ok) throw new Error("Codex model catalog request failed")
-  return decodeCatalog(await response.json())
+  return decodeCatalog(await parseJsonBody(response))
 }
 
 const sendSignedIn = async (
@@ -226,7 +230,7 @@ const fetchUsage = async (
     (url, headers) => httpGet(url, { headers, signal })
   )
   if (!response.ok) throw new Error(`Codex usage request failed (HTTP ${response.status})`)
-  return response.json()
+  return parseJsonBody(response)
 }
 
 /** Codex desktop's dictation: one multipart `file` part, answered with `{ text }`.
@@ -251,13 +255,7 @@ const transcribe = async (
           new Blob([audio.bytes], { type: audio.mediaType }),
           `arden.${extension}`
         )
-        return nodeHttp(
-          HttpClientRequest.post(url).pipe(
-            HttpClientRequest.setHeaders(headers),
-            HttpClientRequest.bodyFormData(form)
-          ),
-          signal
-        )
+        return nodeHttp(postRequest(url).pipe(setHeaders(headers), bodyFormData(form)), signal)
       }
     )
     if (answer.ok) return answer
@@ -267,7 +265,7 @@ const transcribe = async (
       code: "provider_unavailable"
     })
   }, signal)
-  const body: unknown = await response.json()
+  const body: unknown = await parseJsonBody(response)
   if (!Predicate.hasProperty(body, "text") || typeof body.text !== "string")
     throw new Error("Transcription returned no text")
   return body.text

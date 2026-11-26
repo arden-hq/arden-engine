@@ -235,7 +235,9 @@ export type RunQuestionList = typeof RunQuestionListSchema.Type
 export type RunQuestionListOptions = typeof RunQuestionListOptionsSchema.Type
 export type ResolveRunQuestionInput = typeof ResolveRunQuestionInputSchema.Type
 
-export const encodeResolveRunQuestionEffect = (value: unknown) =>
+export const encodeResolveRunQuestionEffect = (
+  value: unknown
+): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(ResolveRunQuestionInputSchema)(value, {
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))

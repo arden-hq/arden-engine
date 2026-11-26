@@ -1,5 +1,11 @@
 import { Channel, Data, Effect, Option, Schema, Stream } from "effect"
-import * as Sse from "effect/unstable/encoding/Sse"
+import {
+  type AnyEvent,
+  encoder as sseEncoder,
+  EventEncoded,
+  makeParser,
+  type Retry
+} from "effect/unstable/encoding/Sse"
 import { ServerEventSchema, isKnownServerEventType } from "../events/schema.js"
 import type { EncodeServerEventOptions, SseDecodeOptions } from "./contracts.js"
 import type { ServerEvent } from "../events/contracts.js"
@@ -89,9 +95,9 @@ export const decodeSseFramesEffect = Effect.fn("decodeSseFramesEffect")(function
   input: string,
   options?: SseDecodeOptions
 ) {
-  const parsed: Array<Sse.EventEncoded> = []
-  const retries: Array<Sse.Retry> = []
-  const parser = Sse.makeParser((value) => {
+  const parsed: Array<EventEncoded> = []
+  const retries: Array<Retry> = []
+  const parser = makeParser((value) => {
     if (value._tag === "Retry") {
       retries.push(value)
     } else {
@@ -108,9 +114,9 @@ export const decodeSseFramesEffect = Effect.fn("decodeSseFramesEffect")(function
   }
   for (const retry of retries) yield* notifyRetry(options, retry)
 
-  const frames: Array<Schema.Schema.Type<typeof Sse.EventEncoded>> = []
+  const frames: Array<Schema.Schema.Type<typeof EventEncoded>> = []
   for (const value of parsed) {
-    frames.push(yield* Schema.decodeUnknownEffect(Sse.EventEncoded)(value))
+    frames.push(yield* Schema.decodeUnknownEffect(EventEncoded)(value))
   }
   return frames
 })
@@ -142,7 +148,7 @@ export const encodeServerEventFrameEffect = Effect.fn("encodeServerEventFrameEff
   }
   const eventData = yield* Schema.decodeUnknownEffect(ServerEventSchema)(eventValue)
   const data = JSON.stringify(eventData)
-  return Sse.encoder.write({
+  return sseEncoder.write({
     _tag: "Event",
     id,
     event: eventData.type,
@@ -164,8 +170,8 @@ export const decodeSseFrameStreamEffect = (
   )
   const text = bytes.pipe(Stream.pipeThroughChannel(Channel.decodeText()))
   return Stream.suspend(() => {
-    const pending: Array<Sse.AnyEvent> = []
-    const parser = Sse.makeParser((value) => pending.push(value), parserOptions(options))
+    const pending: Array<AnyEvent> = []
+    const parser = makeParser((value) => pending.push(value), parserOptions(options))
     return text.pipe(
       Stream.mapEffect(
         Effect.fn("SseFrameStream.chunk")(function* (chunk) {
@@ -179,7 +185,7 @@ export const decodeSseFrameStreamEffect = (
         if (value._tag === "Retry") {
           return Stream.fromEffect(notifyRetry(options, value)).pipe(Stream.drain)
         }
-        return Stream.fromEffect(Schema.decodeUnknownEffect(Sse.EventEncoded)(value))
+        return Stream.fromEffect(Schema.decodeUnknownEffect(EventEncoded)(value))
       })
     )
   })

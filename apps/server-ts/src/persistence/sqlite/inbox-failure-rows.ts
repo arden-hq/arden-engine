@@ -4,6 +4,7 @@ import { countsAsRun } from "./automation-skip-record.js"
 import type { FailureRow } from "./inbox-failures.js"
 import { failureNeedsOwner } from "./run-attention.js"
 import { taskOpenSql } from "./task-status-sql.js"
+import type { Statement } from "effect/unstable/sql/Statement"
 
 const AUTOMATION_FAILED_PREFIX = "automation-failed:"
 
@@ -15,7 +16,10 @@ const AUTOMATION_FAILED_PREFIX = "automation-failed:"
  * idx_run_endings_status_at), and the stuck Tasks (idx_space_tasks_stuck).
  * The final filter still decides; the lists only bound what it reads.
  */
-export const failureRows = (sql: SqlClient.SqlClient, cutoff: string) => sql<FailureRow>`
+export const failureRows = (
+  sql: SqlClient.SqlClient,
+  cutoff: string
+): Statement<FailureRow> => sql<FailureRow>`
   WITH stuck AS (
     SELECT item_id FROM space_tasks AS stuck
     WHERE ${taskOpenSql("stuck")} AND stuck.owner = 'worker' AND stuck.next_attempt_at IS NULL

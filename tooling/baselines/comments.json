@@ -93,7 +93,7 @@
   "apps/server-ts/src/lib/timer-sleep.ts": 1,
   "apps/server-ts/src/lib/wall-clock.ts": 1,
   "apps/server-ts/src/local-models/catalog.ts": 2,
-  "apps/server-ts/src/local-models/llama-server.ts": 2,
+  "apps/server-ts/src/local-models/llama-server.ts": 1,
   "apps/server-ts/src/local-models/manifest.ts": 1,
   "apps/server-ts/src/local-models/models-preset.ts": 1,
   "apps/server-ts/src/local-models/service.ts": 1,

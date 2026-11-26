@@ -1,3 +1,5 @@
+import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { after } from "@arden-hq/std/timer"
 import { cutText } from "@arden-hq/std/text"
 import { spawn } from "node:child_process"
 import { access } from "node:fs/promises"
@@ -85,7 +87,7 @@ const runRipgrep = async <A>(input: {
     let intentionallyStopped = false
 
     const cleanup = (): void => {
-      clearTimeout(timer)
+      timer.cancel()
       input.signal.removeEventListener("abort", onAbort)
     }
     const fail = (cause: unknown): void => {
@@ -140,10 +142,10 @@ const runRipgrep = async <A>(input: {
       child.kill("SIGKILL")
       fail(input.signal.reason ?? new DOMException("File search was cancelled", "AbortError"))
     }
-    const timer = setTimeout(() => {
+    const timer = after(SEARCH_TIMEOUT_MS, () => {
       child.kill("SIGKILL")
       fail(new RipgrepSearchError("timeout", "ripgrep timed out after 20 seconds"))
-    }, SEARCH_TIMEOUT_MS)
+    })
 
     if (input.signal.aborted) {
       onAbort()
@@ -326,12 +328,7 @@ export const ripgrepSearchContent = (input: {
     limit: input.limit,
     signal: input.signal,
     parse: (record) => {
-      let value: unknown
-      try {
-        value = JSON.parse(record.toString("utf8"))
-      } catch {
-        return undefined
-      }
+      const value = parseJsonTextOrUndefined(record.toString("utf8"))
       if (
         value === null ||
         typeof value !== "object" ||
