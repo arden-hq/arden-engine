@@ -2,10 +2,6 @@ import type { DatabaseSync } from "node:sqlite"
 import { hasOldWord, spaceText, spaceValue } from "../space-words-released.js"
 import type { Migration } from "./index.js"
 
-/** "Desk" became "Space". Every table, column, index and trigger named desk is
- * renamed, the old words in their SQL are replaced, and the app's names stored
- * in rows convert (`spaceValue`). The large history tables in LATER convert
- * after start in the space_words backfill. */
 export const spaceNames: Migration = {
   version: 141,
   name: "space_names",
@@ -14,13 +10,14 @@ export const spaceNames: Migration = {
     const objects = schemaObjects(database)
     const rebuilt = new Set(
       objects
-        .filter((object) => object.type === "table" && hasOldWord(object.sql))
+        .filter((object) => object.type === TABLE_SCHEMA_OBJECT && hasOldWord(object.sql))
         .map((o) => o.name)
     )
-    const triggers = objects.filter((object) => object.type === "trigger")
-    const views = objects.filter((object) => object.type === "view")
+    const triggers = objects.filter((object) => object.type === TRIGGER_SCHEMA_OBJECT)
+    const views = objects.filter((object) => object.type === VIEW_SCHEMA_OBJECT)
     const indexes = objects.filter(
-      (object) => object.type === "index" && (hasOldWord(object.sql) || rebuilt.has(object.table))
+      (object) =>
+        object.type === INDEX_SCHEMA_OBJECT && (hasOldWord(object.sql) || rebuilt.has(object.table))
     )
     for (const trigger of triggers) database.exec(`DROP TRIGGER "${trigger.name}"`)
     for (const view of views) database.exec(`DROP VIEW "${view.name}"`)
@@ -36,7 +33,12 @@ export const spaceNames: Migration = {
 
     const virtual = objects.filter((object) => object.sql.startsWith("CREATE VIRTUAL TABLE"))
     for (const table of objects) {
-      if (table.type !== "table" || rebuilt.has(table.name) || LATER.has(table.name)) continue
+      if (
+        table.type !== TABLE_SCHEMA_OBJECT ||
+        rebuilt.has(table.name) ||
+        CONVERTED_AFTER_START_BY_BACKFILL.has(table.name)
+      )
+        continue
       if (
         virtual.some(
           (owner) => table.name === owner.name || table.name.startsWith(`${owner.name}_`)
@@ -52,8 +54,7 @@ export const spaceNames: Migration = {
   }
 }
 
-/** Converted after start by the space_words backfill: too large to scan here. */
-const LATER = new Set([
+const CONVERTED_AFTER_START_BY_BACKFILL = new Set([
   "journal_records",
   "session_messages",
   "message_turns",
@@ -61,6 +62,11 @@ const LATER = new Set([
   "chat_idempotency_keys",
   "run_model_usage"
 ])
+
+const TABLE_SCHEMA_OBJECT = "table"
+const INDEX_SCHEMA_OBJECT = "index"
+const VIEW_SCHEMA_OBJECT = "view"
+const TRIGGER_SCHEMA_OBJECT = "trigger"
 
 interface SchemaObject {
   readonly type: string
@@ -93,8 +99,6 @@ const sqlName = (name: string): string => `"${name.replaceAll('"', '""')}"`
 
 const PRIOR = "arden_space_rename_prior"
 
-/** Copy the table into one created from its renamed SQL, converting each
- * value. legacy_alter_table keeps other tables' references by name. */
 const rebuild = (database: DatabaseSync, table: string, sql: string): void => {
   const columns = columnsOf(database, table)
   const sequence = database.prepare("SELECT seq FROM sqlite_sequence WHERE name = ?").get(table)?.[

@@ -5,7 +5,13 @@ import { isWithin } from "@arden-hq/std/paths"
 import path from "node:path"
 import { CHANGE_ENTRY_PLACE_MAX, CHANGE_ENTRY_TITLE_MAX } from "@arden-hq/protocol/effect/chat"
 
-import type { BrowserRequest } from "../browser/service.js"
+import {
+  BROWSER_ACT_ACTION,
+  BROWSER_OPERATION,
+  BROWSER_POINTER_ACTION,
+  SITE_PERMISSION_ANSWER,
+  type BrowserRequest
+} from "../browser/service.js"
 import type { EffectTarget } from "../execution/tool-effect.js"
 import { bundleName } from "../computer/bundle-id.js"
 
@@ -19,7 +25,7 @@ const folderWords = (cwd: string, home: string): string => {
 const LEADING_ASSIGNMENTS =
   /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"]+)*\s+)+/u
 
-const HEREDOC = /(?:\s+-)?\s*(?<!<)<<(?!<)(-?)\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/u
+const HEREDOC = /(?:\s+-)?\s*(?<!<)<<(?!<)(-)?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/u
 
 const commandWords = (command: string): string => {
   const lines: string[] = []
@@ -35,7 +41,7 @@ const commandWords = (command: string): string => {
       lines.push(line)
       continue
     }
-    delimiter = { tag: heredoc[2] ?? "", tabs: heredoc[1] === "-" }
+    delimiter = { tag: heredoc[2] ?? "", tabs: heredoc[1] !== undefined }
     lines.push(line.replace(HEREDOC, " script"))
   }
   const words = lines.join(" ").trim()
@@ -77,8 +83,7 @@ const pageWords = (url: string): string => {
   if (!URL.canParse(url)) return clipLine(withoutQuery(url), 200)
   const page = new URL(url)
   if (page.host === "") return clipLine(withoutQuery(url), 200)
-  const path = page.pathname === "/" ? "" : page.pathname
-  return clipLine(`${page.host}${path}`, 200)
+  return clipLine(`${page.host}${page.pathname.replace(/^\/$/u, "")}`, 200)
 }
 
 export const pageLink = (url: string): string | undefined => {
@@ -123,45 +128,45 @@ const keyWords = (value: string | undefined): string =>
   value !== undefined && value.split("+").every(isKey) ? value : "a key"
 
 const actWords = (
-  operation: Extract<BrowserOperation, { readonly type: "act" }>,
+  operation: Extract<BrowserOperation, { readonly type: typeof BROWSER_OPERATION.act }>,
   element: BrowserElement | undefined
 ): string => {
   const what = elementWords(element, "an element")
   switch (operation.action) {
-    case "click":
+    case BROWSER_ACT_ACTION.click:
       return `Clicked ${what}`
-    case "dblclick":
+    case BROWSER_ACT_ACTION.dblclick:
       return `Double-clicked ${what}`
-    case "hover":
+    case BROWSER_ACT_ACTION.hover:
       return `Pointed at ${what}`
-    case "focus":
+    case BROWSER_ACT_ACTION.focus:
       return `Focused ${what}`
-    case "fill":
-    case "type":
+    case BROWSER_ACT_ACTION.fill:
+    case BROWSER_ACT_ACTION.type:
       return `Typed in ${element === undefined || element.name.trim() === "" ? "a field" : quoted(element.name, 80)}`
-    case "select":
+    case BROWSER_ACT_ACTION.select:
       return `Chose an option in ${elementWords(element, "a list")}`
-    case "check":
+    case BROWSER_ACT_ACTION.check:
       return `Ticked ${what}`
-    case "uncheck":
+    case BROWSER_ACT_ACTION.uncheck:
       return `Unticked ${what}`
-    case "press":
+    case BROWSER_ACT_ACTION.press:
       return `Pressed ${keyWords(operation.value)}`
-    case "scroll":
+    case BROWSER_ACT_ACTION.scroll:
       return `Scrolled ${operation.direction ?? "down"}`
   }
 }
 
 const permissionLine = (
-  operation: Extract<BrowserOperation, { readonly type: "permission" }>
+  operation: Extract<BrowserOperation, { readonly type: typeof BROWSER_OPERATION.permission }>
 ): string => {
   const what = listWords(operation.permissions)
   switch (operation.answer) {
-    case "once":
+    case SITE_PERMISSION_ANSWER.once:
       return `${DECISION_WORD.allowed} ${what} once`
-    case "always":
+    case SITE_PERMISSION_ANSWER.always:
       return `${DECISION_WORD.allowed} ${what}`
-    case "deny":
+    case SITE_PERMISSION_ANSWER.deny:
       return `${DECISION_WORD.denied} ${what}`
   }
 }
@@ -179,10 +184,10 @@ export const browserTarget = (
 ): EffectTarget | undefined => {
   const words = browserWords(operation, element)
   if (words === undefined) return undefined
-  const link = operation.type === "open" ? pageLink(operation.url) : undefined
+  const link = operation.type === BROWSER_OPERATION.open ? pageLink(operation.url) : undefined
   const host = browserHost(operation)
   const tab =
-    operation.type === "open" && operation.tabRef === undefined
+    operation.type === BROWSER_OPERATION.open && operation.tabRef === undefined
       ? `site:${hostOf(operation.url) ?? withoutQuery(operation.url).slice(0, 200)}`
       : `tab:${"tabRef" in operation ? operation.tabRef : ""}`
   return {
@@ -196,22 +201,22 @@ export const browserTarget = (
 
 const browserHost = (operation: BrowserOperation): string | undefined => {
   switch (operation.type) {
-    case "open":
+    case BROWSER_OPERATION.open:
       return hostOf(operation.url)
-    case "act":
-    case "pointer":
-    case "upload":
-    case "permission":
+    case BROWSER_OPERATION.act:
+    case BROWSER_OPERATION.pointer:
+    case BROWSER_OPERATION.upload:
+    case BROWSER_OPERATION.permission:
       return hostOf(operation.origin)
-    case "close":
-    case "tabs":
-    case "snapshot":
-    case "screenshot":
-    case "target":
-    case "wait":
-    case "site_secrets":
-    case "card_frame":
-    case "card_checkout":
+    case BROWSER_OPERATION.close:
+    case BROWSER_OPERATION.tabs:
+    case BROWSER_OPERATION.snapshot:
+    case BROWSER_OPERATION.screenshot:
+    case BROWSER_OPERATION.target:
+    case BROWSER_OPERATION.wait:
+    case BROWSER_OPERATION.site_secrets:
+    case BROWSER_OPERATION.card_frame:
+    case BROWSER_OPERATION.card_checkout:
       return undefined
   }
 }
@@ -221,15 +226,15 @@ const browserWords = (
   element: BrowserElement | undefined
 ): string | undefined => {
   switch (operation.type) {
-    case "open":
+    case BROWSER_OPERATION.open:
       return `Opened ${pageWords(operation.url)}`
-    case "close":
+    case BROWSER_OPERATION.close:
       return "Closed tab"
-    case "act":
+    case BROWSER_OPERATION.act:
       return `${actWords(operation, element)}${onSite(operation.origin)}`
-    case "pointer":
-      return `${operation.action === "click" ? "Clicked" : "Dragged"}${onSite(operation.origin)}`
-    case "upload": {
+    case BROWSER_OPERATION.pointer:
+      return `${operation.action === BROWSER_POINTER_ACTION.click ? "Clicked" : "Dragged"}${onSite(operation.origin)}`
+    case BROWSER_OPERATION.upload: {
       const [only] = operation.files
       const what =
         operation.files.length === 1 && only !== undefined
@@ -238,16 +243,16 @@ const browserWords = (
       const host = hostOf(operation.origin)
       return `Uploaded ${what}${host === undefined ? "" : ` to ${host}`}`
     }
-    case "permission":
+    case BROWSER_OPERATION.permission:
       return `${permissionLine(operation)}${onSite(operation.origin)}`
-    case "tabs":
-    case "snapshot":
-    case "screenshot":
-    case "target":
-    case "wait":
-    case "site_secrets":
-    case "card_frame":
-    case "card_checkout":
+    case BROWSER_OPERATION.tabs:
+    case BROWSER_OPERATION.snapshot:
+    case BROWSER_OPERATION.screenshot:
+    case BROWSER_OPERATION.target:
+    case BROWSER_OPERATION.wait:
+    case BROWSER_OPERATION.site_secrets:
+    case BROWSER_OPERATION.card_frame:
+    case BROWSER_OPERATION.card_checkout:
       return undefined
   }
 }

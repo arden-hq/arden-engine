@@ -4,12 +4,6 @@ import { Effect, Schema } from "effect"
 import type { ModelCallUsage } from "../../persistence/usage/store.js"
 import type { CompletionImage } from "../structured-completion.js"
 
-/**
- * The question kinds both decision wire formats share: OpenAI `/v1/decisions`
- * calls them predicate / choice / score, TypeSafe `/v1/systemone` calls them
- * noul / choice / score. Limits are the stricter of the two: a choice holds
- * 2–255 options, a score 2–10 levels ordered lowest first.
- */
 export const CHOICE_MAX_OPTIONS = 255
 const SCORE_MAX_LEVELS = 10
 

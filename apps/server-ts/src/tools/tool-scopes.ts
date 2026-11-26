@@ -3,6 +3,16 @@ import { readsOnly } from "../execution/impact.js"
 import type { ToolScopeKey } from "../execution/policy.js"
 import type { ServerTool, ServerToolMetadata } from "./define.js"
 
+export const TOOL_SOURCE = {
+  agents: "_agents",
+  research: "_research",
+  browser: "_browser",
+  wiki: "_wiki",
+  filesystem: "_filesystem",
+  shell: "_shell",
+  code: "_code"
+} as const
+
 const CODE_AGENT_SOURCES = new Set(["_code", "_filesystem", "_skills", "_system", "_web"])
 
 const WORKER_EXCLUDED_SOURCES = new Set([

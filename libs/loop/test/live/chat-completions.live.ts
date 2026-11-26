@@ -1,20 +1,4 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-/**
- * Live check of the Chat Completions provider against a real server, through
- * the real `makeAgent` loop. Not part of `vitest run`; run it by hand:
- *
- *   CHAT_COMPLETIONS_BASE_URL=http://127.0.0.1:9931/v1 \
- *   CHAT_COMPLETIONS_MODEL=ggml-org/gemma-4-E2B-it-GGUF:Q8_0 \
- *   CHAT_COMPLETIONS_COMPAT='{"structuredOutput":"json_schema","imageInput":true,"parallelToolCalls":true,"toolChoiceNone":"unenforced"}' \
- *   bun --conditions=arden-source libs/loop/test/live/chat-completions.live.ts
- *
- * Optional: CHAT_COMPLETIONS_PROVIDER (origin provider id, default
- * "llama.cpp"), CHAT_COMPLETIONS_API_KEY_ENV (the NAME of the variable that
- * holds the key, sent as a bearer token), CHAT_COMPLETIONS_EFFORT (a
- * reasoning effort to request), CHAT_COMPLETIONS_OVERFLOW_WORDS (default
- * 6000, sized for a 4096-token context; one word is about one token), CHAT_COMPLETIONS_SKIP (comma list
- * of case names). Exits non-zero when a case fails.
- */
 import { errorMessage } from "@arden-hq/std/errors"
 
 import { isAbortError } from "../../src/abort.js"
@@ -46,14 +30,12 @@ const overflowWords = Number(process.env.CHAT_COMPLETIONS_OVERFLOW_WORDS ?? "600
 const skipped = new Set((process.env.CHAT_COMPLETIONS_SKIP ?? "").split(",").filter(Boolean))
 const compat: unknown = JSON.parse(process.env.CHAT_COMPLETIONS_COMPAT ?? "{}")
 
-/** llama.cpp's own prompt accounting per request (`timings` on the usage chunk), when it sends one. */
 interface Timing {
   readonly prompt_n: number
   readonly cache_n: number
 }
 const timings: Array<Promise<Timing | undefined>> = []
 
-/** `fetch` that also reads the stream's last `timings` object, without touching what the provider reads. */
 const timedFetch: typeof globalThis.fetch = async (input, init) => {
   const response = await globalThis.fetch(input, init)
   if (response.body === null) return response
@@ -86,7 +68,6 @@ const chatCompletions = makeChatCompletionsProvider({
   ...(typeof compat === "object" && compat !== null ? { compat } : {})
 })
 
-/** The same provider, printing each transport retry so a slow case shows why. */
 const provider: ModelProvider = {
   ...chatCompletions,
   stream: async function* (request) {
@@ -132,10 +113,6 @@ const noTools: Toolset = {
   }
 }
 
-/**
- * A deferred catalog of 40 tools in 8 groups, plus one tool only it can
- * answer with: `order_status` returns a tracking code the model cannot guess.
- */
 const TRACKING = "DHL-7Q2X"
 const CATALOG: ReadonlyArray<ToolEntry> = [
   ...["mail", "calendar", "files", "notes", "contacts", "music", "photos", "travel"].flatMap(
@@ -189,7 +166,6 @@ const declarationOf = (entry: ToolEntry): ToolDeclaration => ({
   ...(entry.meta.group === undefined ? {} : { group: entry.meta.group })
 })
 
-/** The whole prompt one request costs, cached or not. */
 const promptTokens = async (request: ModelProviderRequest): Promise<number> => {
   for await (const item of await chatCompletions.stream(request)) {
     if (item._tag === "Completed") return usageInputTokens(item.usage)
@@ -266,10 +242,6 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       let reasoning = ""
       let text = ""
       for await (const event of agentWith(noTools).stream([
-        // A question most models reason about: OpenRouter's Claude and GPT
-        // models skip thinking on "what is 17 * 3?" (2026-11-16). Claude
-        // reasons only with CHAT_COMPLETIONS_EFFORT set; Claude Sonnet 5.5 at
-        // any effort and GPT-6 Astra at `low` still answer this one unthought.
         {
           role: ROLE.user,
           content:

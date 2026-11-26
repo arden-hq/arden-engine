@@ -13,18 +13,22 @@ import { ScriptRunner } from "../workflows/script-runner.js"
 import { ChatMessageError, type ChatMessageFailure } from "./message-errors.js"
 import { ChatMessage } from "./message.js"
 
-export type ChatEnd = "archive" | "delete"
+const CHAT_END = { archive: "archive", delete: "delete" } as const
+
+export type ChatEnd = (typeof CHAT_END)[keyof typeof CHAT_END]
+
+export const END_RESULT = { ended: "ended", not_found: "not_found", running: "running" } as const
 
 export type ChatEndResult =
-  | { readonly kind: "ended" }
-  | { readonly kind: "not_found" }
-  | { readonly kind: "running"; readonly running: ChatRunningWork }
+  | { readonly kind: typeof END_RESULT.ended }
+  | { readonly kind: typeof END_RESULT.not_found }
+  | { readonly kind: typeof END_RESULT.running; readonly running: ChatRunningWork }
 
 export type SpaceEndResult =
-  | { readonly kind: "ended" }
-  | { readonly kind: "not_found" }
+  | { readonly kind: typeof END_RESULT.ended }
+  | { readonly kind: typeof END_RESULT.not_found }
   | {
-      readonly kind: "running"
+      readonly kind: typeof END_RESULT.running
       readonly chats: ReadonlyArray<{ readonly name: string; readonly running: ChatRunningWork }>
     }
 

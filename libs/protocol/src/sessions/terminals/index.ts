@@ -29,7 +29,6 @@ export const terminalRequests = {
   )
 } as const
 
-/** The terminal path serves DELETE; `/stop` and `/input` take POST. */
 export const terminalRoutes = {
   list(sessionId: string): string {
     return runBoundary(encodeTerminalsPathEffect(sessionId), "Invalid terminals route", "encode")

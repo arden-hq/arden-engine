@@ -1,7 +1,12 @@
 import { Effect, Schema } from "effect"
+import { strict } from "../common/boundary.js"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../common/schema.js"
 import {
+  EMBEDDING_ETA,
+  EMBEDDING_INDEX_ROLE,
+  EMBEDDING_MODEL_CHOICE,
   EMBEDDING_MODEL_REF,
+  EMBEDDING_PHASE,
   EMBEDDING_STATE,
   type EmbeddingIndexStatus,
   type EmbeddingModelChoice,
@@ -18,7 +23,7 @@ const ModelInfoWireSchema = Schema.Struct({
 
 const StoredIndexWireSchema = Schema.Struct({
   model_id: ModelIdSchema,
-  role: Schema.Literals(["serving", "building"] as const),
+  role: Schema.Literals(Object.values(EMBEDDING_INDEX_ROLE)),
   bytes: NonNegativeIntSchema
 })
 
@@ -59,10 +64,13 @@ export const EmbeddingIndexStatusResponseSchema = Schema.Union([
     ...progress,
     previous: ModelRefWireSchema,
     started_at: IsoDateTimeStringSchema,
-    phase: Schema.Literals(["loading", "pages"] as const),
+    phase: Schema.Literals(Object.values(EMBEDDING_PHASE)),
     eta: Schema.Union([
-      Schema.Struct({ kind: Schema.Literal("estimating") }),
-      Schema.Struct({ kind: Schema.Literal("estimated"), seconds: NonNegativeIntSchema })
+      Schema.Struct({ kind: Schema.Literal(EMBEDDING_ETA.estimating) }),
+      Schema.Struct({
+        kind: Schema.Literal(EMBEDDING_ETA.estimated),
+        seconds: NonNegativeIntSchema
+      })
     ])
   }).check(pagesWithinTotal),
   withExtras({
@@ -217,16 +225,14 @@ export const EmbeddingModelChoiceRequestSchema = Schema.Union([
   Schema.Struct({ model_id: Schema.Null, keep_index: Schema.Boolean })
 ])
 
-const strict = { onExcessProperty: "error" } as const
-
 export const decodeEmbeddingModelChoiceRequestEffect = (
   value: unknown
 ): Effect.Effect<EmbeddingModelChoice, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(EmbeddingModelChoiceRequestSchema)(value, strict).pipe(
     Effect.map((choice): EmbeddingModelChoice =>
       "keep_index" in choice
-        ? { kind: "off", keepIndex: choice.keep_index }
-        : { kind: "model", modelId: choice.model_id }
+        ? { kind: EMBEDDING_MODEL_CHOICE.off, keepIndex: choice.keep_index }
+        : { kind: EMBEDDING_MODEL_CHOICE.model, modelId: choice.model_id }
     )
   )
 
@@ -234,7 +240,7 @@ export const encodeEmbeddingModelChoiceEffect = (
   value: EmbeddingModelChoice
 ): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(EmbeddingModelChoiceRequestSchema)(
-    value.kind === "off"
+    value.kind === EMBEDDING_MODEL_CHOICE.off
       ? { model_id: null, keep_index: value.keepIndex }
       : { model_id: value.modelId },
     strict

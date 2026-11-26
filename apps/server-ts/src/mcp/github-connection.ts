@@ -12,13 +12,9 @@ import {
   requireVault,
   vaultOperation,
   writeSecureDocument,
-  type CredentialVault
+  type CredentialVault,
+  type SecureDocumentTarget
 } from "../credentials/vault.js"
-
-/**
- * GitHub's remote MCP server takes one bearer: a personal access token the
- * owner pastes or an OAuth user token.
- */
 
 export class McpCredentialUnavailable extends Error {
   constructor(readonly detail: string) {
@@ -39,10 +35,12 @@ interface GitHubChoice {
   readonly readOnly: boolean
 }
 
+const GITHUB_USER_CHECK = { ok: "ok", rejected: "rejected", unavailable: "unavailable" } as const
+
 type GitHubUserCheck =
-  | { readonly kind: "ok"; readonly login: string }
-  | { readonly kind: "rejected" }
-  | { readonly kind: "unavailable" }
+  | { readonly kind: typeof GITHUB_USER_CHECK.ok; readonly login: string }
+  | { readonly kind: typeof GITHUB_USER_CHECK.rejected }
+  | { readonly kind: typeof GITHUB_USER_CHECK.unavailable }
 
 export interface McpTokenAuth {
   readonly headers: () => Promise<Readonly<Record<string, string>>>
@@ -55,10 +53,13 @@ const TOKEN_PATTERN = /^[A-Za-z0-9_]{20,512}$/
 const NOT_CONNECTED = "Sign in to GitHub or paste a token to connect."
 const NOT_ANSWERING = "GitHub isn’t answering right now. Try again in a few minutes."
 
-const appSettingsTarget = { documentKey: "mcp:github:settings", binding: "preset:github" } as const
+const appSettingsTarget: SecureDocumentTarget = {
+  documentKey: "mcp:github:settings",
+  binding: "preset:github"
+}
 const AppSettingsSchema = Schema.Struct({ read_only: Schema.Boolean })
 
-const documentTarget = { documentKey: "mcp:github", binding: "preset:github" } as const
+const documentTarget: SecureDocumentTarget = { documentKey: "mcp:github", binding: "preset:github" }
 
 const StoredChoiceSchema = Schema.Struct({
   version: Schema.Literal(1),
@@ -162,15 +163,15 @@ export const makeGitHubConnection = ({
     identify: async () => {
       const check = await fetchGitHubLogin((await requireChoice()).token)
       switch (check.kind) {
-        case "ok":
+        case GITHUB_USER_CHECK.ok:
           return check.login
-        case "rejected":
+        case GITHUB_USER_CHECK.rejected:
           throw new McpCredentialUnavailable(
             (await readChoice()) === undefined
               ? "GitHub authorization expired. Sign in again."
               : "GitHub turned down the token. Paste a new one."
           )
-        case "unavailable":
+        case GITHUB_USER_CHECK.unavailable:
           throw new Error(NOT_ANSWERING)
       }
     }
@@ -178,7 +179,7 @@ export const makeGitHubConnection = ({
 
   return {
     auth,
-    // GitHub's notifications endpoint rejects app user tokens.
+    // https://docs.github.com/en/rest/activity/notifications
     token: async (): Promise<string | undefined> => (await readChoice())?.token,
     state: async (): Promise<GitHubConnectionState> => {
       const choice = await readChoice()
@@ -198,8 +199,8 @@ export const makeGitHubConnection = ({
     },
     connect: async (request: GitHubConnectRequest): Promise<void> => {
       const check = await fetchGitHubLogin(request.token)
-      if (check.kind === "unavailable") throw new Error(NOT_ANSWERING)
-      if (check.kind === "rejected") {
+      if (check.kind === GITHUB_USER_CHECK.unavailable) throw new Error(NOT_ANSWERING)
+      if (check.kind === GITHUB_USER_CHECK.rejected) {
         throw new GitHubTokenRejected("GitHub turned down that token. Check it and paste again.")
       }
       const readOnly = (await readChoice())?.readOnly ?? (await appReadOnly())

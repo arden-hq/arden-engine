@@ -46,11 +46,6 @@ const answeredText = (body: Readonly<Record<string, unknown>>): string => {
   return [`The user answered: ${jsonQuoted(answer)}`, ...asked].join("\n")
 }
 
-/**
- * What the owner said in `message`, which `TranscriptQueries.ownerWordsIn` (or
- * `ownerMessagesAfter`) proved is the owner's own words: the typed text, or an answer to Arden's
- * question with Arden's prompt marked as Arden's.
- */
 export const ownerText = (message: Readonly<Record<string, unknown>>): string => {
   const typed = typedText(message.content)
   if (message.question_answer === undefined || !typed.trim().startsWith("<question_answer>"))
@@ -59,7 +54,6 @@ export const ownerText = (message: Readonly<Record<string, unknown>>): string =>
   return body === undefined ? "" : answeredText(body)
 }
 
-/** What the owner typed in a proven `message`, without the choices Arden offered. */
 export const ownerKeystrokes = (message: Readonly<Record<string, unknown>>): string => {
   if (!typedText(message.content).trim().startsWith("<question_answer>")) return ownerText(message)
   const ownAnswer = questionAnswerFields(message)?.own_answer

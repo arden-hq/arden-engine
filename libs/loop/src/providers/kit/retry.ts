@@ -4,7 +4,6 @@ import { sleep } from "@arden-hq/std/sleep"
 import { abortError } from "../../abort.js"
 import { HttpStatusError, ProviderError } from "./errors.js"
 
-/** Total connection attempts per request (the pre-emission 401 auth retry is excluded). */
 export const DEFAULT_MAX_ATTEMPTS = 5
 const RETRY_MAX_DELAY_MS = 30_000
 const BACKOFF = { initialMs: 250, maxMs: RETRY_MAX_DELAY_MS, jitter: 0.25 }
@@ -18,12 +17,6 @@ const RETRYABLE_MESSAGE_PATTERNS: ReadonlyArray<RegExp> = [
 const matchesRetryableMessage = (value: unknown): boolean =>
   typeof value === "string" && RETRYABLE_MESSAGE_PATTERNS.some((pattern) => pattern.test(value))
 
-/**
- * A classified failure retries by its own `retryable` (408/429/5xx statuses and
- * transport failures do; semantic rejections and other 4xx do not). An
- * unclassified Error retries when its message names a transport failure
- * (connection resets, timeouts, overload-style fetch errors).
- */
 export const isRetryableFailure = (error: unknown): boolean => {
   if (error instanceof ProviderError) return error.retryable
   return error instanceof Error && matchesRetryableMessage(error.message)
@@ -37,10 +30,6 @@ const retryAfterDelayMs = (error: unknown): number | undefined => {
   return asked === undefined ? undefined : cap(asked)
 }
 
-/**
- * Delay before retry `attempt` (1-based): response headers win, then the SSE
- * wire `retry:` hint, then exponential backoff.
- */
 export const retryDelayMs = (
   attempt: number,
   error: unknown,
@@ -53,17 +42,11 @@ export const retryDelayMs = (
   return backoffDelayMs(BACKOFF, attempt, random)
 }
 
-/** Backoff sleep that the abort signal cancels immediately with the loop's AbortError. */
 export const backoffSleep = (delayMs: number, signal?: AbortSignal): Promise<void> =>
   sleep(delayMs, signal).catch(() => {
     throw abortError()
   })
 
-/**
- * The one retry decision: the delay before attempt `attempt + 1` when the
- * failure is a transient one and the budget allows another try, else
- * undefined (the failure stands).
- */
 export const nextRetry = (
   attempt: number,
   error: unknown,
@@ -73,15 +56,6 @@ export const nextRetry = (
     ? retryDelayMs(attempt, error, options.wireHintMs)
     : undefined
 
-/**
- * `fetch` with the transport retry, for a model endpoint called with one JSON
- * request (embeddings, decision models, a local model server). A dropped
- * connection or a 408/429/5xx answer is tried again under `nextRetry`; the
- * request's own signal bounds every attempt and every wait, so a caller's
- * timeout still holds. The last answer is returned as it came, so the caller
- * reads its status as before. Only a body that can be sent again (none, or a
- * string) is retried.
- */
 export const retryingFetch =
   (fetch: typeof globalThis.fetch, maxAttempts = DEFAULT_MAX_ATTEMPTS): typeof globalThis.fetch =>
   async (input, init) => {
@@ -112,12 +86,6 @@ export const retryingFetch =
     }
   }
 
-/**
- * A one-shot model call with the transport retry: `run` again after a
- * transient failure under `nextRetry`, for a call that is not a plain fetch
- * (a multipart upload over node:http). The signal bounds every attempt and
- * wait. A non-OK answer must throw an HttpStatusError for its status to count.
- */
 export const retrying = async <T>(
   run: () => Promise<T>,
   signal: AbortSignal | undefined,

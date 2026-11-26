@@ -1,5 +1,4 @@
-import * as real from "node:fs/promises"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -19,12 +18,12 @@ const missing = (path: unknown): Error =>
 const vanishing: ScanFileSystem = {
   lstat: (async (path: never, ...rest: Array<never>) => {
     if (gone(path)) throw missing(path)
-    return real.lstat(path, ...rest)
-  }) as typeof real.lstat,
+    return lstat(path, ...rest)
+  }) as typeof lstat,
   readdir: (async (path: never, ...rest: Array<never>) => {
     if (gone(path)) throw missing(path)
-    return real.readdir(path, ...rest)
-  }) as typeof real.readdir
+    return readdir(path, ...rest)
+  }) as typeof readdir
 }
 
 describe("storage scan while files come and go", () => {
@@ -56,13 +55,13 @@ describe("storage scan while files come and go", () => {
 
   it("still fails on an error that is not a vanished entry", async () => {
     const denied: ScanFileSystem = {
-      lstat: real.lstat,
+      lstat,
       readdir: (async (path: never, ...rest: Array<never>) => {
         if (String(path).endsWith("inner")) {
           throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
         }
-        return real.readdir(path, ...rest)
-      }) as typeof real.readdir
+        return readdir(path, ...rest)
+      }) as typeof readdir
     }
     await expect(scanStorageUnitsUnsafe(root, denied)).rejects.toThrow()
     await expect(scanInventoryUnsafe(root, null, denied)).rejects.toThrow()

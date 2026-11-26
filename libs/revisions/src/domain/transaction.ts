@@ -40,6 +40,19 @@ interface TransactionRow {
   readonly newBlob: string | null
 }
 
+export const TRANSACTION_MARKER = {
+  prepared: "PREPARED",
+  decided: "DECIDED",
+  committed: "COMMITTED",
+  adopting: "ADOPTING",
+  conflict: "CONFLICT",
+  rolledBack: "ROLLED_BACK"
+} as const
+export type TransactionMarker = (typeof TRANSACTION_MARKER)[keyof typeof TRANSACTION_MARKER]
+
+export const markerLocation = (id: string, marker: TransactionMarker): string =>
+  `transactions/${id}/${marker === TRANSACTION_MARKER.prepared ? marker : `markers/${marker}`}`
+
 export interface Transaction {
   readonly transactionId: string
   readonly oldHead: string | null

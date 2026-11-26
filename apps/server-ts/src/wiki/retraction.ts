@@ -1,4 +1,8 @@
-import type { ManagedFileRepositoryShape, RevisionError } from "@arden-hq/revisions/effect"
+import {
+  RESOURCE_STATE,
+  type ManagedFileRepositoryShape,
+  type RevisionError
+} from "@arden-hq/revisions/effect"
 import { markdownWords } from "@arden-hq/protocol/chat"
 import { countOf } from "@arden-hq/std/count"
 import { Effect, Option, Schema } from "effect"
@@ -6,17 +10,11 @@ import { Effect, Option, Schema } from "effect"
 import { parseWikiPage } from "./page.js"
 import { FORGOTTEN_PAGE_PATH } from "./code-owned-pages.js"
 
-/**
- * A line of fewer words carries no claim of its own (a heading, a label, a date), so it is
- * neither forgotten nor guarded.
- */
 export const MIN_CLAIM_WORDS = 4
 
-/** A retraction's one-line claim is shown in every refusal it causes. */
 export const MAX_CLAIM_CHARS = 300
 
 const Said = Schema.Struct({
-  /** The chat link of the owner's turn. */
   chat: Schema.String,
   at: Schema.String
 })
@@ -33,7 +31,6 @@ const OpenRetraction = Schema.Struct({ ...RetractionFields, status: Schema.Liter
 const ClosedRetraction = Schema.Struct({
   ...RetractionFields,
   status: Schema.Literal("closed"),
-  /** The owner's turn that closed it. */
   closed: Said
 })
 
@@ -41,7 +38,6 @@ export const Retraction = Schema.Union([OpenRetraction, ClosedRetraction])
 export type Retraction = typeof Retraction.Type
 export type OpenRetraction = typeof OpenRetraction.Type
 
-/** The frontmatter key under which the forgotten page stores its retractions. */
 export const RETRACTIONS_KEY = "retractions"
 
 const decodeRetraction = Schema.decodeUnknownOption(Retraction)
@@ -49,7 +45,6 @@ const decodeRetraction = Schema.decodeUnknownOption(Retraction)
 export const readRetraction = (value: Schema.Json): Retraction | undefined =>
   Option.getOrUndefined(decodeRetraction(value))
 
-/** What the page's metadata stores, as written, and the entries of it that read. */
 export const storedRetractions = (
   metadata: Readonly<Record<string, Schema.Json>>
 ): {
@@ -78,12 +73,11 @@ const readableRetractions = (
 
 const decoder = new TextDecoder()
 
-/** The open retractions in Memory now. */
 export const openRetractions = Effect.fn("Wiki.openRetractions")(function* (
   repository: ManagedFileRepositoryShape
 ): Effect.fn.Return<ReadonlyArray<OpenRetraction>, RevisionError> {
   const resource = yield* repository.findByPath(FORGOTTEN_PAGE_PATH)
-  if (resource === null || resource.state !== "active") return []
+  if (resource === null || resource.state !== RESOURCE_STATE.active) return []
   const page = yield* parseWikiPage(decoder.decode(yield* repository.readVersion(resource))).pipe(
     Effect.option
   )
@@ -111,7 +105,6 @@ export const claimKey = (line: string): string | undefined => compareForm(reader
 const claimKeys = (body: string): ReadonlySet<string> =>
   new Set(body.split("\n").flatMap((line) => claimKey(line) ?? []))
 
-/** Each guarded line, in its compared form, with the open retraction that guards it. */
 export const guardedLines = (
   open: ReadonlyArray<OpenRetraction>
 ): ReadonlyMap<string, OpenRetraction> =>
@@ -124,7 +117,6 @@ export const guardedLines = (
     )
   )
 
-/** The open retraction a page change would put a line of back, if any. */
 export const putBack = (
   guarded: ReadonlyMap<string, OpenRetraction>,
   before: string | undefined,

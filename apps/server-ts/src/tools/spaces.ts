@@ -6,207 +6,35 @@ import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import {
   SpaceStore,
-  SpaceStoreError,
-  spaceChoices,
   type PersistedSpace,
   type SpaceDetailRecord
 } from "../persistence/spaces/store.js"
-import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
+import { SessionQueries } from "../persistence/sessions/queries.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { RunQueries } from "../persistence/runs/queries.js"
-import { toolFailure } from "./tool-failure.js"
 import { taskHandle } from "./task-handle.js"
 import { writeIdentity } from "./wiki-identity.js"
 import { formatWikiPage } from "../wiki/page.js"
 import { Wiki } from "../wiki/service.js"
-import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
+import type { PageRecord } from "../wiki/snapshot.js"
 import type { ServerRunContext } from "./run-context.js"
-import { boundedBody, loadSnapshot, pageData, wikiFailure, writtenPageData } from "./wiki.js"
+import { boundedBody, pageData, writtenPageData } from "./wiki-render.js"
+import { wikiFailure } from "./wiki-access.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { pageReceipt, pageSource } from "./wiki-records.js"
-import { workTarget } from "./work-reach.js"
-import { refusalError } from "./refusal.js"
-import { MAX_WIKI_CONTENT_CHARS } from "./wiki-schemas.js"
-
-const MAX_PAGE_LINES = 4_000
-
-const OptionalSpaceIdSchema = Schema.optionalKey(
-  Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
-    description: "Exact space_id from space_list. Omit to use the current session's Space."
-  })
-)
-
-const SpacePageReadParametersSchema = Schema.Struct({
-  space_id: OptionalSpaceIdSchema,
-  offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
-    .annotate({
-      description: "One-based first body line to return. Defaults to 1."
-    })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(1))),
-  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LINES }))
-    .annotate({
-      description: `Maximum body lines to return, from 1 to ${MAX_PAGE_LINES}. Defaults to 500.`
-    })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(500)))
-})
-
-const SpacePagePatchParametersSchema = Schema.Struct({
-  space_id: OptionalSpaceIdSchema,
-  old_text: Schema.NonEmptyString.check(Schema.isMaxLength(MAX_WIKI_CONTENT_CHARS)).annotate({
-    description: "Exact current body text to replace. It must occur exactly once."
-  }),
-  new_text: Schema.String.check(Schema.isMaxLength(MAX_WIKI_CONTENT_CHARS)).annotate({
-    description: "Literal replacement text. Empty removes the matched text."
-  })
-})
-
-const SpacePageWriteParametersSchema = Schema.Struct({
-  space_id: OptionalSpaceIdSchema,
-  body: Schema.String.check(Schema.isMaxLength(MAX_WIKI_CONTENT_CHARS)).annotate({
-    description: "Complete replacement Markdown body. Page identity and metadata stay unchanged."
-  })
-})
-
-interface SpaceToolServices {
-  readonly spaces: SpaceStore["Service"]
-  readonly sessions: SessionQueries["Service"]
-  readonly runs: Pick<RunQueries["Service"], "get" | "cause">
-  readonly work: WorkStore["Service"]
-  readonly wiki: Wiki["Service"]
-}
-
-interface SpaceTarget {
-  readonly space: PersistedSpace
-}
-
-interface SpacePageTarget extends SpaceTarget {
-  readonly snapshot: Snapshot
-  readonly page: PageRecord
-}
-
-const sessionFailure = (cause: SessionQueryFailure): ToolExecutionError =>
-  toolFailure(
-    { reason: cause.reason, message: `Could not resolve the current Space: ${cause.message}` },
-    "Space unavailable"
-  )
-
-const spaceFailure = (error: SpaceStoreError): ToolExecutionError =>
-  error.reason === "conflict"
-    ? new ToolExecutionError(error.message, { preview: "Space changed", retryable: false })
-    : toolFailure(error, "Space unavailable")
-
-export const noSpace = async (
-  services: { readonly spaces: SpaceStore["Service"] },
-  requestedSpaceId: string | undefined,
-  signal: AbortSignal
-): Promise<ToolExecutionError> => {
-  const spaces = await Effect.runPromise(
-    services.spaces.list().pipe(Effect.mapError(spaceFailure)),
-    {
-      signal
-    }
-  )
-  return new ToolExecutionError(
-    `${
-      requestedSpaceId === undefined
-        ? "This Automation chat is in no Space, so name the Space."
-        : `No active Space exists with id '${requestedSpaceId}'.`
-    } ${spaceChoices(spaces)}`,
-    {
-      preview: requestedSpaceId === undefined ? "Space required" : "Space not found",
-      retryable: false
-    }
-  )
-}
-
-const resolveSpace = async (
-  services: SpaceToolServices,
-  run: ServerRunContext,
-  requestedSpaceId: string | undefined,
-  signal: AbortSignal,
-  options: { readonly mutation: boolean }
-): Promise<SpaceTarget> => {
-  const header = await Effect.runPromise(
-    services.sessions.loadHistoryHeader(run.sessionId).pipe(Effect.mapError(sessionFailure)),
-    { signal }
-  )
-  const spaceId = options.mutation
-    ? mutationSpace(run, header?.spaceId ?? undefined, requestedSpaceId)
-    : (requestedSpaceId ?? header?.spaceId ?? undefined)
-  if (spaceId === undefined) throw await noSpace(services, undefined, signal)
-  const space = await Effect.runPromise(
-    services.spaces.get(spaceId).pipe(Effect.mapError(spaceFailure)),
-    { signal }
-  )
-  if (space === null) throw await noSpace(services, spaceId, signal)
-  return { space }
-}
-
-const mutationSpace = (
-  run: ServerRunContext,
-  chatSpaceId: string | undefined,
-  requestedSpaceId: string | undefined
-): string | undefined => {
-  const decision = workTarget({
-    authority: run.authority,
-    chatSpaceId,
-    chatSessionId: run.sessionId,
-    requestedSpaceId,
-    op: "change"
-  })
-  if (decision.kind === "target") {
-    switch (decision.target.kind) {
-      case "space":
-        return decision.target.spaceId
-      case "job":
-        return decision.target.spaceId ?? chatSpaceId
-      case "chat":
-        return undefined
-    }
-  }
-  if (decision.reason === "no_space") return undefined
-  throw refusalError({
-    what: PAGE_REFUSAL[decision.reason],
-    rule: "boundary",
-    instead: decision.instead
-  })
-}
-
-const PAGE_REFUSAL = {
-  outside_job_space: "A job changes only its own Space's page",
-  outside_delegated_space: "An agent changes only the page of the Space whose chat started it",
-  unrecorded: "This run's authority was not recorded, so it cannot change a Space page"
-} as const
-
-const resolveSpacePage = async (
-  services: SpaceToolServices,
-  run: ServerRunContext,
-  requestedSpaceId: string | undefined,
-  signal: AbortSignal,
-  options: { readonly mutation: boolean }
-): Promise<SpacePageTarget> => {
-  const target = await resolveSpace(services, run, requestedSpaceId, signal, options)
-  if (target.space.page_id === null || target.space.page_path === null) {
-    throw new ToolExecutionError(`Space '${target.space.name}' has no attached Wiki page.`, {
-      preview: "No Space page",
-      retryable: false
-    })
-  }
-  const snapshot = await loadSnapshot(services.wiki, signal)
-  const page = snapshot.pages.find(
-    (record) => record.page.pageId === target.space.page_id && record.page.lifecycle === "active"
-  )
-  if (page === undefined) {
-    throw new ToolExecutionError(
-      `The Wiki page attached to Space '${target.space.name}' is missing.`,
-      {
-        preview: "Space page missing",
-        retryable: false
-      }
-    )
-  }
-  return { ...target, snapshot, page }
-}
+import {
+  OptionalSpaceIdSchema,
+  SpacePagePatchParametersSchema,
+  SpacePageReadParametersSchema,
+  SpacePageWriteParametersSchema
+} from "./space-tool-parameters.js"
+import {
+  type SpacePageTarget,
+  type SpaceToolServices,
+  resolveSpace,
+  resolveSpacePage,
+  spaceFailure
+} from "./space-tool-access.js"
 
 const publicSpace = (space: PersistedSpace) => ({
   space_id: space.space_id,
@@ -306,7 +134,6 @@ const taskStateWords = (task: SpaceDetailRecord["work"]["work_items"][number]): 
 const namedLink = (label: string, url: string): string =>
   `[${label.replace(/[\\[\]]/g, "\\$&").replace(/[\r\n]+/g, " ")}](${url})`
 
-/** Per-Space cap on instructions in the full list; one Space read by space_id shows them whole. */
 const MAX_LISTED_INSTRUCTIONS_CHARS = 2_000
 
 const SpaceListParametersSchema = Schema.Struct({
@@ -324,7 +151,6 @@ const indented = (text: string): string =>
     .map((line) => `    ${line}`)
     .join("\n")
 
-/** The model sees only this text, so it carries the instructions space_settings_update replaces whole. */
 const spaceInstructionsText = (
   space: ReturnType<typeof publicSpace>,
   limit: number | undefined

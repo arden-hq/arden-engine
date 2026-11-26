@@ -4,10 +4,6 @@ import type { Backfill } from "./backfills/backfill.js"
 
 const KEY_MESSAGE_COPIES_BACKFILL = "key_message_copies"
 
-/** Drops the message copy of every chat idempotency key whose message is already
- * in the transcript, as a write now does when it records the message (see
- * chat-key-message.ts). Keys are walked by rowid; a key whose message is not in
- * the transcript keeps its copy. Cursor: the last key rowid looked at. */
 export const keyMessageCopiesBackfill: Backfill = {
   name: KEY_MESSAGE_COPIES_BACKFILL,
   landed: "2026-11-13",

@@ -1,22 +1,27 @@
 import type { LockedCategory } from "@arden-hq/protocol/permissions"
-import type { ReviewPolicyCategory } from "./review.js"
+import { TOOL_ACTION } from "@arden-hq/protocol/tools"
+import { OUTWARD_CATEGORY, type OutwardCategory } from "./review.js"
 import type { ToolFacts } from "./decide.js"
 
+export const CALL_IMPACT = {
+  inert: "inert",
+  contained: "contained",
+  outward: "outward",
+  locked: "locked"
+} as const
+
 export type CallImpact =
-  | { readonly kind: "inert" }
-  | { readonly kind: "contained" }
-  | { readonly kind: "outward"; readonly category: OutwardCategory }
-  | { readonly kind: "locked"; readonly category: LockedCategory }
+  | { readonly kind: typeof CALL_IMPACT.inert }
+  | { readonly kind: typeof CALL_IMPACT.contained }
+  | { readonly kind: typeof CALL_IMPACT.outward; readonly category: OutwardCategory }
+  | { readonly kind: typeof CALL_IMPACT.locked; readonly category: LockedCategory }
 
-export type OutwardCategory = Exclude<ReviewPolicyCategory, "none"> | "unknown"
+export const INERT: CallImpact = { kind: CALL_IMPACT.inert }
+export const CONTAINED: CallImpact = { kind: CALL_IMPACT.contained }
+export const OUTWARD: CallImpact = { kind: CALL_IMPACT.outward, category: OUTWARD_CATEGORY.unknown }
 
-export const INERT: CallImpact = { kind: "inert" }
-export const CONTAINED: CallImpact = { kind: "contained" }
-export const OUTWARD: CallImpact = { kind: "outward", category: "unknown" }
-
-/** The one test for "this call only reads": scopes, approvals and impact all use it. */
 export const readsOnly = (tool: Pick<ToolFacts, "action" | "changes_state">): boolean =>
-  tool.action === "read" && !tool.changes_state
+  tool.action === TOOL_ACTION.read && !tool.changes_state
 
 export const defaultImpact = (
   tool: Pick<ToolFacts, "action" | "changes_state" | "per_call">

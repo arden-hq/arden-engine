@@ -3,6 +3,7 @@ import {
   authMessage,
   CloseCode,
   decodeFrame,
+  HEADER_TAG,
   deviceId,
   encodeFrame,
   fromB64url,
@@ -11,7 +12,10 @@ import {
   MAX_PUSH_PAYLOAD_BYTES,
   pairTokenHash,
   parseClientHeader,
+  PRESENCE_STATE,
+  RELAY_ERROR_CODE,
   removeDeviceMessage,
+  ROLE,
   toB64url,
   verifyB64
 } from "@arden-hq/relay-protocol"
@@ -21,47 +25,21 @@ import type {
   ClientHeader,
   Peer,
   PushHeader,
+  PushOutcome,
   PresenceState,
   RelayErrorCode,
   RelayHeader,
   Role
 } from "@arden-hq/relay-protocol"
 import { noopPusher } from "./pusher.js"
-import type { Pusher, PushResult } from "./pusher.js"
+import type { Pusher } from "./pusher.js"
+import { ENQUEUE_RESULT } from "./store.js"
 import type { DeviceRecord, Store } from "./store.js"
+import { ATTACHMENT_STATE } from "./connections.js"
+import type { Conns } from "./connections.js"
+import { Limits } from "./limits.js"
 
-// TODO(relay-compat): send "unknown_device" once installed phones and Macs read it.
-const UNKNOWN_DEVICE_CODE = "auth_failed"
-
-/** Per-socket state; JSON-safe so a Durable Object can serialize it across hibernation. */
-export type Attachment =
-  | { readonly state: "challenged"; readonly nonce: string; readonly opened: number }
-  | { readonly state: "pairing"; readonly dev: string; readonly opened: number }
-  | { readonly state: "authed"; readonly role: Role; readonly dev: string; readonly heard: number }
-  | { readonly state: "closed" }
-
-export interface Conns<S> {
-  send(socket: S, frame: Uint8Array): void
-  close(socket: S, code: number, reason: string): void
-  sockets(): readonly S[]
-  attachment(socket: S): Attachment | undefined
-  setAttachment(socket: S, attachment: Attachment): void
-  lastPing(socket: S): number | undefined
-}
-
-const Limits = {
-  authTimeoutMs: 10_000,
-  pairingTimeoutMs: 5 * 60_000,
-  staleMs: 60_000,
-  alarmMs: 30_000,
-  queueRows: 256,
-  queueBytes: 2 * 1024 * 1024,
-  queueTtlMs: 24 * 60 * 60_000,
-  pairOffers: 8,
-  pairOfferTtlMs: 60 * 60_000,
-  devices: 32,
-  leftTtlMs: 90 * 24 * 60 * 60_000
-} as const
+const UNKNOWN_DEVICE_CODE_INSTALLED_CLIENTS_READ = RELAY_ERROR_CODE.auth_failed
 
 export interface RelayCoreOptions<S> {
   readonly mac: string
@@ -99,18 +77,19 @@ export class RelayCore<S> {
 
   onFrame(socket: S, data: Uint8Array): void {
     const attachment = this.#conns.attachment(socket)
-    if (attachment === undefined || attachment.state === "closed") return
+    if (attachment === undefined || attachment.state === ATTACHMENT_STATE.closed) return
     if (data.length > MAX_FRAME_BYTES)
       return this.#drop(socket, CloseCode.TooBig, "frame too large")
     const frame = decodeFrame(data)
     const header = frame.ok ? parseClientHeader(frame.header) : undefined
     switch (attachment.state) {
-      case "challenged":
-        if (header?.t !== "auth") return this.#drop(socket, CloseCode.Protocol, "expected auth")
+      case ATTACHMENT_STATE.challenged:
+        if (header?.t !== HEADER_TAG.auth)
+          return this.#drop(socket, CloseCode.Protocol, "expected auth")
         return this.#authenticate(socket, attachment.nonce, header)
-      case "pairing":
+      case ATTACHMENT_STATE.pairing:
         return this.#error(socket, "forbidden", "waiting for the Mac to add this device")
-      case "authed": {
+      case ATTACHMENT_STATE.authed: {
         const heard = { ...attachment, heard: Date.now() }
         this.#conns.setAttachment(socket, heard)
         if (header === undefined || !frame.ok)
@@ -123,8 +102,8 @@ export class RelayCore<S> {
   onClose(socket: S): void {
     const attachment = this.#conns.attachment(socket)
     this.#conns.setAttachment(socket, { state: "closed" })
-    if (attachment?.state === "pairing") return this.#pairGone(attachment.dev)
-    if (attachment?.state !== "authed") return
+    if (attachment?.state === ATTACHMENT_STATE.pairing) return this.#pairGone(attachment.dev)
+    if (attachment?.state !== ATTACHMENT_STATE.authed) return
     if (this.#socketFor(attachment.dev, socket) !== undefined) return
     this.#markGone(
       attachment.role,
@@ -139,17 +118,17 @@ export class RelayCore<S> {
       const attachment = this.#conns.attachment(socket)
       switch (attachment?.state) {
         case undefined:
-        case "closed":
+        case ATTACHMENT_STATE.closed:
           break
-        case "challenged":
+        case ATTACHMENT_STATE.challenged:
           if (now - attachment.opened > Limits.authTimeoutMs)
             this.#drop(socket, CloseCode.Timeout, "auth timeout")
           break
-        case "pairing":
+        case ATTACHMENT_STATE.pairing:
           if (now - attachment.opened > Limits.pairingTimeoutMs)
             this.#drop(socket, CloseCode.Timeout, "pairing timeout")
           break
-        case "authed": {
+        case ATTACHMENT_STATE.authed: {
           const heard = Math.max(attachment.heard, this.#conns.lastPing(socket) ?? 0)
           if (now - heard <= Limits.staleMs) break
           this.#drop(socket, CloseCode.Timeout, "stale")
@@ -163,7 +142,7 @@ export class RelayCore<S> {
     this.#store.deleteQueuedBefore(now - Limits.queueTtlMs)
     const live = this.#conns
       .sockets()
-      .some((socket) => this.#conns.attachment(socket)?.state !== "closed")
+      .some((socket) => this.#conns.attachment(socket)?.state !== ATTACHMENT_STATE.closed)
     const oldest = this.#store.listQueued()[0]
     const next = Math.min(
       live ? now + Limits.alarmMs : Infinity,
@@ -181,7 +160,7 @@ export class RelayCore<S> {
     const message = authMessage({ mac: header.mac, dev: header.dev, nonce: fromB64url(nonce) })
     const signedBy = (publicKey: string) => verifyB64({ sig: header.sig, message, publicKey })
 
-    if (header.role === "mac") {
+    if (header.role === ROLE.mac) {
       if (header.dev !== this.#mac) return fail("a Mac authenticates as its own id")
       const record = this.#store.getMac()
       if (record !== undefined)
@@ -214,7 +193,7 @@ export class RelayCore<S> {
       name === undefined ||
       pair_token === undefined
     ) {
-      return fail("unknown device", UNKNOWN_DEVICE_CODE)
+      return fail("unknown device", UNKNOWN_DEVICE_CODE_INSTALLED_CLIENTS_READ)
     }
     if (deviceId(fromB64url(ed_pub)) !== header.dev || !signedBy(ed_pub))
       return fail("bad signature")
@@ -239,7 +218,7 @@ export class RelayCore<S> {
     for (const other of this.#socketsFor(dev)) {
       if (other !== socket) this.#drop(other, CloseCode.Replaced, "replaced")
     }
-    if (role === "mac") {
+    if (role === ROLE.mac) {
       this.#store.setMacPresence("online", now)
       this.#broadcast("phone", { t: "presence", dev, state: "online", last_seen: now })
     } else {
@@ -248,9 +227,9 @@ export class RelayCore<S> {
     }
     this.#send(socket, {
       t: "ready",
-      peers: role === "mac" ? this.#phonePeers() : [this.#macPeer()]
+      peers: role === ROLE.mac ? this.#phonePeers() : [this.#macPeer()]
     })
-    if (role === "mac") {
+    if (role === ROLE.mac) {
       this.#store.deleteLeftBefore(now - Limits.leftTtlMs)
       for (const left of this.#store.listLeft())
         this.#send(socket, { t: "device_left", dev: left.dev, sig: left.sig })
@@ -266,21 +245,21 @@ export class RelayCore<S> {
     header: ClientHeader,
     body: Uint8Array
   ): void {
-    if (header.t === "msg") return this.#route(socket, self, header.to, header.id, body)
-    if (self.role === "phone") {
-      if (header.t === "queued") return this.#enqueue(socket, self.dev, header.id, body)
-      if (header.t === "leave") return this.#leave(socket, self.dev, header.sig)
+    if (header.t === HEADER_TAG.msg) return this.#route(socket, self, header.to, header.id, body)
+    if (self.role === ROLE.phone) {
+      if (header.t === HEADER_TAG.queued) return this.#enqueue(socket, self.dev, header.id, body)
+      if (header.t === HEADER_TAG.leave) return this.#leave(socket, self.dev, header.sig)
       return this.#error(socket, "forbidden", `a phone cannot send ${header.t}`)
     }
     const now = Date.now()
     switch (header.t) {
-      case "auth":
+      case HEADER_TAG.auth:
         return this.#error(socket, "bad_frame", "already authenticated")
-      case "queued":
+      case HEADER_TAG.queued:
         return this.#error(socket, "forbidden", "only phones queue")
-      case "qack":
+      case HEADER_TAG.qack:
         return this.#store.dequeue(header.id)
-      case "presence":
+      case HEADER_TAG.presence:
         this.#store.setMacPresence(header.state, now)
         return this.#broadcast("phone", {
           t: "presence",
@@ -288,9 +267,9 @@ export class RelayCore<S> {
           state: header.state,
           last_seen: now
         })
-      case "add_device":
+      case HEADER_TAG.add_device:
         return this.#addDevice(socket, header)
-      case "remove_device": {
+      case HEADER_TAG.remove_device: {
         if (!this.#signedByMac(header.sig_mac, removeDeviceMessage({ dev: header.dev }))) {
           return this.#error(socket, "bad_signature", "remove_device signature")
         }
@@ -301,7 +280,7 @@ export class RelayCore<S> {
           this.#drop(other, CloseCode.Revoked, "revoked")
         return this.#send(socket, { t: "device_removed", dev: header.dev })
       }
-      case "pair_offer": {
+      case HEADER_TAG.pair_offer: {
         this.#store.deletePairOffersExpiredBy(now)
         if (header.expires <= now || header.expires > now + Limits.pairOfferTtlMs) {
           return this.#error(
@@ -316,11 +295,11 @@ export class RelayCore<S> {
         this.#scheduleAlarm(header.expires)
         return this.#send(socket, { t: "pair_offered", token_hash: header.token_hash })
       }
-      case "leave":
+      case HEADER_TAG.leave:
         return this.#error(socket, "forbidden", "only phones leave")
-      case "pair_deny":
+      case HEADER_TAG.pair_deny:
         return this.#denyPairing(header.dev)
-      case "push":
+      case HEADER_TAG.push:
         return this.#push(socket, header, body)
     }
   }
@@ -348,14 +327,14 @@ export class RelayCore<S> {
   #denyPairing(dev: string): void {
     for (const pending of this.#conns.sockets()) {
       const attachment = this.#conns.attachment(pending)
-      if (attachment?.state !== "pairing" || attachment.dev !== dev) continue
+      if (attachment?.state !== ATTACHMENT_STATE.pairing || attachment.dev !== dev) continue
       this.#error(pending, "forbidden", "Your Mac said no.")
       this.#drop(pending, CloseCode.Denied, "denied")
     }
   }
 
   #push(socket: S, header: PushHeader, body: Uint8Array): void {
-    const reply = (result: PushResult) =>
+    const reply = (result: PushOutcome) =>
       this.#send(socket, { t: "pushed", id: header.id, ...result })
     if (this.#store.getDevice(header.dev) === undefined)
       return reply({ status: "rejected", reason: "UnknownDevice" })
@@ -383,7 +362,8 @@ export class RelayCore<S> {
     id: string,
     body: Uint8Array
   ): void {
-    const known = self.role === "phone" ? to === this.#mac : this.#store.getDevice(to) !== undefined
+    const known =
+      self.role === ROLE.phone ? to === this.#mac : this.#store.getDevice(to) !== undefined
     if (!known || to === self.dev)
       return this.#send(socket, { t: "undeliverable", id, reason: "unknown_peer" })
     const target = this.#socketFor(to)
@@ -400,7 +380,7 @@ export class RelayCore<S> {
     const now = Date.now()
     const result = this.#store.enqueue({ id, from, body, storedAt: now })
     this.#send(socket, { t: "stored", id })
-    if (result === "duplicate") return
+    if (result === ENQUEUE_RESULT.duplicate) return
     const mac = this.#socketFor(this.#mac)
     if (mac !== undefined) this.#send(mac, { t: "queued", id, from }, body)
     this.#scheduleAlarm(now + Limits.queueTtlMs + 1)
@@ -434,17 +414,18 @@ export class RelayCore<S> {
     this.#send(socket, { t: "device_added", dev: header.dev })
     for (const pending of this.#conns.sockets()) {
       const attachment = this.#conns.attachment(pending)
-      if (attachment?.state === "pairing" && attachment.dev === header.dev)
+      if (attachment?.state === ATTACHMENT_STATE.pairing && attachment.dev === header.dev)
         this.#admit(pending, "phone", header.dev)
     }
   }
 
   #markGone(role: Role, dev: string, lastSeen: number): void {
-    if (role === "phone") {
+    if (role === ROLE.phone) {
       this.#store.touchDevice(dev, lastSeen)
       return this.#broadcast("mac", { t: "presence", dev, state: "offline", last_seen: lastSeen })
     }
-    const state: PresenceState = this.#store.getMac()?.state === "asleep" ? "asleep" : "offline"
+    const state: PresenceState =
+      this.#store.getMac()?.state === PRESENCE_STATE.asleep ? "asleep" : "offline"
     this.#store.setMacPresence(state, lastSeen)
     this.#broadcast("phone", { t: "presence", dev, state, last_seen: lastSeen })
   }
@@ -454,7 +435,7 @@ export class RelayCore<S> {
     const socket = this.#socketFor(this.#mac)
     const online = socket !== undefined
     const awake: PresenceState = online ? "online" : "offline"
-    const state: PresenceState = record?.state === "asleep" ? "asleep" : awake
+    const state: PresenceState = record?.state === PRESENCE_STATE.asleep ? "asleep" : awake
     return {
       dev: this.#mac,
       role: "mac",
@@ -490,7 +471,7 @@ export class RelayCore<S> {
 
   #heard(socket: S): number {
     const attachment = this.#conns.attachment(socket)
-    const heard = attachment?.state === "authed" ? attachment.heard : 0
+    const heard = attachment?.state === ATTACHMENT_STATE.authed ? attachment.heard : 0
     return Math.max(heard, this.#conns.lastPing(socket) ?? 0)
   }
 
@@ -498,7 +479,8 @@ export class RelayCore<S> {
     return this.#conns.sockets().filter((socket) => {
       const attachment = this.#conns.attachment(socket)
       return (
-        (attachment?.state === "authed" || attachment?.state === "pairing") &&
+        (attachment?.state === ATTACHMENT_STATE.authed ||
+          attachment?.state === ATTACHMENT_STATE.pairing) &&
         attachment.dev === dev
       )
     })
@@ -507,14 +489,17 @@ export class RelayCore<S> {
   #socketFor(dev: string, except?: S): S | undefined {
     return this.#conns.sockets().find((socket) => {
       const attachment = this.#conns.attachment(socket)
-      return socket !== except && attachment?.state === "authed" && attachment.dev === dev
+      return (
+        socket !== except && attachment?.state === ATTACHMENT_STATE.authed && attachment.dev === dev
+      )
     })
   }
 
   #broadcast(role: Role, header: RelayHeader): void {
     for (const socket of this.#conns.sockets()) {
       const attachment = this.#conns.attachment(socket)
-      if (attachment?.state === "authed" && attachment.role === role) this.#send(socket, header)
+      if (attachment?.state === ATTACHMENT_STATE.authed && attachment.role === role)
+        this.#send(socket, header)
     }
   }
 
@@ -535,7 +520,7 @@ export class RelayCore<S> {
     const attachment = this.#conns.attachment(socket)
     this.#conns.setAttachment(socket, { state: "closed" })
     this.#conns.close(socket, code, reason)
-    if (attachment?.state === "pairing") this.#pairGone(attachment.dev)
+    if (attachment?.state === ATTACHMENT_STATE.pairing) this.#pairGone(attachment.dev)
   }
 
   #pairGone(dev: string): void {

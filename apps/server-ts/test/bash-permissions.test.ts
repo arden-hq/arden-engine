@@ -13,7 +13,8 @@ import { SessionStore } from "../src/persistence/sessions/store.js"
 import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 import { ToolExecutionStore } from "../src/persistence/tools/store.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
-import { parseCommandSegments, planHostCommandGrant } from "../src/tools/bash-permissions.js"
+import { planHostCommandGrant } from "../src/tools/bash-permissions.js"
+import { parseCommandSegments } from "../src/tools/shell-parse.js"
 import { ToolHistoryQueries } from "../src/persistence/tools/history-queries.js"
 
 const executable = async (directory: string, name: string): Promise<string> => {

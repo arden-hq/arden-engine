@@ -1,9 +1,8 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { isSpaceWorkJob, type JobPurpose } from "../job-classification.js"
 import { storeError } from "./automation-rows.js"
-
-const SESSION_TYPE = { chat: "chat", channel: "channel" } as const
 
 export const requireUserChat = Effect.fn("SqliteAutomationStore.requireUserChat")(function* (
   sql: SqlClient.SqlClient,

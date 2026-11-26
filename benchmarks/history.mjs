@@ -5,10 +5,10 @@ import { sqliteStoresLayer } from "../apps/server-ts/dist/persistence/sqlite/lay
 import { automationRulesLayer } from "../apps/server-ts/dist/automations/rules.js"
 import { chatRulesLayer } from "../apps/server-ts/dist/chat/rules.js"
 import { SessionStore } from "../apps/server-ts/dist/persistence/sessions/store.js"
-import { ChatWriteStore } from "../apps/server-ts/dist/persistence/chat/store.js"
+import { CHAT_WRITE_START, ChatWriteStore } from "../apps/server-ts/dist/persistence/chat/store.js"
+import { ROLE } from "../libs/std/dist/message-vocabulary.js"
+import { every } from "../libs/std/dist/timer.js"
 
-/** The server's stores over one database file, without the server: no restart
- *  recovery and no retention timer, so only the caller's writes happen. */
 export const storesLayer = ({ databasePath, models }) =>
   sqliteStoresLayer({
     dataDir: null,
@@ -19,7 +19,6 @@ export const storesLayer = ({ databasePath, models }) =>
     Layer.provide(PersistenceWriteQueue.layer)
   )
 
-/** Offline fixture ingestion through production writers, never a generated replacement conversation. */
 export async function importHistory({ databasePath, models, history }) {
   let fixtureTime = 0
   const liveClock = Effect.runSync(Clock.Clock)
@@ -33,9 +32,7 @@ export async function importHistory({ databasePath, models, history }) {
   const runtime = ManagedRuntime.make(
     storesLayer({ databasePath, models }).pipe(Layer.provideMerge(fixtureClock))
   )
-  // The SQLite thread is unref'd and nothing else holds a process that has no
-  // server yet, so a standalone caller would exit mid-import (unsettled await).
-  const alive = setInterval(() => {}, 1_000)
+  const holdProcessOpen = every(1_000, () => {})
   try {
     return await runtime.runPromise(
       Effect.gen(function* () {
@@ -51,17 +48,16 @@ export async function importHistory({ databasePath, models, history }) {
             role: message.role,
             content: message.content,
             created_at: new Date(source.date).toISOString(),
-            ...(message.role === "user" ? { client_id: `${session.sessionId}-${index}` } : {})
+            ...(message.role === ROLE.user ? { client_id: `${session.sessionId}-${index}` } : {})
           }))
-          // Each fixture turn retains its supplied assistant text and date.
           for (let index = 0; index < messages.length;) {
             const user = messages[index]
-            if (user.role !== "user")
+            if (user.role !== ROLE.user)
               throw new Error("History must start each turn with a user message")
             let end = index + 1
-            while (end < messages.length && messages[end].role !== "user") end += 1
+            while (end < messages.length && messages[end].role !== ROLE.user) end += 1
             const turn = messages.slice(index + 1, end)
-            if (!turn.length || turn.some((message) => message.role !== "assistant"))
+            if (!turn.length || turn.some((message) => message.role !== ROLE.assistant))
               throw new Error("History requires user/assistant turns")
             const started = yield* chat.start({
               sessionId: session.sessionId,
@@ -70,7 +66,7 @@ export async function importHistory({ databasePath, models, history }) {
               assistantMessageId: turn[0].message_id,
               message: user
             })
-            if (started._tag !== "Started")
+            if (started._tag !== CHAT_WRITE_START.started)
               throw new Error("Fixture import unexpectedly reused a Run")
             yield* chat.finish({
               runId: started.runId,
@@ -85,6 +81,6 @@ export async function importHistory({ databasePath, models, history }) {
       })
     )
   } finally {
-    await runtime.dispose().finally(() => clearInterval(alive))
+    await runtime.dispose().finally(() => holdProcessOpen.cancel())
   }
 }

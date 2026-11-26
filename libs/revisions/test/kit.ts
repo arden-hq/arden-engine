@@ -1,9 +1,7 @@
 import { Effect } from "effect"
 
-import {
-  ManagedFileRepository,
-  type ManagedFileRepositoryShape
-} from "../src/repository/service.js"
+import { ManagedFileRepository } from "../src/repository/service.js"
+import { type ManagedFileRepositoryShape } from "../src/repository/service-types.js"
 import { managedFileRepositoryNodeLayer } from "../src/storage/node.js"
 
 export const useRepository = <A, E>(

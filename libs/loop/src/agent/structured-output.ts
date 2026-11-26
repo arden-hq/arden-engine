@@ -3,19 +3,9 @@ import type { JsonSchemaConverter } from "../tools/tool.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { parseJsonText } from "@arden-hq/std/json-text"
 
-/**
- * Structured output for one invocation. The JSON-Schema response format is
- * carried to the provider on every model request of the run (a format only
- * constrains emitted text, so tool-calling turns are unaffected); validation
- * applies to the FINAL text turn only. On validation failure the loop makes
- * ONE correction retry — a user message quoting the issues, then a re-run of
- * the final turn — before failing with `StructuredOutputError`.
- */
 export interface AgentOutputOptions {
   readonly schema: StandardSchemaV1
-  /** Host-supplied Standard-Schema→JSON-Schema conversion (e.g. `z.toJSONSchema`). */
   readonly toJsonSchema: JsonSchemaConverter
-  /** Provider-facing schema name (default "output"). */
   readonly name?: string
 }
 

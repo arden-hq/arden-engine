@@ -7,6 +7,7 @@ import {
   PositiveIntSchema
 } from "../../common/schema.js"
 import type { SpaceContinuitySeenState, SpaceContinuityStateResponse } from "./contracts.js"
+import { RENDERED_CONTINUITY_RECORD, SEEN_ACKNOWLEDGEMENT } from "./contracts.js"
 
 const IdentifierSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 
@@ -14,8 +15,11 @@ export const SpaceContinuitySeenStateSchema: Schema.Codec<SpaceContinuitySeenSta
   state_version: NonNegativeIntSchema,
   seen_through: ContinuitySourceCursorSchema,
   acknowledgement: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("never") }),
-    Schema.Struct({ kind: Schema.Literal("acknowledged"), at: IsoDateTimeStringSchema })
+    Schema.Struct({ kind: Schema.Literal(SEEN_ACKNOWLEDGEMENT.never) }),
+    Schema.Struct({
+      kind: Schema.Literal(SEEN_ACKNOWLEDGEMENT.acknowledged),
+      at: IsoDateTimeStringSchema
+    })
   ]).pipe(Schema.toTaggedUnion("kind"))
 })
 
@@ -25,9 +29,12 @@ export const SpaceContinuityStateResponseSchema: Schema.Codec<SpaceContinuitySta
   })
 
 const RenderedContinuityRecordSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("arrival"), arrival_id: IdentifierSchema }),
   Schema.Struct({
-    kind: Schema.Literal("question"),
+    kind: Schema.Literal(RENDERED_CONTINUITY_RECORD.arrival),
+    arrival_id: IdentifierSchema
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(RENDERED_CONTINUITY_RECORD.question),
     question_id: IdentifierSchema,
     revision: PositiveIntSchema
   })
@@ -41,9 +48,9 @@ export const AcknowledgeSpaceContinuityRequestSchema = Schema.Struct({
     Schema.makeFilter((records) => {
       const keys = records.map((record) => {
         switch (record.kind) {
-          case "arrival":
+          case RENDERED_CONTINUITY_RECORD.arrival:
             return `arrival:${record.arrival_id}`
-          case "question":
+          case RENDERED_CONTINUITY_RECORD.question:
             return `question:${record.question_id}:${record.revision}`
         }
       })

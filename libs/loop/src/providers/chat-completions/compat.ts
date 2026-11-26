@@ -1,80 +1,31 @@
-/**
- * The wire differences between Chat Completions servers, as one flag block
- * resolved once against the defaults. The adapter reads only these flags;
- * it never branches on who serves the route. A flag exists only when a
- * target server needs it and the need was verified against that server or
- * the reference adapters (prime `openai_completions`, hermes `chat_completions`).
- */
+export const REASONING_EFFORT_STYLE = {
+  reasoningEffort: "reasoning_effort",
+  openrouter: "openrouter",
+  none: "none"
+} as const
+export type ReasoningEffortStyle =
+  (typeof REASONING_EFFORT_STYLE)[keyof typeof REASONING_EFFORT_STYLE]
+
+export const COMPAT_STRUCTURED_OUTPUT = { jsonSchema: "json_schema", none: "none" } as const
+export type CompatStructuredOutput =
+  (typeof COMPAT_STRUCTURED_OUTPUT)[keyof typeof COMPAT_STRUCTURED_OUTPUT]
+
+export const CACHE_CONTROL_STYLE = { anthropic: "anthropic", none: "none" } as const
+export type CacheControlStyle = (typeof CACHE_CONTROL_STYLE)[keyof typeof CACHE_CONTROL_STYLE]
+
+export const TOOL_CHOICE_NONE = { enforced: "enforced", unenforced: "unenforced" } as const
+export type ToolChoiceNone = (typeof TOOL_CHOICE_NONE)[keyof typeof TOOL_CHOICE_NONE]
+
 export interface ChatCompletionsCompat {
-  /**
-   * The output-token limit field. `max_completion_tokens` is OpenAI's current
-   * name (its reasoning models refuse `max_tokens`) and OpenRouter accepts it;
-   * llama.cpp reads both; `max_tokens` is for older OpenAI-compatible servers.
-   */
   readonly maxTokensField: "max_completion_tokens" | "max_tokens"
-  /**
-   * The role every system and developer message is sent with. One role per
-   * route: OpenAI's reasoning models take `developer` and treat `system` the
-   * same, while generic servers (vLLM, Ollama) know only `system`.
-   */
   readonly systemRole: "system" | "developer"
-  /**
-   * How the request's reasoning effort is sent: top-level `reasoning_effort`
-   * (OpenAI, and llama.cpp, which turns thinking off for `none` with any
-   * template and hands other values to the template), OpenRouter's
-   * `reasoning: { effort }`, or not at all for a route without an effort
-   * setting.
-   */
-  readonly reasoningEffort: "reasoning_effort" | "openrouter" | "none"
-  /**
-   * Ask for the usage chunk with `stream_options: { include_usage: true }`.
-   * OpenAI, OpenRouter and llama.cpp send usage only when asked; a server
-   * that refuses unknown fields can turn it off.
-   */
+  readonly reasoningEffort: ReasoningEffortStyle
   readonly usageInStream: boolean
-  /**
-   * `json_schema` sends structured output as `response_format: { type:
-   * "json_schema", json_schema: { name, schema, strict: true } }` (OpenAI,
-   * OpenRouter, llama.cpp grammar-constrains it) and declares
-   * `structuredOutput: "native"`; `none` declares the route cannot, so the
-   * loop refuses a run with `output` before inference.
-   */
-  readonly structuredOutput: "json_schema" | "none"
-  /**
-   * The route accepts `image_url` parts (a vision model, or llama.cpp with a
-   * multimodal projector), and reports `imageInput` in its capabilities so
-   * the host offers images. Without it an image block is sent as a note that
-   * says the image was left out, so the model never answers about an image it
-   * did not see, and a chat that holds an image still works on this route.
-   */
+  readonly structuredOutput: CompatStructuredOutput
   readonly imageInput: boolean
-  /**
-   * Send `parallel_tool_calls: true`. llama.cpp generates one call per turn
-   * unless asked; OpenAI and OpenRouter default to parallel already.
-   */
   readonly parallelToolCalls: boolean
-  /**
-   * `anthropic` marks Anthropic-syntax prompt-cache breakpoints
-   * (`cache_control: { type: "ephemeral" }`) on the last tool, the first
-   * system message and the last conversation message, as prime
-   * `apply_anthropic_cache_control` sends them. The value names the syntax,
-   * not the vendor: OpenRouter takes it for Claude and for Alibaba's Qwen
-   * models, which cache only at these breakpoints (which models, from the
-   * OpenRouter docs: server-ts `discovery.ts` `EXPLICIT_CACHE`). Other
-   * servers cache by prefix on their own.
-   */
-  readonly cacheControl: "anthropic" | "none"
-  /**
-   * What `tool_choice: "none"` does on this server. `enforced` — the model
-   * cannot call a tool (OpenAI's meaning, which OpenRouter passes on).
-   * `unenforced` — the server only stops parsing calls: llama.cpp b12359
-   * still renders the tools and a model that calls one anyway answers with
-   * the template's raw call text as `content` and finish `stop` (checked
-   * live: `<|tool_call>call:weather{…}<tool_call|>` from Gemma 4), which a
-   * caller would take for the answer. There the adapter asks with `auto`, so
-   * such a call arrives parsed, and refuses it as on any other server.
-   */
-  readonly toolChoiceNone: "enforced" | "unenforced"
+  readonly cacheControl: CacheControlStyle
+  readonly toolChoiceNone: ToolChoiceNone
 }
 
 export const DEFAULT_COMPAT: ChatCompletionsCompat = Object.freeze({
@@ -89,7 +40,6 @@ export const DEFAULT_COMPAT: ChatCompletionsCompat = Object.freeze({
   toolChoiceNone: "enforced"
 })
 
-/** The top-level body keys this compat can write; `extraBody` may not set them. */
 export const ownedBodyKeys = (compat: ChatCompletionsCompat): ReadonlyArray<string> => [
   "model",
   "messages",
@@ -100,6 +50,8 @@ export const ownedBodyKeys = (compat: ChatCompletionsCompat): ReadonlyArray<stri
   "parallel_tool_calls",
   "response_format",
   compat.maxTokensField,
-  ...(compat.reasoningEffort === "reasoning_effort" ? ["reasoning_effort"] : []),
-  ...(compat.reasoningEffort === "openrouter" ? ["reasoning"] : [])
+  ...(compat.reasoningEffort === REASONING_EFFORT_STYLE.reasoningEffort
+    ? ["reasoning_effort"]
+    : []),
+  ...(compat.reasoningEffort === REASONING_EFFORT_STYLE.openrouter ? ["reasoning"] : [])
 ]

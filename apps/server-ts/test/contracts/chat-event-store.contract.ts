@@ -34,7 +34,7 @@ const delta = (text: string) => ({
   runId
 })
 
-export const chatEventStoreContract = (backend: ContractBackend) =>
+export const chatEventStoreContract = (backend: ContractBackend): ReturnType<typeof describe> =>
   describe(`ChatEventStore contract (${backend.name})`, () => {
     it("appends a batch in its own unit of work and reads it back from the head", () =>
       backend.run(({ sessions, chatEvents }) =>

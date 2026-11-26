@@ -16,7 +16,6 @@ export const tasksWithoutDesk: Migration = {
   },
   up: (database) => {
     deferUnstartedTasks(database)
-    // Renaming a parent table aside must leave the REFERENCES text of its child
     database.exec("PRAGMA legacy_alter_table = ON")
     try {
       rebuild(database, "desk_tasks", deskTasks, deskTaskColumns, [
@@ -179,7 +178,7 @@ const deskTasksDeskStatusIndex = `CREATE INDEX idx_desk_tasks_desk_status
 const deskTasksFollowUpIndex = `CREATE INDEX idx_desk_tasks_follow_up
       ON desk_tasks(next_attempt_at) WHERE next_attempt_at IS NOT NULL`
 
-// SQLite treats NULLs as distinct in UNIQUE(desk_id, stable_key), so a Task
+// A UNIQUE index treats every NULL as distinct, so desk-less Tasks get their own key indexes: https://www.sqlite.org/lang_createindex.html
 const deskTasksChatKeyIndex = `CREATE UNIQUE INDEX idx_desk_tasks_chat_key
       ON desk_tasks(home_session_id, stable_key) WHERE desk_id IS NULL AND home_session_id IS NOT NULL`
 

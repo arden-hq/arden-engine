@@ -1,6 +1,11 @@
 import { Schema } from "effect"
 import { withExtras, NonNegativeIntSchema, PositiveIntSchema } from "../common/schema.js"
-import type { AutomationCondition } from "./contracts.js"
+import {
+  AUTOMATION_CONDITION,
+  CONDITION_OPERATOR,
+  type AutomationCondition,
+  type AutomationValueOperator
+} from "./contracts.js"
 import {
   APP_EVENT,
   LEAD_EVENT,
@@ -10,7 +15,7 @@ import {
   type AutomationTriggerSpec,
   type PlainEventType
 } from "./trigger-contracts.js"
-import { AUTOMATION_EVENT_TYPES } from "./triggers.js"
+import { AUTOMATION_EVENT_TYPE } from "./triggers.js"
 
 const TrimmedTextSchema = Schema.Trim.check(Schema.isMinLength(1))
 const RunOnlyIfTextSchema = TrimmedTextSchema.check(Schema.isMaxLength(300))
@@ -18,23 +23,14 @@ export const TriggerIdSchema = Schema.String.check(Schema.isPattern(/^t[1-9]\d*$
 
 type StructOf = typeof Schema.Struct | typeof withExtras
 
-const VALUE_OPERATORS = [
-  "eq",
-  "ne",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "contains",
-  "starts_with",
-  "ends_with"
-] as const
+const AutomationValueOperatorSchema = Schema.Literals(
+  Object.values(CONDITION_OPERATOR).filter(
+    (operator): operator is AutomationValueOperator =>
+      operator !== CONDITION_OPERATOR.in && operator !== CONDITION_OPERATOR.exists
+  )
+)
 
-export const AutomationConditionOperatorSchema = Schema.Literals([
-  ...VALUE_OPERATORS,
-  "in",
-  "exists"
-] as const)
+export const AutomationConditionOperatorSchema = Schema.Literals(Object.values(CONDITION_OPERATOR))
 
 const conditionSchema = (
   struct: StructOf,
@@ -42,25 +38,31 @@ const conditionSchema = (
 ): Schema.Codec<AutomationCondition> =>
   Schema.Union([
     struct({
-      kind: Schema.Literal("compare"),
+      kind: Schema.Literal(AUTOMATION_CONDITION.compare),
       field: TrimmedTextSchema,
-      op: Schema.Literals(VALUE_OPERATORS),
+      op: AutomationValueOperatorSchema,
       value: Schema.Json
     }),
     struct({
-      kind: Schema.Literal("compare"),
+      kind: Schema.Literal(AUTOMATION_CONDITION.compare),
       field: TrimmedTextSchema,
-      op: Schema.Literal("in"),
+      op: Schema.Literal(CONDITION_OPERATOR.in),
       value: Schema.Array(Schema.Json)
     }),
     struct({
-      kind: Schema.Literal("compare"),
+      kind: Schema.Literal(AUTOMATION_CONDITION.compare),
       field: TrimmedTextSchema,
-      op: Schema.Literal("exists")
+      op: Schema.Literal(CONDITION_OPERATOR.exists)
     }),
-    struct({ kind: Schema.Literal("and"), conditions: Schema.NonEmptyArray(Schema.suspend(self)) }),
-    struct({ kind: Schema.Literal("or"), conditions: Schema.NonEmptyArray(Schema.suspend(self)) }),
-    struct({ kind: Schema.Literal("not"), condition: Schema.suspend(self) })
+    struct({
+      kind: Schema.Literal(AUTOMATION_CONDITION.and),
+      conditions: Schema.NonEmptyArray(Schema.suspend(self))
+    }),
+    struct({
+      kind: Schema.Literal(AUTOMATION_CONDITION.or),
+      conditions: Schema.NonEmptyArray(Schema.suspend(self))
+    }),
+    struct({ kind: Schema.Literal(AUTOMATION_CONDITION.not), condition: Schema.suspend(self) })
   ])
 
 export const AutomationConditionInputSchema: Schema.Codec<AutomationCondition> = conditionSchema(
@@ -126,7 +128,7 @@ const McpEventChoiceSchema = Schema.Union([
   Schema.Struct({ ...kind("chosen"), ...mcpEventSelectorFields })
 ])
 
-const PLAIN_EVENT_TYPES = AUTOMATION_EVENT_TYPES.filter(
+const PLAIN_EVENT_TYPES = Object.values(AUTOMATION_EVENT_TYPE).filter(
   (type): type is PlainEventType => type !== LEAD_EVENT && type !== APP_EVENT
 )
 

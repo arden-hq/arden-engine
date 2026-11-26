@@ -93,7 +93,6 @@ export const scriptedProvider = (
   }
 }
 
-/** One SSE `data:` line per frame; a non-string frame is sent as JSON. */
 export const sseResponse = (frames: ReadonlyArray<unknown>): Response => {
   const encoder = new TextEncoder()
   const body = frames
@@ -116,8 +115,9 @@ interface RecordedRequest {
   readonly body: unknown
 }
 
-/** A `fetch` that answers attempt N with `answers[N]` and records every request. */
-export const scriptedFetch = (answers: ReadonlyArray<() => Response>) => {
+export const scriptedFetch = (
+  answers: ReadonlyArray<() => Response>
+): { readonly fetch: typeof globalThis.fetch; readonly requests: Array<RecordedRequest> } => {
   const requests: Array<RecordedRequest> = []
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const answer = answers[requests.length]

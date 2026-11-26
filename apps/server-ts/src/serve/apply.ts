@@ -1,5 +1,6 @@
 import { parseJsonBody } from "@arden-hq/protocol/common"
 import {
+  MCP_CONNECTION_STATUS,
   MCP_DIAGNOSTICS,
   MCP_FOLDER,
   MCP_SERVER_DETAIL,
@@ -9,6 +10,10 @@ import {
   type McpServer
 } from "@arden-hq/protocol/mcp"
 import {
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_LIST,
+  PERMISSION_RULE_SUBJECT,
   PERMISSION_TOOL_OWNER,
   permissionDecoders,
   permissionRoutes
@@ -23,7 +28,6 @@ import { toolDecoders, toolRoutes } from "@arden-hq/protocol/tools"
 import { sleep } from "@arden-hq/std/sleep"
 import { SettingsError, type Settings } from "./settings.js"
 
-/** The tool settings alone, so a caller with its own file format can reuse the rule. */
 export type ToolSettings = Pick<Settings, "tools" | "blockedTools">
 
 interface CatalogTool {
@@ -31,11 +35,6 @@ interface CatalogTool {
   readonly source: string | null
 }
 
-/**
- * The tools the model is offered: the allow-list as given, or the whole catalog
- * minus the block-list. Undefined when the settings name neither, which leaves
- * the server's own rules alone. A name the catalog does not have is an error.
- */
 export const offeredTools = (
   settings: ToolSettings,
   catalog: ReadonlyArray<CatalogTool>
@@ -69,16 +68,17 @@ export const offeredTools = (
 }
 
 type RuleSubject =
-  | { readonly kind: "tool"; readonly tool: string }
-  | { readonly kind: "path"; readonly path: string; readonly access: "change" }
+  | { readonly kind: typeof PERMISSION_RULE_SUBJECT.tool; readonly tool: string }
+  | {
+      readonly kind: typeof PERMISSION_RULE_SUBJECT.path
+      readonly path: string
+      readonly access: typeof PERMISSION_PATH_ACCESS.change
+    }
 
-/** One request to the started server, already carrying its access header. */
 export type ServerRequest = (path: string, init?: RequestInit) => Promise<Response>
 
 export interface AppliedSettings {
-  /** Undefined when the settings name no tools: the server's own rules stand. */
   readonly offeredTools: ReadonlyArray<string> | undefined
-  /** Tools that take no rule because they always ask the owner. */
   readonly toolsWithoutRule: ReadonlyArray<string>
   readonly mcpServers: ReadonlyArray<string>
 }
@@ -86,24 +86,15 @@ export interface AppliedSettings {
 export interface ApplyInput {
   readonly request: ServerRequest
   readonly settings: Settings
-  /** Where an MCP server's `environment` values are read from. */
   readonly env: NodeJS.ProcessEnv
   readonly signal?: AbortSignal
-  /** Automations `automations: false` leaves on, for a caller that still needs one. */
   readonly keepAutomations?: ReadonlyArray<string>
 }
 
 const json = { "content-type": "application/json" }
 
-/** A stdio MCP server that has not connected by now will not: it waits for a sign-in or is off. */
 const MCP_CONNECT_TIMEOUT_MS = 60_000
 
-/**
- * Applies what a start option cannot carry, over the server's own HTTP API:
- * Automations off, MCP servers, tool rules, the work folder and sub-agents.
- * Model, step limit, Memory, Skills and the sandbox are start options instead
- * (`serverOptionsFor`).
- */
 const failureText = (server: McpServer): string => {
   if (server.diagnostics.kind === MCP_DIAGNOSTICS.captured) return server.diagnostics.text
   return server.detail.kind === MCP_SERVER_DETAIL.shown ? server.detail.text : "null"
@@ -127,24 +118,23 @@ export const applySettings = async ({
       throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`)
     return parseJsonBody(response)
   }
-  // The rules already on the global list, so a second start on the same data
-  // folder changes what differs and adds nothing twice.
   const held = permissionDecoders
     .rules(await call(permissionRoutes.rules))
-    .rules.filter((entry) => entry.list.kind === "global")
+    .rules.filter((entry) => entry.list.kind === PERMISSION_RULE_LIST.global)
   const heldRule = (subject: RuleSubject) =>
     held.find((entry) =>
-      subject.kind === "tool"
-        ? entry.subject.kind === "tool" &&
+      subject.kind === PERMISSION_RULE_SUBJECT.tool
+        ? entry.subject.kind === PERMISSION_RULE_SUBJECT.tool &&
           entry.subject.tool === subject.tool &&
           entry.subject.owner.kind === PERMISSION_TOOL_OWNER.arden
-        : entry.subject.kind === "path" &&
+        : entry.subject.kind === PERMISSION_RULE_SUBJECT.path &&
           entry.subject.path === subject.path &&
           entry.subject.access === subject.access
     )
-  // Answers false for a subject the server keeps no rule for (422): a tool that
-  // always asks the owner.
-  const rule = async (decision: "allow" | "never", subject: RuleSubject): Promise<boolean> => {
+  const rule = async (
+    decision: typeof PERMISSION_RULE_DECISION.allow | typeof PERMISSION_RULE_DECISION.never,
+    subject: RuleSubject
+  ): Promise<boolean> => {
     const existing = heldRule(subject)
     if (existing !== undefined) {
       if (existing.decision !== decision)
@@ -158,13 +148,11 @@ export const applySettings = async ({
     const response = await request(permissionRoutes.rules, {
       method: "POST",
       headers: json,
-      body: JSON.stringify({ list: { kind: "global" }, decision, subject }),
+      body: JSON.stringify({ list: { kind: PERMISSION_RULE_LIST.global }, decision, subject }),
       ...(signal === undefined ? {} : { signal })
     })
     const detail = await response.text()
     if (response.status === 422) return false
-    // 409: the server already holds this subject under its own spelling (a
-    // folder is stored by its real path), so there is nothing to add.
     if (response.status === 409) return true
     if (!response.ok) throw new Error(`Permission rule: ${response.status} ${detail}`)
     return true
@@ -180,8 +168,6 @@ export const applySettings = async ({
     }
   }
 
-  // A server of the same name from an earlier start is replaced, so the file
-  // always wins and a second start does not fail on it.
   const mcpServers = settings.mcpServers ?? []
   const present =
     mcpServers.length === 0
@@ -222,12 +208,12 @@ export const applySettings = async ({
       const servers = mcpDecoders
         .list(await call(mcpRoutes.collection))
         .servers.filter((server) => wanted.has(server.name))
-      const failed = servers.find((server) => server.status === "failed")
+      const failed = servers.find((server) => server.status === MCP_CONNECTION_STATUS.failed)
       if (failed !== undefined)
         throw new SettingsError(`MCP server ${failed.name} failed: ${failureText(failed)}`)
       if (
         servers.length === wanted.size &&
-        servers.every((server) => server.status === "connected")
+        servers.every((server) => server.status === MCP_CONNECTION_STATUS.connected)
       )
         break
       if (performance.now() > deadline)
@@ -240,24 +226,24 @@ export const applySettings = async ({
     }
   }
 
-  // A `never` rule keeps a tool out of what the model is offered; an offered
-  // tool gets `allow`. A tool that always asks the owner takes no rule: a
-  // server with nobody to answer may not name one in an allow-list.
   const catalog = toolDecoders.catalog(await call(toolRoutes.catalog))
   const offered = offeredTools(settings, catalog.tools)
   const toolsWithoutRule: Array<string> = []
   if (offered !== undefined) {
     for (const tool of catalog.tools) {
       const wanted = offered.has(tool.name)
-      if (await rule(wanted ? "allow" : "never", { kind: "tool", tool: tool.name })) continue
+      if (
+        await rule(wanted ? PERMISSION_RULE_DECISION.allow : PERMISSION_RULE_DECISION.never, {
+          kind: PERMISSION_RULE_SUBJECT.tool,
+          tool: tool.name
+        })
+      )
+        continue
       if (wanted && settings.tools !== undefined)
         throw new SettingsError(`Tool always asks the owner: ${tool.name}`)
       toolsWithoutRule.push(tool.name)
     }
   }
-  // Sub-agents follow the tool: offered, they get the file's limits or the
-  // defaults; not offered, they are off, so the two never disagree. Both are
-  // written on every start, so an earlier start's limits do not linger.
   const subAgentLimits = (): IntelligenceSettingsPatch => {
     if (offered !== undefined && !offered.has("spawn_agent"))
       return [
@@ -299,10 +285,10 @@ export const applySettings = async ({
     await call("/settings/intelligence", "PATCH", intelligenceSettingsRequests.update(limits))
 
   if (settings.workspace !== undefined) {
-    const allowed = await rule("allow", {
-      kind: "path",
+    const allowed = await rule(PERMISSION_RULE_DECISION.allow, {
+      kind: PERMISSION_RULE_SUBJECT.path,
       path: settings.workspace,
-      access: "change"
+      access: PERMISSION_PATH_ACCESS.change
     })
     if (!allowed)
       throw new SettingsError(`The server refused the work folder: ${settings.workspace}`)

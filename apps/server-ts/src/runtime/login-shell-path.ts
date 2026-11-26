@@ -3,11 +3,6 @@ import { spawn } from "node:child_process"
 import { basename, delimiter, isAbsolute } from "node:path"
 import { withSafeGit } from "./git-environment.js"
 import { signalProcessGroup } from "@arden-hq/std/process"
-/**
- * The PATH the person's own terminal sees. An app started from the Dock
- * inherits launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin`, so Homebrew, npm
- * and the like are missing until the login shell is asked once.
- */
 
 const LOGIN_SHELL_TIMEOUT_MS = 3_000
 const PROBE_TIMEOUT_MS = 4_000
@@ -46,7 +41,7 @@ export const readLoginShellPath = async (
     environment,
     LOGIN_SHELL_TIMEOUT_MS
   )
-  return result.kind === "exited" ? parseShellPath(result.output) : undefined
+  return result.kind === PROBE_RESULT.exited ? parseShellPath(result.output) : undefined
 }
 
 let resolving: Promise<string | undefined> | undefined
@@ -69,9 +64,11 @@ export const resolveLoginShellPath = ({
 
 export const resolvedLoginShellPath = (): string | undefined => resolved
 
+export const PROBE_RESULT = { exited: "exited", failed: "failed" } as const
+
 export type ProbeResult =
-  | { readonly kind: "exited"; readonly code: number; readonly output: string }
-  | { readonly kind: "failed" }
+  | { readonly kind: typeof PROBE_RESULT.exited; readonly code: number; readonly output: string }
+  | { readonly kind: typeof PROBE_RESULT.failed }
 
 export const runBounded = (
   file: string,

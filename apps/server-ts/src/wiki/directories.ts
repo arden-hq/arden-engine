@@ -1,4 +1,5 @@
-import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
+import { PATH_SEGMENT, isDotSegment } from "@arden-hq/revisions/effect"
+import { WIKI_REPORT_FIELDS, WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
@@ -17,7 +18,8 @@ import {
   pageKind,
   recordFolders
 } from "./collections.js"
-import { createPage, movePage, updatePage, type WikiCommitIdentity } from "./commit.js"
+import { createPage, movePage, updatePage } from "./commit.js"
+import { type WikiCommitIdentity } from "./origin.js"
 import { type WikiError, wikiError } from "./errors.js"
 import { writerOf, type WikiChanges, type WikiPlan } from "./page-change.js"
 import { formatWikiPage, parseWikiPage, reviseWikiPage } from "./page.js"
@@ -52,7 +54,7 @@ const directoryPath = (value: string): string | undefined => {
     return undefined
   }
   if (value.includes("\\") || value.includes("\u0000")) return undefined
-  return value.split("/").some((part) => part.length === 0 || part === "." || part === "..")
+  return value.split("/").some((part) => part.length === 0 || isDotSegment(part))
     ? undefined
     : value
 }
@@ -139,7 +141,10 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
         )
       }
       const parent = posix.dirname(directory)
-      if (parent !== "." && directoryReadme(snapshot.wholeSet, parent) === undefined) {
+      if (
+        parent !== PATH_SEGMENT.current &&
+        directoryReadme(snapshot.wholeSet, parent) === undefined
+      ) {
         return yield* wikiError(
           "create",
           "blocked",
@@ -152,7 +157,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
       )
       if (current !== undefined) {
         if (
-          current.page.lifecycle !== "active" ||
+          current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active ||
           !hasDirectoryContract(current.page.body, contract)
         ) {
           return yield* wikiError(
@@ -206,7 +211,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
       const occupant = snapshot.wholeSet.find(
         (record) =>
           record.resource.path.toLowerCase() === `${directory}.md`.toLowerCase() &&
-          record.page.lifecycle === "active"
+          record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
       )
       if (occupant !== undefined && producerAutomationId !== undefined) {
         return yield* wikiError(

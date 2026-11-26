@@ -1,35 +1,20 @@
-import { cutText } from "@arden-hq/std/text"
 import { countOf } from "@arden-hq/std/count"
-import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
+import { ToolExecutionError } from "@arden-hq/loop"
 import { Array as Arr, Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
-import { writeIdentity, type WikiWriteIdentity } from "./wiki-identity.js"
-import type { ServerRunContext } from "./run-context.js"
-import type { WikiLocationAuthority } from "../wiki/authority.js"
-import type { WikiCommitIdentity } from "../wiki/commit.js"
-import { captureSaveKey } from "../wiki/capture.js"
-import type { WikiError } from "../wiki/errors.js"
+import { writeIdentity } from "./wiki-identity.js"
 import { outsideEditNotice } from "../wiki/outside-edits.js"
-import { nameKeys, namesTakenAt, normal, reviseWikiPage } from "../wiki/page.js"
+import { nameKeys, normal, reviseWikiPage } from "../wiki/page.js"
 import { loadPageAges, PAGE_AGE_RULE } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
-import type { WikiPage } from "@arden-hq/protocol/wiki"
-import {
-  activeRunPages,
-  redirectTargetAt,
-  type PageRecord,
-  type Snapshot,
-  pageLifecycle
-} from "../wiki/snapshot.js"
+import { activeRunPages } from "../wiki/snapshot.js"
 import { bodyFields } from "./code-mode-result.js"
-import { readTextPage } from "./read-text.js"
-import { recordApplied, type CallEffects } from "../execution/tool-effect.js"
+import { recordApplied } from "../execution/tool-effect.js"
 import {
   MAX_PAGE_SOURCES,
   memorySource,
   pageReceipt,
-  pagesReceipt,
   reportProvenanceLines,
   requireObserved
 } from "./wiki-records.js"
@@ -45,348 +30,24 @@ import {
   EditParametersSchema,
   CreateParametersSchema,
   ReadParametersSchema,
-  ListParametersSchema,
-  MAX_WIKI_CONTENT_CHARS
+  ListParametersSchema
 } from "./wiki-schemas.js"
-
-export const wikiFailure = (error: WikiError): ToolExecutionError => {
-  switch (error.reason) {
-    case "not_found":
-      return new ToolExecutionError(
-        `${error.message} Call wiki_list_pages and retry with an exact active page path.`,
-        { preview: "Memory page not found", retryable: false }
-      )
-    case "conflict":
-      return new ToolExecutionError(
-        "Memory changed after it was read. Read the relevant page again, then retry.",
-        { preview: "Memory changed", retryable: true }
-      )
-    case "blocked":
-      return new ToolExecutionError(error.message, {
-        preview: "Memory write blocked",
-        retryable: false
-      })
-    case "invalid":
-      return new ToolExecutionError(
-        `The Memory page path, metadata, or Markdown body is invalid: ${error.message}`,
-        { preview: "Invalid Memory page", retryable: false }
-      )
-    case "closed":
-      return new ToolExecutionError("Memory is closed because Arden is shutting down.", {
-        preview: "Memory closed",
-        retryable: false
-      })
-    case "corrupt":
-      return new ToolExecutionError(error.message, {
-        preview: "Memory storage failed",
-        retryable: false
-      })
-    case "storage":
-      return new ToolExecutionError(error.message, {
-        preview: "Memory storage failed",
-        retryable: true
-      })
-  }
-}
-
-const parseDirectory = (value: string): string | null => {
-  if (value === "") return ""
-  if (value.startsWith("/")) return null
-  if (value.includes("\\")) return null
-  const directory = value.endsWith("/") ? value.slice(0, -1) : value
-  if (directory === "") return null
-  const parts = directory.split("/")
-  if (parts.some((part) => part === "")) return null
-  if (parts.some((part) => part === "." || part === "..")) return null
-  return directory
-}
-
-export const activePage = (snapshot: Snapshot, path: string): PageRecord | null => {
-  const pages = activeRunPages(snapshot.pages)
-  const direct = pages.find((record) => record.resource.path === path)
-  if (direct !== undefined) return direct
-  const wanted = normal(path)
-  return pages.find((record) => nameKeys(record.resource.path).includes(wanted)) ?? null
-}
-
-export const readablePage = (snapshot: Snapshot, path: string): PageRecord | null =>
-  activePage(snapshot, path) ?? redirectTargetAt(snapshot, path)
-
-export const pageData = (
-  record: PageRecord
-): {
-  page_ref: string
-  revision: string
-  path: string
-  title: string
-  aliases: string[]
-  lifecycle: "active" | "redirect"
-} => ({
-  page_ref: record.page.pageId,
-  revision: record.resource.versionId,
-  path: record.resource.path,
-  title: record.page.title,
-  aliases: [...record.page.aliases],
-  lifecycle: record.page.lifecycle
-})
-
-export const writtenPageData = (page: {
-  readonly path: string
-  readonly title: string
-  readonly aliases: ReadonlyArray<string>
-  readonly lifecycle: WikiPage["lifecycle"]
-}): { path: string; title: string; aliases: string[]; lifecycle: string } => ({
-  path: page.path,
-  title: page.title,
-  aliases: [...page.aliases],
-  lifecycle: page.lifecycle.kind
-})
-
-interface ListingEntry {
-  readonly kind: "directory" | "page"
-  readonly path: string
-  readonly title?: string
-}
-
-const listingEntries = (
-  pages: ReadonlyArray<PageRecord>,
-  directory: string
-): ReadonlyArray<ListingEntry> => {
-  const prefix = directory === "" ? "" : `${directory}/`
-  const directories = new Set<string>()
-  const entries: Array<ListingEntry> = []
-  for (const record of pages) {
-    const path = record.resource.path
-    if (!path.startsWith(prefix)) continue
-    const relative = path.slice(prefix.length)
-    if (relative === "") continue
-    const separator = relative.indexOf("/")
-    if (separator >= 0) {
-      directories.add(`${prefix}${relative.slice(0, separator)}/`)
-      continue
-    }
-    entries.push({ kind: "page", path, title: record.page.title })
-  }
-  return [
-    ...[...directories].sort().map((path): ListingEntry => ({ kind: "directory", path })),
-    ...entries.sort((left, right) => left.path.localeCompare(right.path))
-  ]
-}
-
-export interface BoundedBody {
-  readonly content: string
-  readonly text: string
-  readonly totalLines: number
-  readonly truncated: boolean
-}
-
-export const boundedBody = (body: string, offset: number, limit: number): BoundedBody => {
-  const page = readTextPage(body, { offset, limit })
-  const sliced = page.content
-  const truncatedByChars = sliced.length > MAX_WIKI_CONTENT_CHARS
-  const content = truncatedByChars
-    ? cutText(sliced, MAX_WIKI_CONTENT_CHARS, {
-        suffix: `\n[truncated at ${MAX_WIKI_CONTENT_CHARS} characters]`
-      })
-    : [sliced, page.notice].filter(Boolean).join("\n\n")
-  return {
-    content,
-    text: sliced,
-    totalLines: page.total,
-    truncated: truncatedByChars || page.hasMore
-  }
-}
-
-const formatListingEntry = (entry: ListingEntry): string => {
-  if (entry.kind === "directory") return `[directory] ${entry.path}`
-  return `[page] ${entry.path} — ${entry.title}`
-}
-
-const renderListing = (
-  directory: string,
-  visible: ReadonlyArray<ListingEntry>,
-  hasMore: boolean,
-  nextOffset: number
-): string => {
-  const lines = visible.map(formatListingEntry)
-  if (lines.length === 0) lines.push("No wiki entries.")
-  if (hasMore) lines.push(`More entries exist; retry with offset=${nextOffset}.`)
-  lines.push(
-    "Link a page as [Title](path.md) when the user should open it. The answer's Sources footer already names what was read, so do not add a 'Source:' line."
-  )
-  const header = directory === "" ? "Wiki /" : `Wiki /${directory}/`
-  return `${header}\n${lines.join("\n")}`
-}
-
-export const loadSnapshot = (wiki: Wiki["Service"], signal: AbortSignal): Promise<Snapshot> =>
-  Effect.runPromise(wiki.snapshot().pipe(Effect.mapError(wikiFailure)), { signal })
-
-const pagesWithPathAlias = (snapshot: Snapshot, path: string): ReadonlyArray<string> => {
-  const wanted = namesTakenAt([path])
-  return activeRunPages(snapshot.pages)
-    .filter((record) => record.page.aliases.some((alias) => wanted.has(normal(alias))))
-    .map((record) => record.resource.path)
-}
-
-export const pageNotFound = (snapshot: Snapshot, path: string): ToolExecutionError => {
-  const redirected = redirectTargetAt(snapshot, path)
-  if (redirected !== null)
-    return new ToolExecutionError(
-      `'${path}' now redirects to '${redirected.resource.path}'. Use '${redirected.resource.path}' to change that page.`,
-      { preview: "Memory page moved", retryable: false }
-    )
-  const named = pagesWithPathAlias(snapshot, path).slice(0, 3)
-  const hint =
-    named.length === 0
-      ? "Call wiki_list_pages and retry with an exact active page path."
-      : `${named.map((candidate) => `'${candidate}'`).join(", ")} lists '${path}' as an earlier name; read it if it is the page you want.`
-  return new ToolExecutionError(`No active Memory page exists at '${path}'. ${hint}`, {
-    preview: "Memory page not found",
-    retryable: false
-  })
-}
-
-interface ChangedPage {
-  readonly pageId: string
-  readonly path: string
-  readonly title: string
-  readonly version: string
-}
-
-/** A page a change saved, and its version before the change. */
-export interface SavedPage<Page extends ChangedPage = ChangedPage> {
-  readonly page: Page
-  readonly before: string
-}
-
-type Found<Paths> = { readonly [K in keyof Paths]: PageRecord }
-
-/** The pages a run named, as it found them, and who it writes as. */
-export interface PagesTarget<Paths> {
-  readonly head: string
-  readonly records: Found<Paths>
-  readonly identity: WikiWriteIdentity
-  /** This run as the writer of a change made for `reason`, as a page service verb takes it. */
-  readonly writer: (reason: string) => {
-    readonly authority: WikiLocationAuthority
-    readonly commit: WikiCommitIdentity
-  }
-  /** Runs a page service call, failing as a tool fails. */
-  readonly run: <A>(effect: Effect.Effect<A, WikiError>) => Promise<A>
-}
-
-export interface WikiToolServices {
-  readonly wiki: Wiki["Service"]
-  readonly runs: Pick<RunQueries["Service"], "get" | "cause">
-}
-
-/** A page as this run found it, saved by a change that did not need to write it. */
-export const keptPage = (
-  record: PageRecord
-): SavedPage<
-  Pick<WikiPage, "pageId" | "path" | "title" | "version" | "aliases" | "lifecycle">
-> => ({
-  page: {
-    pageId: record.page.pageId,
-    path: record.resource.path,
-    title: record.page.title,
-    version: record.resource.versionId,
-    aliases: record.page.aliases,
-    lifecycle: pageLifecycle(record.page)
-  },
-  before: record.resource.versionId
-})
-
-const findAll = <const Paths extends Arr.NonEmptyReadonlyArray<string>>(
-  paths: Paths,
-  find: (path: string) => PageRecord
-): Found<Paths> => paths.map(find) as unknown as Found<Paths>
-
-/**
- * Changes the pages at `paths` as this run: finds each page, saves through `save` as this run's
- * writer, takes each saved page as the run's read of it, and receipts the pages whose version moved.
- */
-export const changePages = async <
-  const Paths extends Arr.NonEmptyReadonlyArray<string>,
-  Page extends ChangedPage
->(
-  { wiki, runs }: WikiToolServices,
-  ctx: ToolContext<ServerRunContext>,
-  effects: CallEffects,
-  request: {
-    /** The tool's arguments; a Capture save is keyed by them. */
-    readonly input: unknown
-    readonly paths: Paths
-    /** The page a path names; an active page unless given. */
-    readonly find?: (snapshot: Snapshot, path: string) => PageRecord | null
-    readonly save: (
-      target: PagesTarget<Paths>
-    ) => Promise<Arr.NonEmptyReadonlyArray<SavedPage<Page>>>
-  }
-): Promise<{
-  records: Found<Paths>
-  saved: readonly [SavedPage<Page>, ...SavedPage<Page>[]]
-  changed: boolean
-  receipt: Readonly<Record<string, unknown>> | undefined
-}> => {
-  const snapshot = await loadSnapshot(wiki, ctx.signal)
-  const head = snapshot.head
-  if (head === null) throw pageNotFound(snapshot, request.paths[0])
-  const records = findAll(request.paths, (path) => {
-    const record = (request.find ?? activePage)(snapshot, path)
-    if (record === null) throw pageNotFound(snapshot, path)
-    return record
-  })
-  const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-  const run = <A>(effect: Effect.Effect<A, WikiError>) =>
-    Effect.runPromise(effect.pipe(Effect.mapError(wikiFailure)), { signal: ctx.signal })
-  const replayKey =
-    identity.captureBatch === null ? undefined : captureSaveKey(ctx.run.runId, request.input)
-  if (replayKey !== undefined && (await run(wiki.hasCaptureReceipt(replayKey))))
-    throw new ToolExecutionError(
-      "This run already saved this exact request; nothing was saved again.",
-      {
-        preview: "Already saved",
-        retryable: false
-      }
-    )
-  const saved = await request.save({
-    head,
-    records,
-    identity,
-    writer: (reason) => ({
-      authority: identity.authority,
-      commit: {
-        actor: identity.actor,
-        origin: identity.origin,
-        reason,
-        ...(replayKey === undefined ? {} : { replayKey })
-      }
-    }),
-    run
-  })
-  for (const { page } of saved) ctx.run.observations.observe(page.pageId, page.version)
-  const moved = saved.filter(({ page, before }) => page.version !== before)
-  if (moved.length > 0) effects.applied()
-  else effects.unchanged()
-  const [one] = moved
-  return {
-    records,
-    saved,
-    changed: one !== undefined,
-    receipt:
-      moved.length === 1 && one !== undefined
-        ? pageReceipt({ ctx, page: one.page, beforeVersion: one.before })
-        : pagesReceipt(
-            ctx,
-            moved.map(({ page, before }) => ({
-              ...page,
-              beforeVersion: before,
-              afterVersion: page.version
-            }))
-          )
-  }
-}
+import {
+  loadSnapshot,
+  pageNotFound,
+  parseDirectory,
+  readablePage,
+  wikiFailure
+} from "./wiki-access.js"
+import {
+  boundedBody,
+  formatListingEntry,
+  listingEntries,
+  pageData,
+  renderListing,
+  writtenPageData
+} from "./wiki-render.js"
+import { changePages, keptPage } from "./wiki-page-writes.js"
 
 const makeWikiTools = ({
   wiki,

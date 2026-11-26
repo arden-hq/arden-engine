@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs"
-import { defineConfig } from "oxlint"
+import { defineConfig, type DummyRuleMap } from "oxlint"
 import { baselinedOverrides } from "./tooling/lint-plugin.mjs"
 import { exemptDirs, ownedBans, ownerFiles } from "./tooling/owned-behaviors.mjs"
 
@@ -10,11 +10,11 @@ const tsFiles = "**/*.{ts,tsx,mts,cts}"
 const testFiles = [`**/{test,tests}/**/*.${sources}`, `**/*.test.${sources}`]
 const plugin = "./tooling/lint-plugin.mjs"
 
-const taste = {
+const taste: DummyRuleMap = {
   "no-nested-ternary": "error",
   "prefer-template": "error",
   "no-else-return": "error"
-} as const
+}
 
 const escapeHatches = {
   "typescript/no-explicit-any": "error",

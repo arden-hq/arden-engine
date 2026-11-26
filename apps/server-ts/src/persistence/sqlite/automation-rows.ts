@@ -1,10 +1,12 @@
+import { AUTOMATION_APPROVAL } from "@arden-hq/protocol/permissions"
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
 import { RunOriginSchema } from "../runs/stored-context.js"
 import type { AutomationContextMode, AutomationToolScope } from "@arden-hq/protocol/automations"
-import { Effect, Result, Schema } from "effect"
+import { Effect, Result, Schema, type SchemaAST } from "effect"
 import { type AutomationRules, type SystemAutomationSpec } from "../automations/model.js"
 import { AutomationStoreError, type AutomationQueueSource } from "../automations/store.js"
-import { JobPurposeSchema, type JobClassification } from "../job-classification.js"
-import { TaskItemId, spaceJobId, taskJobId } from "../space-job-id.js"
+import { JOB_PURPOSE, JobPurposeSchema, type JobClassification } from "../job-classification.js"
+import { JOB_SUBJECT_KIND, TaskItemId, spaceJobId, taskJobId } from "../space-job-id.js"
 import type { PersistenceDeps } from "./deps.js"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import {
@@ -32,7 +34,7 @@ export type AutomationRow = JobClassification & {
   readonly automation_ref: string
   readonly name: string
   readonly description: string | null
-  readonly description_source: string | null
+  readonly description_source: DescriptionSource | null
   readonly prompt: string
   readonly model: string | null
   readonly context_mode: AutomationContextMode
@@ -97,8 +99,8 @@ export const boundAttemptJson = (sql: SqlClient.SqlClient, attempt: string): Sta
 }
 
 type OwnerApproval =
-  | { readonly kind: "own"; readonly autoApprove: boolean }
-  | { readonly kind: "space" }
+  | { readonly kind: typeof AUTOMATION_APPROVAL.own; readonly autoApprove: boolean }
+  | { readonly kind: typeof AUTOMATION_APPROVAL.space }
 
 export interface OwnerPolicy {
   readonly toolScope: AutomationToolScope
@@ -107,14 +109,14 @@ export interface OwnerPolicy {
 
 export const ownerPolicy = (owner: WorkOwner): OwnerPolicy => {
   switch (owner.kind) {
-    case "automation":
+    case JOB_SUBJECT_KIND.automation:
       return {
         toolScope: owner.policy.toolScope,
         approval: { kind: "own", autoApprove: owner.policy.autoApprove }
       }
-    case "space_review":
+    case JOB_SUBJECT_KIND.spaceReview:
       return { toolScope: "space", approval: { kind: "space" } }
-    case "task":
+    case JOB_SUBJECT_KIND.task:
       return {
         toolScope: "space",
         approval: owner.spaceId === null ? { kind: "own", autoApprove: false } : { kind: "space" }
@@ -168,24 +170,24 @@ export const decodeBoundAttempt = (
 const boundAgrees = (bound: BoundAttempt, key: string): boolean => {
   const { origin } = bound
   switch (bound.purpose) {
-    case "task_execution":
+    case JOB_PURPOSE.taskExecution:
       return (
-        origin.kind === "task" &&
+        origin.kind === RUN_ORIGIN.task &&
         origin.item_id === bound.itemId &&
         bound.generation !== null &&
         key === taskJobId(origin.item_id)
       )
-    case "space_review":
+    case JOB_PURPOSE.spaceReview:
       return (
-        origin.kind === "space" &&
+        origin.kind === RUN_ORIGIN.space &&
         bound.itemId === null &&
         bound.generation === null &&
         key === spaceJobId(origin.space_id)
       )
-    case "user_automation":
-    case "system":
+    case JOB_PURPOSE.userAutomation:
+    case JOB_PURPOSE.system:
       return (
-        origin.kind === "automation" &&
+        origin.kind === RUN_ORIGIN.automation &&
         origin.automation_id === key &&
         bound.itemId === null &&
         bound.generation === null
@@ -222,26 +224,26 @@ export const readWorkOwner = Effect.fn("AutomationRows.readWorkOwner")(function*
 })
 
 export const isDefinition = (owner: WorkOwner | undefined): owner is DefinitionOwner =>
-  owner?.kind === "automation"
+  owner?.kind === JOB_SUBJECT_KIND.automation
 
 export const ownerIsOn = (owner: WorkOwner): boolean => {
   switch (owner.kind) {
-    case "automation":
+    case JOB_SUBJECT_KIND.automation:
       return owner.state.enabled
-    case "space_review":
+    case JOB_SUBJECT_KIND.spaceReview:
       return owner.mayRun
-    case "task":
+    case JOB_SUBJECT_KIND.task:
       return owner.stands
   }
 }
 
 export const classificationOf = (owner: WorkOwner): JobClassification => {
   switch (owner.kind) {
-    case "automation":
+    case JOB_SUBJECT_KIND.automation:
       return { purpose: owner.purpose, owner_space_id: null, owner_task_id: null }
-    case "space_review":
+    case JOB_SUBJECT_KIND.spaceReview:
       return { purpose: "space_review", owner_space_id: owner.spaceId, owner_task_id: null }
-    case "task":
+    case JOB_SUBJECT_KIND.task:
       return {
         purpose: "task_execution",
         owner_space_id: owner.spaceId,
@@ -250,7 +252,11 @@ export const classificationOf = (owner: WorkOwner): JobClassification => {
   }
 }
 
-export const strict = { onExcessProperty: "error" } as const
+export const DESCRIPTION_SOURCE = { manual: "manual", generated: "generated" } as const
+
+type DescriptionSource = (typeof DESCRIPTION_SOURCE)[keyof typeof DESCRIPTION_SOURCE]
+
+export const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 
 export const storeError = (
   operation: StoreOperation,

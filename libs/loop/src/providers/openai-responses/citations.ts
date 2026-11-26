@@ -16,12 +16,13 @@ const CITATION_DELIMITER = "\uE202"
 const CITATION_STOP = "\uE201"
 const CITATION_PREFIX = `${CITATION_START}cite${CITATION_DELIMITER}`
 
-type FilterState =
-  | { readonly kind: "text" }
-  | { readonly kind: "prefix"; readonly value: string }
-  | { readonly kind: "citation" }
+const FILTER_STATE = { text: "text", prefix: "prefix", citation: "citation" } as const
 
-/** Stateful because a citation marker may span several streamed deltas. */
+type FilterState =
+  | { readonly kind: typeof FILTER_STATE.text }
+  | { readonly kind: typeof FILTER_STATE.prefix; readonly value: string }
+  | { readonly kind: typeof FILTER_STATE.citation }
+
 export class OpenAiCitationFilter {
   private state: FilterState = { kind: "text" }
 
@@ -29,12 +30,12 @@ export class OpenAiCitationFilter {
     let visible = ""
 
     for (const character of chunk) {
-      if (this.state.kind === "citation") {
+      if (this.state.kind === FILTER_STATE.citation) {
         if (character === CITATION_STOP) this.state = { kind: "text" }
         continue
       }
 
-      if (this.state.kind === "prefix") {
+      if (this.state.kind === FILTER_STATE.prefix) {
         const candidate = `${this.state.value}${character}`
         if (candidate === CITATION_PREFIX) {
           this.state = { kind: "citation" }
@@ -62,7 +63,6 @@ export class OpenAiCitationFilter {
     return visible
   }
 
-  /** Drops a truncated citation prefix or marker at the end of the response. */
   finish(): void {
     this.state = { kind: "text" }
   }

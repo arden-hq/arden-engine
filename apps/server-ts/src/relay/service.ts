@@ -1,5 +1,7 @@
 import { sleep } from "@arden-hq/std/sleep"
+import { AWAKE_STATE } from "@arden-hq/relay-protocol"
 import {
+  RELAY_CONNECTION,
   RELAY_PAIR_REQUEST,
   RELAY_PRESENCE,
   RELAY_SETTING,
@@ -14,12 +16,12 @@ import type { PowerHost } from "../config/options.js"
 import type { CredentialVault } from "../credentials/vault.js"
 import type { LocalAccess } from "../http/middleware/local-only.js"
 import { effectiveRelayUrl, RelayStore, type RelayStoreError } from "../persistence/relay/store.js"
-import { SessionLifecycleEvents } from "../persistence/sessions/events.js"
-import { RelayConnector } from "./connector.js"
+import { LIFECYCLE_DELIVERY, SessionLifecycleEvents } from "../persistence/sessions/events.js"
+import { CONNECTOR_STATE, RelayConnector } from "./connector.js"
 import { PUSH_RETRY, deliverPushes, pushPayload, runPushes, type PushRoute } from "./push.js"
 import { loadMacIdentity, type MacIdentity } from "./identity.js"
 import { relayLoopback } from "./loopback.js"
-import type { CommandLog, DeviceRegistry, RelayLog } from "./ports.js"
+import type { CommandLog, DeviceRegistry, RelayLog, RelayLogLevel } from "./ports.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { currentMillis, iso } from "../runtime/clock.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
@@ -60,6 +62,11 @@ const PUSH_WAKES: ReadonlySet<string> = new Set([
   "automation_finished",
   "record_told"
 ])
+const RELAY_LOG: Record<RelayLogLevel, (message: string) => Effect.Effect<void>> = {
+  info: Effect.logInfo,
+  warning: Effect.logWarning
+}
+
 const COMMAND_RETENTION_DAYS = 7
 const PAIRING_WINDOW_MS = 10 * 60_000
 const CONNECT_WAIT_MS = 5_000
@@ -84,11 +91,7 @@ export const relayLayer = (
       const loopback = relayLoopback(server.address, options.localAccess)
       const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect)
       const log: RelayLog = (level, message, fields = {}) => {
-        Effect.runFork(
-          (level === "info" ? Effect.logInfo(message) : Effect.logWarning(message)).pipe(
-            Effect.annotateLogs(fields)
-          )
-        )
+        Effect.runFork(RELAY_LOG[level](message).pipe(Effect.annotateLogs(fields)))
       }
       const devices: DeviceRegistry = {
         list: () => run(store.devices()),
@@ -187,7 +190,7 @@ export const relayLayer = (
 
       const pushRoute = Effect.fn("RelayService.pushRoute")(function* () {
         const live = connector?.instance
-        const targets = live?.state === "connected" ? live.pushTargets() : []
+        const targets = live?.state === CONNECTOR_STATE.connected ? live.pushTargets() : []
         const ready = identity
         if (live === undefined || targets.length === 0 || ready === undefined) return undefined
         const mac = yield* Effect.promise(() => ready)
@@ -199,7 +202,7 @@ export const relayLayer = (
             const sealed = pushPayload({ identity: mac, device, notice })
             return live.push({
               device,
-              collapseId: collapseId(notice.collapseId),
+              collapseId: urlSafeCollapseId(notice.collapseId),
               category: sealed.category,
               payload: sealed.payload
             })
@@ -230,7 +233,9 @@ export const relayLayer = (
           const opened = yield* sessionEvents.open()
           yield* wake
           yield* Stream.runForEach(opened.stream, (delivery) =>
-            delivery.kind === "reset" || PUSH_WAKES.has(delivery.event.type) ? wake : Effect.void
+            delivery.kind === LIFECYCLE_DELIVERY.reset || PUSH_WAKES.has(delivery.event.type)
+              ? wake
+              : Effect.void
           )
         })
       ).pipe(Effect.tapError((cause) => Effect.logWarning("Relay push wake failed", { cause })))
@@ -239,7 +244,7 @@ export const relayLayer = (
       )
 
       const unsubscribe = options.power?.onSleep((asleep) =>
-        connector?.instance.presence(asleep ? "asleep" : "online")
+        connector?.instance.presence(asleep ? AWAKE_STATE.asleep : AWAKE_STATE.online)
       )
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
@@ -371,13 +376,15 @@ const connectionOf = (input: {
   readonly enabled: boolean
   readonly live: RelayStatus["connection"] | undefined
 }): RelayStatus["connection"] => {
-  if (!input.secure) return "unavailable"
-  if (!input.enabled) return "off"
-  return input.live ?? "idle"
+  if (!input.secure) return RELAY_CONNECTION.unavailable
+  if (!input.enabled) return RELAY_CONNECTION.off
+  return input.live ?? RELAY_CONNECTION.idle
 }
 
-/** An APNs collapse id the relay accepts (url-safe, at most 64 characters). */
-const collapseId = (id: string): string => id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)
+const APNS_COLLAPSE_ID_MAX_LENGTH = 64
+
+const urlSafeCollapseId = (id: string): string =>
+  id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, APNS_COLLAPSE_ID_MAX_LENGTH)
 
 const connected = async (
   current: () => RelayConnector | undefined
@@ -385,7 +392,7 @@ const connected = async (
   const deadline = currentMillis() + CONNECT_WAIT_MS
   for (;;) {
     const instance = current()
-    if (instance?.state === "connected") return instance
+    if (instance?.state === CONNECTOR_STATE.connected) return instance
     if (currentMillis() > deadline) return undefined
     await sleep(50)
   }

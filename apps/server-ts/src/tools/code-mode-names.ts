@@ -1,9 +1,3 @@
-/**
- * The model sees provider-namespaced names (`functions.x`, `space.x`,
- * `browser_tools.x`) and copies the habit into scripts; a script's flat tool
- * list has bare names only.
- */
-
 export interface CodeModeToolFacts {
   readonly name: string
   readonly codeMode: boolean

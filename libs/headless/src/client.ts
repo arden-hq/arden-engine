@@ -2,6 +2,7 @@ import { parseJsonBody } from "@arden-hq/protocol/common"
 import { abortAfter } from "@arden-hq/std/timer"
 import type { DecodedServerEventFrame } from "@arden-hq/protocol"
 import {
+  CHAT_RECEIPT_STATUS,
   chatDecoders,
   chatRequests,
   chatRoutes,
@@ -52,7 +53,6 @@ import { listAllRuns, type HeadlessRunListOptions } from "./run-list.js"
 
 export type { ModelCatalog, ResolveRunQuestionInput, RunDetail, RunQuestion, RunTerminalResult }
 
-/** One decoded frame of a run's session event stream. */
 export type HeadlessRunEvent = DecodedServerEventFrame
 
 export interface HeadlessClientOptions {
@@ -69,11 +69,9 @@ export interface SubmittedRun {
   readonly delivery: ChatDelivery
 }
 
-/** A message for `queue`: it waits for the chat's Run to end, then starts its own. */
 export interface QueueMessageInput {
   readonly sessionId: string
   readonly message: string
-  /** Caller-owned identity, so a retry cannot queue twice. Generated when absent. */
   readonly clientId?: string
 }
 
@@ -91,8 +89,6 @@ export interface WaitForRunOptions {
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
   readonly reconnectDelayMs?: number
-  /** Called for each event, with a signal that aborts when the wait's own signal or its timeout
-   *  does. It does not abort when the wait returns. */
   readonly onEvent?: (event: HeadlessRunEvent, signal: AbortSignal) => void | PromiseLike<void>
 }
 
@@ -233,7 +229,6 @@ export class HeadlessClient {
     )
   }
 
-  /** Submit with one generated client id and reuse the exact body for a lost-response retry. */
   async submit(input: ChatMessageInput): Promise<SubmittedRun> {
     const prepared = chatRequests.message(input)
     let response: Response | undefined
@@ -272,11 +267,6 @@ export class HeadlessClient {
     }
   }
 
-  /**
-   * Park a message behind the chat's current Run. Unlike `submit`, which
-   * steers a Run that is going, the message waits for that Run to end and then
-   * starts a Run of its own. With no Run going it is sent at once.
-   */
   async queue(input: QueueMessageInput): Promise<QueuedChatMessage> {
     const clientId = input.clientId ?? globalThis.crypto.randomUUID()
     return chatDecoders.queuedMessage(
@@ -293,14 +283,12 @@ export class HeadlessClient {
     )
   }
 
-  /** The messages parked behind the chat's Run, in the order they will be sent. */
   async listQueued(sessionId: string): Promise<ReadonlyArray<QueuedChatMessage>> {
     return chatDecoders.queue(
       await this.#requestJson(chatRoutes.queue(sessionId), { method: "GET" })
     ).messages
   }
 
-  /** Take a parked message back before it is sent. */
   async cancelQueued(sessionId: string, clientId: string): Promise<QueuedCancelResponse> {
     return chatDecoders.queuedCancellation(
       await this.#requestJson(chatRoutes.queuedMessage({ sessionId, clientId }), {
@@ -313,12 +301,6 @@ export class HeadlessClient {
     return this.#getRun(runId)
   }
 
-  /**
-   * The server's Runs, oldest first, sub-agent Runs included, and whether the
-   * server is idle. `sessionId` keeps one chat's Runs; `active` keeps the Runs
-   * still going. The server answers in pages; this reads them all. Owner
-   * access only: the app's command-line secret is refused.
-   */
   async listRuns(options: HeadlessRunListOptions = {}): Promise<RunList> {
     return listAllRuns(options, async (path) =>
       runDecoders.list(await this.#requestJson(path, { method: "GET" }))
@@ -352,15 +334,11 @@ export class HeadlessClient {
     yield* chatDecoders.eventStream(responseChunks(response.body))
   }
 
-  /** Follow a submitted message to the end of the Run that answers it. A queued
-   *  message joined the chat's running Run (a Goal's turn, say), which another
-   *  client started; that Run answers it, under its own client identity. */
   async wait(run: SubmittedRun, options: WaitForRunOptions = {}): Promise<RunDetail> {
-    if (run.status === "queued") return this.waitForRun(run.runId, options)
+    if (run.status === CHAT_RECEIPT_STATUS.queued) return this.waitForRun(run.runId, options)
     return this.#waitFor(run, options)
   }
 
-  /** Follow a Run this client did not submit (one started earlier, or elsewhere) to its end. */
   async waitForRun(runId: string, options: WaitForRunOptions = {}): Promise<RunDetail> {
     const detail = await this.#getRun(runId, options.signal)
     if (isTerminalRunStatus(detail.status)) return detail
@@ -376,12 +354,10 @@ export class HeadlessClient {
     )
   }
 
-  /** Whether the server is up and has a model to answer with. */
   async health(): Promise<HealthStatus> {
     return healthDecoders.status(await this.#requestJson(healthRoutes.status, { method: "GET" }))
   }
 
-  /** Delete a Session for good, with its files: archived first, as only an archived one deletes. */
   async deleteSession(sessionId: string): Promise<void> {
     await this.#requestJson(sessionRoutes.archive(sessionId, { stop: false }), { method: "DELETE" })
     await this.#requestJson(sessionRoutes.permanentDelete(sessionId, { stop: false }), {
@@ -389,17 +365,10 @@ export class HeadlessClient {
     })
   }
 
-  /**
-   * The models a chat may run on, grouped by provider, as the server reports
-   * them: a configured server lists its settings' `model` first, then
-   * `extraModels`; on llama.cpp and OpenRouter the ids are the server's own.
-   * `createSession({ chat_model })` takes one of these ids.
-   */
   async listModels(): Promise<ModelCatalog> {
     return modelDecoders.catalog(await this.#requestJson(modelRoutes.catalog, { method: "GET" }))
   }
 
-  /** The server's tools and the display facts each declares, such as the card it asks on. */
   async toolCatalog(options: { readonly signal?: AbortSignal } = {}): Promise<ToolCatalogResponse> {
     return toolDecoders.catalog(
       await this.#requestJson(toolRoutes.catalog, {
@@ -413,7 +382,6 @@ export class HeadlessClient {
     return spaceDecoders.list(await this.#requestJson(spaceRoutes.collection, { method: "GET" }))
   }
 
-  /** Answer a tool approval the Run is waiting on. */
   async answerApproval(input: ToolResultInput): Promise<void> {
     await this.#requestJson(chatRoutes.toolResult, {
       method: "POST",
@@ -421,7 +389,6 @@ export class HeadlessClient {
     })
   }
 
-  /** Answer a connection request the Run is waiting on. */
   async answerConnection(input: ConnectionResultInput): Promise<void> {
     await this.#requestJson(chatRoutes.connectionResult, {
       method: "POST",

@@ -1,8 +1,10 @@
-import { publicWebUrl } from "@arden-hq/std/url"
+import { PUBLIC_WEB_URL, publicWebUrl } from "@arden-hq/std/url"
 import { clipLine, cutText } from "@arden-hq/std/text"
 import type { JsonObject, JsonValue, ProviderToolCall } from "../../contracts/messages.js"
 import {
   asRecord,
+  RESPONSE_ITEM_TYPE,
+  RESPONSE_PART_TYPE,
   WEB_SEARCH_TOOL_NAME,
   type OutputItem,
   type ResponseShape,
@@ -29,12 +31,17 @@ const boundedLine = (value: unknown, limit: number): string | null => {
 const webUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null
   const page = publicWebUrl(value)
-  return page.kind === "ok" ? page.url.toString() : null
+  return page.kind === PUBLIC_WEB_URL.ok ? page.url.toString() : null
 }
+
+const CITATION_SOURCE_TYPE = { url: "url", urlCitation: "url_citation" } as const
+type CitationSourceType = (typeof CITATION_SOURCE_TYPE)[keyof typeof CITATION_SOURCE_TYPE]
+const isCitationSourceType = (value: unknown): value is CitationSourceType =>
+  value === CITATION_SOURCE_TYPE.url || value === CITATION_SOURCE_TYPE.urlCitation
 
 const sourceRef = (value: unknown): WebSourceRef | null => {
   const source = asRecord(value)
-  if (source?.type !== "url" && source?.type !== "url_citation") return null
+  if (!isCitationSourceType(source?.type)) return null
   const url = webUrl(source.url)
   if (url === null) return null
   const title = boundedLine(source.title, 256) ?? new URL(url).hostname
@@ -42,9 +49,9 @@ const sourceRef = (value: unknown): WebSourceRef | null => {
 }
 
 const itemCitations = (item: OutputItem): ReadonlyArray<WebSourceRef> => {
-  if (item.type !== "message") return []
+  if (item.type !== RESPONSE_ITEM_TYPE.message) return []
   return item.content.flatMap((part) => {
-    if (part.type !== "output_text") return []
+    if (part.type !== RESPONSE_PART_TYPE.outputText) return []
     return part.annotations.flatMap((annotation) => {
       const ref = sourceRef(annotation)
       return ref === null ? [] : [ref]
@@ -114,7 +121,7 @@ const searchResult = (item: WebSearchOutputItem, sources: ReadonlyArray<WebSourc
 export const webSearchCalls = (response: ResponseShape): ReadonlyArray<ProviderToolCall> => {
   const citations = citedSources(response)
   return response.output.flatMap((item): ReadonlyArray<ProviderToolCall> => {
-    if (item.type !== "web_search_call") return []
+    if (item.type !== RESPONSE_ITEM_TYPE.webSearchCall) return []
     const sources = searchSources(item, citations)
     return [
       {

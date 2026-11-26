@@ -5,7 +5,7 @@ import {
   type Result,
   type ToolPaused
 } from "../contracts/events.js"
-import { invoke } from "./guards.js"
+import { hookCall, invoke } from "./guards.js"
 import { currentCost } from "./run-cost.js"
 import { type Run } from "./run-state.js"
 
@@ -55,7 +55,7 @@ export const finalize = async (
   await run.emit(await result(run, text, reason, steps, pausedTools))
 }
 
-export const pauseResult = (paused: ReadonlyArray<ToolPaused>): ReadonlyArray<PendingToolRequest> =>
+const pauseResult = (paused: ReadonlyArray<ToolPaused>): ReadonlyArray<PendingToolRequest> =>
   paused.map((event) => ({
     tool_call_id: event.tool_id,
     name: event.name,
@@ -63,3 +63,22 @@ export const pauseResult = (paused: ReadonlyArray<ToolPaused>): ReadonlyArray<Pe
     reason: event.reason,
     detail: event.detail
   }))
+
+export const finalizePaused = async (
+  run: Run,
+  steps: number,
+  paused: ReadonlyArray<ToolPaused>
+): Promise<void> => {
+  const running = run.background.running()
+  const hold = run.wiring.hooks.holdBackgroundCalls
+  if (running.length > 0 && hold !== undefined) {
+    try {
+      await hookCall("holdBackgroundCalls", () => hold(running))
+    } catch (error) {
+      for (const call of running) call.stop()
+      throw error
+    }
+  }
+  run.detachBackground()
+  await finalize(run, "", StopReason.PAUSED, steps, pauseResult(paused))
+}

@@ -126,10 +126,6 @@ const plainLine = (line: string): string =>
         .join(" ")
     : line.replace(/\*\*(.+?)\*\*/g, "$1")
 
-/**
- * The text Memory Capture reads of a message, or null when it reads none. An answer to Arden's
- * question reads as what the owner said, with Arden's prompt marked as Arden's.
- */
 export const capturedText = (message: StoredMessageEnvelope): string | null => {
   if (message.superseded === true) return null
   const text = (

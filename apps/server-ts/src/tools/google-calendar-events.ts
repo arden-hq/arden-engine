@@ -41,7 +41,6 @@ const CalendarEventSchema = Schema.Struct({
       )
     })
   ),
-  /** Google moves it on every change; a sync reports the same time for this revision. */
   updated: Schema.optionalKey(Schema.String),
   start: Schema.optionalKey(CalendarEventTimeSchema),
   end: Schema.optionalKey(CalendarEventTimeSchema),
@@ -51,7 +50,6 @@ const CalendarEventSchema = Schema.Struct({
       self: Schema.optionalKey(Schema.Boolean)
     })
   ),
-  /** true — the list holds only some guests (Google hides the rest from this account). */
   attendeesOmitted: Schema.optionalKey(Schema.Boolean),
   attendees: Schema.optionalKey(
     Schema.Array(
@@ -108,10 +106,6 @@ export type EventData = {
   readonly attendees: { email: string; response_status: string | null }[]
 }
 
-/**
- * An all-day event reads as dates with `end` the last day, inclusive (Google
- * stores the day after); a timed one keeps its date-times.
- */
 export const eventData = (
   item: CalendarEvent,
   account: string,

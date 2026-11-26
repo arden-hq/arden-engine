@@ -73,7 +73,6 @@ export const makeHomeEvidence = ({
           AND event.created_at > ${since} AND event.created_at <= ${through}
           AND NOT EXISTS (SELECT 1 FROM scheduled_tasks AS system_job WHERE system_job.builtin = 1
             AND system_job.task_id = json_extract(source_run.metadata_json, '$.run_context.origin.automation_id'))`
-        // A worker's note on a Task is news about that Task; the user's own notes are not.
         const comments = sql`
         SELECT 'task:comment:' || comment.comment_id AS id, comment.created_at AS at, 'task' AS kind,
           json_object('id', 'task:comment:' || comment.comment_id, 'at', comment.created_at, 'kind', 'task',
@@ -145,8 +144,6 @@ export const makeHomeEvidence = ({
           cursor === undefined
             ? sql``
             : sql`WHERE at <= ${cursor.at} AND (at, id) < (${cursor.at}, ${cursor.id})`
-        // Each kind gives its own newest page through its time index, so a page
-        // reads about a page of each kind however long the window is.
         const newest = (part: Statement.Fragment) => sql`SELECT * FROM (
           SELECT id, at, kind, payload FROM (${part}) ${after} ORDER BY at DESC, id DESC LIMIT 101)`
         const rows = yield* sql<{

@@ -5,6 +5,7 @@ import {
   SpaceTaskCaptureInputSchema,
   SpaceTaskSchema,
   SpaceTaskSourceSchema,
+  TaskOwnerSchema,
   WorkTaskKeySchema
 } from "../spaces/work/schema.js"
 import { WORK_TASK_BODY_MAX_CHARS, WORK_TASK_TEXT_MAX_CHARS } from "../spaces/work/contracts.js"
@@ -15,6 +16,13 @@ import type {
   TaskProposalRetirement,
   TaskProposalConflict,
   TaskProposalReview
+} from "./contracts.js"
+import {
+  RESOLVED_PROPOSAL_TASK,
+  TASK_PROPOSAL_CONFLICT,
+  TASK_PROPOSAL_RETIREMENT_SOURCE,
+  TASK_PROPOSAL_REVIEW_STATE,
+  TASK_PROPOSAL_STATUS
 } from "./contracts.js"
 
 const identity = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1024))
@@ -77,7 +85,7 @@ const taskProposalFields = {
       text: Schema.String.check(Schema.isMaxLength(WORK_TASK_BODY_MAX_CHARS))
     })
   ]),
-  owner: Schema.Literals(["worker", "user", "external"] as const),
+  owner: TaskOwnerSchema,
   capture: SpaceTaskCaptureInputSchema,
   sources: Schema.Array(SpaceTaskSourceSchema),
   signal: TaskProposalSignalSchema,
@@ -163,24 +171,25 @@ export const ResolveTaskProposalResponseSchema: Schema.Codec<ResolveTaskProposal
   withExtras({
     proposal: TaskProposalSchema,
     task: Schema.Union([
-      Schema.Struct({ kind: Schema.Literal("started"), task: SpaceTaskSchema }),
-      Schema.Struct({ kind: Schema.Literal("unstarted") })
+      Schema.Struct({
+        kind: Schema.Literal(RESOLVED_PROPOSAL_TASK.started),
+        task: SpaceTaskSchema
+      }),
+      Schema.Struct({ kind: Schema.Literal(RESOLVED_PROPOSAL_TASK.unstarted) })
     ])
   }).check(
     Schema.makeFilter((response) =>
-      response.task.kind !== "started" || response.proposal.status === "accepted"
+      response.task.kind !== RESOLVED_PROPOSAL_TASK.started ||
+      response.proposal.status === TASK_PROPOSAL_STATUS.accepted
         ? undefined
         : "only a started proposal returns a Task"
     )
   )
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type TaskProposalAgrees = Assert<Agrees<typeof TaskProposalSchema.Type, TaskProposal>>
-/** @internal Compile-time check that the schema and the type agree. */
 export type TaskProposalListAgrees = Assert<
   Agrees<typeof TaskProposalListSchema.Type, TaskProposalList>
 >
-/** @internal Compile-time check that the schema and the type agree. */
 export type ResolveTaskProposalResponseAgrees = Assert<
   Agrees<typeof ResolveTaskProposalResponseSchema.Type, ResolveTaskProposalResponse>
 >
@@ -192,9 +201,8 @@ export const encodeResolveTaskProposalRequestEffect = (
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))
 
-/** Exact action evidence is restricted to proposal retirement. */
 export const ChatActionRetirementSourceSchema = Schema.Struct({
-  kind: Schema.Literal("chat_action"),
+  kind: Schema.Literal(TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action),
   session_id: identity,
   turn_id: identity,
   run_id: identity,
@@ -207,14 +215,7 @@ export const TaskProposalRetirementSourceSchema = Schema.Union([
   ChatActionRetirementSourceSchema
 ])
 
-export const TaskProposalConflictKindSchema = Schema.Literals([
-  "proposal_changed",
-  "source_changed",
-  "source_unavailable",
-  "space_unavailable",
-  "settled",
-  "not_offered"
-])
+export const TaskProposalConflictKindSchema = Schema.Literals(Object.values(TASK_PROPOSAL_CONFLICT))
 
 export const TaskProposalConflictSchema = Schema.Struct({
   kind: TaskProposalConflictKindSchema,
@@ -227,13 +228,18 @@ export const RecheckTaskProposalInputSchema = Schema.Struct({
 
 export const TaskProposalReviewSchema = Schema.Struct({
   expected_revision: NonNegativeIntSchema,
-  state: Schema.Literals(["queued", "running", "completed", "failed"]),
+  state: Schema.Literals([
+    TASK_PROPOSAL_REVIEW_STATE.queued,
+    TASK_PROPOSAL_REVIEW_STATE.running,
+    TASK_PROPOSAL_REVIEW_STATE.completed,
+    TASK_PROPOSAL_REVIEW_STATE.failed
+  ]),
   message: Schema.String,
   proposal: TaskProposalSchema
 })
 
 export const TaskProposalReviewStatusSchema = Schema.Union([
-  Schema.Struct({ state: Schema.Literal("unrequested") }),
+  Schema.Struct({ state: Schema.Literal(TASK_PROPOSAL_REVIEW_STATE.unrequested) }),
   TaskProposalReviewSchema
 ])
 
@@ -244,11 +250,9 @@ export const encodeRecheckTaskProposalRequestEffect = (
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))
 
-/** @internal */
 export type TaskProposalConflictAgrees = Assert<
   Agrees<typeof TaskProposalConflictSchema.Type, TaskProposalConflict>
 >
-/** @internal */
 export type TaskProposalReviewAgrees = Assert<
   Agrees<typeof TaskProposalReviewSchema.Type, TaskProposalReview>
 >

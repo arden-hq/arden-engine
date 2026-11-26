@@ -120,7 +120,6 @@ const CONTROL_REFUSAL: Record<ScriptControl, { readonly verb: string; readonly p
     cancel: { verb: "stop it", preview: "Cancel not allowed" }
   }
 
-/** Reads a script the caller may change: only the chat run that started it, or the person. */
 const controlled = async (
   services: ScriptToolServices,
   ctx: ToolContext<ServerRunContext>,

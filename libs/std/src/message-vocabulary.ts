@@ -38,3 +38,13 @@ export const INTERACTION_OUTCOME = {
 } as const
 export type InteractionOutcome = (typeof INTERACTION_OUTCOME)[keyof typeof INTERACTION_OUTCOME]
 export const INTERACTION_OUTCOMES = Object.values(INTERACTION_OUTCOME)
+
+export const TOOL_EXECUTION = { runtime: "runtime", provider: "provider" } as const
+export type ToolExecution = (typeof TOOL_EXECUTION)[keyof typeof TOOL_EXECUTION]
+export const isToolExecution = (value: unknown): value is ToolExecution =>
+  value === TOOL_EXECUTION.runtime || value === TOOL_EXECUTION.provider
+
+export const IMAGE_MEDIA_TYPE = { png: "image/png", jpeg: "image/jpeg" } as const
+export type ImageMediaType = (typeof IMAGE_MEDIA_TYPE)[keyof typeof IMAGE_MEDIA_TYPE]
+export const isImageMediaType = (value: unknown): value is ImageMediaType =>
+  value === IMAGE_MEDIA_TYPE.png || value === IMAGE_MEDIA_TYPE.jpeg

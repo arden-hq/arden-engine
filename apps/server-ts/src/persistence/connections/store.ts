@@ -14,8 +14,6 @@ export interface FetchedConnectionItem {
   readonly sender: string | undefined
   readonly receivedAt: string
   readonly snippet: string
-  /** The source's own fields (a calendar change: its kind, start, attendees), or
-   *  undefined when title, sender and snippet say it all. JSON-safe. */
   readonly detail: ConnectionItemDetail | undefined
 }
 

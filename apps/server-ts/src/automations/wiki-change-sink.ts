@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect"
 
 import { WikiEventOutbox } from "../persistence/automations/wiki-event-outbox.js"
 import { causedChainDepth } from "../persistence/automations/chain-depth.js"
-import { wikiOriginSource, type WikiCommitOrigin } from "../wiki/commit.js"
+import { wikiOriginSource, type WikiCommitOrigin } from "../wiki/origin.js"
 import { shownPathToRuns } from "../wiki/change.js"
 import { isImportedPath } from "../wiki/collections.js"
 import { WikiChangeSink, WikiChangeSinkError } from "../wiki/publication.js"

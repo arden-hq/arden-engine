@@ -1,7 +1,8 @@
 import { type OfferSource } from "../persistence/permissions/offer.js"
 import type { ServerTool } from "./define.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
-import { type OfferRequest, type OfferOutcome } from "./permission-offer.js"
+import { type OfferRequest } from "./permission-offer-facts.js"
+import { type OfferOutcome } from "./permission-offer.js"
 
 export interface PermissionOffers {
   readonly offer: (input: {

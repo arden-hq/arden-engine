@@ -10,7 +10,6 @@ const LLAMA = "http://127.0.0.1:9931"
 const fixture = async (name: string): Promise<unknown> =>
   JSON.parse(await readFile(new URL(`fixtures/chat-completions/${name}`, import.meta.url), "utf8"))
 
-/** A fetch that answers the listed URLs (JSON, 200) and 404s the rest. */
 const serving =
   (routes: Readonly<Record<string, unknown>>): typeof globalThis.fetch =>
   async (url) => {
@@ -54,12 +53,9 @@ describe("modelsFor a chat-completions provider", () => {
         roles: { background: inherit, helper: inherit }
       }
     })
-    // No approval-review, plan-limit or dictation source: those are Codex account features.
     expect(Object.keys(route)).toEqual(["provider", "modelHost"])
     const provider = route.provider
     if (provider === undefined) throw new Error("no provider")
-    // llama.cpp grammar-constrains json_schema output, so helper jobs get native structured
-    // output; its projector takes images and states no limits the host could fit them to.
     expect(await resolveModelCapabilities({ provider, model: GEMMA })).toMatchObject({
       structuredOutput: "native",
       imageInput: { limits: undefined }

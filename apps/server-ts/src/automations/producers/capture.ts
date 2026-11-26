@@ -2,7 +2,10 @@ import { clipLine } from "@arden-hq/std/text"
 import { Effect } from "effect"
 
 import type { AutomationTriggerEvent, EventChat } from "../../persistence/automations/model.js"
-import type { CaptureArrivedEvent } from "../../persistence/sessions/internal-events.js"
+import {
+  INTERNAL_LIFECYCLE_EVENT,
+  type CaptureArrivedEvent
+} from "../../persistence/sessions/internal-events.js"
 import type { AutomationEventProducer } from "../event-producer.js"
 
 const NOTE_CHARS = 500
@@ -35,7 +38,7 @@ export const captureEventProducer: AutomationEventProducer<"capture.arrived"> = 
   eventType: "capture.arrived",
   source: { kind: "feed" },
   fromJournal: Effect.fnUntraced(function* (record, read) {
-    if (record.event.type !== "capture_arrived") return []
+    if (record.event.type !== INTERNAL_LIFECYCLE_EVENT.captureArrived) return []
     const capture = record.event
     const chat = yield* read.chat(capture.session_id)
     return chat === undefined ? [] : [{ event: captureArrivedEvent(capture, chat) }]

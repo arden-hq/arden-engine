@@ -2,7 +2,15 @@ import type { JsonRecord } from "../common/json.js"
 
 import type { McpConnectionStatus } from "./status.js"
 
-export type McpPresetId = "github" | "linear" | "notion" | "slack" | "vercel"
+export const MCP_PRESET_ID = {
+  github: "github",
+  linear: "linear",
+  notion: "notion",
+  slack: "slack",
+  vercel: "vercel"
+} as const
+
+export type McpPresetId = (typeof MCP_PRESET_ID)[keyof typeof MCP_PRESET_ID]
 
 export interface McpPresetServer extends JsonRecord {
   readonly name: string
@@ -10,16 +18,20 @@ export interface McpPresetServer extends JsonRecord {
   readonly url: string
 }
 
+export const MCP_PRESET_AUTH = { oauth: "oauth", token: "token" } as const
+
+export const MCP_OAUTH_CLIENT = { confidential: "confidential", dynamic: "dynamic" } as const
+
+export type McpOAuthClient = (typeof MCP_OAUTH_CLIENT)[keyof typeof MCP_OAUTH_CLIENT]
+
 export interface McpPresetOAuth extends JsonRecord {
-  readonly type: "oauth"
-  readonly clientType: "confidential" | "dynamic"
+  readonly type: typeof MCP_PRESET_AUTH.oauth
+  readonly clientType: McpOAuthClient
   readonly scopes: ReadonlyArray<string>
 }
 
-/** A preset that resolves bearer credentials per request. GitHub accepts
- * a personal access token or an OAuth user token. */
 export interface McpPresetToken extends JsonRecord {
-  readonly type: "token"
+  readonly type: typeof MCP_PRESET_AUTH.token
 }
 
 export interface McpPreset extends JsonRecord {
@@ -42,6 +54,12 @@ export interface McpSecretPatch extends JsonRecord {
 
 export const MCP_TRANSPORT = { stdio: "stdio", http: "http" } as const
 
+export type McpTransportKind = (typeof MCP_TRANSPORT)[keyof typeof MCP_TRANSPORT]
+
+export const MCP_AUTH = { none: "none", oauth: "oauth", headers: "headers" } as const
+
+export type McpAuth = (typeof MCP_AUTH)[keyof typeof MCP_AUTH]
+
 export const MCP_FOLDER = { keep: "keep", home: "home", folder: "folder" } as const
 
 export type McpFolder =
@@ -51,7 +69,7 @@ export type McpFolder =
 export type McpFolderInput = { readonly kind: typeof MCP_FOLDER.keep } | McpFolder
 
 export interface McpStdioTransport extends JsonRecord {
-  readonly type: "stdio"
+  readonly type: typeof MCP_TRANSPORT.stdio
   readonly command: string
   readonly args: ReadonlyArray<string>
   readonly environmentKeys: ReadonlyArray<string>
@@ -59,9 +77,9 @@ export interface McpStdioTransport extends JsonRecord {
 }
 
 export interface McpHttpTransport extends JsonRecord {
-  readonly type: "http"
+  readonly type: typeof MCP_TRANSPORT.http
   readonly url: string
-  readonly auth: "none" | "oauth" | "headers"
+  readonly auth: McpAuth
   readonly headerKeys: ReadonlyArray<string>
 }
 
@@ -80,15 +98,14 @@ export interface McpTool extends JsonRecord {
   readonly description: string
 }
 
-/** How a server can deliver an event; Arden takes `push` over `poll` and never uses `webhook`. */
-export type McpEventDelivery = "poll" | "push" | "webhook"
+export const MCP_EVENT_DELIVERY = { poll: "poll", push: "push", webhook: "webhook" } as const
 
-/** One event a server lists (`events/list`): what an `mcp.event` trigger can wait for. */
+export type McpEventDelivery = (typeof MCP_EVENT_DELIVERY)[keyof typeof MCP_EVENT_DELIVERY]
+
 export interface McpEvent extends JsonRecord {
   readonly name: string
   readonly description: string
   readonly delivery: ReadonlyArray<McpEventDelivery>
-  /** JSON Schema of a subscription's arguments. */
   readonly inputSchema: JsonRecord
 }
 
@@ -126,7 +143,6 @@ export interface McpServer extends JsonRecord {
   readonly account: McpAccount
   readonly transport: McpTransport
   readonly tools: ReadonlyArray<McpTool>
-  /** Empty for a server that lists no events, or none Arden can receive. */
   readonly events: ReadonlyArray<McpEvent>
 }
 
@@ -140,7 +156,7 @@ export interface McpPresetInstallResponse extends JsonRecord {
 }
 
 export interface McpStdioTransportInput extends JsonRecord {
-  readonly type: "stdio"
+  readonly type: typeof MCP_TRANSPORT.stdio
   readonly command: string
   readonly args: ReadonlyArray<string>
   readonly environment: McpSecretPatch
@@ -148,9 +164,9 @@ export interface McpStdioTransportInput extends JsonRecord {
 }
 
 export interface McpHttpTransportInput extends JsonRecord {
-  readonly type: "http"
+  readonly type: typeof MCP_TRANSPORT.http
   readonly url: string
-  readonly auth: "none" | "oauth" | "headers"
+  readonly auth: McpAuth
   readonly headers: McpSecretPatch
 }
 
@@ -182,6 +198,22 @@ export type McpOAuthStartResponse =
       readonly authorizationUrl: string
     }
 
+export const MCP_OFFER_OUTCOME = {
+  open: "open",
+  connected: "connected",
+  declined: "declined",
+  expired: "expired"
+} as const
+
+export type McpOfferOutcome = (typeof MCP_OFFER_OUTCOME)[keyof typeof MCP_OFFER_OUTCOME]
+
+export const MCP_OFFER_DECLINE = {
+  declined: "declined",
+  alreadyAnswered: "already_answered"
+} as const
+
+export type McpOfferDecline = (typeof MCP_OFFER_DECLINE)[keyof typeof MCP_OFFER_DECLINE]
+
 export interface McpRemoveReceipt extends JsonRecord {
   readonly status: "removed"
   readonly name: string
@@ -189,13 +221,18 @@ export interface McpRemoveReceipt extends JsonRecord {
 
 export const GITHUB_CONNECTION = { disconnected: "disconnected", connected: "connected" } as const
 
+export const GITHUB_CONNECTION_SOURCE = { token: "token", app: "app" } as const
+
+export type GitHubConnectionSource =
+  (typeof GITHUB_CONNECTION_SOURCE)[keyof typeof GITHUB_CONNECTION_SOURCE]
+
 export interface GitHubConnectionState {
   readonly connection:
     | { readonly kind: typeof GITHUB_CONNECTION.disconnected }
     | {
         readonly kind: typeof GITHUB_CONNECTION.connected
         readonly readOnly: boolean
-        readonly source: "token" | "app"
+        readonly source: GitHubConnectionSource
       }
 }
 

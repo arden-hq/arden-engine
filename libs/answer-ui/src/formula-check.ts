@@ -1,6 +1,7 @@
 import type { ElementNode } from "@openuidev/lang-core"
-import { isAstNode } from "./ast.js"
-import { missingVariables, readFormula } from "./formula.js"
+import { isAstNode, isElement } from "./ast.js"
+import { FORMULA_READ_KIND, missingVariables, readFormula } from "./formula.js"
+import { COMPONENT_NAME } from "./parts.js"
 import { isRecord } from "@arden-hq/std/json"
 
 interface FormulaIssue {
@@ -19,13 +20,13 @@ export function formulaIssues(root: ElementNode | null): ReadonlyArray<FormulaIs
     const at = value.statementId ?? statementId
     const report = (message: string) => issues.push({ statementId: at, message })
     switch (value.typeName) {
-      case "Formula": {
+      case COMPONENT_NAME.Formula: {
         const label = typeof value.props["label"] === "string" ? value.props["label"] : "Formula"
         const problem = formulaProblem(value.props["fn"], value.props["vars"], [])
         if (problem !== undefined) report(`Formula "${label}": ${problem}`)
         return
       }
-      case "Plot": {
+      case COMPONENT_NAME.Plot: {
         const spec = value.props["spec"]
         if (!isRecord(spec)) return
         const x = spec["x"]
@@ -53,16 +54,10 @@ function formulaProblem(fn: unknown, vars: unknown, given: readonly string[]): s
   if (isAstNode(fn)) return undefined
   if (typeof fn !== "string") return 'fn must be a string, such as "m * (1 + r)^x".'
   const read = readFormula(fn)
-  if (read.kind === "invalid") return `${read.reason}.`
+  if (read.kind === FORMULA_READ_KIND.invalid) return `${read.reason}.`
   if (vars !== undefined && !isRecord(vars)) return undefined
   const missing = missingVariables(read.formula, [...given, ...Object.keys(vars ?? {})])
   if (missing.length === 0) return undefined
   const names = missing.map((name) => `\`${name}\``).join(", ")
   return `${names} ${missing.length === 1 ? "is" : "are"} not in vars; add ${missing.length === 1 ? "it" : "them"} to vars (a number or a $variable).`
 }
-
-const isValueRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  isRecord(value) && !isAstNode(value)
-
-const isElement = (value: unknown): value is ElementNode =>
-  isValueRecord(value) && value["type"] === "element" && typeof value["typeName"] === "string"

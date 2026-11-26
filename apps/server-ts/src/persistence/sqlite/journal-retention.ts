@@ -12,9 +12,6 @@ import { activeRunStatusList } from "./status-sets.js"
 
 const RELEASE_BATCH_ROWS = 2_000
 
-/** Live status rows of the automation worker. Nothing reads them once the
- * trigger listener has passed them: the trigger producers react to other
- * types, and the desktop and relay follow the stream live. */
 const LIFECYCLE_STATUS_TYPES = new Set([
   "automation_progress",
   "automation_finished",
@@ -30,9 +27,6 @@ const daysAgo = Effect.fn("JournalRetention.daysAgo")(function* (days: number) {
 
 const nothingAfter = () => Effect.void
 
-/** Rule 1. Delete old status rows of the lifecycle stream that the trigger
- * listener has already read. The replay floor stays: followers skip the gaps,
- * and the head row stays. */
 const trimLifecycleStatusRows = Effect.fn("JournalRetention.trimLifecycleStatusRows")(function* (
   writer: Writer
 ) {
@@ -64,18 +58,6 @@ const trimLifecycleStatusRows = Effect.fn("JournalRetention.trimLifecycleStatusR
   })
 })
 
-/** A run whose step rows must stay, because a reader needs them:
- * - active (`pending`, `running`): run-progress.ts:54 and :153 read its tool
- *   rows, and recovery reads its streamed messages (chat-recovery.ts:207,
- *   recovery.ts:387, recovery-finish.ts:227);
- * - ended after the cutoff: the Run events panel (runs.ts:267) lists its rows
- *   for as long as "Keep logs" says;
- * - owning a code-mode script with no saved progress: script-executions.ts:78
- *   rebuilds the script's steps from the run's TOOL_CALL_PROGRESS rows.
- * Nothing reads the rows of an ended run for an unresolved tool call, a
- * pending approval, an open deferred call, a session's other work or an
- * interrupted run: those live in their own tables, and recovery only picks
- * `pending` and active runs. */
 const pinnedRunSql = (sql: SqlClient.SqlClient, cutoff: string, alias: string) => {
   const run = sql.literal(alias)
   return sql`(${run}.status IN ${activeRunStatusList} OR ${run}.ended_at > ${cutoff}
@@ -83,12 +65,9 @@ const pinnedRunSql = (sql: SqlClient.SqlClient, cutoff: string, alias: string) =
       WHERE script.origin_run_id = ${run}.run_id AND script.progress_json IS NULL))`
 }
 
-/** A run is free to lose its step rows now: not pinned. */
 const freeRunSql = (sql: SqlClient.SqlClient, cutoff: string, run: string) =>
   sql`(NOT ${pinnedRunSql(sql, cutoff, run)})`
 
-/** The run lost step rows: say so, and keep the replay floor at the first row
- * left (the head when none are). */
 const markTraceRemoved = Effect.fn("JournalRetention.markTraceRemoved")(function* (
   sql: SqlClient.SqlClient,
   input: { readonly runs: ReadonlyArray<string>; readonly streams: ReadonlyArray<string> }
@@ -118,14 +97,6 @@ interface Held {
   through: number
 }
 
-/** Decide one batch of rows of the walk, inside its write transaction. In a
- * session stream a row goes when it has no run (the session-level signals
- * `transcript_changed`, `session_updated`, `focus_updated` and `focus_cleared`:
- * no reader looks at old ones) or is a step row of a free run. Kept: every
- * run's boundary rows (event admission reads the newest of them), head rows,
- * rows above the session's checkpoint (the clients' resume window), and the rows
- * of pinned runs, which are recorded as held and handled when the run is free.
- * Rows of runs missing from `chat_runs` are not pinned and go. */
 const decideSessionRows = Effect.fn("JournalRetention.decideSessionRows")(function* (
   sql: SqlClient.SqlClient,
   cutoff: string,
@@ -211,12 +182,9 @@ interface HeldRow {
   readonly stream_id: string
   readonly from_sequence: number
   readonly through_sequence: number
-  /** 1 when the run no longer exists: nothing is left to hold. */
   readonly missing: number
 }
 
-/** Handle one held run that is free now: delete its step rows through a primary
- * key range scan of its stream, then drop the record. */
 const releaseHeldRun = Effect.fn("JournalRetention.releaseHeldRun")(function* (
   writer: Writer,
   cutoff: string,
@@ -250,7 +218,6 @@ const releaseHeldRun = Effect.fn("JournalRetention.releaseHeldRun")(function* (
     beforeSequence: head,
     sequences,
     batchSize: RELEASE_BATCH_ROWS,
-    // Checked again inside each write.
     where: sql`${mine} AND EXISTS (
       SELECT 1 FROM chat_runs AS run
       WHERE run.run_id = ${held.run_id} AND ${freeRunSql(sql, cutoff, "run")})`,
@@ -269,9 +236,6 @@ const releaseHeldRun = Effect.fn("JournalRetention.releaseHeldRun")(function* (
   return deleted
 })
 
-/** Rule 2. Walk the session streams behind the Keep-logs cutoff, then handle
- * the held runs that are free now, found by one query over the held records
- * and `chat_runs`. */
 const trimSessionJournals = Effect.fn("JournalRetention.trimSessionJournals")(function* (
   writer: Writer,
   agentTraceDays: number
@@ -304,8 +268,6 @@ const trimSessionJournals = Effect.fn("JournalRetention.trimSessionJournals")(fu
   return deleted
 })
 
-/** Journal retention, run from the hourly retention tick. Rule 1 always runs;
- * rule 2 runs only while the Keep-logs setting is on. */
 export const trimJournals = Effect.fn("JournalRetention.trimJournals")(function* ({
   writer,
   policy

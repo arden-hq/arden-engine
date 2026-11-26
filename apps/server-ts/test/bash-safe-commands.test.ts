@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
-import { parseCommandSegments } from "../src/tools/bash-permissions.js"
+import { parseCommandSegments } from "../src/tools/shell-parse.js"
 import { changesNothing, isReadOnlyCommand } from "../src/tools/bash-safe-commands.js"
 
 const NORMAL = mkdtempSync(join(tmpdir(), "arden-globs-normal-"))

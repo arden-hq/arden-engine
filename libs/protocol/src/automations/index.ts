@@ -42,7 +42,6 @@ export * from "./triggers.js"
 export * from "./schedule.js"
 export * from "./trigger-merge.js"
 
-/** Plain response decoders for the live Automations routes. */
 export const automationDecoders = {
   automation: projectedDecoderFor(AutomationSchema, toAutomation, "Invalid automation response"),
   list: projectedDecoderFor(
@@ -60,10 +59,6 @@ export const automationDecoders = {
   deleted: decoderFor(DeleteAutomationResponseSchema, "Invalid automation-delete response")
 } as const
 
-/**
- * Validate and serialize mutation inputs. `create` adds a private retry key;
- * reuse its returned body if the same HTTP operation must be retried.
- */
 export const automationRequests = {
   create: makeEncoder<CreateAutomationInput>(
     encodeCreateAutomationRequestEffect,
@@ -84,7 +79,6 @@ const route = (
   message: string
 ): string => runBoundary(program, message, "encode")
 
-/** Validated paths for the live Automations collection, stream, and item controls. */
 export const automationRoutes = {
   collection: "/automations",
   eventCatalog: "/automations/event-catalog",
@@ -117,7 +111,6 @@ export const automationRoutes = {
   run(taskId: string): string {
     return route(encodeAutomationRunPathEffect(taskId), "Invalid automation-run route")
   },
-  /** POST: start a run with the event a skipped run held back; answers like `run`. */
   runWithEvent(taskId: string, runId: number): string {
     return runBoundary(
       encodeAutomationRunWithEventPathEffect({ taskId, runId }),

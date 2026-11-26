@@ -5,7 +5,7 @@ import {
   EventEncoded,
   makeParser,
   type SseError,
-  type Retry
+  Retry
 } from "effect/unstable/encoding/Sse"
 import { ServerEventSchema, isKnownServerEventType } from "../events/schema.js"
 import {
@@ -92,7 +92,6 @@ const decodeServerEventFrame = Effect.fn("decodeServerEventFrame")(function* (
   return Option.some(yield* validateServerEventFrame({ id: frame.id, event: frame.event, data }))
 })
 
-/** Decode a complete SSE buffer using Effect's standards-compliant parser. */
 export const decodeSseFramesEffect = Effect.fn("decodeSseFramesEffect")(function* (
   input: string,
   options: SseDecodeOptions = SSE_DECODE_DEFAULTS
@@ -100,7 +99,7 @@ export const decodeSseFramesEffect = Effect.fn("decodeSseFramesEffect")(function
   const parsed: Array<EventEncoded> = []
   const retries: Array<Retry> = []
   const parser = makeParser((value) => {
-    if (value._tag === "Retry") {
+    if (Retry.is(value)) {
       retries.push(value)
     } else {
       parsed.push(value)
@@ -154,7 +153,6 @@ export const encodeServerEventFrameEffect = Effect.fn("encodeServerEventFrameEff
   })
 })
 
-/** A live SSE source as its frames (`id`, `event`, `data`), lazily, with cancellation owned by the stream. */
 export const decodeSseFrameStreamEffect = (
   input: AsyncIterable<string | Uint8Array>,
   options: SseDecodeOptions = SSE_DECODE_DEFAULTS
@@ -180,7 +178,7 @@ export const decodeSseFrameStreamEffect = (
       ),
       Stream.flatMap((values) => Stream.fromIterable(values)),
       Stream.flatMap((value) => {
-        if (value._tag === "Retry") {
+        if (Retry.is(value)) {
           return Stream.fromEffect(notifyRetry(options, value)).pipe(Stream.drain)
         }
         return Stream.fromEffect(
@@ -191,7 +189,6 @@ export const decodeSseFrameStreamEffect = (
   })
 }
 
-/** Decode a live SSE source lazily, with cancellation owned by the stream. */
 export const decodeServerEventStreamEffect = (
   input: AsyncIterable<string | Uint8Array>,
   options: SseDecodeOptions = SSE_DECODE_DEFAULTS

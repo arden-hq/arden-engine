@@ -44,11 +44,6 @@ const places = async (
     })
   )
 
-/**
- * The calendar or Reminders list a new or moved item goes to: the one `id`
- * names, else the Mac's default. Refused here, before any card, when the
- * helper would refuse it after one.
- */
 const pickTarget = (
   all: ReadonlyArray<MacCalendarRecord>,
   kind: Place,
@@ -74,11 +69,6 @@ export const writableTarget = async (
   signal: AbortSignal
 ): Promise<MacCalendarRecord | undefined> => pickTarget(await places(apps, kind, signal), kind, id)
 
-/**
- * Refuses a change to an item whose calendar or list is read-only, before any
- * card, and returns where a `moveTo` id leads. A reminder names its list by
- * title only, so it is refused when every list of that title is read-only.
- */
 export const changeablePlace = async (
   apps: MacApps,
   kind: Place,
@@ -101,7 +91,6 @@ export const changeablePlace = async (
 
 const APPROVED_TARGET = "mac_target"
 
-/** The calendar or list the card named, kept with the approval so the run uses the same one. */
 export const targetData = (
   target: MacCalendarRecord | undefined
 ): { data?: never } | { data: { mac_target: string } } =>
@@ -123,7 +112,6 @@ export const newItemTarget = async (
     : (await writableTarget(apps, kind, undefined, signal))?.id
 }
 
-/** A field an edit may replace or clear: the new value over the old, or the old one alone. */
 export const changedField = (
   label: string,
   next: string | undefined,
@@ -156,7 +144,6 @@ export const notesBody = (
   }
 }
 
-/** all_day with a time would land on this Mac's local day, not the day the text names. */
 export const newEventAllDay = (input: {
   readonly start: string
   readonly end?: string | undefined
@@ -172,11 +159,6 @@ export const newEventAllDay = (input: {
   return days
 }
 
-/**
- * The times an edit leaves the event with, by the helper's own rules: start
- * and end share one form, a change of form needs both, and a new start alone
- * moves the event and keeps its length.
- */
 export const editedEventTimes = (
   clock: LocalClock,
   current: MacEventRecord,
@@ -204,7 +186,6 @@ export const editedEventTimes = (
     return { start, end: Number.isFinite(end) ? utcDay(end) : current.end, all_day: true }
   }
   const end = clock.instant(start) + Date.parse(current.end) - Date.parse(current.start)
-  // The helper refuses a start it cannot read; the card then shows the end as it is.
   return {
     start,
     end: Number.isFinite(end) ? clock.localTime(end) : current.end,
@@ -219,11 +200,6 @@ export const eventChanges = (input: typeof EventEditSchema.Type): void => {
   if (!changed) throw toolRefusal("Provide at least one event change.", "No event changes")
 }
 
-/**
- * The helper's span for a change, or nothing for a single event. An event is
- * part of a series when it repeats or is one changed occurrence, and the
- * helper marks both by a start after the last bar of the reference.
- */
 export const eventSpan = (
   current: MacEventRecord,
   scope: "this" | "future" | undefined
@@ -241,7 +217,6 @@ const scopeFields = (
   ]
 }
 
-/** The other people on an event, and that its account may write to them. */
 const guestParts = (current: MacEventRecord, what: string) => {
   const others = (current.guest_list ?? []).filter((guest) => guest.you !== true)
   const named = others.flatMap((guest) => guest.name ?? guest.email ?? [])

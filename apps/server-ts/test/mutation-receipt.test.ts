@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-layer.js"
-import { markRunToolExecutionsUncertainInTransaction } from "../src/persistence/sqlite/tool-receipts.js"
+import { markRunToolExecutionsUncertainInTransaction } from "../src/persistence/sqlite/tool-uncertainty.js"
 import {
   attachMutationReceipt,
   ensureMutationReceipt,

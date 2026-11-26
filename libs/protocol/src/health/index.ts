@@ -9,4 +9,4 @@ export const healthDecoders = {
 
 export const healthRoutes = {
   status: "/health"
-} as const
+}

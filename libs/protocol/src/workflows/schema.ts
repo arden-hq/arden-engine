@@ -1,43 +1,33 @@
-import { Effect, Schema } from "effect"
-import { IsoDateTimeStringSchema, withExtras, PositiveIntSchema } from "../common/schema.js"
+import { Effect, Schema, type SchemaAST } from "effect"
+import {
+  IsoDateTimeStringSchema,
+  PositiveIntSchema,
+  RuntimeRunStatusSchema,
+  withExtras
+} from "../common/schema.js"
 import { routeSegment } from "../common/routes.js"
 import {
   AGENT_RUN,
   SCRIPT_END,
   SCRIPT_FAILURE,
+  WORKFLOW_EFFECT,
+  WORKFLOW_ERROR_CODE,
   WORKFLOW_PREVIEW,
   WORKFLOW_RECOVERY,
   type ScriptDetail,
   type ScriptSummary
 } from "./contracts.js"
-import { WORKFLOW_STATUSES } from "./status.js"
+import { WORKFLOW_STATUS } from "./status.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const IdentifierSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const SourceRefSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8_192))
 
-export const WorkflowStatusSchema = Schema.Literals(WORKFLOW_STATUSES)
+export const WorkflowStatusSchema = Schema.Literals(Object.values(WORKFLOW_STATUS))
 
-export const WorkflowEffectDispositionSchema = Schema.Literals([
-  "none",
-  "no_op",
-  "applied",
-  "unknown"
-] as const)
+export const WorkflowEffectDispositionSchema = Schema.Literals(Object.values(WORKFLOW_EFFECT))
 
-export const WorkflowErrorCodeSchema = Schema.Literals([
-  "coordinator_failed",
-  "agent_failed",
-  "schema_invalid",
-  "interrupted",
-  "cancelled",
-  "timed_out",
-  "budget_exhausted",
-  "conflict",
-  "uncertain_effect",
-  "storage",
-  "internal"
-] as const)
+export const WorkflowErrorCodeSchema = Schema.Literals(Object.values(WORKFLOW_ERROR_CODE))
 
 export const WorkflowSourceRefSchema = withExtras({
   provider: IdentifierSchema,
@@ -91,7 +81,7 @@ const ScriptAgentSchema = withExtras({
         Schema.Struct({
           kind: Schema.Literal(AGENT_RUN.run),
           run_id: IdentifierSchema,
-          status: Schema.String
+          status: RuntimeRunStatusSchema
         })
       ])
     })
@@ -113,10 +103,8 @@ export const ScriptDetailSchema: Schema.Codec<ScriptDetail> = withExtras({
   )
 })
 
-/** `:workflowRef` in every `/scripts/:workflowRef[/…]` route. */
 export const WorkflowRefSchema = routeSegment()
 
-/** Query of every script route: the owning Session. */
 export const ScriptOwnerQuerySchema = Schema.Struct({
   session_id: Schema.NonEmptyString.check(Schema.isMaxLength(512))
 })

@@ -1,4 +1,5 @@
 import { clipLine } from "@arden-hq/std/text"
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
 import { Effect } from "effect"
 
 import type {
@@ -7,6 +8,7 @@ import type {
   AutomationTriggerEvent,
   JournalRecord
 } from "../../persistence/automations/model.js"
+import { INTERNAL_LIFECYCLE_EVENT } from "../../persistence/sessions/internal-events.js"
 import type { AutomationEventProducer } from "../event-producer.js"
 
 const TEXT_CHARS = 500
@@ -39,9 +41,10 @@ const askWaitingEvent = (row: AskFeedRow): AutomationTriggerEvent => ({
 const ASK_OPEN_FOR_MS = 60_000
 
 const askOpened = ({ event }: JournalRecord): AskRef | undefined => {
-  if (event.type === "approval_waiting")
+  if (event.type === INTERNAL_LIFECYCLE_EVENT.approvalWaiting)
     return { kind: "card", runId: event.run_id, toolCallId: event.tool_call_id }
-  if (event.type === "question_changed") return { kind: "question", questionId: event.question_id }
+  if (event.type === SERVER_EVENT_TYPE.questionChanged)
+    return { kind: "question", questionId: event.question_id }
   return undefined
 }
 

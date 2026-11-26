@@ -1,31 +1,34 @@
 import { Schema } from "effect"
 
-export const ReceiptOutcomeSchema = Schema.Literals([
-  "applied",
-  "no_op",
-  "failed",
-  "unconfirmed",
-  "unknown"
-])
+export const CHANGE_ENTRY_OUTCOME = {
+  applied: "applied",
+  noOp: "no_op",
+  failed: "failed",
+  unconfirmed: "unconfirmed",
+  unknown: "unknown"
+} as const
 
-/**
- * One side of a change.
- * - "absent": the object did not exist (before a create, after a delete).
- * - "version": the exact version its owner keeps.
- * - "unrecorded": the object existed, but no version was kept — a service
- *   confirmed the change without returning a before or after Arden retains.
- */
+export type ChangeEntryOutcome = (typeof CHANGE_ENTRY_OUTCOME)[keyof typeof CHANGE_ENTRY_OUTCOME]
+
+export const ReceiptOutcomeSchema = Schema.Literals(Object.values(CHANGE_ENTRY_OUTCOME))
+
+export const CHANGE_ENTRY_VERSION = {
+  absent: "absent",
+  version: "version",
+  unrecorded: "unrecorded"
+} as const
+
 const VersionSideSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("absent") }),
-  Schema.Struct({ kind: Schema.Literal("version"), version: Schema.NonEmptyString }),
-  Schema.Struct({ kind: Schema.Literal("unrecorded") })
+  Schema.Struct({ kind: Schema.Literal(CHANGE_ENTRY_VERSION.absent) }),
+  Schema.Struct({
+    kind: Schema.Literal(CHANGE_ENTRY_VERSION.version),
+    version: Schema.NonEmptyString
+  }),
+  Schema.Struct({ kind: Schema.Literal(CHANGE_ENTRY_VERSION.unrecorded) })
 ])
 
-/** Longest object name an entry carries; producers cut longer names. */
 export const CHANGE_ENTRY_TITLE_MAX = 256
-/** Longest place an entry carries; producers cut longer places. */
 export const CHANGE_ENTRY_PLACE_MAX = 128
-/** Longest link an entry carries; producers drop longer links. */
 export const CHANGE_ENTRY_HREF_MAX = 2048
 
 export const CHANGE_ENTRY_TITLE = { untitled: "untitled", titled: "titled" } as const
@@ -62,33 +65,39 @@ export type ChangeEntryTitle = typeof ChangeEntryTitleSchema.Type
 export type ChangeEntryLink = typeof ChangeEntryLinkSchema.Type
 export type ChangeEntryPlace = typeof ChangeEntryPlaceSchema.Type
 
-/**
- * What a changed thing is. Besides objects, three domains name an action
- * Arden performed whose side effects it cannot list: "command" (a command it
- * ran, and in which folder), "browser" (what it did on a page), "app" (what
- * it did in an app's window). Their entries keep no before or after
- * (`unrecorded`), compare nothing (`unavailable`), and their title is the
- * action in plain words.
- */
+export const CHANGE_ENTRY_DOMAIN = {
+  task: "task",
+  proposal: "proposal",
+  space: "space",
+  session: "session",
+  automation: "automation",
+  file: "file",
+  resource: "resource",
+  memory: "memory",
+  email: "email",
+  calendar: "calendar",
+  document: "document",
+  other: "other",
+  command: "command",
+  browser: "browser",
+  app: "app"
+} as const
+
+export type ChangeEntryDomain = (typeof CHANGE_ENTRY_DOMAIN)[keyof typeof CHANGE_ENTRY_DOMAIN]
+
+export const CHANGE_ENTRY_COMPARISON = {
+  versions: "versions",
+  patch: "patch",
+  truncated: "truncated",
+  unavailable: "unavailable"
+} as const
+
+export type ChangeEntryComparison =
+  (typeof CHANGE_ENTRY_COMPARISON)[keyof typeof CHANGE_ENTRY_COMPARISON]
+
 export const ChangeEntrySchema = Schema.Struct({
   entry_id: Schema.NonEmptyString,
-  domain: Schema.Literals([
-    "task",
-    "proposal",
-    "space",
-    "session",
-    "automation",
-    "file",
-    "resource",
-    "memory",
-    "email",
-    "calendar",
-    "document",
-    "other",
-    "command",
-    "browser",
-    "app"
-  ]),
+  domain: Schema.Literals(Object.values(CHANGE_ENTRY_DOMAIN)),
   resource_ref: Schema.NonEmptyString,
   title: ChangeEntryTitleSchema,
   link: ChangeEntryLinkSchema,
@@ -96,7 +105,7 @@ export const ChangeEntrySchema = Schema.Struct({
   outcome: ReceiptOutcomeSchema,
   before: VersionSideSchema,
   after: VersionSideSchema,
-  comparison: Schema.Literals(["versions", "patch", "truncated", "unavailable"])
+  comparison: Schema.Literals(Object.values(CHANGE_ENTRY_COMPARISON))
 })
 export type ChangeEntry = typeof ChangeEntrySchema.Type
 

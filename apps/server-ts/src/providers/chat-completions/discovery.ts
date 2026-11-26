@@ -2,34 +2,23 @@ import type { ChatCompletionsCompat } from "@arden-hq/loop/providers/chat-comple
 import { unreachableMessage } from "@arden-hq/loop/provider-kit"
 import { Option, Schema } from "effect"
 
-/**
- * The servers a `chat-completions` provider knows how to ask about a model.
- * `generic` asks nothing: the settings carry the model and its window.
- */
-export const CHAT_COMPLETIONS_SERVERS = ["llama.cpp", "openrouter", "generic"] as const
-export type ChatCompletionsServer = (typeof CHAT_COMPLETIONS_SERVERS)[number]
+export const CHAT_COMPLETIONS_SERVER = {
+  llamaCpp: "llama.cpp",
+  openrouter: "openrouter",
+  generic: "generic"
+} as const
+export type ChatCompletionsServer =
+  (typeof CHAT_COMPLETIONS_SERVER)[keyof typeof CHAT_COMPLETIONS_SERVER]
+export const CHAT_COMPLETIONS_SERVERS = Object.values(CHAT_COMPLETIONS_SERVER)
 
-/** One model as its server reports it. */
 export interface DiscoveredModel {
   readonly id: string
-  /** The server's own window in tokens; undefined when it does not say. */
   readonly contextLimit: number | undefined
-  /**
-   * The most tokens the model writes in one response, where the server says
-   * (OpenRouter `top_provider.max_completion_tokens`); llama.cpp has no cap
-   * of its own beyond the window, so undefined there.
-   */
   readonly outputCap: number | undefined
   readonly reasoningEfforts: ReadonlyArray<string>
-  /** How its requests are shaped; a field left out takes the adapter's default. */
   readonly compat: Partial<ChatCompletionsCompat>
 }
 
-/**
- * Why a server's answer rules a model out. Each caller words these itself
- * (the settings file names the field to fix, the desktop Check states what
- * the server lacks); `DiscoveryError.message` is the settings file's wording.
- */
 export type DiscoveryFailure =
   | { readonly reason: "not_llama_cpp"; readonly url: string; readonly status: number }
   | { readonly reason: "no_model_list"; readonly url: string; readonly status: number }
@@ -39,7 +28,6 @@ export type DiscoveryFailure =
       readonly reason: "model_missing"
       readonly server: "llama.cpp" | "openrouter"
       readonly model: string
-      /** What a llama.cpp server lists instead; OpenRouter's hundreds are not named. */
       readonly listed: ReadonlyArray<string>
     }
   | {
@@ -55,7 +43,6 @@ export type DiscoveryFailure =
       readonly model: string
     }
 
-/** The server cannot be asked, or its answer rules the settings out. */
 export class DiscoveryError extends Error {
   readonly failure: DiscoveryFailure
 
@@ -66,7 +53,6 @@ export class DiscoveryError extends Error {
   }
 }
 
-/** A failure in the settings file's words: which field to set, or what the server answered. */
 const settingsMessage = (failure: DiscoveryFailure): string => {
   switch (failure.reason) {
     case "not_llama_cpp":
@@ -90,11 +76,6 @@ const settingsMessage = (failure: DiscoveryFailure): string => {
   }
 }
 
-/**
- * Nothing answered at an address: the server is not running, or not there.
- * Not a `DiscoveryError`, whose answer rules the settings out: here the
- * settings may be right.
- */
 export class UnreachableError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
@@ -103,25 +84,12 @@ export class UnreachableError extends Error {
 }
 
 export interface DiscoveryInput {
-  /** The provider's `baseUrl` without a trailing slash; model requests go to
-   *  `${baseUrl}/chat/completions`. */
   readonly baseUrl: string
   readonly fetch: typeof globalThis.fetch
-  /** Sent with every request: the key, when the provider has one. */
   readonly headers: Readonly<Record<string, string>>
   readonly signal: AbortSignal
 }
 
-/**
- * Which server answers at `baseUrl`, for settings that do not say. An explicit
- * `server` always wins over this, as prime-agent's explicit `compat` wins over
- * its `detect_compat`: a proxy in front of llama.cpp can be named `generic`.
- * OpenRouter is known by its host. llama.cpp is known by `GET /props` carrying
- * `build_info`: Ollama and LM Studio answer `/v1/models` but not `/props`
- * (hermes-agent's fingerprint, `local_runtime/detect.py`). An unreachable
- * server is an `UnreachableError` here, not `generic`, so a stopped server is
- * reported as stopped instead of as missing settings.
- */
 export const detectServer = async (input: DiscoveryInput): Promise<ChatCompletionsServer> => {
   if (new URL(input.baseUrl).hostname === "openrouter.ai") return "openrouter"
   const props = await getJson(input, `${serverRoot(input.baseUrl)}/props`)
@@ -130,11 +98,6 @@ export const detectServer = async (input: DiscoveryInput): Promise<ChatCompletio
     : "generic"
 }
 
-/**
- * The asked models on a llama.cpp server, in the order asked; undefined asks
- * for the server's only model. Discovery never loads a model: a router loads
- * one for any request that names it unless the request says `autoload=false`.
- */
 export const discoverLlamaCpp = async (
   input: DiscoveryInput,
   wanted: ReadonlyArray<string> | undefined
@@ -148,17 +111,10 @@ export const discoverLlamaCpp = async (
   return Promise.all((wanted ?? ids).map((id) => llamaEntry(input, server, id)))
 }
 
-/** One model a llama.cpp server lists: what it can do, or why Arden cannot use it. */
 export type LlamaListing =
   | { readonly id: string; readonly kind: "usable"; readonly model: DiscoveredModel }
   | { readonly id: string; readonly kind: "refused"; readonly failure: DiscoveryFailure }
 
-/**
- * Every model a llama.cpp server lists, in its order, each with its facts or
- * the reason it cannot serve Arden. For a caller that offers what the server
- * runs instead of naming models (the desktop's model server); a server that
- * is not llama.cpp, or lists nothing, still fails as a whole.
- */
 export const listLlamaCpp = async (input: DiscoveryInput): Promise<ReadonlyArray<LlamaListing>> => {
   const server = await llamaServer(input)
   if (server.models.length === 0) throw new DiscoveryError({ reason: "no_model" })
@@ -215,16 +171,10 @@ const llamaEntry = async (
       model: id,
       listed: server.models.map((model) => model.id)
     })
-  // A router has no model of its own: each model's facts come from its
-  // child, asked by name. A single-model server answers for its one model.
   if (server.props.role !== "router") return llamaModel(id, server.props, undefined)
   const own = await getJson(input, `${root}/props?model=${encodeURIComponent(id)}&autoload=false`)
   const loaded = decodeProps(own.body)
   if (own.status === 200 && Option.isSome(loaded)) return llamaModel(id, loaded.value, undefined)
-  // b12359 answers an unloaded model with 400 `{"error":{"code":400,
-  // "message":"model is not loaded","type":"invalid_request_error"}}`
-  // (checked live on 2026-11-16); its window is then the `--ctx-size`
-  // the router will start its child with. Any other answer is an error.
   const message = Option.getOrUndefined(decodeErrorMessage(own.body))
   if (own.status === 400 && message === NOT_LOADED)
     return llamaModel(id, undefined, ctxSizeArgument(listing.status?.args ?? []))
@@ -255,8 +205,6 @@ export const discoverOpenRouter = async (
       status: listed.status
     })
   return wanted.map((id) => {
-    // Each entry is decoded alone, so one odd entry elsewhere in a list of
-    // hundreds cannot fail every model.
     const entry = list.value.data.find((item) => Option.isSome(decodeEntryId(item, id)))
     const model = entry === undefined ? Option.none() : decodeOpenRouterModel(entry)
     if (Option.isNone(model))
@@ -278,24 +226,9 @@ const llamaModel = (
   const caps = props?.chat_template_caps
   if (caps?.supports_tools === false)
     throw new DiscoveryError({ reason: "no_tool_calls", server: "llama.cpp", model: id })
-  // `n_ctx` is the window one request gets (per slot), never `n_ctx_train`.
-  // On b12359 a router child started with `--ctx-size 4096` and 4 slots
-  // reports `n_ctx: 4096`: slots share one unified KV cache, so the
-  // `--ctx-size` fallback for an unloaded model is the same number.
   const contextLimit = positive(props?.default_generation_settings?.n_ctx) ?? positive(ctxSize)
-  // An unloaded model's template is unknown until it loads, so whatever its
-  // `/props` would say is taken as absent: no effort levels, no images,
-  // one tool call at a time. Loading it first lifts these at the next start.
   const levels =
     caps?.supports_reasoning_effort === true ? (caps.reasoning_effort_levels ?? []) : []
-  // `none` is the server's, not the template's: `reasoning_effort: "none"`
-  // sets `enable_thinking: false` for any template, loaded or not (b12359
-  // `server-common.cpp`, its README's `reasoning_effort`). Checked on
-  // 2026-11-16 with Gemma 4 E2B, whose `/props` lists no levels: it thought
-  // through an 80-token limit without the field and answered in 21 tokens
-  // with it. A template that never thinks renders the same either way.
-  // `/props` says nothing about whether a template thinks, so `none` is
-  // offered for every model.
   const efforts = ["none", ...levels.filter((level) => level !== "none")]
   return {
     id,
@@ -303,20 +236,14 @@ const llamaModel = (
     outputCap: undefined,
     reasoningEfforts: efforts,
     compat: {
-      // llama.cpp honors both fields (checked on b12359); `max_tokens` is its
-      // long-standing alias of `n_predict`.
       maxTokensField: "max_tokens",
       systemRole: "system",
       reasoningEffort: "reasoning_effort",
-      // Checked on b12359: the last chunk carries `usage` with `include_usage`.
       usageInStream: true,
-      // The server turns `response_format: json_schema` into a grammar.
       structuredOutput: "json_schema",
       imageInput: props?.modalities?.vision === true,
       parallelToolCalls: caps?.supports_parallel_tool_calls === true,
       cacheControl: "none",
-      // b12359 renders the tools under `tool_choice: "none"` and returns a
-      // call as raw template text (see `ChatCompletionsCompat.toolChoiceNone`).
       toolChoiceNone: "unenforced"
     }
   }
@@ -329,25 +256,18 @@ const openRouterModel = (model: typeof OpenRouterModelSchema.Type): DiscoveredMo
   const reasoning = parameters.includes("reasoning")
   return {
     id: model.id,
-    // The model's window, or its main provider's when that one is smaller:
-    // OpenRouter routes to that provider first.
     contextLimit: smallest([model.context_length, model.top_provider?.context_length]),
     outputCap: positive(model.top_provider?.max_completion_tokens),
     reasoningEfforts: reasoning ? openRouterEfforts(model.reasoning ?? undefined) : [],
     compat: {
-      // 450 of 467 models list `max_tokens`, 91 `max_completion_tokens`
-      // (listing of 2026-11-15); the docs give both one meaning.
       maxTokensField:
         parameters.includes("max_tokens") || !parameters.includes("max_completion_tokens")
           ? "max_tokens"
           : "max_completion_tokens",
       systemRole: "system",
       reasoningEffort: reasoning ? "openrouter" : "none",
-      // https://openrouter.ai/docs/guides/guides/usage-accounting: usage is
-      // always in the last chunk.
+      // Usage is always in the last chunk: https://openrouter.ai/docs/guides/guides/usage-accounting
       usageInStream: true,
-      // `structured_outputs` is json_schema support; `response_format` alone
-      // may be JSON mode only.
       structuredOutput: parameters.includes("structured_outputs") ? "json_schema" : "none",
       imageInput: model.architecture?.input_modalities?.includes("image") === true,
       parallelToolCalls: parameters.includes("parallel_tool_calls"),
@@ -380,7 +300,6 @@ const openRouterEfforts = (
   return reasoning?.mandatory === true ? efforts.filter((effort) => effort !== "none") : efforts
 }
 
-/** Every `reasoning.effort` the gateway takes, highest first as the model list orders them. */
 const OPENROUTER_EFFORTS = ["max", "xhigh", "high", "medium", "low", "minimal", "none"]
 
 /**
@@ -419,13 +338,8 @@ const EXPLICIT_CACHE: {
 const explicitCache = (name: string): boolean =>
   EXPLICIT_CACHE.ids.has(name) || EXPLICIT_CACHE.prefixes.some((prefix) => name.startsWith(prefix))
 
-/**
- * Where llama-server serves `/props`: beside `/v1`, so `baseUrl` without its
- * trailing `/v1`. That is the origin, or the origin plus `--api-prefix`.
- */
 const serverRoot = (baseUrl: string): string => baseUrl.replace(/\/v1$/, "")
 
-/** The `--ctx-size` value in a router child's arguments, as `/v1/models` lists them. */
 const NOT_LOADED = "model is not loaded"
 
 const decodeErrorMessage = (body: unknown): Option.Option<string> =>
@@ -435,16 +349,6 @@ const decodeErrorBody = Schema.decodeUnknownOption(
   Schema.Struct({ error: Schema.Struct({ message: Schema.String }) })
 )
 
-/**
- * The window an unloaded router model's child will start with. The router
- * writes these arguments itself, always as `--ctx-size N`, however the
- * owner spelled it: on b12359 `-c 8192` on the router's command line and
- * `c = 4096` or `ctx-size = 3072` in a `--models-preset` file all came out
- * as `--ctx-size`, `N` (checked live on 2026-11-16), so `-c N` and
- * `--ctx-size=N` never reach this list. A window set through the
- * environment (`LLAMA_ARG_CTX_SIZE`) reaches the child but not the list, so
- * it cannot be seen here: the window stays unknown and `contextLimit` names it.
- */
 const ctxSizeArgument = (args: ReadonlyArray<string>): number | undefined => {
   const at = args.indexOf("--ctx-size")
   return at === -1 ? undefined : Number(args[at + 1])

@@ -40,13 +40,6 @@ const mergedProperty = (schemas: ReadonlyArray<unknown>): unknown => {
   return { anyOf: distinct }
 }
 
-/**
- * Providers accept only an object at a tool's parameter root (Anthropic
- * rejects a top-level anyOf; OpenAI requires `type: "object"`). A root union
- * of object variants is sent as one object: every variant's properties, the
- * ones every variant requires, and closed when every variant is. Input is
- * still validated against the tool's own schema, so the variant rules hold.
- */
 const objectRoot = (schema: JsonObject): JsonObject => {
   if (schema.type === "object" || !Array.isArray(schema.anyOf)) return schema
   const variants = schema.anyOf.map(objectVariant)

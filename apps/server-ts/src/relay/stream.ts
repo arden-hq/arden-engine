@@ -4,7 +4,7 @@ import type { EventMessage, ResetMessage } from "@arden-hq/relay-protocol"
 import { ANONYMOUS_FRAME, SSE_FRAME_ID, type SseFrameId } from "@arden-hq/protocol"
 import { Option, Schema } from "effect"
 import type { Loopback, RelayLog } from "./ports.js"
-import type { StreamRoute } from "./routes.js"
+import { STREAM_ROUTE, type StreamRoute } from "./routes.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 const StreamLimits = {
@@ -137,7 +137,7 @@ export class RelayStream {
       try {
         const frames = this.#loopback.events({
           path: this.route.path,
-          lastEventId: this.route.kind === "bus" ? this.#lastEventId : ANONYMOUS_FRAME,
+          lastEventId: this.route.kind === STREAM_ROUTE.bus ? this.#lastEventId : ANONYMOUS_FRAME,
           signal
         })
         for await (const frame of frames) {

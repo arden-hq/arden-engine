@@ -31,7 +31,7 @@ import {
   commitRecord,
   type JsonRecord
 } from "../domain/format.js"
-import type { RevisionStorageShape } from "../storage/service.js"
+import type { RevisionStorageShape } from "../storage/service-types.js"
 import { currentMap, timestamp } from "./state.js"
 import {
   artifact,
@@ -45,12 +45,6 @@ import {
 } from "./transaction.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-/**
- * One commit request. `expectedHead` is a repository-wide compare-and-swap:
- * omit it for none; `null` with `enforceExpectedHead` asserts an empty repository.
- * `idempotencyKey` is the durable write identity — a retry with the same key and
- * request replays the first commit; omit it for a fresh identity.
- */
 export type CommitInput = Omit<typeof ChangeSet.Encoded, "idempotencyKey"> & {
   readonly idempotencyKey?: string
 }
@@ -66,7 +60,6 @@ export const decodeChangeSet = Effect.fn("decodeChangeSet")(function* (
 
 export interface CommitResult {
   readonly commit: Commit
-  /** True when the idempotency key already named this exact request and its first commit was returned. */
   readonly replayed: boolean
 }
 
@@ -78,7 +71,7 @@ export const commit = Effect.fn("RevisionRepository.commit")(function* (
 ): Effect.fn.Return<CommitResult, RevisionError> {
   const critical = Effect.gen(function* () {
     const prepared = yield* prepare(storage, head, changeSet)
-    if (prepared.kind === "replayed") return prepared.result
+    if (prepared.kind === PREPARED_KIND.replayed) return prepared.result
     for (const row of prepared.applied.rows) yield* requireUnchangedOutside(storage, row)
     const written = yield* writeTransaction(storage, changeSet, prepared)
     yield* markPrepared(storage, written.transaction, prepared.oldHead, checkpoint)
@@ -92,21 +85,15 @@ export interface AdoptWorkingChangeOptions {
   readonly actor: string
   readonly origin: string
   readonly reason: string
-  /** The head the caller decided on; the adoption fails when the head has moved since. */
   readonly expectedHead: string | null
 }
 
-/** One resource's working file as a scan found it: new content, or null when the file is gone. */
 export interface WorkingChange {
   readonly resourceId: string
   readonly expectedVersion: string
   readonly content: Uint8Array | null
 }
 
-/**
- * Records a change that is already in its resource's working file as one update or archive,
- * with nothing installed.
- */
 export const adoptWorkingChange = Effect.fn("RevisionRepository.adoptWorkingChange")(function* (
   storage: RevisionStorageShape,
   head: Effect.Effect<string | null, RevisionError>,
@@ -130,7 +117,7 @@ export const adoptWorkingChange = Effect.fn("RevisionRepository.adoptWorkingChan
   })
   const critical = Effect.gen(function* () {
     const prepared = yield* prepare(storage, head, changeSet)
-    if (prepared.kind === "replayed") return prepared.result
+    if (prepared.kind === PREPARED_KIND.replayed) return prepared.result
     const adoptedPath = prepared.before.get(resourceId)?.path
     for (const row of prepared.applied.rows) {
       if (adoptedPath === row.path) yield* requireAlreadyInWorkingTree(storage, row)
@@ -148,10 +135,12 @@ export const adoptWorkingChange = Effect.fn("RevisionRepository.adoptWorkingChan
   return yield* storage.withLock(critical)
 })
 
+const PREPARED_KIND = { replayed: "replayed", prepared: "prepared" } as const
+
 type Prepared =
-  | { readonly kind: "replayed"; readonly result: CommitResult }
+  | { readonly kind: typeof PREPARED_KIND.replayed; readonly result: CommitResult }
   | {
-      readonly kind: "prepared"
+      readonly kind: typeof PREPARED_KIND.prepared
       readonly identity: RequestIdentity
       readonly oldHead: string | null
       readonly before: ResourceSnapshot
@@ -173,7 +162,7 @@ const prepare = Effect.fn("RevisionRepository.prepare")(function* (
         message: `idempotency key was reused for a different request: ${changeSet.idempotencyKey}`
       })
     return {
-      kind: "replayed",
+      kind: PREPARED_KIND.replayed,
       result: {
         commit: yield* storage
           .readCommit(record.commitId)
@@ -195,7 +184,7 @@ const prepare = Effect.fn("RevisionRepository.prepare")(function* (
   }
   const before = yield* currentMap(storage, oldHead)
   const applied = yield* applyChangeSet(changeSet, before)
-  return { kind: "prepared", identity, oldHead, before, applied }
+  return { kind: PREPARED_KIND.prepared, identity, oldHead, before, applied }
 })
 
 const requireUnchangedOutside = Effect.fn("RevisionRepository.requireUnchangedOutside")(function* (
@@ -222,7 +211,7 @@ const requireAlreadyInWorkingTree = Effect.fn("RevisionRepository.requireAlready
 const writeTransaction = Effect.fn("RevisionRepository.writeTransaction")(function* (
   storage: RevisionStorageShape,
   changeSet: ChangeSet,
-  prepared: Extract<Prepared, { readonly kind: "prepared" }>
+  prepared: Extract<Prepared, { readonly kind: typeof PREPARED_KIND.prepared }>
 ): Effect.fn.Return<
   { readonly transaction: Transaction; readonly commitBytes: Uint8Array },
   RevisionError

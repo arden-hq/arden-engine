@@ -6,7 +6,7 @@ import {
 } from "../persistence/runs/stored-question.js"
 import { Schema } from "effect"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
-import type { OfferRequest } from "./permission-offer.js"
+import type { OfferRequest } from "./permission-offer-facts.js"
 import { wordsRuleText } from "../persistence/permissions/rules.js"
 
 const WORDS_OFFER_MAX = 120

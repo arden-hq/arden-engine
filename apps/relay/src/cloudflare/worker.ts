@@ -1,18 +1,14 @@
-import { isDeviceId } from "@arden-hq/relay-protocol"
+import { isDeviceId, isRole, KEEPALIVE, RELAY_PATH } from "@arden-hq/relay-protocol"
 import { createApnsPusher } from "../apns/apns.js"
 import type { ApnsTransport } from "../apns/apns.js"
 import { noopPusher } from "../core/pusher.js"
 import type { Pusher } from "../core/pusher.js"
 import { RelayCore } from "../core/relay-core.js"
-import type { Attachment, Conns } from "../core/relay-core.js"
+import { ATTACHMENT_STATE } from "../core/connections.js"
+import type { Attachment, Conns } from "../core/connections.js"
 import { migrate, SqlStore } from "../core/sql-store.js"
 import type { Sql } from "../core/sql-store.js"
 import type { CfWebSocket, DurableObjectNamespace, DurableObjectState } from "./workers-types.js"
-
-// Cloudflare host: the Worker routes /v1/connect?mac= to one Durable Object
-// per Mac (idFromName), which runs the RelayCore over the WebSocket
-// Hibernation API. Text "ping" is a runtime auto-response, so heartbeats never
-// wake the object; the core reads their time through lastPing.
 
 export interface Env {
   readonly RELAY: DurableObjectNamespace
@@ -21,7 +17,6 @@ export interface Env {
   readonly APNS_TEAM_ID?: string
 }
 
-/** Workers' fetch negotiates HTTP/2 with Apple, which APNs requires. */
 const fetchTransport: ApnsTransport = async (request) => {
   const response = await fetch(request.url, {
     method: "POST",
@@ -39,14 +34,16 @@ const pusherFor = (env: Env): Pusher =>
       })
     : noopPusher
 
+const websocketUpgrade = "websocket"
+
 export default {
   fetch(request: Request, env: Env): Promise<Response> | Response {
     const url = new URL(request.url)
-    if (url.pathname === "/v1/health") return new Response("ok")
-    if (url.pathname !== "/v1/connect") return new Response("not found", { status: 404 })
+    if (url.pathname === RELAY_PATH.health) return new Response("ok")
+    if (url.pathname !== RELAY_PATH.connect) return new Response("not found", { status: 404 })
     const mac = url.searchParams.get("mac")
     if (!isDeviceId(mac)) return new Response("bad mac id", { status: 400 })
-    if (request.headers.get("Upgrade") !== "websocket")
+    if (request.headers.get("Upgrade") !== websocketUpgrade)
       return new Response("expected a WebSocket", { status: 426 })
     return env.RELAY.get(env.RELAY.idFromName(mac)).fetch(request)
   }
@@ -73,7 +70,8 @@ export class RelayObject {
       all: (statement, params) => ctx.storage.sql.exec(statement, ...params).toArray()
     }
     migrate(this.#sql)
-    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"))
+    // Answered without waking the hibernated object: https://developers.cloudflare.com/durable-objects/api/state/
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(KEEPALIVE.ping, KEEPALIVE.pong))
   }
 
   fetch(request: Request): Response {
@@ -171,20 +169,18 @@ const toAttachment = (value: unknown): Attachment | undefined => {
   const opened = field("opened")
   const heard = field("heard")
   switch (state) {
-    case "closed":
+    case ATTACHMENT_STATE.closed:
       return { state }
-    case "challenged":
+    case ATTACHMENT_STATE.challenged:
       return typeof nonce === "string" && typeof opened === "number"
         ? { state, nonce, opened }
         : undefined
-    case "pairing":
+    case ATTACHMENT_STATE.pairing:
       return typeof dev === "string" && typeof opened === "number"
         ? { state, dev, opened }
         : undefined
-    case "authed":
-      return typeof dev === "string" &&
-        typeof heard === "number" &&
-        (role === "mac" || role === "phone")
+    case ATTACHMENT_STATE.authed:
+      return typeof dev === "string" && typeof heard === "number" && isRole(role)
         ? { state, role, dev, heard }
         : undefined
     default:

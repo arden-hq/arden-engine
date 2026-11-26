@@ -16,7 +16,7 @@ import {
 } from "../persistence/scripts/store.js"
 import { drainScriptResults } from "./delivery.js"
 import { ScriptShutdown, type ScriptHost } from "./runtime/contract.js"
-import type { ScriptOutcome, ScriptProgress } from "./runtime/script-runtime.js"
+import type { ScriptOutcome, ScriptProgress } from "./runtime/script-outcome.js"
 import { executeScriptAttempt, type AdoptedScript } from "./script-attempt.js"
 import { attemptStep, interruptedByRestart } from "./script-retry.js"
 

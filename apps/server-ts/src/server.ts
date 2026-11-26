@@ -17,22 +17,10 @@ export interface ServerHandle {
   readonly port: number
   readonly url: URL
   readonly fetch: (input: string | Request | URL, init?: RequestInit) => Promise<Response>
-  /**
-   * Let live runs reach a clean point before stop(): each current tool may
-   * finish within the budget, then runs are aborted with no terminal record,
-   * so the next boot resumes them. Never throws.
-   */
   readonly drain: (input?: {
     readonly toolSettleMs?: number
-    /** Names the stop on the run's line; a restart unless said otherwise. */
     readonly reason?: StopReason
   }) => Promise<void>
-  /**
-   * Swap the model provider without a restart (a sign-in or sign-out): the
-   * next run, compaction and completion use `next`; those already under way
-   * finish on the provider they started with. Omitting `provider` leaves the
-   * server without a model, as at a start without one.
-   */
   readonly replaceProvider: (next: ModelProviderOptions) => Promise<void>
   readonly stop: (input?: {
     readonly reason?: StopReason
@@ -40,16 +28,26 @@ export interface ServerHandle {
   }) => Promise<void>
 }
 
-export type ServerErrorCode =
-  | "invalid_options"
-  | "storage_failed"
-  | "data_newer"
-  | "schema_convert_failed"
-  | "start_failed"
-  | "provider_failed"
-  | "stop_failed"
+const SERVER_ERROR_CODE = {
+  invalid_options: "invalid_options",
+  storage_failed: "storage_failed",
+  data_newer: "data_newer",
+  schema_convert_failed: "schema_convert_failed",
+  start_failed: "start_failed",
+  provider_failed: "provider_failed",
+  stop_failed: "stop_failed"
+} as const
 
-/** Plain daemon-boundary error. Runtime failures stay inside the server. */
+export type ServerErrorCode = (typeof SERVER_ERROR_CODE)[keyof typeof SERVER_ERROR_CODE]
+
+const STORAGE_ERROR_CODES: ReadonlySet<ServerErrorCode> = new Set([
+  SERVER_ERROR_CODE.storage_failed,
+  SERVER_ERROR_CODE.data_newer,
+  SERVER_ERROR_CODE.schema_convert_failed
+])
+
+export const isStorageErrorCode = (code: ServerErrorCode): boolean => STORAGE_ERROR_CODES.has(code)
+
 export class ServerError extends Error {
   readonly code: ServerErrorCode
 
@@ -119,22 +117,29 @@ const startConfiguredServer = async (options: HostedServerOptions): Promise<Serv
       Effect.runPromise(
         Effect.gen(function* () {
           if (!lifecycle.isAccepting())
-            return yield* Effect.fail(new ServerError("Arden is stopping", "provider_failed"))
+            return yield* Effect.fail(
+              new ServerError("Arden is stopping", SERVER_ERROR_CODE.provider_failed)
+            )
           yield* Context.get(opened.context, ModelProviderSwitch).replace(next)
         })
       ).catch(async (cause) => {
         if (Schema.isSchemaError(cause)) {
-          throw new ServerError("Invalid provider options", "invalid_options")
+          throw new ServerError("Invalid provider options", SERVER_ERROR_CODE.invalid_options)
         }
         await Effect.runPromise(Effect.logError(cause)).catch(() => undefined)
-        throw new ServerError("Could not replace the model provider", "provider_failed")
+        throw new ServerError(
+          "Could not replace the model provider",
+          SERVER_ERROR_CODE.provider_failed
+        )
       })
     const stop: ServerHandle["stop"] = (input) => {
       if (
         input?.budgetMs !== undefined &&
         (!Number.isFinite(input.budgetMs) || input.budgetMs < 0)
       ) {
-        return Promise.reject(new ServerError("Invalid shutdown budget", "invalid_options"))
+        return Promise.reject(
+          new ServerError("Invalid shutdown budget", SERVER_ERROR_CODE.invalid_options)
+        )
       }
       deadline ??= performance.now() + (input?.budgetMs ?? 5_500)
       stopping ??= (async () => {
@@ -153,7 +158,7 @@ const startConfiguredServer = async (options: HostedServerOptions): Promise<Serv
         )
         if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return
         await Effect.runPromise(Effect.logError(Cause.squash(exit.cause))).catch(() => undefined)
-        throw new ServerError("Failed to stop Arden server", "stop_failed")
+        throw new ServerError("Failed to stop Arden server", SERVER_ERROR_CODE.stop_failed)
       })()
       return stopping
     }
@@ -171,22 +176,22 @@ const startConfiguredServer = async (options: HostedServerOptions): Promise<Serv
   } catch (cause) {
     await Effect.runPromise(Scope.close(scope, Exit.die(cause))).catch(() => undefined)
     if (Schema.isSchemaError(cause)) {
-      throw new ServerError("Invalid server options", "invalid_options")
+      throw new ServerError("Invalid server options", SERVER_ERROR_CODE.invalid_options)
     }
     await Effect.runPromise(Effect.logError(cause)).catch(() => undefined)
     if (cause instanceof StorageStartupError && cause.operation === NEWER_DATA_OPERATION) {
-      throw new ServerError(cause.message, "data_newer")
+      throw new ServerError(cause.message, SERVER_ERROR_CODE.data_newer)
     }
     if (
       cause instanceof StorageStartupError &&
       cause.operation === SCHEMA_CONVERT_FAILED_OPERATION
     ) {
-      throw new ServerError(cause.message, "schema_convert_failed")
+      throw new ServerError(cause.message, SERVER_ERROR_CODE.schema_convert_failed)
     }
     if (cause instanceof StorageStartupError) {
-      throw new ServerError(cause.message, "storage_failed")
+      throw new ServerError(cause.message, SERVER_ERROR_CODE.storage_failed)
     }
-    throw new ServerError("Failed to start Arden server", "start_failed")
+    throw new ServerError("Failed to start Arden server", SERVER_ERROR_CODE.start_failed)
   }
 }
 

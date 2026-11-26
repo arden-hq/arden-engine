@@ -1,5 +1,14 @@
+import { isPresenceState } from "@arden-hq/relay-protocol"
 import type { PresenceState } from "@arden-hq/relay-protocol"
-import type { DeviceRecord, LeftRecord, MacRecord, QueuedRow, Store } from "./store.js"
+import { ENQUEUE_RESULT } from "./store.js"
+import type {
+  DeviceRecord,
+  EnqueueResult,
+  LeftRecord,
+  MacRecord,
+  QueuedRow,
+  Store
+} from "./store.js"
 
 const schema = [
   `CREATE TABLE IF NOT EXISTS macs (
@@ -173,12 +182,12 @@ export class SqlStore implements Store {
     this.#sql.run("DELETE FROM pair_offers WHERE mac = ? AND expires <= ?", [this.#mac, now])
   }
 
-  enqueue(row: QueuedRow): "stored" | "duplicate" {
+  enqueue(row: QueuedRow): EnqueueResult {
     const existing = this.#sql.all("SELECT 1 FROM queue WHERE mac = ? AND id = ?", [
       this.#mac,
       row.id
     ])
-    if (existing.length > 0) return "duplicate"
+    if (existing.length > 0) return ENQUEUE_RESULT.duplicate
     this.#sql.run("INSERT INTO queue (mac, id, from_dev, body, stored_at) VALUES (?, ?, ?, ?, ?)", [
       this.#mac,
       row.id,
@@ -186,7 +195,7 @@ export class SqlStore implements Store {
       row.body,
       row.storedAt
     ])
-    return "stored"
+    return ENQUEUE_RESULT.stored
   }
 
   queueUsage(): { rows: number; bytes: number } {
@@ -244,17 +253,10 @@ const int = (row: Record<string, unknown>, column: string): number => {
 }
 
 const presence = (value: unknown): PresenceState => {
-  switch (value) {
-    case "online":
-    case "asleep":
-    case "offline":
-      return value
-    default:
-      throw new Error(`relay store: unknown presence ${String(value)}`)
-  }
+  if (isPresenceState(value)) return value
+  throw new Error(`relay store: unknown presence ${String(value)}`)
 }
 
-/** bun:sqlite returns Uint8Array, the Durable Object SQL API an ArrayBuffer. */
 const blob = (value: unknown): Uint8Array => {
   if (value instanceof Uint8Array) return value
   if (value instanceof ArrayBuffer) return new Uint8Array(value)

@@ -1,10 +1,17 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type {
-  AssistantMessage,
-  AssistantOutputPart,
-  JsonObject,
-  ProviderToolCall,
-  ToolCall
+import {
+  ASSISTANT_TEXT_PHASE,
+  isReasoningPart,
+  isTextPart,
+  isToolCallPart,
+  TOOL_EXECUTION,
+  toolCallPart,
+  type AssistantMessage,
+  type AssistantOutputPart,
+  type JsonObject,
+  type ProviderToolCall,
+  type ToolCall,
+  type ToolExecution
 } from "../contracts/messages.js"
 import type { CompletionResponse } from "../contracts/provider.js"
 import type { ToolDisplayTitle, ToolMeta } from "../contracts/tools.js"
@@ -24,7 +31,7 @@ export type ToolStartEvent = Extract<
   { readonly _tag: "ToolInputStarted" | "ToolStarted" }
 >
 
-export const startKey = (execution: "runtime" | "provider", toolId: string): string =>
+export const startKey = (execution: ToolExecution, toolId: string): string =>
   `${execution}:${toolId}`
 
 const persistedStart = (snapshot: ToolStartSnapshot | undefined) =>
@@ -140,9 +147,7 @@ export const fallbackOutputParts = (
   const message = response.message
   let parts = [...streamed]
   const reasoning = message.reasoning_content ?? ""
-  const reasoningIndexes = parts.flatMap((part, index) =>
-    part.type === "reasoning" ? [index] : []
-  )
+  const reasoningIndexes = parts.flatMap((part, index) => (isReasoningPart(part) ? [index] : []))
   const onlyReasoningIndex = reasoningIndexes.length === 1 ? reasoningIndexes[0] : undefined
   if (reasoning.length > 0 && reasoningIndexes.length === 0) {
     parts.unshift({ type: "reasoning", text: reasoning })
@@ -150,7 +155,7 @@ export const fallbackOutputParts = (
     parts[onlyReasoningIndex] = { type: "reasoning", text: reasoning }
   }
   const content = message.content ?? ""
-  const textIndexes = parts.flatMap((part, index) => (part.type === "text" ? [index] : []))
+  const textIndexes = parts.flatMap((part, index) => (isTextPart(part) ? [index] : []))
   const onlyTextIndex = textIndexes.length === 1 ? textIndexes[0] : undefined
   const finalIndex = textIndexes.at(-1)
   if (content.length > 0 && textIndexes.length === 0) {
@@ -162,22 +167,24 @@ export const fallbackOutputParts = (
       .slice(0, -1)
       .map((index) => {
         const part = parts[index]
-        return part?.type === "text" ? part.text : ""
+        return isTextPart(part) ? part.text : ""
       })
       .join("")
     const finalPart = parts[finalIndex]
     const suffix = content.startsWith(prefix) ? content.slice(prefix.length) : ""
-    if (finalPart?.type === "text" && suffix.length > 0) {
+    if (isTextPart(finalPart) && suffix.length > 0) {
       parts[finalIndex] = { ...finalPart, text: suffix }
     }
   }
-  const textJoin = parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+  const textJoin = parts.flatMap((part) => (isTextPart(part) ? [part.text] : [])).join("")
   if (textJoin !== content) {
-    const firstTextIndex = parts.findIndex((part) => part.type === "text")
-    const phase = parts.some((part) => part.type === "text" && part.phase === "final_answer")
-      ? ("final_answer" as const)
+    const firstTextIndex = parts.findIndex(isTextPart)
+    const phase = parts.some(
+      (part) => isTextPart(part) && part.phase === ASSISTANT_TEXT_PHASE.finalAnswer
+    )
+      ? ASSISTANT_TEXT_PHASE.finalAnswer
       : parts.flatMap((part) =>
-          part.type === "text" && part.phase !== undefined ? [part.phase] : []
+          isTextPart(part) && part.phase !== undefined ? [part.phase] : []
         )[0]
     const merged: AssistantOutputPart = {
       type: "text",
@@ -185,30 +192,22 @@ export const fallbackOutputParts = (
       ...(phase === undefined ? {} : { phase })
     }
     parts = parts.flatMap((part, index): ReadonlyArray<AssistantOutputPart> => {
-      if (part.type !== "text") return [part]
+      if (!isTextPart(part)) return [part]
       return index === firstTextIndex && content.length > 0 ? [merged] : []
     })
   }
   const referenced = new Set(
     parts.flatMap((part) =>
-      part.type === "tool_call" ? [`${part.execution}:${part.tool_call_id}`] : []
+      isToolCallPart(part) ? [`${part.execution}:${part.tool_call_id}`] : []
     )
   )
   parts.push(
     ...(message.provider_tool_calls ?? [])
       .filter((call) => !referenced.has(`provider:${call.id}`))
-      .map((call) => ({
-        type: "tool_call" as const,
-        tool_call_id: call.id,
-        execution: "provider" as const
-      })),
+      .map((call) => toolCallPart(call.id, TOOL_EXECUTION.provider)),
     ...(message.tool_calls ?? [])
       .filter((call) => !referenced.has(`runtime:${call.id}`))
-      .map((call) => ({
-        type: "tool_call" as const,
-        tool_call_id: call.id,
-        execution: "runtime" as const
-      }))
+      .map((call) => toolCallPart(call.id, TOOL_EXECUTION.runtime))
   )
   return parts
 }

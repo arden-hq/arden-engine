@@ -225,8 +225,6 @@ export const compactExpiredAgentSessions = Effect.fn(
             "session_activity",
             row.session_id
           )
-          // An archived chat announces nothing, so there is no boundary to
-          // prune its older list snapshots to.
           const retainedSequence = activity.records.at(-1)?.sequence ?? null
           return { retainedSequence }
         })

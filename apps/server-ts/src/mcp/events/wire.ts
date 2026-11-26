@@ -2,13 +2,8 @@ import type { JsonValue } from "@arden-hq/protocol"
 import type { McpEvent, McpEventDelivery } from "@arden-hq/protocol/mcp"
 import { Option, Predicate, Schema } from "effect"
 
-/**
- * The MCP protocol 2026-07-28 wire Arden speaks to a server that offers it
- * (stateless requests, `server/discover`), and its Events extension
- * (`io.modelcontextprotocol/events`, SEP-3415).
- */
-
 export const EVENTS_PROTOCOL_VERSION = "2026-07-28"
+// modelcontextprotocol/modelcontextprotocol#3415
 const EVENTS_EXTENSION = "io.modelcontextprotocol/events"
 const PROTOCOL_VERSION_META = "io.modelcontextprotocol/protocolVersion"
 const CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"
@@ -24,6 +19,8 @@ const EVENT_NOTIFICATIONS = {
   error: "notifications/events/error",
   terminated: "notifications/events/terminated"
 } as const
+
+const isEventNotification = Schema.is(Schema.Literals(Object.values(EVENT_NOTIFICATIONS)))
 
 export const EVENT_ERROR_CODES = {
   invalidParams: -32602,
@@ -166,6 +163,7 @@ export const decodeStreamSignal = (
   method: string,
   params: unknown
 ): McpStreamSignal | undefined => {
+  if (!isEventNotification(method)) return undefined
   switch (method) {
     case EVENT_NOTIFICATIONS.active: {
       const position = Schema.decodeUnknownOption(PositionSchema)(params)
@@ -202,8 +200,6 @@ export const decodeStreamSignal = (
         ? { kind: "error", error }
         : { kind: "terminated", error }
     }
-    default:
-      return undefined
   }
 }
 

@@ -1,6 +1,6 @@
 import { Schema, SchemaTransformation } from "effect"
 
-import { SiteSecretNameSchema } from "../browser/service.js"
+import { BROWSER_ACT_ACTION, SiteSecretNameSchema } from "../browser/service.js"
 import {
   atNodeRef,
   OriginSchema,
@@ -213,19 +213,7 @@ export const ActParametersSchema = Schema.Struct({
       "It must still match the tab at execution."
     ].join(" ")
   }),
-  action: Schema.Literals([
-    "click",
-    "dblclick",
-    "hover",
-    "focus",
-    "fill",
-    "type",
-    "press",
-    "select",
-    "check",
-    "uncheck",
-    "scroll"
-  ] as const).annotate({
+  action: Schema.Literals(Object.values(BROWSER_ACT_ACTION)).annotate({
     description: [
       "One action to perform.",
       "press/scroll omit target; fill/type/press require value; select requires values."

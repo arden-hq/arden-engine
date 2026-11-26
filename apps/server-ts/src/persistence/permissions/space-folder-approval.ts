@@ -34,17 +34,25 @@ const carriesSpaceFolderGrant = Schema.is(
   Schema.Struct({ space_folder_grant: SpaceFolderGrantSchema })
 )
 
-const OUTSIDE_FILE_TOOLS: ReadonlySet<string> = new Set([
-  "browser_upload",
-  "file_write",
-  "file_edit"
+const FOLDER_GRANT_TOOL = {
+  spawnAgent: "spawn_agent",
+  browserUpload: "browser_upload",
+  fileWrite: "file_write",
+  fileEdit: "file_edit"
+} as const
+type FolderGrantTool = (typeof FOLDER_GRANT_TOOL)[keyof typeof FOLDER_GRANT_TOOL]
+
+const OUTSIDE_FILE_TOOLS: ReadonlySet<string> = new Set<FolderGrantTool>([
+  FOLDER_GRANT_TOOL.browserUpload,
+  FOLDER_GRANT_TOOL.fileWrite,
+  FOLDER_GRANT_TOOL.fileEdit
 ])
 
 export const spaceFolderGrantOf = (
   toolName: string,
   data: unknown
 ): SpaceFolderApprovalData["space_folder_grant"] | undefined => {
-  if (toolName === "spawn_agent")
+  if (toolName === FOLDER_GRANT_TOOL.spawnAgent)
     return isSpaceFolderApprovalData(data) ? data.space_folder_grant : undefined
   if (OUTSIDE_FILE_TOOLS.has(toolName))
     return carriesSpaceFolderGrant(data) ? data.space_folder_grant : undefined

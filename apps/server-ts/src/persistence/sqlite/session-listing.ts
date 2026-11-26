@@ -259,7 +259,6 @@ export const makeSessionListing = ({
     else if (input.scope === "agent") agentFilter = reader`AND s.session_type = 'agent'`
     const liveFilter =
       input.live === true ? reader`AND latest_run.status IN ${activeRunStatusList}` : reader``
-    // A live chat has an active run: start from those few, not from every chat.
     const sessions =
       input.live === true
         ? reader`(SELECT DISTINCT live_run.session_id FROM chat_runs AS live_run

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import type { Agrees, Assert } from "../common/type-agreement.js"
 import type {
   AutomationRunStatus,
@@ -7,8 +7,15 @@ import type {
   RunAutomationResponse,
   ToggleAutomationResponse
 } from "./contracts.js"
+import {
+  SYSTEM_AUTOMATION_SETTING,
+  AUTOMATION_CATALOG_FIELD_TYPE,
+  AUTOMATION_CHAT_CHOICE,
+  AUTOMATION_HISTORY,
+  AUTOMATION_RUN_STATUS
+} from "./contracts.js"
 import { withExtras, NonNegativeIntSchema } from "../common/schema.js"
-import { AUTOMATION_EVENT_TYPES } from "./triggers.js"
+import { AUTOMATION_EVENT_TYPE } from "./triggers.js"
 import {
   AutomationConditionOperatorSchema,
   AutomationTriggerInputSchema,
@@ -17,12 +24,12 @@ import {
 } from "./trigger-schema.js"
 import { APPROVAL_MODES } from "../permissions/modes.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const TrimmedTextSchema = Schema.Trim.check(Schema.isMinLength(1))
 const DescriptionSchema = TrimmedTextSchema.check(Schema.isMaxLength(220))
 export const AutomationTextSchema = TrimmedTextSchema
 export const AutomationDescriptionTextSchema = DescriptionSchema
-const AutomationEventTypeSchema = Schema.Literals(AUTOMATION_EVENT_TYPES)
+const AutomationEventTypeSchema = Schema.Literals(Object.values(AUTOMATION_EVENT_TYPE))
 
 export const SettableAutomationToolScopeSchema = Schema.Literals([
   "read_only",
@@ -41,11 +48,14 @@ export const AutomationToolScopeSchema = Schema.Literals([
   "chat_summary"
 ] as const)
 
-export const AutomationHistorySchema = Schema.Literals(["fresh", "chat"] as const)
+export const AutomationHistorySchema = Schema.Literals(Object.values(AUTOMATION_HISTORY))
 
 export const AutomationChatChoiceSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("own") }),
-  Schema.Struct({ kind: Schema.Literal("yours"), session_id: Schema.NonEmptyString })
+  Schema.Struct({ kind: Schema.Literal(AUTOMATION_CHAT_CHOICE.own) }),
+  Schema.Struct({
+    kind: Schema.Literal(AUTOMATION_CHAT_CHOICE.yours),
+    session_id: Schema.NonEmptyString
+  })
 ]).pipe(Schema.toTaggedUnion("kind"))
 
 const TriggerInputsSchema = Schema.Array(AutomationTriggerInputSchema).check(Schema.isMinLength(1))
@@ -108,28 +118,17 @@ export const UpdateAutomationInputSchema = Schema.Struct({
   )
 })
 
-/** Internal create wire shape. Its retry identity is generated once. */
 export const InternalCreateAutomationRequestSchema = Schema.Struct({
   ...createAutomationInputFields,
   idempotency_key: Schema.String.check(Schema.isUUID(4)),
   idempotency_scope: Schema.Literal("global")
 })
 
-export const AutomationRunStatusSchema = Schema.Literals([
-  "running",
-  "completed",
-  "blocked",
-  "failed",
-  "cancelled",
-  "interrupted"
-] as const)
+export const AutomationRunStatusSchema = Schema.Literals(Object.values(AUTOMATION_RUN_STATUS))
 
-export const SystemAutomationSettingSchema = Schema.Literals([
-  "triggers",
-  "model",
-  "prompt",
-  "enabled"
-] as const)
+export const SystemAutomationSettingSchema = Schema.Literals(
+  Object.values(SYSTEM_AUTOMATION_SETTING)
+)
 
 export const SystemAutomationSettingsSchema = withExtras({
   default_triggers: Schema.Array(AutomationTriggerSpecSchema),
@@ -145,7 +144,7 @@ export const AutomationEventCatalogFieldSchema = withExtras({
   field: Schema.NonEmptyString,
   label: Schema.NonEmptyString,
   hint: Schema.String,
-  type: Schema.Literals(["int", "float", "str", "bool", "list"] as const),
+  type: Schema.Literals(Object.values(AUTOMATION_CATALOG_FIELD_TYPE)),
   operators: Schema.Array(AutomationConditionOperatorSchema)
 })
 
@@ -201,7 +200,6 @@ export const encodeUpdateAutomationRequestEffect = (
     Effect.map(JSON.stringify)
   )
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type AutomationRunStatusAgrees = Assert<
   Agrees<(typeof AutomationRunStatusSchema)["Type"], AutomationRunStatus>
 >

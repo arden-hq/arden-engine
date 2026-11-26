@@ -2,18 +2,27 @@ import { Effect, Exit } from "effect"
 
 import { parseIdempotencyRecord, parseTransaction } from "../domain/transaction.js"
 import { normalizeRelativePath } from "../domain/model.js"
-import { CorruptRepositoryError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
+import {
+  CorruptRepositoryError,
+  RevisionConflictError,
+  RevisionStorageError,
+  UnsafePathError
+} from "../domain/errors.js"
+import { OBJECT_KIND, type ObjectKind } from "../domain/format.js"
 import type {
   MaintenanceIdempotencyRecord,
   MaintenanceMetadataStats,
   MaintenanceObjectEntry,
-  MaintenanceObjectKind,
   MaintenanceProtectedTransaction,
   MaintenanceStorage,
   MaintenanceStorageError
-} from "./maintenance.js"
-import type { RevisionStorageShape, StorageError } from "./service.js"
+} from "./maintenance-types.js"
+import { objectFilename, objectLocation } from "./objects.js"
+import type { RevisionStorageShape, StorageError } from "./service-types.js"
 import { compareCodePoints } from "@arden-hq/std/json"
+
+const TRANSACTION_PARENT = { transactions: "transactions", conflicts: "conflicts" } as const
+type TransactionParent = (typeof TRANSACTION_PARENT)[keyof typeof TRANSACTION_PARENT]
 
 const transactionDirectories = ["publish", "backups", "displaced", "rejected", "markers"] as const
 
@@ -27,26 +36,14 @@ const corrupt = (message: string): Effect.Effect<never, CorruptRepositoryError> 
 
 const storageErrorMessage = (error: StorageError): string => `${error._tag}: ${error.message}`
 
-const adaptStorageError = (error: StorageError): MaintenanceStorageError => {
-  switch (error._tag) {
-    case "RevisionStorageError":
-      return error
-    case "UnsafePathError":
-      return error
-    case "RevisionConflictError":
-      return new RevisionStorageError({ message: storageErrorMessage(error), cause: error })
-  }
-}
+const adaptStorageError = (error: StorageError): MaintenanceStorageError =>
+  error instanceof RevisionConflictError
+    ? new RevisionStorageError({ message: storageErrorMessage(error), cause: error })
+    : error
 
 const fromStorage = <A>(
   effect: Effect.Effect<A, StorageError>
 ): Effect.Effect<A, MaintenanceStorageError> => effect.pipe(Effect.mapError(adaptStorageError))
-
-const objectFilename = (kind: MaintenanceObjectKind, id: string): string =>
-  kind === "blob" ? id : `${id}.jsonl`
-
-const objectPath = (kind: MaintenanceObjectKind, id: string): string =>
-  `${kind === "commit" ? "commits" : `objects/${kind === "blob" ? "blobs" : "trees"}`}/${objectFilename(kind, id)}`
 
 const checkedStat = (
   target: string,
@@ -98,7 +95,7 @@ const optionalMetadataBytes = Effect.fn("maintenanceAdapter.optionalMetadataByte
 const readProtectedTransaction = Effect.fn("maintenanceAdapter.readProtectedTransaction")(
   function* (
     storage: RevisionStorageShape,
-    parent: "transactions" | "conflicts",
+    parent: TransactionParent,
     transactionId: string
   ): Effect.fn.Return<MaintenanceProtectedTransaction | null, MaintenanceStorageError> {
     const prefix = `${parent}/${transactionId}`
@@ -113,7 +110,7 @@ const readProtectedTransaction = Effect.fn("maintenanceAdapter.readProtectedTran
     if (content === null) return yield* corrupt(`transaction manifest is missing: ${transactionId}`)
     return {
       ...(yield* parseTransaction(transactionId, content)),
-      conflicted: parent === "conflicts"
+      conflicted: parent === TRANSACTION_PARENT.conflicts
     }
   }
 )
@@ -121,7 +118,7 @@ const readProtectedTransaction = Effect.fn("maintenanceAdapter.readProtectedTran
 const listProtectedTransactions = Effect.fn("maintenanceAdapter.listProtectedTransactions")(
   function* (
     storage: RevisionStorageShape,
-    parent: "transactions" | "conflicts"
+    parent: TransactionParent
   ): Effect.fn.Return<ReadonlyArray<MaintenanceProtectedTransaction>, MaintenanceStorageError> {
     const names = yield* fromStorage(storage.listMetadata(parent))
     const output: MaintenanceProtectedTransaction[] = []
@@ -134,18 +131,17 @@ const listProtectedTransactions = Effect.fn("maintenanceAdapter.listProtectedTra
   }
 )
 
-/** Adapt the repository's low-level storage contract to maintenance operations. */
 export const maintenanceStorageFromRevisionStorage = (
   storage: RevisionStorageShape
 ): MaintenanceStorage => {
   const listObjects = Effect.fn("maintenanceAdapter.listObjects")(function* (
-    kind: MaintenanceObjectKind
+    kind: ObjectKind
   ): Effect.fn.Return<ReadonlyArray<MaintenanceObjectEntry>, MaintenanceStorageError> {
     const ids = yield* fromStorage(storage.listObjectIds(kind))
     const entries: MaintenanceObjectEntry[] = []
     for (const id of [...ids].sort(compareCodePoints)) {
       if (!isHash(id)) return yield* corrupt(`invalid ${kind} object identifier: ${id}`)
-      const target = objectPath(kind, id)
+      const target = objectLocation(kind, id)
       const measured = yield* checkedStat(target, yield* fromStorage(storage.metadataStat(target)))
       entries.push({ name: objectFilename(kind, id), ...measured })
     }
@@ -153,17 +149,17 @@ export const maintenanceStorageFromRevisionStorage = (
   })
 
   const readObject = (
-    kind: MaintenanceObjectKind,
+    kind: ObjectKind,
     id: string
   ): Effect.Effect<Uint8Array, MaintenanceStorageError> => {
     if (!isHash(id))
       return Effect.fail(new UnsafePathError({ message: `${kind} identifier is invalid: ${id}` }))
     switch (kind) {
-      case "blob":
+      case OBJECT_KIND.blob:
         return fromStorage(storage.readBlob(id))
-      case "tree":
+      case OBJECT_KIND.tree:
         return fromStorage(storage.readTree(id))
-      case "commit":
+      case OBJECT_KIND.commit:
         return fromStorage(storage.readCommit(id))
     }
   }
@@ -183,15 +179,15 @@ export const maintenanceStorageFromRevisionStorage = (
   })
 
   const listProtected = Effect.gen(function* () {
-    const transactions = yield* listProtectedTransactions(storage, "transactions")
-    const conflicts = yield* listProtectedTransactions(storage, "conflicts")
+    const transactions = yield* listProtectedTransactions(storage, TRANSACTION_PARENT.transactions)
+    const conflicts = yield* listProtectedTransactions(storage, TRANSACTION_PARENT.conflicts)
     return [...transactions, ...conflicts]
   })
 
   const metadataStats: Effect.Effect<MaintenanceMetadataStats, MaintenanceStorageError> =
     Effect.gen(function* () {
-      const transactionBytes = yield* metadataBytes(storage, "transactions")
-      const conflictBytes = yield* metadataBytes(storage, "conflicts")
+      const transactionBytes = yield* metadataBytes(storage, TRANSACTION_PARENT.transactions)
+      const conflictBytes = yield* metadataBytes(storage, TRANSACTION_PARENT.conflicts)
       const idempotencyBytes = yield* metadataBytes(storage, "idempotency")
       const publicationBytes = yield* metadataBytes(storage, "published")
       const refBytes = yield* metadataBytes(storage, "refs")

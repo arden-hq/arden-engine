@@ -2,6 +2,16 @@ import type { JsonRecord } from "../../common/json.js"
 
 export const TERMINAL_STATE = { running: "running", exited: "exited" } as const
 
+export const TERMINAL_ACCESS = { sandbox: "sandbox", network: "network", host: "host" } as const
+export type TerminalAccess = (typeof TERMINAL_ACCESS)[keyof typeof TERMINAL_ACCESS]
+
+export const TERMINAL_INPUT_STATUS = {
+  sent: "sent",
+  stdin_closed: "stdin_closed",
+  exited: "exited"
+} as const
+export type TerminalInputStatus = (typeof TERMINAL_INPUT_STATUS)[keyof typeof TERMINAL_INPUT_STATUS]
+
 export type TerminalExit =
   | { readonly kind: "code"; readonly code: number }
   | { readonly kind: "signal"; readonly signal: string }
@@ -11,7 +21,7 @@ interface SessionTerminalFields extends JsonRecord {
   readonly tool_call_id: string
   readonly command: string
   readonly cwd: string
-  readonly access: "sandbox" | "network" | "host"
+  readonly access: TerminalAccess
   readonly tty: boolean
   readonly started_at: string
   readonly cursor: number
@@ -33,14 +43,12 @@ export interface SessionTerminalsResponse extends JsonRecord {
   readonly terminals: ReadonlyArray<SessionTerminal>
 }
 
-/** Output after a cursor; `start` passes `after` when older output was dropped. */
 export interface TerminalOutputResponse extends JsonRecord {
   readonly output: string
   readonly start: number
   readonly cursor: number
 }
 
-/** Stop and close answer with this once the command is handled. */
 export interface TerminalActionResponse extends JsonRecord {
   readonly ok: true
 }
@@ -49,7 +57,6 @@ export interface TerminalInputRequest {
   readonly chars: string
 }
 
-/** "sent" — delivered; "stdin_closed" — started without tty; "exited" — nothing is running. */
 export interface TerminalInputResponse extends JsonRecord {
-  readonly status: "sent" | "stdin_closed" | "exited"
+  readonly status: TerminalInputStatus
 }

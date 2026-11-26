@@ -124,12 +124,12 @@ describe("test vectors", () => {
   })
 
   it("derives the same session keys on both ends", () => {
-    expect({ p2m: toHex(phoneKeys.p2m), m2p: toHex(phoneKeys.m2p) }).toEqual({
+    expect({ p2m: toHex(phoneKeys.phoneToMac), m2p: toHex(phoneKeys.macToPhone) }).toEqual({
       p2m: field("handshake.k_p2m"),
       m2p: field("handshake.k_m2p")
     })
     expect(macKeys).toEqual(phoneKeys)
-    expect(toHex(phoneKeys.p2m) + toHex(phoneKeys.m2p)).toBe(field("handshake.okm"))
+    expect(toHex(phoneKeys.phoneToMac) + toHex(phoneKeys.macToPhone)).toBe(field("handshake.okm"))
   })
 
   it("seals and opens the first frames in each direction", () => {

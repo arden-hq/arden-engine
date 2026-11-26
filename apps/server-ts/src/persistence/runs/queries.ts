@@ -22,19 +22,15 @@ export const ActiveRunSnapshotSchema = Schema.Struct({
 
 export type ActiveRunSnapshot = (typeof ActiveRunSnapshotSchema)["Type"]
 
-/** One Run of the server, as the run list shows it. */
 interface ListedRun {
   readonly runId: string
   readonly sessionId: string
   readonly status: string
-  /** Still owns its chat: not yet ended. */
   readonly active: boolean
   readonly startedAt: string
 }
 
-/** Where a page of the Run list starts, which Runs it keeps and how many. */
 export interface RunListInput {
-  /** The last Run of the page before; absent for the first page. */
   readonly after?: { readonly startedAt: string; readonly runId: string }
   readonly sessionId?: string
   readonly activeOnly: boolean
@@ -42,15 +38,10 @@ export interface RunListInput {
 }
 
 export interface RunListSnapshot {
-  /** One page of Runs, oldest first. */
   readonly runs: ReadonlyArray<ListedRun>
-  /** More Runs follow this page. */
   readonly more: boolean
-  /** A Run is still going, anywhere on the server. */
   readonly anyActive: boolean
-  /** Automation deliveries not yet sent; each will start a Run. */
   readonly pendingDeliveries: number
-  /** Scripts still running in the background; each reports back to its chat when it ends. */
   readonly runningScripts: number
 }
 
@@ -160,7 +151,6 @@ export class RunQueries extends Context.Service<
     readonly cause: (runId: string) => Effect.Effect<RunCause, RunQueryError>
     readonly liveness: (runId: string) => Effect.Effect<RunLiveness | undefined, RunQueryError>
     readonly authority: (runId: string) => Effect.Effect<RunAuthority | undefined, RunQueryError>
-    /** What the run was sent from Memory, each composition in order; empty when it was sent none. */
     readonly memoryContext: (
       runId: string
     ) => Effect.Effect<ReadonlyArray<RunMemoryContext>, RunQueryError>

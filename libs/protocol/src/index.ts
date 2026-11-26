@@ -21,6 +21,7 @@ export type { CapabilityCandidate, CapabilityProposal } from "./chat/capability-
 export type { RuntimeRunStatus, ConnectionState, ConnectionAction } from "./chat/runtime.js"
 export type { SessionType, SessionListItem } from "./sessions/contracts.js"
 export type { AppSettingsTabId, AppDestination } from "./common/navigation.js"
+export { APP_DESTINATION, APP_SETTINGS_TAB } from "./common/navigation.js"
 export type { TodoStatus, TodoListItem } from "./sessions/todos/contracts.js"
 export type {
   AssistantTextPhase,
@@ -31,10 +32,13 @@ export type {
   InteractionOutcome,
   InteractionRecipient,
   InteractionReference,
+  InteractionReferenceType,
   InteractionSender,
-  InteractionSource
+  InteractionSource,
+  ConnectionArrivalOutcome
 } from "./chat/history.js"
 export { PROVIDER_COST } from "./common/event-fields.js"
+export { SERVER_EVENT_TYPE, type ServerEventType } from "./common/event-types.js"
 export type {
   ChatEventFrame,
   ProviderCost,
@@ -100,6 +104,7 @@ export type {
   AutomationProgressEvent,
   AutomationFinishedEvent,
   RecordToldEvent,
+  NavigationMode,
   RecordToldStatus,
   SessionCreatedEvent,
   SessionActivityEvent,
@@ -171,14 +176,19 @@ export {
 
 export { isKnownServerEventType, SERVER_EVENT_TYPES } from "./events/schema.js"
 
-/** Decode one JSON event payload without exposing Effect to consumers. */
 export const decodeServerEvent = decoderFor(ServerEventSchema, "Invalid server event")
 
-/** Encode one event as an SSE frame. */
 export function encodeServerEventFrame(
   event: ServerEvent,
   options?: EncodeServerEventOptions
 ): string {
   return runBoundary(encodeServerEventFrameEffect(event, options), "Invalid server event", "encode")
 }
-export { ENTITY_TARGET, LINK, TASK_SPACE } from "./events/contracts.js"
+export {
+  ENTITY_TARGET,
+  LINK,
+  NAVIGATION_MODE,
+  RECORD_TOLD_STATUS,
+  TASK_SPACE,
+  TASK_WORK_STATE
+} from "./events/contracts.js"

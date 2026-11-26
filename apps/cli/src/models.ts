@@ -6,11 +6,6 @@ export interface ModelsOptions {
   readonly output: "text" | "json"
 }
 
-/**
- * `arden models`: the models a new chat may run on, as the server lists them.
- * On a configured server that is the settings' `model` and `extraModels`, or
- * the one model a llama.cpp server holds; the ids are what `--model` takes.
- */
 export const modelsCommand = async (
   options: ModelsOptions,
   dependencies: CliDependencies

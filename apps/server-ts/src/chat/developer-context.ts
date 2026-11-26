@@ -5,17 +5,18 @@ import { isDeepStrictEqual } from "node:util"
 import type { ChatRunnerInput } from "./runner-contract.js"
 import { currentIso } from "../runtime/clock.js"
 
-type DeveloperContextSource = "local_instructions" | "local_time" | "step_limit"
+export const DEVELOPER_CONTEXT_SOURCE = {
+  localInstructions: "local_instructions",
+  localTime: "local_time",
+  stepLimit: "step_limit"
+} as const
+type DeveloperContextSource =
+  (typeof DEVELOPER_CONTEXT_SOURCE)[keyof typeof DEVELOPER_CONTEXT_SOURCE]
 
-const developerContextLabel = (source: DeveloperContextSource): string => {
-  switch (source) {
-    case "local_instructions":
-      return "local instructions"
-    case "local_time":
-      return "local time"
-    case "step_limit":
-      return "step limit"
-  }
+const DEVELOPER_CONTEXT_LABEL: Readonly<Record<DeveloperContextSource, string>> = {
+  local_instructions: "local instructions",
+  local_time: "local time",
+  step_limit: "step limit"
 }
 
 const renderDeveloperContext = ({
@@ -25,7 +26,7 @@ const renderDeveloperContext = ({
   readonly source: DeveloperContextSource
   readonly content: string
 }): string => {
-  const label = developerContextLabel(source)
+  const label = DEVELOPER_CONTEXT_LABEL[source]
   return [
     `Current Arden ${label}; this replaces earlier Arden ${label} updates.`,
     content.trim().length === 0 ? "(none)" : content

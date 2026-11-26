@@ -1,7 +1,3 @@
-// A recipe (docs/recipes/*.md) shows one real change file by file. It is wrong the day a file it
-// names moves, so this fails when a recipe names a path that is gone, or when AGENTS.md does not
-// list a recipe.
-
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 

@@ -4,9 +4,10 @@ import { Effect, Layer, References } from "effect"
 import { it } from "vitest"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { decodeWikiOrigin } from "../src/wiki/commit.js"
+import { WIKI_ORIGIN_KIND, WIKI_USER_VIA } from "../src/wiki/origin.js"
 import type { OutsideEditCheck } from "../src/wiki/outside-edits.js"
 import { Wiki, wikiLayer } from "../src/wiki/service.js"
-import { locateReplayCopy, runOnReplayCopy } from "../test/fixtures/replay-copy.js"
+import { locateReplayCopy, REPLAY_COPY, runOnReplayCopy } from "../test/fixtures/replay-copy.js"
 
 const report = (title: string, checked: OutsideEditCheck): ReadonlyArray<string> => [
   title,
@@ -35,7 +36,7 @@ const settledCheck = Effect.gen(function* () {
 
 it("checks the copy's Memory folder for changes made outside Arden", async () => {
   const located = locateReplayCopy()
-  if (located.kind === "absent") throw new Error(located.reason)
+  if (located.kind === REPLAY_COPY.absent) throw new Error(located.reason)
   const copy = located.copy
   const roots = {
     workingRoot: join(copy.wiki, "pages"),
@@ -62,7 +63,8 @@ it("checks the copy's Memory folder for changes made outside Arden", async () =>
       const newest = new Map<string, string>()
       for (const commit of yield* repository.history()) {
         const origin = decodeWikiOrigin(commit.origin)
-        if (origin.kind !== "user" || origin.via !== "filesystem") continue
+        if (origin.kind !== WIKI_ORIGIN_KIND.user || origin.via !== WIKI_USER_VIA.filesystem)
+          continue
         for (const change of commit.changes) {
           const version = change.after ?? change.before
           if (version === null || newest.has(version.resourceId)) continue

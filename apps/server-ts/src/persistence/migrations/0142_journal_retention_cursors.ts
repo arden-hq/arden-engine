@@ -1,9 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** Journal retention walks `journal_records` in insertion order behind a
- * cutoff. A cursor remembers where each walk stopped, so a restart resumes;
- * a held run is one whose rows were skipped while it was pinned. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TABLE journal_retention_cursors (
       name TEXT PRIMARY KEY CHECK(length(name) > 0),

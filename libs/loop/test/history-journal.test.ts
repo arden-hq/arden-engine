@@ -10,7 +10,9 @@ it("checkpoints appended history, invalidates the cursor on replacement, and ret
     changes.push({
       kind: change.kind,
       ...(change.kind === "append" ? { start: change.start } : {}),
-      ids: change.messages.map((message) => message.message_id ?? "")
+      ids: change.messages.flatMap((message) =>
+        message.message_id === undefined ? [] : [message.message_id]
+      )
     })
   }
   await history.checkpoint(async (_messages, change) => record(change))

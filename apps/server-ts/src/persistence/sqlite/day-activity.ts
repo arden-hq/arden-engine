@@ -3,7 +3,6 @@ import { DayActivity } from "../automations/day-activity.js"
 import type { PersistenceDeps } from "./deps.js"
 import type { DayTaskEvent, DayItem } from "../automations/day-activity.js"
 
-/** The Task events a day's record keeps. A schedule, a progress note or an edit is not one. */
 const KEPT_TASK_EVENTS = [
   "created",
   "done",
@@ -45,7 +44,6 @@ export const makeDayActivity = ({
         WHERE event.created_at >= ${start} AND event.created_at < ${end}
           AND event.event_type IN ${sql.in(KEPT_TASK_EVENTS)}
         ORDER BY event.created_at, event.event_id`
-      // A mail sent to two connected accounts is stored once for each: keep one.
       const items = yield* sql<{
         readonly item_id: string
         readonly source: string

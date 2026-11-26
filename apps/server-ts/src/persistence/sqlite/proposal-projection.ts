@@ -7,7 +7,7 @@ import type {
 import { Schema } from "effect"
 import { publicSource } from "../work/public.js"
 import type { TaskSourceRecord } from "../work/task-record.js"
-import type { ProposalRow } from "./task-proposals.js"
+import type { ProposalRow } from "./task-proposal-support.js"
 
 export const SignalSnapshotSchema = Schema.Struct({
   source: Schema.NonEmptyString,

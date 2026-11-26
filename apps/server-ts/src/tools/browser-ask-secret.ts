@@ -83,7 +83,6 @@ const secretCard = (input: AskSecretInput): ServerApprovalPrompt => {
   }
 }
 
-/** The origin of a tab in a browser_tabs answer, or undefined when the tab is not there. */
 export const tabOriginOf = (output: BrowserOutput, tabRef: string): string | undefined => {
   const tabs = output.data?.["tabs"]
   if (!Array.isArray(tabs)) return undefined
@@ -101,7 +100,6 @@ const savedNames = (output: BrowserOutput): ReadonlyArray<string> => {
   return Array.isArray(names) ? names.filter((name) => typeof name === "string") : []
 }
 
-/** The user name saved with a secret: not secret, so the agent may type it into the form. */
 const savedUserName = (output: BrowserOutput, name: string): string | undefined => {
   const users = output.data?.["users"]
   if (typeof users !== "object" || users === null || Array.isArray(users)) return undefined
@@ -230,7 +228,6 @@ const makeBrowserAskSecretTool = (
   })
 }
 
-/** What the agent reads once a password is saved: the user name (not secret), never the value. */
 const savedSecretResult = (
   input: Pick<AskSecretInput, "origin" | "name">,
   userName: string | undefined

@@ -4,16 +4,9 @@ import { failedToolResult, PauseRequested, ToolExecutionError } from "@arden-hq/
 import type { ToolResult } from "@arden-hq/loop"
 import { Cause, Effect, Result, Semaphore } from "effect"
 import { ChatEventStore } from "../persistence/events/store.js"
-import { toolFailure, toolRefusal } from "../tools/tool-failure.js"
+import { toolRefusal } from "../tools/tool-failure.js"
 import type { CommittedEventBatch, EventDraft } from "../persistence/events/model.js"
-import {
-  ChatAgentSpawnError,
-  ChatWriteConflictError,
-  ChatWriteError,
-  ChatWriteStore,
-  type ChatWriteResume,
-  type ChatWriteSpawnAgentInput
-} from "../persistence/chat/store.js"
+import { ChatWriteStore, type ChatWriteResume } from "../persistence/chat/store.js"
 import {
   TOOL_MUTATION_STALLED,
   TOOL_OUTCOME_UNCERTAIN,
@@ -34,6 +27,7 @@ import type { HeldBackground } from "./held-background.js"
 import { RecordedToolPause } from "../execution/recorded-tool-pause.js"
 import { taskDirectionReview } from "../persistence/work/task-direction.js"
 import { toolOutputEvent, toolProgressEvent, toolWaitingEvent } from "./tool-events.js"
+import { spawnFailure, spawnInput, toolIdentity } from "./tool-request-mapping.js"
 
 export interface ToolHost {
   readonly lifecycle: Semaphore.Semaphore
@@ -470,81 +464,4 @@ export const advanceEventSequence = (
   committed: CommittedEventBatch
 ): void => {
   run.eventSequence.value = Math.max(run.eventSequence.value ?? 0, committed.headSequence)
-}
-
-const toolIdentity = (
-  run: Pick<ToolRun, "runId" | "sessionId">,
-  request: ChatRunnerToolRequest
-): ToolExecutionIdentity => ({
-  runId: run.runId,
-  sessionId: run.sessionId,
-  toolCallId: request.toolCallId,
-  toolName: request.name,
-  arguments: request.args,
-  changesState: request.changesState,
-  ...(request.effect === undefined ? {} : { effect: request.effect }),
-  ...(request.source === undefined ? {} : { source: request.source })
-})
-
-const spawnInput = (
-  run: Pick<ToolRun, "runId" | "sessionId">,
-  request: ChatRunnerSpawnAgentRequest
-): ChatWriteSpawnAgentInput => {
-  const parent: ToolExecutionIdentity = {
-    runId: run.runId,
-    sessionId: run.sessionId,
-    toolCallId: request.toolCallId,
-    toolName: "spawn_agent",
-    arguments: request.arguments,
-    changesState: true,
-    effect: "arden_db"
-  }
-  const base = {
-    parent,
-    task: request.task,
-    ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
-    ...(request.taskItemId === undefined ? {} : { taskItemId: request.taskItemId }),
-    ...(request.model === undefined ? {} : { model: request.model }),
-    ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
-    ...(request.defaultModel === undefined ? {} : { defaultModel: request.defaultModel }),
-    ...(request.name === undefined ? {} : { name: request.name }),
-    ...(request.forkHistory === undefined ? {} : { forkHistory: request.forkHistory })
-  }
-  return request.mode === "code"
-    ? {
-        ...base,
-        mode: "code",
-        workspace: request.workspace,
-        ...(request.requestedWorkingDirectory === undefined
-          ? {}
-          : { requestedWorkingDirectory: request.requestedWorkingDirectory })
-      }
-    : { ...base, mode: request.mode }
-}
-
-const spawnFailure = (cause: unknown): ToolExecutionError => {
-  if (cause instanceof ChatAgentSpawnError) {
-    return new ToolExecutionError(cause.message, {
-      preview: spawnErrorPreview(cause.reason),
-      retryable: cause.retryable
-    })
-  }
-  if (cause instanceof ChatWriteError) return toolFailure(cause, "Agent was not started")
-  if (cause instanceof ChatWriteConflictError)
-    return toolRefusal(cause.message, "Agent was not started")
-  return new ToolExecutionError("The agent Session could not be started", {
-    preview: "Agent was not started",
-    retryable: true
-  })
-}
-
-const spawnErrorPreview = (reason: ChatAgentSpawnError["reason"]): string => {
-  switch (reason) {
-    case "max_depth":
-      return "Agent depth limit reached"
-    case "invalid_parent":
-      return "Agent was not started"
-    case "working_directory":
-      return "Working directory required"
-  }
 }

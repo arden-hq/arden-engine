@@ -8,7 +8,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import type { PersistenceDeps } from "./deps.js"
-import { settleTypedHereInTransaction } from "./focus-choices.js"
+import { settleTypedHereInTransaction } from "./focus-thread-events.js"
 import { answerChatTaskQuestionByTypingInTransaction } from "./task-typed-answer.js"
 
 interface TypedInput {

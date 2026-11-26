@@ -1,11 +1,5 @@
 import type { Migration } from "./index.js"
 
-/**
- * Calendar changes are now fetched as items, with their cursor in
- * `connection_cursors`. Each cursor the old trigger producer kept in
- * `monitor_state` moves there, so a change made since its last poll is still
- * fetched; a calendar without one starts from a baseline.
- */
 export const calendarChangesCursor: Migration = {
   version: 172,
   name: "calendar_changes_cursor",

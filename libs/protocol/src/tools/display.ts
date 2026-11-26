@@ -1,48 +1,65 @@
 import { Schema } from "effect"
 
-/**
- * Each fact the desktop branches on to show a tool's calls, as a closed set of
- * values. A tool declares its facts once, in its server metadata (`display`);
- * the desktop reads them from the tool catalog and never compares tool names.
- */
+export const TOOL_DISPLAY_MAIL = {
+  send: "send",
+  reply: "reply",
+  forward: "forward",
+  draft: "draft"
+} as const
+
+export const TOOL_DISPLAY_CARD = {
+  command: "command",
+  fileChange: "file_change",
+  siteGrant: "site_grant",
+  siteSecret: "site_secret",
+  vaultKeyUse: "vault_key_use",
+  vaultKeyAsk: "vault_key_ask",
+  vaultCardPay: "vault_card_pay",
+  vaultCardFrame: "vault_card_frame",
+  pagePatch: "page_patch",
+  automation: "automation",
+  calendar: "calendar"
+} as const
+
+export const TOOL_DISPLAY_RESULT = {
+  appliedEdit: "applied_edit",
+  automationCreated: "automation_created",
+  savedArtifact: "saved_artifact",
+  chatSent: "chat_sent",
+  toolList: "tool_list"
+} as const
+
+export const TOOL_DISPLAY_REFRESH = { automations: "automations", terminals: "terminals" } as const
+
+export const TOOL_DISPLAY_ROW = {
+  code: "code",
+  webSites: "web_sites",
+  chatRead: "chat_read",
+  skill: "skill",
+  report: "report",
+  blocked: "blocked"
+} as const
+
+export const TOOL_DISPLAY_TRAIL = { hidden: "hidden", plan: "plan" } as const
+
+export const TOOL_DISPLAY_APP = { tour: "tour" } as const
+
+export type ToolDisplayMail = (typeof TOOL_DISPLAY_MAIL)[keyof typeof TOOL_DISPLAY_MAIL]
+export type ToolDisplayCard = (typeof TOOL_DISPLAY_CARD)[keyof typeof TOOL_DISPLAY_CARD]
+export type ToolDisplayResult = (typeof TOOL_DISPLAY_RESULT)[keyof typeof TOOL_DISPLAY_RESULT]
+export type ToolDisplayRefresh = (typeof TOOL_DISPLAY_REFRESH)[keyof typeof TOOL_DISPLAY_REFRESH]
+export type ToolDisplayRow = (typeof TOOL_DISPLAY_ROW)[keyof typeof TOOL_DISPLAY_ROW]
+export type ToolDisplayTrail = (typeof TOOL_DISPLAY_TRAIL)[keyof typeof TOOL_DISPLAY_TRAIL]
+export type ToolDisplayApp = (typeof TOOL_DISPLAY_APP)[keyof typeof TOOL_DISPLAY_APP]
+
 export const TOOL_DISPLAY_FACTS = {
-  /** A Gmail message the call writes: its card is the mail panel, its result
-   *  may carry a send receipt or a saved draft, and the draft's account comes
-   *  from `account_ref` ("send") or the replied-to `message_ref` ("reply"). */
-  mail: ["send", "reply", "forward", "draft"],
-  /** The approval card's own shape: a shell command, a file write with its
-   *  patch, a site's standing grant, a sign-in secret, a saved key's use or a
-   *  missing key's ask, a payment with a saved card or a card for a payment
-   *  frame Arden does not know, a Memory page patch read as words, or a new
-   *  automation's editable fields. */
-  card: [
-    "command",
-    "file_change",
-    "site_grant",
-    "site_secret",
-    "vault_key_use",
-    "vault_key_ask",
-    "vault_card_pay",
-    "vault_card_frame",
-    "page_patch",
-    "automation",
-    "calendar"
-  ],
-  /** What its result carries beside its row: an applied file edit, the
-   *  automation it created, the artifact file it saved, the chat a message
-   *  went to, or a list of tool ids said as names. */
-  result: ["applied_edit", "automation_created", "saved_artifact", "chat_sent", "tool_list"],
-  /** What else a live result changes, read again after it: the Automation
-   *  list, or the commands left running in the chat. */
-  refresh: ["automations", "terminals"],
-  /** How its row reads: a script's card, a web search's sites, the chat a
-   *  read names, the Skill it loads, a report that may say it is blocked, or
-   *  a blocker report of its own. */
-  row: ["code", "web_sites", "chat_read", "skill", "report", "blocked"],
-  /** Kept out of the trail: drawn nowhere, or as the Plan card. */
-  trail: ["hidden", "plan"],
-  /** What the desktop app itself does once the call completes: start the tour. */
-  app: ["tour"]
+  mail: Object.values(TOOL_DISPLAY_MAIL),
+  card: Object.values(TOOL_DISPLAY_CARD),
+  result: Object.values(TOOL_DISPLAY_RESULT),
+  refresh: Object.values(TOOL_DISPLAY_REFRESH),
+  row: Object.values(TOOL_DISPLAY_ROW),
+  trail: Object.values(TOOL_DISPLAY_TRAIL),
+  app: Object.values(TOOL_DISPLAY_APP)
 } as const
 
 type Facts = typeof TOOL_DISPLAY_FACTS
@@ -61,12 +78,12 @@ export const toolDisplayFact = <Fact extends keyof Facts>(
     (each): each is Extract<ToolDisplayFact, { readonly fact: Fact }> => each.fact === fact
   )?.value
 
-const APP_ONLY_CARDS = [
-  "site_secret",
-  "vault_key_ask",
-  "vault_card_pay",
-  "vault_card_frame"
-] as const satisfies ReadonlyArray<Facts["card"][number]>
+const APP_ONLY_CARDS: ReadonlyArray<ToolDisplayCard> = [
+  TOOL_DISPLAY_CARD.siteSecret,
+  TOOL_DISPLAY_CARD.vaultKeyAsk,
+  TOOL_DISPLAY_CARD.vaultCardPay,
+  TOOL_DISPLAY_CARD.vaultCardFrame
+]
 
 export const grantedOnlyInTheApp = (display: ToolDisplay | undefined): boolean => {
   const card = toolDisplayFact(display, "card")
@@ -110,12 +127,6 @@ export const toToolDisplay = (
   wire: Schema.Schema.Type<typeof ToolDisplayWireSchema>
 ): ToolDisplay => wire.filter(isKnownFact)
 
-/**
- * The facts a server that predates `display` held for its tools, frozen as
- * they were. Only the catalog decoder reads it, for such a server's catalog,
- * and the desktop until its first catalog arrives. Never add to it: a new
- * fact or tool is declared on the tool.
- */
 export const LEGACY_TOOL_DISPLAY: Readonly<Record<string, ToolDisplay>> = {
   email_send: [{ fact: "mail", value: "send" }],
   email_reply: [{ fact: "mail", value: "reply" }],

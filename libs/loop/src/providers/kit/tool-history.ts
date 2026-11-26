@@ -1,46 +1,19 @@
-/**
- * The tool-call ordering every function-calling wire requires: each runtime
- * call is answered by its output before the conversation goes on. Stored
- * history does not always hold that order (background results, steering and
- * current context arrive while calls are pending; a crash leaves a call
- * unanswered), so each adapter converts its messages into wire items in
- * batches and this one algorithm orders them.
- */
-
-/** Wire items converted from one stored message, in order. */
 export interface ToolHistoryBatch<Item> {
   readonly items: ReadonlyArray<Item>
-  /**
-   * Context and steering: held back while calls are pending and sent right
-   * after their outputs. Any other batch closes pending calls first.
-   */
   readonly deferWhileCallsPending: boolean
 }
 
-/** How one wire names calls and outputs; ids are raw and checked here. */
 export interface ToolHistoryWire<Item> {
-  /** Names the history in failures: "Stored <name> contains duplicate function call <id>". */
   readonly name: string
-  /** The runtime calls an item opens; `async` calls may be answered after the response ends. */
   readonly calls: (item: Item) => ReadonlyArray<{ readonly id: unknown; readonly async: boolean }>
-  /** The raw id of the call an item answers, or undefined for an item that answers none. */
   readonly answers: (item: Item) => { readonly id: unknown } | undefined
-  /** The output sent for a call whose output was never recorded. */
   readonly missingOutput: (callId: string) => Item
-  /** The adapter's failure for malformed stored history. */
   readonly fail: (message: string) => Error
 }
 
-/** The output text for a call the stored history never answered. */
 export const MISSING_TOOL_OUTPUT =
   "Tool output was not recorded. The call may have been interrupted; check its effects before retrying."
 
-/**
- * Orders the batches so every call is followed by its output: deferred
- * batches wait for pending outputs, an output recorded later than an
- * interruption moves up to it, and a call never answered gets
- * `missingOutput`. Duplicate calls and outputs without a call are failures.
- */
 export function orderToolHistory<Item>(
   batches: ReadonlyArray<ToolHistoryBatch<Item>>,
   wire: ToolHistoryWire<Item>
@@ -54,7 +27,6 @@ export function orderToolHistory<Item>(
   const orphan = (id: string): Error =>
     wire.fail(`Stored ${wire.name} contains output without matching function call ${id}`)
 
-  // The recorded output of each call occurrence, keyed by the item that opened it.
   const outputs = new Map<Item, Map<string, Item>>()
   const outstanding = new Map<string, Item>()
   for (const batch of batches) {

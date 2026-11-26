@@ -44,22 +44,10 @@ export const PersistedToolResultSchema = Schema.Struct({
 
 export type PersistedToolResult = (typeof PersistedToolResultSchema)["Type"]
 
-/**
- * A result whose JSON is larger than this is kept whole as a managed object
- * owned by its chat, and `tool_calls.result_json` holds a slim row in the same
- * shape. Rows up to 16 KB (three in four, measured) stay as they are; the rows
- * above it hold two thirds of the stored text.
- */
 export const STORED_RESULT_INLINE_BYTES = 16 * 1024
 const CONTENT_HEAD_BYTES = 4 * 1024
 const INLINE_FIELD_BYTES = 2 * 1024
 
-/**
- * Data fields a slim row keeps whatever their size: the ones SQL reads in
- * place from `result_json` (keep this list in step with those queries; the
- * slim-row test reads each of them), and `change_evidence`, which is projected
- * when the row is written and so is not part of the stored object.
- */
 const INLINE_DATA_FIELDS: ReadonlySet<string> = new Set([
   "applied_change",
   "attachment_id",
@@ -80,9 +68,7 @@ const StoredResultMarkerSchema = Schema.Struct({
   ref: Schema.String,
   sha256: Schema.String,
   bytes: Schema.Int,
-  /** Characters in the whole `content`, as SQLite's length() counts them. */
   content_chars: Schema.Int,
-  /** Fields left out of the slim row, such as `data.text` or `message_extras`. */
   omitted: Schema.Array(Schema.String)
 })
 
@@ -108,11 +94,6 @@ interface ResultObject {
   readonly bytes: number
 }
 
-/**
- * The text kept as the managed object: the whole result with sorted keys, so
- * equal results have one digest. `change_evidence` is left out because it is
- * projected inside the writing transaction, after the object is published.
- */
 const resultObject = (result: PersistedToolResult): ResultObject => {
   const text = engineOrderedJson(withoutChangeEvidence(result))
   return { text, sha256: sha256Hex(text), bytes: Buffer.byteLength(text, "utf8") }
@@ -125,12 +106,6 @@ export const withoutChangeEvidence = (result: PersistedToolResult): PersistedToo
   return { ...rest, ...(Object.keys(data).length === 0 ? {} : { data }) }
 }
 
-/**
- * Publishes the whole result as a managed object when it is over the inline
- * limit. Runs before the transaction that writes the row, so the object exists
- * before the row that names it commits. Returns undefined when the row stays
- * whole.
- */
 export const publishLargeToolResult = Effect.fn("ToolResultStorage.publish")(function* (
   call: { readonly sessionId: string; readonly toolName: string; readonly toolCallId: string },
   result: PersistedToolResult
@@ -150,11 +125,6 @@ export const publishLargeToolResult = Effect.fn("ToolResultStorage.publish")(fun
   })
 })
 
-/**
- * The `result_json` to write for `result`. Slim only when `published` is the
- * object of this very result; any other result is written whole, so a row
- * never names an object that does not hold it.
- */
 export const storedResultJson = (
   result: PersistedToolResult,
   published: ManagedObjectDescriptor | undefined
@@ -214,7 +184,6 @@ const slimResult = (
 const fits = (value: unknown): boolean =>
   Buffer.byteLength(JSON.stringify(value), "utf8") <= INLINE_FIELD_BYTES
 
-/** The longest prefix of whole characters within `maxBytes` of UTF-8. */
 const head = (text: string, maxBytes: number): string => {
   if (Buffer.byteLength(text, "utf8") <= maxBytes) return text
   let bytes = 0
@@ -227,7 +196,6 @@ const head = (text: string, maxBytes: number): string => {
   return text.slice(0, end)
 }
 
-/** Code points, as SQLite's length() counts a text value. */
 const characters = (text: string): number => {
   let pairs = 0
   for (let index = 1; index < text.length; index += 1) {
@@ -238,18 +206,11 @@ const characters = (text: string): number => {
   return text.length - pairs
 }
 
-/** The digest of a slim row's whole result, without reading the object; undefined for a whole row. */
 export const storedResultDigest = (json: string): string | undefined =>
   Option.getOrUndefined(decodeMarker(json))?.stored_result.sha256
 
-/** The digest `result` would be stored under. */
 export const resultDigest = (result: PersistedToolResult): string => resultObject(result).sha256
 
-/**
- * The whole result a `result_json` row holds: the row itself, or, for a slim
- * row, the object it names (verified against its digest) with the row's
- * `change_evidence`.
- */
 export const loadFullResult = Effect.fn("ToolResultStorage.loadFull")(function* (
   json: string
 ): Effect.fn.Return<PersistedToolResult, StoredToolResultError> {
@@ -312,18 +273,9 @@ const withTaggedComputerStep = (result: PersistedToolResult): PersistedToolResul
   return isComputerStep(computer) ? { ...result, data: { ...data, computer } } : result
 }
 
-/**
- * SQL for the stored row when it left fields out, else NULL: readers select it
- * beside their projection and load the object only for those rows.
- */
 export const OMITTING_ROW_SQL = `CASE WHEN json_array_length(result_json, '$.stored_result.omitted') > 0
   THEN result_json END`
 
-/**
- * `projected` with the whole result's `data` and `host` when `omitting` (a row
- * selected by `OMITTING_ROW_SQL`) left fields out; otherwise as it is, with no
- * object read.
- */
 export const withWholeDataAndHost = <
   A extends { readonly data?: JsonObject | null; readonly host?: JsonObject }
 >(
@@ -340,10 +292,6 @@ export const withWholeDataAndHost = <
         }))
       )
 
-/**
- * The whole result as JSON text, for readers that parse `result_json`
- * themselves. A row without the marker is returned as it is, unchecked.
- */
 export const fullResultJson = (json: string): Effect.Effect<string, StoredToolResultError> =>
   Option.isNone(decodeMarker(json))
     ? Effect.succeed(json)

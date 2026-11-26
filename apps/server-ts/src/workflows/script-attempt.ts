@@ -29,12 +29,9 @@ import type {
   ScriptAgentRequest,
   ScriptHost
 } from "./runtime/contract.js"
-import {
-  executeScript,
-  type ScriptOptions,
-  type ScriptOutcome,
-  type ScriptProgress
-} from "./runtime/script-runtime.js"
+import { executeScript } from "./runtime/script-runtime.js"
+import { type ScriptOptions } from "./runtime/script-run.js"
+import type { ScriptOutcome, ScriptProgress } from "./runtime/script-outcome.js"
 
 export interface AdoptedScript {
   readonly adopt: (input: {

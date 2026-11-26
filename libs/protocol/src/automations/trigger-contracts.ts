@@ -1,39 +1,39 @@
 import type { JsonValue } from "../common/json.js"
 import type { AutomationCondition } from "./contracts.js"
-import type { AutomationEventType } from "./triggers.js"
+import { AUTOMATION_EVENT_TYPE, type AutomationEventType } from "./triggers.js"
 
 export type TriggerDays =
-  | { readonly kind: "every_day" }
-  | { readonly kind: "days"; readonly days: string }
+  | { readonly kind: typeof TRIGGER_STATE.every_day }
+  | { readonly kind: typeof TRIGGER_STATE.days; readonly days: string }
 
 export type IntervalWindow =
-  | { readonly kind: "all_day" }
-  | { readonly kind: "from"; readonly start: string }
-  | { readonly kind: "until"; readonly end: string }
-  | { readonly kind: "between"; readonly start: string; readonly end: string }
+  | { readonly kind: typeof TRIGGER_STATE.all_day }
+  | { readonly kind: typeof TRIGGER_STATE.from; readonly start: string }
+  | { readonly kind: typeof TRIGGER_STATE.until; readonly end: string }
+  | { readonly kind: typeof TRIGGER_STATE.between; readonly start: string; readonly end: string }
 
 export type TimeTriggerSchedule =
-  | { readonly kind: "next"; readonly at: string }
-  | { readonly kind: "once"; readonly at: string; readonly on: string }
-  | { readonly kind: "daily"; readonly at: string; readonly days: string }
+  | { readonly kind: typeof TRIGGER_STATE.next; readonly at: string }
+  | { readonly kind: typeof TRIGGER_STATE.once; readonly at: string; readonly on: string }
+  | { readonly kind: typeof TRIGGER_STATE.daily; readonly at: string; readonly days: string }
   | {
-      readonly kind: "interval"
+      readonly kind: typeof TRIGGER_STATE.interval
       readonly every: string
       readonly days: TriggerDays
       readonly window: IntervalWindow
     }
 
 export type EventLead =
-  | { readonly kind: "default" }
-  | { readonly kind: "minutes"; readonly minutes: number }
+  | { readonly kind: typeof TRIGGER_STATE.default }
+  | { readonly kind: typeof TRIGGER_STATE.minutes; readonly minutes: number }
 
 export type RunOnlyIf =
-  | { readonly kind: "any_event" }
-  | { readonly kind: "sentence"; readonly sentence: string }
+  | { readonly kind: typeof TRIGGER_STATE.any_event }
+  | { readonly kind: typeof TRIGGER_STATE.sentence; readonly sentence: string }
 
 export type OldEventCondition =
-  | { readonly kind: "none" }
-  | { readonly kind: "old"; readonly condition: AutomationCondition }
+  | { readonly kind: typeof TRIGGER_STATE.none }
+  | { readonly kind: typeof TRIGGER_STATE.old; readonly condition: AutomationCondition }
 
 export interface McpEventSelector {
   readonly server: string
@@ -41,9 +41,11 @@ export interface McpEventSelector {
   readonly arguments: Readonly<Record<string, JsonValue>>
 }
 
-export type KeptField = { readonly kind: "kept" }
+export type KeptField = { readonly kind: typeof TRIGGER_STATE.kept }
 
-export type McpEventChoice = KeptField | ({ readonly kind: "chosen" } & McpEventSelector)
+export type McpEventChoice =
+  | KeptField
+  | ({ readonly kind: typeof TRIGGER_STATE.chosen } & McpEventSelector)
 
 export const TRIGGER_TYPE = {
   time: "time",
@@ -75,22 +77,22 @@ export const TRIGGER_STATE = {
 
 export const TRIGGER_INPUT = { new: "new", edit: "edit" } as const
 
-export const LEAD_EVENT = "event_approaching"
-export const APP_EVENT = "mcp.event"
+export const LEAD_EVENT = AUTOMATION_EVENT_TYPE.event_approaching
+export const APP_EVENT = AUTOMATION_EVENT_TYPE.mcp_event
 export type PlainEventType = Exclude<AutomationEventType, typeof LEAD_EVENT | typeof APP_EVENT>
 
 type EventOf<Filter, Lead, App> =
   | ({
-      readonly type: "event"
+      readonly type: typeof TRIGGER_TYPE.event
       readonly event_type: typeof LEAD_EVENT
       readonly lead: Lead
     } & Filter)
   | ({
-      readonly type: "event"
+      readonly type: typeof TRIGGER_TYPE.event
       readonly event_type: typeof APP_EVENT
       readonly mcp_event: App
     } & Filter)
-  | ({ readonly type: "event"; readonly event_type: PlainEventType } & Filter)
+  | ({ readonly type: typeof TRIGGER_TYPE.event; readonly event_type: PlainEventType } & Filter)
 
 type EventFilters = {
   readonly run_only_if: RunOnlyIf
@@ -102,10 +104,19 @@ type EventFilterEdits = {
   readonly condition: OldEventCondition | KeptField
 }
 
-export type TimeTriggerSpec = { readonly type: "time"; readonly schedule: TimeTriggerSchedule }
+export type TimeTriggerSpec = {
+  readonly type: typeof TRIGGER_TYPE.time
+  readonly schedule: TimeTriggerSchedule
+}
 export type EventTriggerSpec = EventOf<EventFilters, EventLead, McpEventSelector>
-export type IdleTriggerSpec = { readonly type: "idle"; readonly idle_minutes: number }
-export type CountTriggerSpec = { readonly type: "count"; readonly every_n: number }
+export type IdleTriggerSpec = {
+  readonly type: typeof TRIGGER_TYPE.idle
+  readonly idle_minutes: number
+}
+export type CountTriggerSpec = {
+  readonly type: typeof TRIGGER_TYPE.count
+  readonly every_n: number
+}
 
 export type AutomationTriggerSpec =
   | TimeTriggerSpec
@@ -135,5 +146,9 @@ export type AutomationTrigger =
   | CountAutomationTrigger
 
 export type AutomationTriggerInput =
-  | { readonly kind: "new"; readonly trigger: AutomationTriggerSpec }
-  | { readonly kind: "edit"; readonly id: string; readonly trigger: AutomationTriggerEdit }
+  | { readonly kind: typeof TRIGGER_INPUT.new; readonly trigger: AutomationTriggerSpec }
+  | {
+      readonly kind: typeof TRIGGER_INPUT.edit
+      readonly id: string
+      readonly trigger: AutomationTriggerEdit
+    }

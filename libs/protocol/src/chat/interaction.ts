@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, type InteractionKind } from "@arden-hq/std/message-vocabulary"
 import { Schema } from "effect"
 
 import {
@@ -5,6 +6,7 @@ import {
   INTERACTION_KINDS,
   INTERACTION_OUTCOMES,
   INTERACTION_PREVIEW,
+  INTERACTION_REFERENCE,
   INTERACTION_SOURCES,
   SENDER_ADDRESS,
   SENDER_CAUSE,
@@ -30,7 +32,7 @@ export const InteractionRecipientSchema = Schema.Struct({
 })
 
 export const InteractionReferenceSchema = Schema.Struct({
-  type: Schema.Literals(["message", "run", "tool_call", "workflow"] as const),
+  type: Schema.Literals(Object.values(INTERACTION_REFERENCE)),
   id: Schema.NonEmptyString
 })
 
@@ -59,13 +61,14 @@ const senderFields = {
 }
 
 const kinds = INTERACTION_KINDS.filter(
-  (kind): kind is Exclude<(typeof INTERACTION_KINDS)[number], "completion"> => kind !== "completion"
+  (kind): kind is Exclude<InteractionKind, typeof INTERACTION_KIND.completion> =>
+    kind !== INTERACTION_KIND.completion
 )
 
 export const interactionSenderFields = [
   { kind: Schema.Literals(kinds), ...senderFields },
   {
-    kind: Schema.Literal("completion"),
+    kind: Schema.Literal(INTERACTION_KIND.completion),
     outcome: Schema.Literals(INTERACTION_OUTCOMES),
     ...senderFields
   }

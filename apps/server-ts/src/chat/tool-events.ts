@@ -3,7 +3,7 @@ import { isRecord } from "@arden-hq/std/json"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import {
   chatDecoders,
-  DEFAULT_TOOL_KIND,
+  toolKindOf,
   GMAIL_SEND,
   TOOL_DATA,
   TOOL_EXECUTION,
@@ -76,7 +76,7 @@ const toolFace = (event: ToolStarted): ToolFace => {
       title === undefined
         ? { kind: TOOL_TITLE.untitled }
         : { kind: TOOL_TITLE.titled, text: title },
-    kind: stringField(event.host.kind) ?? DEFAULT_TOOL_KIND,
+    kind: toolKindOf(event.host.kind),
     icon: icon === undefined ? { kind: TOOL_ICON.plain } : { kind: TOOL_ICON.icon, name: icon },
     noun: noun === undefined ? { kind: TOOL_NOUN.unnamed } : { kind: TOOL_NOUN.noun, text: noun },
     source:
@@ -118,7 +118,7 @@ export const toolResultEvent = (event: ToolCompleted): ToolEvent<"TOOL_CALL_RESU
   content: event.result,
   preview: event.preview,
   display_name: stringField(event.host.display_name) ?? event.name,
-  kind: stringField(event.host.kind) ?? DEFAULT_TOOL_KIND,
+  kind: toolKindOf(event.host.kind),
   is_error: event.is_error,
   retry: toolRetry(event.retryable),
   duration_ms: event.duration_ms,

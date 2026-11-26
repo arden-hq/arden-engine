@@ -2,7 +2,7 @@ import { Effect } from "effect"
 
 import { WikiEmbeddingIndex } from "../../embedding/wiki-index.js"
 import type { AutomationTriggerEvent } from "../../persistence/automations/model.js"
-import type { WikiCommitSource } from "../../wiki/commit.js"
+import type { WikiCommitSource } from "../../wiki/origin.js"
 import { Wiki } from "../../wiki/service.js"
 import type { AutomationEventProducer } from "../event-producer.js"
 

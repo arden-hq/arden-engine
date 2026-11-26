@@ -1,9 +1,9 @@
 import { Schema } from "effect"
-import type { AutomationRunsResponse } from "./contracts.js"
+import { AUTOMATION_CONTEXT_MODE, type AutomationRunsResponse } from "./contracts.js"
 import { IsoDateTimeStringSchema, PositiveIntSchema, withExtras } from "../common/schema.js"
-import { AUTOMATION_EVENT_TYPES } from "./triggers.js"
+import { AUTOMATION_EVENT_TYPE } from "./triggers.js"
 
-const AutomationEventTypeSchema = Schema.Literals(AUTOMATION_EVENT_TYPES)
+const AutomationEventTypeSchema = Schema.Literals(Object.values(AUTOMATION_EVENT_TYPE))
 
 const QueryLimitSchema = Schema.Union([Schema.Number, Schema.NumberFromString]).check(
   Schema.isInt(),
@@ -77,10 +77,12 @@ export const AutomationRunOutputSchema = Schema.Union([
   })
 ]).pipe(Schema.toTaggedUnion("kind"))
 
+export const AutomationContextModeSchema = Schema.Literals(Object.values(AUTOMATION_CONTEXT_MODE))
+
 const automationRunFields = {
   id: PositiveIntSchema,
   task_id: Schema.NonEmptyString,
-  context_mode: Schema.Literals(["fresh", "continue", "fork"] as const),
+  context_mode: AutomationContextModeSchema,
   started_at: IsoDateTimeStringSchema
 } as const
 

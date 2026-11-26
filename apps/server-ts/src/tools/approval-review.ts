@@ -1,39 +1,42 @@
 import { after } from "@arden-hq/std/timer"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText, foldSpace } from "@arden-hq/std/text"
-import { errorMessage, redactedFailureText } from "@arden-hq/std/errors"
 import {
   MAX_REVIEW_BYTES,
   type TrustedAuthority,
   type TrustedAuthorityReader
 } from "./approval-review-authority.js"
-import {
-  providerErrorCode,
-  type ChatMessage,
-  type CompletionResponse,
-  type ProviderErrorCode,
-  type ToolApprovalPrompt
-} from "@arden-hq/loop"
+import { type ChatMessage, type ToolApprovalPrompt } from "@arden-hq/loop"
 import type { ApprovalReviewSource } from "../models/provider.js"
 import type { ApprovalPresentationDraft } from "../persistence/tools/approval-draft.js"
-import { Effect, Schema } from "effect"
-import { STRUCTURED_OUTPUT_DIALECTS } from "../models/structured-output.js"
+import { Effect } from "effect"
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { AskReason } from "../execution/decide.js"
-import type { OutwardCategory } from "../execution/impact.js"
 import type { WordsRule } from "../execution/rules.js"
 import { RULE_DECISION_WORD } from "@arden-hq/protocol/permissions"
 import {
   judgeAssessment,
   reviewBreakerTripped,
   withKnownCategory,
+  type OutwardCategory,
   type ReviewAssessment,
-  type ReviewAuthorizationSource,
   type ReviewEnding
 } from "../execution/review.js"
 import type { ApprovalReviewRecord } from "../persistence/permissions/approval-policy.js"
 import type { ServerRunContext } from "./run-context.js"
 import { describeUiTarget, splitUiTarget } from "./ui-target.js"
+import {
+  RULE_WORDS_MAX,
+  VerdictSchema,
+  guardianSchema,
+  type AuthorityShown,
+  sourceOf,
+  ruleOf,
+  guardUnavailable,
+  GuardUnanswered,
+  causeChain,
+  guardianAssessment
+} from "./approval-review-guardian.js"
 
 export interface ApprovalReviewInput {
   readonly run: ServerRunContext
@@ -61,125 +64,6 @@ export type ApprovalReviewVerdict =
   | { readonly verdict: "ask"; readonly why: ApprovalReviewAsk }
 
 export type ApprovalReview = (input: ApprovalReviewInput) => Promise<ApprovalReviewVerdict>
-
-const RULE_WORDS_MAX = 120
-
-const VerdictSchema = Schema.Struct({
-  authorization: Schema.Literals(["high", "medium", "low", "unknown"]),
-  authorization_source: Schema.Literals(["owner", "brief"]),
-  risk: Schema.Literals(["low", "medium", "high", "critical"]),
-  policy_category: Schema.Literals(["none", "external_send", "delete_data", "spend"]),
-  narrowly_scoped: Schema.Boolean,
-  malicious_prompt_injection: Schema.Boolean,
-  reason: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
-  rule: Schema.optional(Schema.String),
-  verdict: Schema.Literals(["allow", "ask"])
-})
-
-const GuardianSchema = Schema.Struct({
-  risk_level: VerdictSchema.fields.risk,
-  user_authorization: VerdictSchema.fields.authorization,
-  authorization_source: Schema.optional(VerdictSchema.fields.authorization_source),
-  policy_category: VerdictSchema.fields.policy_category,
-  narrowly_scoped: Schema.optional(Schema.Boolean),
-  outcome: Schema.Literals(["allow", "deny"]),
-  rationale: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000)),
-  rule: Schema.optional(Schema.String),
-  malicious_prompt_injection: Schema.optional(Schema.Boolean)
-})
-
-const guardianSchema = STRUCTURED_OUTPUT_DIALECTS.openai(
-  Schema.Struct({
-    ...GuardianSchema.fields,
-    authorization_source: VerdictSchema.fields.authorization_source,
-    narrowly_scoped: Schema.Boolean,
-    rule: Schema.String,
-    malicious_prompt_injection: Schema.Boolean
-  })
-).jsonSchema
-
-type AuthorityShown = "owner" | "mixed" | "untrusted"
-
-const sourceOf = (
-  said: ReviewAuthorizationSource | undefined,
-  shown: AuthorityShown
-): ReviewAuthorizationSource => {
-  switch (shown) {
-    case "owner":
-      return "owner"
-    case "untrusted":
-      return "brief"
-    case "mixed":
-      return said ?? "brief"
-  }
-}
-
-const ruleOf = (rule: string | undefined): { readonly rule?: string } => {
-  const words = rule?.replace(/\s+/gu, " ").trim()
-  return words === undefined || words === "" || words.length > RULE_WORDS_MAX ? {} : { rule: words }
-}
-
-const decodeGuardian = Schema.decodeUnknownSync(Schema.fromJsonString(GuardianSchema))
-
-const parseGuardianAssessment = (text: string | null, shown: AuthorityShown): ReviewAssessment => {
-  const full = decodeGuardian(text ?? "", { onExcessProperty: "error" })
-  return {
-    verdict: full.outcome === "allow" ? "allow" : "ask",
-    risk: full.risk_level,
-    authorization: full.user_authorization,
-    authorization_source: sourceOf(full.authorization_source, shown),
-    policy_category: full.policy_category,
-    narrowly_scoped: full.narrowly_scoped ?? false,
-    malicious_prompt_injection: full.malicious_prompt_injection ?? false,
-    rationale: full.rationale,
-    ...ruleOf(full.rule),
-    abbreviated: false
-  }
-}
-
-const GUARD_UNAVAILABLE: ReadonlySet<ProviderErrorCode> = new Set<ProviderErrorCode>([
-  "provider_unavailable",
-  "rate_limited",
-  "provider_auth",
-  "model_unavailable"
-])
-const guardUnavailable = (cause: unknown): boolean => {
-  const code = providerErrorCode(cause)
-  return code !== undefined && GUARD_UNAVAILABLE.has(code)
-}
-
-class GuardUnanswered extends Error {
-  constructor(cause: unknown) {
-    super("The guard model gave no answer", { cause })
-  }
-}
-
-/** Every message down a failure's `cause` chain: a wrapper such as Effect's
- *  UnknownError says only "An error occurred in Effect.tryPromise", and the
- *  provider's own error (its status, its body) is the cause under it. */
-const causeChain = (cause: unknown): string => {
-  const parts: string[] = []
-  for (let at: unknown = cause, depth = 0; at !== undefined && depth < 6; depth += 1) {
-    parts.push(at instanceof Error ? `${at.name}: ${errorMessage(at)}` : errorMessage(at))
-    at = at instanceof Error ? at.cause : undefined
-  }
-  return redactedFailureText(parts.join(" <- "))
-}
-
-const guardianAssessment = async (
-  complete: () => Promise<CompletionResponse>,
-  shown: AuthorityShown
-): Promise<ReviewAssessment> => {
-  const response = await complete()
-  if (
-    response.continuation ||
-    response.finish_reason !== "stop" ||
-    response.message.tool_calls?.length ||
-    response.message.provider_tool_calls?.length
-  )
-    throw new Error("Approval review did not return a final assessment")
-  return parseGuardianAssessment(response.message.content, shown)
-}
 
 const REASON_STYLE = `The person reads your reason on the card. Write it to them, as Arden: one short sentence in plain words, "you" for them, saying what the action does and why it needs their yes ("You asked me to prefill this for your review. This click sends the application."). Name things by what the person sees on the page or screen. Never write "the user", "target", "snapshot", "ref", "@e" or tool names.`
 const RULE_STYLE = `"rule" is always given: the action in a few plain words, at most ${RULE_WORDS_MAX} characters, that the person could say as a standing permission ("delete Lab campaign resources", "rent Modal GPUs for Lab runs"). It says what the action does, never a command name, flag or path unless the person used it, and is as narrow as this action, so allowing it again would not allow more.`

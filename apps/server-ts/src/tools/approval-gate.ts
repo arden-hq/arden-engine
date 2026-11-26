@@ -326,7 +326,6 @@ const withRunReads = (prompt: ToolApprovalPrompt, run: ServerRunContext): ToolAp
   data: { ...prompt.data, [RUN_READS]: run.observations.snapshot() }
 })
 
-/** Only the gate says which rule a card may save: a tool's own data never does. */
 const withToolGrant = (
   prompt: ToolApprovalPrompt,
   subject: RuleSubject | undefined

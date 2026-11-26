@@ -39,37 +39,18 @@ import type {
 import type { ModelDefinition } from "../host.js"
 import { type EndpointFailureReason, failureForStatus } from "./failure.js"
 
-/**
- * The desktop's model servers: what a Check proves about one, and the models
- * and adapters a saved one adds to the model list. Discovery, request shapes
- * and model definitions come from the shared Chat Completions builder
- * (`providers/chat-completions/route.ts`); this file adds only the desktop's
- * rules: models offered only when they call tools and have
- * `CHAT_ENDPOINT_MIN_WINDOW`, ids that never collide with Codex's or another
- * saved server's, a group name per server.
- */
-
-/** Which discovery each service runs. A custom server is asked nothing. */
 const SERVER_OF: Record<ChatEndpointService, ChatCompletionsServer> = {
   "llama.cpp": "llama.cpp",
   openrouter: "openrouter",
   custom: "generic"
 }
 
-/** What names a server's group in the model picker. */
 export interface ChatServerIdentity {
   readonly id: string
   readonly service: ChatEndpointService
   readonly baseUrl: string
 }
 
-/**
- * Each server's group in the model picker, by server id. The name is the
- * service's, or a custom server's host (never "local"); servers that would
- * share a name each add their host. The model host wants one name per
- * provider id, so the id is the server's own, never the service's: two
- * llama.cpp servers are two groups.
- */
 export const chatGroups = (
   servers: ReadonlyArray<ChatServerIdentity>
 ): ReadonlyMap<string, ModelDefinition["provider"]> => {
@@ -94,14 +75,8 @@ export const chatGroups = (
   )
 }
 
-/**
- * The model ids other saved servers offer, each with its server's group
- * name. A chat's stored model id names one server, so none may be offered
- * twice.
- */
 export type TakenModels = ReadonlyMap<string, string>
 
-/** What the person asked to check, with the key already resolved. */
 export type ChatEndpointTarget = (
   | { readonly service: "llama.cpp" }
   | { readonly service: "openrouter" | "custom"; readonly models: ReadonlyArray<string> }
@@ -119,29 +94,10 @@ export type ChatDiscovery =
     }
   | ChatEndpointCheckFailure
 
-/** How long discovery may take: the same as the configured server's start. */
 const DISCOVERY_TIMEOUT_MS = 15_000
-/**
- * How long the Check's one chat request may take. A llama.cpp router loads a
- * model on its first request, which takes seconds for a large GGUF.
- */
-const CHAT_REQUEST_TIMEOUT_MS = 60_000
-/**
- * The Check's answer budget: enough for a model to say a word, little enough
- * to cost nothing. A model that spends it thinking still answers in the
- * format, which is what the request proves.
- */
+const CHECK_CHAT_TIMEOUT_WITH_MODEL_LOAD_MS = 60_000
 const CHECK_OUTPUT_TOKENS = 32
 
-/**
- * Discovery as the Check and the start-up re-probe run it: no chat request.
- * llama.cpp offers every listed model Arden can use, and skips the rest;
- * OpenRouter and a custom server offer every named model, or fail on the
- * first that cannot be offered, since the person asked for each. A custom
- * server reports neither its windows nor whether it calls tools: its models
- * are taken to have `CHAT_ENDPOINT_MIN_WINDOW`, and the Check's chat request
- * declares a tool so a server that refuses tools fails there.
- */
 export const discoverChatEndpoint = async (
   target: ChatEndpointTarget,
   taken: TakenModels
@@ -198,13 +154,6 @@ export type ChatCheck =
     }
   | ChatEndpointCheckFailure
 
-/**
- * Discovery, then one small chat request to the first offered model: it
- * proves the key and the wire format. Only the first, so a Check of several
- * OpenRouter models costs one small request; the others' abilities come from
- * the model list. Thinking is off where the model offers `none`, and the
- * answer is capped at `CHECK_OUTPUT_TOKENS`.
- */
 export const checkChatEndpoint = async (
   target: ChatEndpointTarget,
   {
@@ -230,17 +179,11 @@ export const checkChatEndpoint = async (
   return { ...discovered, ms: Math.round(now() - started) }
 }
 
-/** A saved server's models as the host lists them, and the adapters that serve them. */
 export interface ServerModels {
   readonly provider: ModelProvider
   readonly models: ReadonlyArray<ModelDefinition>
 }
 
-/**
- * A saved server's part of the model list, built from what it last reported:
- * no request is made, so a stopped server keeps its models. `report` hears
- * each request's outcome for the endpoint's health.
- */
 export const serverModels = (input: {
   readonly stored: StoredChatEndpoint
   readonly group: ModelDefinition["provider"]
@@ -273,7 +216,6 @@ type Judged =
   | { readonly kind: "offered"; readonly model: StoredChatModel }
   | { readonly kind: "skipped"; readonly skip: ChatEndpointSkip }
 
-/** The desktop's rules for one discovered model. */
 const judged = (model: DiscoveredModel, taken: TakenModels): Judged => {
   const skip = (detail: ChatEndpointSkip): Judged => ({ kind: "skipped", skip: detail })
   if (isTaken(model.id, taken)) return skip({ id: model.id, reason: "model_taken" })
@@ -296,7 +238,6 @@ const judged = (model: DiscoveredModel, taken: TakenModels): Judged => {
 const isTaken = (modelName: string, taken: TakenModels): boolean =>
   modelName.startsWith(CODEX_MODEL_PREFIX) || taken.has(modelName)
 
-/** The Check's `model_taken` for the first of `ids` that is taken. */
 export const takenFailure = (
   ids: ReadonlyArray<string>,
   taken: TakenModels
@@ -305,10 +246,6 @@ export const takenFailure = (
   return id === undefined ? undefined : skipFailure({ id, reason: "model_taken" }, taken)
 }
 
-/**
- * A listing server works when one model is offered; a named one when every
- * named model is. Otherwise it fails with the first skipped model's reason.
- */
 const offered = (
   entries: ReadonlyArray<Judged>,
   rules: { readonly named: boolean; readonly taken: TakenModels }
@@ -322,11 +259,6 @@ const offered = (
   return skipFailure(first, rules.taken)
 }
 
-/**
- * A re-asked server's answer without the ids another saved server took
- * since: those move to its skipped list as `model_taken`. Undefined when no
- * model is left.
- */
 export const untaken = (
   found: Extract<ChatDiscovery, { readonly result: "works" }>,
   taken: TakenModels
@@ -388,13 +320,11 @@ const skipFailure = (skip: ChatEndpointSkip, taken: TakenModels): ChatEndpointCh
   }
 }
 
-/** A model the server lists but cannot describe or rules out itself. */
 const skipOf = (id: string, failure: DiscoveryFailure): ChatEndpointSkip =>
   failure.reason === "no_tool_calls"
     ? { id, reason: "no_tool_calls" }
     : { id, reason: "wrong_format" }
 
-/** A whole-server discovery failure as the Check states it. */
 const discoveryFailure = (failure: DiscoveryFailure, message: string): ChatEndpointCheckFailure => {
   switch (failure.reason) {
     case "not_llama_cpp":
@@ -434,14 +364,12 @@ const discoveredOf = (model: StoredChatModel): DiscoveredModel => ({
   compat: model.compat
 })
 
-/** The one tool a custom server's Check declares: every Arden request declares tools. */
-const CHECK_TOOL = {
+const TOOL_A_CUSTOM_SERVER_MUST_ACCEPT = {
   name: "noop",
   description: "Does nothing. Do not call it.",
   parameters: { type: "object", properties: {}, additionalProperties: false }
 }
 
-/** Undefined when the model answered; otherwise why the request failed. */
 const askOnce = async (input: {
   readonly provider: ModelProvider
   readonly model: StoredChatModel
@@ -454,13 +382,13 @@ const askOnce = async (input: {
       model: model.id,
       maxOutputTokens: CHECK_OUTPUT_TOKENS,
       ...(model.reasoningEfforts.includes("none") ? { reasoningEffort: "none" } : {}),
-      tools: input.declareTool ? [CHECK_TOOL] : [],
+      tools: input.declareTool ? [TOOL_A_CUSTOM_SERVER_MUST_ACCEPT] : [],
       deferredTools: [],
       toolChoice: input.declareTool ? ToolChoice.AUTO : ToolChoice.NONE,
       renderInteraction: () => {
         throw new Error("The Check has no interactions")
       },
-      signal: AbortSignal.timeout(CHAT_REQUEST_TIMEOUT_MS)
+      signal: AbortSignal.timeout(CHECK_CHAT_TIMEOUT_WITH_MODEL_LOAD_MS)
     }))
       if (item._tag === "Completed") return undefined
     return { result: "wrong_format", message: "The answer ended without a completed response" }
@@ -477,7 +405,6 @@ const requestFailure = (
   switch (code) {
     case "provider_auth":
       return { result: "key_refused", message }
-    // A server that is not answering, or limiting requests, may work at the next Check.
     case "provider_unavailable":
     case "rate_limited":
       return { result: "unreachable", message }
@@ -491,7 +418,6 @@ const requestFailure = (
   }
 }
 
-/** The health a request's failure says about the server; undefined says nothing. */
 const healthFailure = (code: ProviderErrorCode | undefined): EndpointFailureReason | undefined => {
   switch (code) {
     case "provider_auth":
@@ -508,11 +434,6 @@ const healthFailure = (code: ProviderErrorCode | undefined): EndpointFailureReas
   }
 }
 
-/**
- * The server's adapters, reporting each request's outcome: a completed
- * answer says it works again, a refused key or a server that does not answer
- * marks it failing (as search and decision endpoints are marked).
- */
 const observed = (
   provider: ModelProvider,
   report: (failure: EndpointFailureReason | undefined) => void

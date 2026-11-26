@@ -13,7 +13,6 @@ interface AgentLimits {
   readonly maxToolCalls?: number
   readonly maxWallTimeMs?: number
   readonly maxCost?: number
-  /** Consecutive all-error steps before stopping. Zero disables this limit. */
   readonly maxNoProgressSteps: number
 }
 
@@ -21,31 +20,14 @@ const defaultAgentLimits: AgentLimits = {
   maxNoProgressSteps: 0
 }
 
-/** Input accepted by `validateAgentConfig`; limit fields are flattened for Agent callers. */
 export interface AgentConfigInput extends Partial<AgentLimits> {
   readonly model: string
   readonly maxOutputTokens?: number
   readonly toolChoice?: ToolChoice
   readonly reasoningEffort?: string
-  /**
-   * Stable identity of the conversation a request extends — one value for a
-   * whole agent tree. Each provider maps it to its own prompt-cache mechanism
-   * (OpenAI: `prompt_cache_key`); the host never deals in cache details.
-   */
   readonly cacheScope?: string
   readonly maxToolConcurrency?: number
-  /**
-   * How long the next model request waits for background calls just launched,
-   * so a quick one delivers its result in that request instead of a running
-   * receipt and one more request. Zero disables the wait. Defaults to 1000.
-   */
   readonly backgroundGraceMs?: number
-  /**
-   * Execution time after which a call still running moves to the background:
-   * the model gets a receipt and the result arrives later. Counted from when
-   * the call's effect begins. Defaults to 10000; Infinity keeps every call in
-   * the foreground.
-   */
   readonly foregroundBudgetMs?: number
   readonly modelRequestMiddlewares?: ReadonlyArray<ModelRequestMiddleware>
   readonly toolCallMiddlewares?: ReadonlyArray<ToolCallMiddleware>
@@ -53,7 +35,6 @@ export interface AgentConfigInput extends Partial<AgentLimits> {
   readonly mintMessageId?: MessageIdMinter
 }
 
-/** Immutable, validated configuration consumed by the Agent state machine. */
 export interface AgentConfig extends AgentLimits {
   readonly model: string
   readonly maxOutputTokens?: number

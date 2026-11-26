@@ -72,6 +72,11 @@ const prepare = (lease: Lease) =>
     )
   })
 
+const childOf = (result: Effect.Success<ReturnType<typeof prepare>>): string => {
+  if (result.kind === "prepared" && result.sessionId !== undefined) return result.sessionId
+  throw new Error("The review was not given a child chat")
+}
+
 const editByHand = (itemId: string, text: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -93,10 +98,11 @@ const runnerCase = Effect.gen(function* () {
   yield* editByHand(task.item_id, "Edited by hand")
   const first = (yield* claim("first", 10)).find((lease) => lease.payload.automationId === REVIEW)
   if (first === undefined) throw new Error("The review was not claimed")
-  const trunk = first.payload.sessionId ?? ""
+  const trunk = first.payload.sessionId
+  if (trunk === null) throw new Error("The review has no trunk chat")
   const prepared = yield* prepare(first)
   const preparedAgain = yield* prepare(first)
-  const child = prepared.kind === "prepared" ? (prepared.sessionId ?? "") : ""
+  const child = childOf(prepared)
   const forgedId = "forged-child"
   yield* sql`INSERT INTO sessions (session_id, public_ref, name, started_at, last_activity,
         session_type, origin_automation_id, parent_session_id, space_id)
@@ -153,7 +159,7 @@ const runnerCase = Effect.gen(function* () {
   if (second === undefined) throw new Error("The second change did not wake the review")
   const stale = yield* startIn(second, child, "stale-child")
   const preparedSecond = yield* prepare(second)
-  const secondChild = preparedSecond.kind === "prepared" ? (preparedSecond.sessionId ?? "") : ""
+  const secondChild = childOf(preparedSecond)
   const startedSecond = yield* startIn(second, secondChild, "review-2")
   return {
     prepared:
@@ -168,7 +174,7 @@ const runnerCase = Effect.gen(function* () {
     attemptPinnedToChild:
       attempt?.chat_session_id === child && attempt?.chat_run_id === started.runId,
     stale: stale.kind,
-    secondChild: secondChild !== "" && secondChild !== child && secondChild !== trunk,
+    secondChild: secondChild !== child && secondChild !== trunk,
     sameTrunk: second.payload.sessionId === trunk,
     startedSecond: startedSecond.kind,
     children: (yield* sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM sessions

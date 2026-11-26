@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Deferred, Effect, Fiber, Layer, Ref, Schedule, Schema, Scope, Stream } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import type * as Sse from "effect/unstable/encoding/Sse"
+import type { Event as SseEvent } from "effect/unstable/encoding/Sse"
 import { describe, expect, it } from "vitest"
 
 import { automationRulesLayer } from "../src/automations/rules.js"
@@ -128,7 +128,7 @@ const SnapshotData = Schema.fromJsonString(
   })
 )
 
-const parse = (event: Sse.Event): Seen | undefined => {
+const parse = (event: SseEvent): Seen | undefined => {
   switch (event.event) {
     case "stream_live":
     case "stream_keepalive":

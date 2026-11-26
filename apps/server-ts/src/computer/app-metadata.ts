@@ -16,7 +16,6 @@ const decode = Schema.decodeUnknownSync(
     ])
   )
 )
-// NSRunningApplication reads identity without Apple Events or app activation.
 const script = `ObjC.import('AppKit');function run(args){var app=$.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(args[0]));if(app.isNil())return JSON.stringify({kind:'unidentified'});var icon=$.NSImage.alloc.initWithSize($.NSMakeSize(32,32));icon.lockFocus;app.icon.drawInRectFromRectOperationFraction($.NSMakeRect(0,0,32,32),$.NSZeroRect,$.NSCompositingOperationCopy,1);icon.unlockFocus;var rep=$.NSBitmapImageRep.imageRepWithData(icon.TIFFRepresentation);var data=rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG,$({}));return JSON.stringify({kind:'identified',name:ObjC.unwrap(app.localizedName),icon:'data:image/png;base64,'+ObjC.unwrap(data.base64EncodedStringWithOptions(0))});}`
 
 export async function nativeAppMetadata({

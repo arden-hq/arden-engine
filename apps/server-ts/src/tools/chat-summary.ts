@@ -20,8 +20,6 @@ const ParametersSchema = Schema.Struct({
     description:
       '"summary" saves the fields below. "nothing_to_recall" means the chat holds nothing worth coming back to (a quick one-off question, a greeting, a test); nothing is saved and any earlier summary stays.'
   }),
-  // Each description sits on the string, not on a custom filter: the JSON
-  // Schema a model sees drops a filter together with its annotations.
   title: Schema.optionalKey(
     Schema.String.annotate({
       description:

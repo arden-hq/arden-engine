@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import {
   IsoDateTimeStringSchema,
   PlannedTodoStatusSchema,
@@ -15,7 +15,7 @@ import {
   type TodoLifecycleResponse
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const TodoContentSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))
 
 const explanationSchema = <Text extends Schema.Top>(text: Text) =>

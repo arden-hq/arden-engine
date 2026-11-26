@@ -38,12 +38,6 @@ export const RunProgressSchema = Schema.Struct({
 })
 export type RunProgress = typeof RunProgressSchema.Type
 
-/**
- * Events after which a cached `RunProgress` for their Session is stale: a Run
- * started or ended, or its active tools changed. Every terminal event is a
- * member (finished, failed, cancelled): the server's run record is the truth,
- * so a failed Run must not keep showing the progress it had before it failed.
- */
 export const RUN_PROGRESS_EVENT_TYPES: ReadonlySet<string> = eventTypeLiterals([
   ToolCallStartEventSchema,
   ToolCallEndEventSchema,

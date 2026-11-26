@@ -52,7 +52,10 @@ const macKeys = macSessionKeys({
   phoneStaticPublic: SP.publicKey,
   phoneEphemeralPublic: eP.publicKey
 })
-if (toHex(keys.p2m) !== toHex(macKeys.p2m) || toHex(keys.m2p) !== toHex(macKeys.m2p)) {
+if (
+  toHex(keys.phoneToMac) !== toHex(macKeys.phoneToMac) ||
+  toHex(keys.macToPhone) !== toHex(macKeys.macToPhone)
+) {
   throw new Error("phone and Mac derived different session keys")
 }
 
@@ -166,8 +169,8 @@ const vectors = {
     dh_SP_eM: toHex(dh3),
     salt: toHex(salt),
     okm: toHex(okm),
-    k_p2m: toHex(keys.p2m),
-    k_m2p: toHex(keys.m2p)
+    k_p2m: toHex(keys.phoneToMac),
+    k_m2p: toHex(keys.macToPhone)
   },
   frames: {
     phone_dev: phone,

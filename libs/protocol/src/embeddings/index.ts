@@ -23,11 +23,10 @@ export const embeddingRequests = {
   )
 } as const
 
-/** Every route answers with the embedding index status. */
 export const embeddingRoutes = {
   status: "/embeddings/status",
   model: "/embeddings/model",
   pause: "/embeddings/pause",
   resume: "/embeddings/resume",
   cancel: "/embeddings/cancel"
-} as const
+}

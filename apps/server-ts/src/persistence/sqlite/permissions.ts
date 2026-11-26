@@ -1,3 +1,4 @@
+import { PERMISSION_RULE_SUBJECT, PERMISSION_RULE_LIST } from "@arden-hq/protocol/permissions"
 import { Effect, Option, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/unstable/sql"
 
@@ -22,12 +23,13 @@ import {
 } from "../permissions/rules.js"
 import { RuleSavedInSchema, type RuleSavedIn } from "@arden-hq/protocol/effect/runs"
 import type { StandingRuleList } from "@arden-hq/protocol/chat"
-import { runAuthorityState, type RunAuthorityState } from "./run-context.js"
+import { RUN_AUTHORITY_STATE, runAuthorityState, type RunAuthorityState } from "./run-context.js"
 import { storedAuthority } from "./run-authority.js"
 import { ownRuleList } from "../../execution/rules.js"
 import { allowsSave, saveAllowsInTransaction } from "./permission-rules.js"
 import type { PersistenceDeps } from "./deps.js"
 import {
+  PERMISSION_CHANGE,
   allowSubjects,
   changeJson,
   commandSubjects,
@@ -39,7 +41,7 @@ import {
 type StandingPrincipal = `space:${string}` | "global" | "system"
 
 const principalOf = (list: RuleList): StandingPrincipal =>
-  list.kind === "space" ? `space:${list.spaceId}` : list.kind
+  list.kind === PERMISSION_RULE_LIST.space ? `space:${list.spaceId}` : list.kind
 
 export interface ApprovalPermissionContext {
   readonly principal: StandingPrincipal
@@ -61,15 +63,15 @@ export const cardRuleList = (input: {
   const { now, picked } = input
   if (now === undefined) return undefined
   if (input.asked === LEGACY_COMMAND_PRINCIPAL)
-    return picked === "space" ? undefined : { kind: "global" }
+    return picked === PERMISSION_RULE_LIST.space ? undefined : { kind: "global" }
   if (input.asked !== principalOf(now)) return undefined
   switch (now.kind) {
-    case "space":
-      return picked === "global" ? { kind: "global" } : now
-    case "global":
-      return picked === "space" ? undefined : now
-    case "system":
-      if (picked === "global") return { kind: "global" }
+    case PERMISSION_RULE_LIST.space:
+      return picked === PERMISSION_RULE_LIST.global ? { kind: "global" } : now
+    case PERMISSION_RULE_LIST.global:
+      return picked === PERMISSION_RULE_LIST.space ? undefined : now
+    case PERMISSION_RULE_LIST.system:
+      if (picked === PERMISSION_RULE_LIST.global) return { kind: "global" }
       return picked === undefined ? now : undefined
   }
 }
@@ -89,7 +91,7 @@ export const savedIn = Effect.fn("SqlitePermissionStore.savedIn")(function* (
   sql: SqlClient.SqlClient,
   list: RuleList
 ): Effect.fn.Return<RuleSavedIn, PermissionStoreError> {
-  const spaceId = list.kind === "space" ? list.spaceId : null
+  const spaceId = list.kind === PERMISSION_RULE_LIST.space ? list.spaceId : null
   const rows = yield* sql<{ readonly saved_in: string }>`
     SELECT ${ruleSavedInSql(sql, { kind: sql`${list.kind}`, spaceId: sql`${spaceId}` })} AS saved_in
   `.pipe(Effect.mapError(storage("run_grants", "Could not read the Space's name")))
@@ -135,7 +137,7 @@ const runRuleHome = Effect.fn("SqlitePermissionStore.runRuleHome")(function* (
     WHERE run.run_id = ${runId}
   `.pipe(Effect.mapError(storage("run_grants", "Could not read the run's Space")))
   const row = rows[0]
-  if (row === undefined || row.authority !== "active") return undefined
+  if (row === undefined || row.authority !== RUN_AUTHORITY_STATE.active) return undefined
   const authority = storedAuthority(row.authority_json)
   if (authority === undefined) return undefined
   return { list: ownRuleList(authority) ?? { kind: "global" }, spaceName: row.space_name ?? "" }
@@ -205,10 +207,11 @@ export const approvalPermissionContext = Effect.fn(
   if (home === undefined) return null
   const updatedAt = serverName === undefined ? null : yield* connectorUpdatedAt(sql, serverName)
   if (updatedAt === undefined) return null
-  // "Always allow" on a key's card means that key in this Space, never everywhere.
-  const ownOnly = subjects.every((subject) => subject.kind === "vault_key")
+  const ownOnly = subjects.every((subject) => subject.kind === PERMISSION_RULE_SUBJECT.vaultKey)
   const lists: ReadonlyArray<RuleList> =
-    home.list.kind === "global" || ownOnly ? [home.list] : [home.list, { kind: "global" }]
+    home.list.kind === PERMISSION_RULE_LIST.global || ownOnly
+      ? [home.list]
+      : [home.list, { kind: "global" }]
   const places: RuleSavedIn[] = []
   for (const list of lists) {
     const saves = yield* allowsSave(sql, { subjects, list }).pipe(
@@ -250,7 +253,7 @@ export const makePermissionStore = ({
     if (home === undefined) return null
     return {
       shared:
-        home.list.kind === "space"
+        home.list.kind === PERMISSION_RULE_LIST.space
           ? { kind: "space", principal: principalOf(home.list), name: home.spaceName }
           : null
     }
@@ -267,8 +270,11 @@ export const makePermissionStore = ({
     runId: string,
     change: PermissionChange
   ): Effect.fn.Return<OfferHistory, PermissionStoreError> {
-    const toolName = change.kind === "tool" || change.kind === "site" ? change.tool : null
-    const origin = change.kind === "site" ? change.origin : null
+    const toolName =
+      change.kind === PERMISSION_CHANGE.tool || change.kind === PERMISSION_CHANGE.site
+        ? change.tool
+        : null
+    const origin = change.kind === PERMISSION_CHANGE.site ? change.origin : null
     const rows = yield* sql<{
       readonly approvals: number
       readonly offer: OfferHistory["offer"] | null

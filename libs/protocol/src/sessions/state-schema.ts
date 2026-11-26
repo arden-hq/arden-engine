@@ -1,13 +1,23 @@
 import { Schema } from "effect"
 import { LINK } from "../common/links.js"
 import {
+  SESSION_EXECUTION_LABEL,
+  SESSION_OWNER,
+  SESSION_PRESENTATION,
+  SESSION_PRESENTATION_ROLE
+} from "./presentation.js"
+import {
   IsoDateTimeStringSchema,
   NonNegativeIntSchema,
   RuntimeRunStatusSchema,
   SessionTypeSchema,
   withExtras
 } from "../common/schema.js"
-import { SESSION_TRIAGE_STATE, type SessionTriageDecision } from "./contracts.js"
+import {
+  SESSION_TRIAGE_DECISION,
+  SESSION_TRIAGE_STATE,
+  type SessionTriageDecision
+} from "./contracts.js"
 import {
   ACTIVITY_TEXT,
   AGENT_WORKSPACE,
@@ -119,24 +129,22 @@ const SessionRunSchema = Schema.Union([
 
 export const SessionPresentationSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("conversation"),
-    role: Schema.Literals(["space", "topic"])
+    kind: Schema.Literal(SESSION_PRESENTATION.conversation),
+    role: Schema.Literals(Object.values(SESSION_PRESENTATION_ROLE))
   }),
   Schema.Struct({
-    kind: Schema.Literal("execution"),
-    label: Schema.Literals([
-      "Space review",
-      "Task worker",
-      "Agent",
-      "Side chat",
-      "Automation",
-      "System"
-    ]),
+    kind: Schema.Literal(SESSION_PRESENTATION.execution),
+    label: Schema.Literals(Object.values(SESSION_EXECUTION_LABEL)),
     title: Schema.NonEmptyString,
     owner: Schema.Union([
-      tagged("none"),
+      tagged(SESSION_OWNER.none),
       Schema.Struct({
-        kind: Schema.Literals(["space", "task", "automation", "session"]),
+        kind: Schema.Literals([
+          SESSION_OWNER.space,
+          SESSION_OWNER.task,
+          SESSION_OWNER.automation,
+          SESSION_OWNER.session
+        ]),
         id: Schema.NonEmptyString,
         name: Schema.NonEmptyString
       })
@@ -151,25 +159,25 @@ const SessionTriageTargetSchema = Schema.Struct({
 
 export const SessionTriageDecisionSchema: Schema.Codec<SessionTriageDecision> = Schema.Union([
   Schema.Struct({
-    decision: Schema.Literal("move"),
+    decision: Schema.Literal(SESSION_TRIAGE_DECISION.move),
     target: SessionTriageTargetSchema,
     new_title: Schema.Null,
     rationale: Schema.String
   }),
   Schema.Struct({
-    decision: Schema.Literal("create"),
+    decision: Schema.Literal(SESSION_TRIAGE_DECISION.create),
     target: Schema.Null,
     new_title: Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
     rationale: Schema.String
   }),
   Schema.Struct({
-    decision: Schema.Literal("none"),
+    decision: Schema.Literal(SESSION_TRIAGE_DECISION.none),
     target: Schema.Null,
     new_title: Schema.Null,
     rationale: Schema.String
   }),
   Schema.Struct({
-    decision: Schema.Literal("moved"),
+    decision: Schema.Literal(SESSION_TRIAGE_DECISION.moved),
     target: SessionTriageTargetSchema,
     new_title: Schema.Null,
     rationale: Schema.String

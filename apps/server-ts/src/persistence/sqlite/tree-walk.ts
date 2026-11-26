@@ -30,9 +30,6 @@ export const delegatedLinkSql = (sql: SqlClient.SqlClient): Statement.Statement<
   WHERE delegating_run.run_id = child.parent_run_id
     AND delegating_run.session_id = child.parent_session_id)`
 
-// The descendant steps and runAncestors use CROSS JOIN: SQLite then keeps the
-// written order, rows walked so far first. With a plain JOIN it is free to
-// start from `sessions` or `chat_runs` and read all of it for every step.
 interface Step {
   readonly id: "session_id" | "run_id"
   readonly next: string
@@ -49,8 +46,6 @@ const steps = {
   sessionAncestors: {
     id: "session_id",
     next: "parent.session_id",
-    // Left as a plain JOIN: released migrations and triggers carry this text
-    // (sessionAncestorsText), and both lookups are by primary key.
     join: `JOIN sessions AS child ON child.session_id = walk.session_id
       JOIN sessions AS parent ON parent.session_id = child.parent_session_id`
   },

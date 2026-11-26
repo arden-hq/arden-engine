@@ -2,28 +2,17 @@ import { stripChangeEvidence } from "../tools/change-evidence.js"
 import { descendantCalls, detachedWorkflowCalls } from "./detached-workflow-calls.js"
 import { withChangeEvidence, refreshChangeEvidence } from "./change-evidence.js"
 import type { ToolResult } from "@arden-hq/loop"
-import { DateTime, Effect } from "effect"
+import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { UnitOfWork } from "../unit-of-work.js"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
-import {
-  ToolExecutionStoreError,
-  UNCERTAIN_TOOL_RESULT,
-  type ToolExecutionIdentity,
-  type ToolExecutionOutcome
-} from "../tools/store.js"
-import {
-  attachMutationReceipt,
-  ensureMutationReceipt,
-  makeMutationReceipt
-} from "../tools/mutation-receipt.js"
+import { ToolExecutionStoreError, type ToolExecutionIdentity } from "../tools/store.js"
+import { attachMutationReceipt, ensureMutationReceipt } from "../tools/mutation-receipt.js"
 import { decodeJson, encodeJson } from "./json.js"
 import {
   type ToolOperation,
-  type ValidToolExecutionIdentity,
   type ChatRunRow,
   type UpdatedToolRow,
-  type LoadedToolRow,
   resultEquivalent,
   canonicalToolArguments,
   toolError,
@@ -113,7 +102,6 @@ export const settleToolExecutionInTransaction = Effect.fn(
   inputResult: ToolResult,
   endedAt: string,
   options: {
-    /** The result's object, published before this transaction (`publishLargeToolResult`). */
     readonly published?: ManagedObjectDescriptor | undefined
   } = {}
 ): Effect.fn.Return<ToolResult, ToolExecutionStoreError> {
@@ -140,7 +128,6 @@ export const settleToolExecutionInTransaction = Effect.fn(
   )
   const current = yield* requireRow(sql, identity, "complete")
   if (current.status === "completed") {
-    // A retry of a slim row with the same whole result matches by digest, without reading it.
     const sameDigest =
       current.row.result_json !== null &&
       storedResultDigest(current.row.result_json) === resultDigest(result)
@@ -230,231 +217,6 @@ export const settleToolExecutionInTransaction = Effect.fn(
   return result
 })
 
-export const settleUncertainRow = Effect.fn("SqliteToolExecutionStore.settleUncertainRow")(
-  function* (
-    sql: SqlClient.SqlClient,
-    identity: ValidToolExecutionIdentity,
-    operation: "uncertain" | "recover",
-    current: LoadedToolRow
-  ): Effect.fn.Return<ToolExecutionOutcome, ToolExecutionStoreError> {
-    const result = uncertainToolResult(identity)
-    if (current.status === "completed") {
-      const stored = yield* decodeStoredResult(current.row, identity, operation)
-      return {
-        status: "completed",
-        result: yield* refreshChangeEvidence(sql, identity, stored).pipe(
-          Effect.mapError((cause) =>
-            toolError(operation, "storage", "Could not refresh mutation evidence", identity, cause)
-          )
-        )
-      }
-    }
-    if (current.status === "uncertain") {
-      const stored = yield* decodeStoredResult(current.row, identity, operation)
-      if (!resultEquivalent(withoutChangeEvidence(stored), withoutChangeEvidence(result))) {
-        return yield* toolError(
-          operation,
-          "corrupt",
-          "Stored uncertain result is invalid",
-          identity
-        )
-      }
-      return {
-        status: "uncertain",
-        result: yield* refreshChangeEvidence(sql, identity, stored).pipe(
-          Effect.mapError((cause) =>
-            toolError(operation, "storage", "Could not refresh mutation evidence", identity, cause)
-          )
-        )
-      }
-    }
-    if (current.status === "paused") {
-      return yield* toolError(
-        operation,
-        "blocked",
-        "Paused tool execution requires an approval decision",
-        identity
-      )
-    }
-    if (current.status === "ready") {
-      return yield* toolError(
-        operation,
-        "blocked",
-        "Approved tool execution is waiting to resume",
-        identity
-      )
-    }
-
-    const resultJson = yield* uncertainResultJson(operation, identity)
-    const endedAt = DateTime.formatIso(yield* DateTime.now)
-    const updated = yield* sql<UpdatedToolRow>`
-    UPDATE tool_calls
-    SET status = 'uncertain', result_json = ${resultJson}, ended_at = ${endedAt}
-    WHERE run_id = ${identity.runId} AND tool_call_id = ${identity.toolCallId}
-      AND status = 'running'
-    RETURNING status
-  `.pipe(
-      Effect.mapError((cause) =>
-        toolError(
-          operation,
-          "storage",
-          "Could not record uncertain tool execution",
-          identity,
-          cause
-        )
-      )
-    )
-    if (updated.length !== 1) {
-      return yield* toolError(
-        operation,
-        "conflict",
-        "Tool execution changed before uncertainty was recorded",
-        identity
-      )
-    }
-    return {
-      status: "uncertain",
-      result: yield* refreshChangeEvidence(sql, identity, result).pipe(
-        Effect.mapError((cause) =>
-          toolError(operation, "storage", "Could not refresh mutation evidence", identity, cause)
-        )
-      )
-    }
-  }
-)
-
-type UncertainToolIdentity = Pick<ToolExecutionIdentity, "runId" | "toolCallId" | "changesState">
-
-const uncertainToolResult = (identity?: UncertainToolIdentity): PersistedToolResult =>
-  identity?.changesState === true
-    ? {
-        ...UNCERTAIN_TOOL_RESULT,
-        host: {
-          mutation_receipt: makeMutationReceipt({
-            identity,
-            outcome: "unconfirmed",
-            resource: { kind: "none" }
-          })
-        }
-      }
-    : UNCERTAIN_TOOL_RESULT
-
-const uncertainResultJson = (operation: ToolOperation, identity?: UncertainToolIdentity) =>
-  storedResultJson(uncertainToolResult(identity), undefined).pipe(
-    Effect.mapError((cause) =>
-      toolError(operation, "corrupt", "Uncertain tool result is invalid", undefined, cause)
-    )
-  )
-
-const writeMutationUncertaintyReceipts = Effect.fn(
-  "SqliteToolExecutionStore.writeMutationUncertaintyReceipts"
-)(function* (
-  sql: SqlClient.SqlClient,
-  runId: string,
-  rows: ReadonlyArray<{ readonly tool_call_id: string }>
-): Effect.fn.Return<void, ToolExecutionStoreError> {
-  for (const row of rows) {
-    const identity = { runId, toolCallId: row.tool_call_id, changesState: true }
-    const resultJson = yield* uncertainResultJson("uncertain", identity)
-    const updated = yield* sql<UpdatedToolRow>`
-      UPDATE tool_calls
-      SET result_json = ${resultJson}
-      WHERE run_id = ${runId} AND tool_call_id = ${row.tool_call_id}
-        AND changes_state = 1 AND status = 'uncertain'
-      RETURNING status
-    `.pipe(
-      Effect.mapError((cause) =>
-        toolError(
-          "uncertain",
-          "storage",
-          "Could not record mutation uncertainty receipt",
-          identity,
-          cause
-        )
-      )
-    )
-    if (updated.length !== 1) {
-      return yield* toolError(
-        "uncertain",
-        "conflict",
-        "Mutation execution changed before its uncertainty receipt was recorded",
-        identity
-      )
-    }
-  }
-})
-
-export type RunEnding = "run_ended" | "process_restarted"
-
-const scriptCalls = (
-  sql: SqlClient.SqlClient,
-  runId: string,
-  toolCallIds: ReadonlyArray<string>,
-  ending: RunEnding
-): Effect.Effect<ReadonlySet<string>, ToolExecutionStoreError> =>
-  ending === "process_restarted"
-    ? Effect.succeed(new Set())
-    : detachedWorkflowCalls(sql, runId, toolCallIds).pipe(
-        Effect.mapError((cause) =>
-          toolError(
-            "uncertain",
-            "storage",
-            "Could not read which calls a background script owns",
-            undefined,
-            cause
-          )
-        )
-      )
-
-export const markRunToolExecutionsUncertainInTransaction = Effect.fn(
-  "SqliteToolExecutionStore.markRunToolExecutionsUncertainInTransaction"
-)(function* (
-  sql: SqlClient.SqlClient,
-  runId: string,
-  endedAt: string,
-  ending: RunEnding
-): Effect.fn.Return<void, ToolExecutionStoreError> {
-  const running = yield* sql<{ readonly tool_call_id: string; readonly changes_state: number }>`
-    SELECT tool_call_id, changes_state
-    FROM tool_calls
-    WHERE run_id = ${runId} AND status = 'running'
-  `.pipe(
-    Effect.mapError((cause) =>
-      toolError("uncertain", "storage", "Could not list running tool executions", undefined, cause)
-    )
-  )
-  const scripts = yield* scriptCalls(
-    sql,
-    runId,
-    running.map((row) => row.tool_call_id),
-    ending
-  )
-  const settled = running.filter((row) => !scripts.has(row.tool_call_id))
-  if (settled.length === 0) return
-  const resultJson = yield* uncertainResultJson("uncertain")
-  yield* sql`
-    UPDATE tool_calls
-    SET status = 'uncertain', result_json = ${resultJson}, ended_at = ${endedAt}
-    WHERE run_id = ${runId} AND status = 'running'
-      AND tool_call_id IN ${sql.in(settled.map((row) => row.tool_call_id))}
-  `.pipe(
-    Effect.mapError((cause) =>
-      toolError(
-        "uncertain",
-        "storage",
-        "Could not settle running tool executions",
-        undefined,
-        cause
-      )
-    )
-  )
-  yield* writeMutationUncertaintyReceipts(
-    sql,
-    runId,
-    settled.filter((row) => row.changes_state === 1)
-  )
-})
-
 export const loadSettledRunToolExecutionsInTransaction = Effect.fn(
   "SqliteToolExecutionStore.loadSettledRunToolExecutionsInTransaction"
 )(function* (
@@ -533,10 +295,10 @@ const decodeSettledRunToolRow = Effect.fn("SqliteToolExecutionStore.decodeSettle
   }
 )
 
-export const RUN_END_APPROVAL_FEEDBACK = {
+export const RUN_END_APPROVAL_FEEDBACK: Record<"cancelled" | "ended", string> = {
   cancelled: "The run was cancelled before this was answered",
   ended: "The run ended before this was answered"
-} as const
+}
 
 export const settleUnstartedToolWorkForTerminalInTransaction = Effect.fn(
   "SqliteToolExecutionStore.settleUnstartedToolWorkForTerminalInTransaction"

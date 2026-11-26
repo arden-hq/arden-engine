@@ -6,7 +6,18 @@ import {
 } from "@arden-hq/std/retry"
 import { Option, Schema } from "effect"
 
-import type { GoogleConnectionDiagnostic } from "./errors.js"
+import { GOOGLE_API_ERROR_REASON, type GoogleConnectionDiagnostic } from "./errors.js"
+
+const RETRY_SAFE_METHOD = { GET: "GET", HEAD: "HEAD" } as const
+
+type RetrySafeMethod = (typeof RETRY_SAFE_METHOD)[keyof typeof RETRY_SAFE_METHOD]
+
+const retrySafeMethods: ReadonlySet<string> = new Set<RetrySafeMethod>(
+  Object.values(RETRY_SAFE_METHOD)
+)
+
+export const isRetrySafeMethod = (method: string): method is RetrySafeMethod =>
+  retrySafeMethods.has(method)
 
 export const GOOGLE_API_MAX_ATTEMPTS = 3
 
@@ -55,13 +66,13 @@ export const googleApiErrorMessage = (diagnostic: HttpDiagnostic): string => {
   const retry =
     diagnostic.retryAfterMs === undefined ? "" : ` Retry after ${diagnostic.retryAfterMs} ms.`
   switch (diagnostic.reason) {
-    case "auth":
+    case GOOGLE_API_ERROR_REASON.auth:
       return `Google authorization does not permit this operation (HTTP ${diagnostic.status}).`
-    case "rate_limit":
+    case GOOGLE_API_ERROR_REASON.rateLimit:
       return `Google API rate limit exceeded (HTTP ${diagnostic.status}).${retry}`
-    case "provider":
+    case GOOGLE_API_ERROR_REASON.provider:
       return `Google API is temporarily unavailable (HTTP ${diagnostic.status}).${retry}`
-    case "request":
+    case GOOGLE_API_ERROR_REASON.request:
       return `Google API rejected the request (HTTP ${diagnostic.status}).`
   }
 }

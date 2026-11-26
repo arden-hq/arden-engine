@@ -1,5 +1,10 @@
 import { freshRow } from "./automation-enqueue.js"
-import { HANDLER_TOOL_NAMES } from "../automations/queue.js"
+import {
+  AUTOMATION_FOLLOWUP,
+  HANDLER_TOOL_NAMES,
+  type AutomationFollowup
+} from "../automations/queue.js"
+import { JOB_SUBJECT_KIND } from "../space-job-id.js"
 import { isUserAutomationPurpose, isSpaceWorkJob, type JobPurpose } from "../job-classification.js"
 import { readAutomationFollowup } from "./automation-followup.js"
 import { haltAutomation } from "./automation-halt.js"
@@ -8,17 +13,24 @@ import { answersSchedule, consumeIdleInput } from "./automation-occurrence.js"
 import { quietRunOutcome } from "./run-outcomes.js"
 import { recordAutomationEvent } from "./entity-events.js"
 import { announceNotice } from "./notices.js"
-import { recordEnding, toldOutcomeOf } from "./run-ending.js"
+import { recordEnding } from "./run-ending.js"
+import { toldOutcomeOf } from "./run-ending-said.js"
 import { endAutoResumes, endStreak, pauseOnGivingUp } from "./automation-auto-pause.js"
 import { parseLease } from "./automation-lease.js"
 import { JobLeaseLostError } from "@arden-hq/jobs"
 import { Effect } from "effect"
 import {
+  AUTOMATION_JOB_OUTCOME,
+  AUTOMATION_JOB_STATUS,
   type AutomationJobOutcome,
   type AutomationJobResult,
   type AutomationJobSkip
 } from "../automations/store.js"
-import { ranOutcome, type AutomationRunOutcome } from "@arden-hq/protocol/automations"
+import {
+  ranOutcome,
+  TRIGGER_STATE,
+  type AutomationRunOutcome
+} from "@arden-hq/protocol/automations"
 import { deleteAutomationRow } from "./automation-removal.js"
 import { decodeJson } from "./json.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
@@ -59,17 +71,9 @@ import type { UnitOfWork } from "../unit-of-work.js"
 import type { WorkOwner } from "./automation-owner.js"
 import { JOB_PURPOSE } from "../job-classification.js"
 
-const ENDING = { ended: "ended", skipped: "skipped" } as const
-const SETTLE = { complete: "complete" } as const
-const OWNER_KIND = { automation: "automation", spaceReview: "space_review" } as const
-const TRIGGER_KIND = { once: "once" } as const
-const FOLLOWUP = { stop: "stop" } as const
-const OUTCOME = {
-  failed: "failed",
-  finished: "finished",
-  noChange: "no_change",
-  noInput: "no_input"
-} as const
+const SETTLE = { complete: "complete", fail: "fail", claim: "claim" } as const
+
+type SettleOperation = (typeof SETTLE)[keyof typeof SETTLE]
 
 type FencedDeps = Pick<AutomationStoreDeps, "writer" | "sessionEvents" | "rules">
 
@@ -91,7 +95,7 @@ export interface FencedOccurrences {
   readonly settleFenced: (
     fenced: FencedJob,
     settledAt: number,
-    operation: "complete" | "fail" | "claim",
+    operation: SettleOperation,
     ending: AutomationJobResult | AutomationJobSkip
   ) => Effect.Effect<
     void,
@@ -156,11 +160,11 @@ export const makeFencedOccurrences = ({
   const settleFenced = Effect.fn("SqliteAutomationStore.settleFenced")(function* (
     fenced: Effect.Success<ReturnType<typeof loadFenced>>,
     settledAt: number,
-    operation: "complete" | "fail" | "claim",
+    operation: SettleOperation,
     ending: AutomationJobResult | AutomationJobSkip
   ) {
     const settled =
-      ending.status === ENDING.ended && ending.chatRunId !== null
+      ending.status === AUTOMATION_JOB_STATUS.ended && ending.chatRunId !== null
         ? { runId: ending.chatRunId, sessionId: ending.chatSessionId }
         : {
             runId: fenced.pinned.chatRunId,
@@ -190,7 +194,7 @@ export const makeFencedOccurrences = ({
       chatSessionId: settledSessionId
     }
     const run: EndedAutomationRun =
-      ending.status === ENDING.skipped
+      ending.status === AUTOMATION_JOB_STATUS.skipped
         ? { ...identity, ...skipEnd(ending.skip), error: null, skip: ending.skip }
         : {
             ...identity,
@@ -205,7 +209,7 @@ export const makeFencedOccurrences = ({
     const taskItemId = purpose === JOB_PURPOSE.taskExecution ? fenced.bound.itemId : null
     const internalSpaceJob = isSpaceWorkJob(fenced.bound)
     const definition = isDefinition(fenced.owner) ? fenced.owner : undefined
-    const automation = definition?.kind === OWNER_KIND.automation ? definition : undefined
+    const automation = definition?.kind === JOB_SUBJECT_KIND.automation ? definition : undefined
     const triggers =
       automation === undefined
         ? []
@@ -237,7 +241,7 @@ export const makeFencedOccurrences = ({
           oneShot &&
           triggers.length === schedule.times.length &&
           rules.nextRunAt(
-            { times: schedule.times.filter((time) => time.kind === TRIGGER_KIND.once) },
+            { times: schedule.times.filter((time) => time.kind === TRIGGER_STATE.once) },
             settledAt
           ) === null
       } else {
@@ -249,9 +253,9 @@ export const makeFencedOccurrences = ({
       ? yield* readAutomationFollowup(sql, fenced.parsed.runId, settledRunId)
       : undefined
     if (followup !== undefined) {
-      enabled = followup.action === FOLLOWUP.stop ? 0 : undefined
-      nextRunAt = followup.action === FOLLOWUP.stop ? null : followup.at
-      if (followup.action !== FOLLOWUP.stop)
+      enabled = followup.action === AUTOMATION_FOLLOWUP.stop ? 0 : undefined
+      nextRunAt = followup.action === AUTOMATION_FOLLOWUP.stop ? null : followup.at
+      if (followup.action !== AUTOMATION_FOLLOWUP.stop)
         yield* sql`DELETE FROM automation_event_queue WHERE task_id = ${fenced.queue.task_id}
           AND ${freshRow(sql)} AND source = 'scheduled'`
     }
@@ -271,7 +275,7 @@ export const makeFencedOccurrences = ({
         halt: "stop",
         settlingRunId: settledRunId ?? undefined
       })
-    const counted = ending.status !== ENDING.skipped
+    const counted = ending.status !== AUTOMATION_JOB_STATUS.skipped
     const lastResult = ran ? run.result : run.error
     if (definition !== undefined) {
       const { state } = definition
@@ -300,7 +304,7 @@ export const makeFencedOccurrences = ({
       userAutomation &&
       told !== undefined &&
       settledRunId === null &&
-      outcome === OUTCOME.failed
+      outcome === AUTOMATION_JOB_OUTCOME.failed
     ) {
       yield* recordAutomationEvent(sql, {
         sessionEvents,
@@ -329,7 +333,7 @@ export const makeFencedOccurrences = ({
       })
     }
     const paused =
-      definition !== undefined && outcome === OUTCOME.failed && userAutomation
+      definition !== undefined && outcome === AUTOMATION_JOB_OUTCOME.failed && userAutomation
         ? yield* pauseOnGivingUp({
             sql,
             sessionEvents,
@@ -339,10 +343,13 @@ export const makeFencedOccurrences = ({
           })
         : false
     yield* sql`DELETE FROM automation_event_queue WHERE id = ${fenced.parsed.queueId}`
-    if (fenced.owner?.kind === OWNER_KIND.spaceReview && outcome === OUTCOME.failed)
+    if (
+      fenced.owner?.kind === JOB_SUBJECT_KIND.spaceReview &&
+      outcome === AUTOMATION_JOB_OUTCOME.failed
+    )
       yield* spaceJobs.retryReview(fenced.owner, endedAt)
     yield* consumeIdleInput({ sql, automationId: fenced.queue.task_id, context: fenced.context })
-    if (taskItemId !== null && outcome === OUTCOME.failed) {
+    if (taskItemId !== null && outcome === AUTOMATION_JOB_OUTCOME.failed) {
       yield* spaceJobs.failTask(taskItemId, run.error, endedAt, settledRunId)
     }
     if (internalSpaceJob && settledRunId !== null)
@@ -394,7 +401,7 @@ export const makeFencedOccurrences = ({
             WHERE json_extract(chat.metadata_json, '$.run_context.origin') = json(attempt.origin)`
     const ranModel = (admitted[0]?.count ?? 0) > 0
     const declared = noInput(ending.outcome, ranModel)
-    return declared === OUTCOME.finished && ranModel && admitted[0]?.quiet === 1
+    return declared === AUTOMATION_JOB_OUTCOME.finished && ranModel && admitted[0]?.quiet === 1
       ? "no_change"
       : declared
   })
@@ -406,18 +413,19 @@ const jobDone = (input: {
   readonly purpose: JobPurpose
   readonly enabled: boolean
   readonly outcome: AutomationRunOutcome
-  readonly followup: string | undefined
+  readonly followup: AutomationFollowup["action"] | undefined
   readonly spent: boolean
 }): boolean =>
   isUserAutomationPurpose(input.purpose) &&
   input.enabled &&
-  (input.outcome === OUTCOME.finished || input.outcome === OUTCOME.noChange) &&
-  (input.followup === FOLLOWUP.stop || (input.followup === undefined && input.spent))
+  (input.outcome === AUTOMATION_JOB_OUTCOME.finished ||
+    input.outcome === AUTOMATION_JOB_OUTCOME.no_change) &&
+  (input.followup === AUTOMATION_FOLLOWUP.stop || (input.followup === undefined && input.spent))
 
 const noInput = (
   outcome: AutomationJobOutcome,
   ranModel: boolean
 ): Exclude<AutomationJobOutcome, "no_input"> => {
-  if (outcome !== OUTCOME.noInput) return outcome
+  if (outcome !== AUTOMATION_JOB_OUTCOME.no_input) return outcome
   return ranModel ? "finished" : "no_change"
 }

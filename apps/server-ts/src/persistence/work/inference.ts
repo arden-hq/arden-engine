@@ -1,10 +1,5 @@
 import { type TaskSourceRecord } from "./task-record.js"
 
-/**
- * The version of a Task with no saved history yet: an old Task the history
- * backfill has not reached. Its first saved change makes version 1, so this
- * stops matching as soon as the Task changes.
- */
 export const unsavedTaskRevision = (itemId: string): string => `${itemId}:0`
 
 export interface TaskInferenceReview {
@@ -35,7 +30,6 @@ export interface TaskInferenceReview {
     readonly sources: ReadonlyArray<TaskSourceRecord>
   }>
   readonly rejections: ReadonlyArray<{
-    /** `proposal`: an offer the owner rejected. `expired`: an offer left unanswered. */
     readonly kind: "proposal" | "expired" | "stopped_task"
     readonly item_id: string | null
     readonly proposal_id: string | null

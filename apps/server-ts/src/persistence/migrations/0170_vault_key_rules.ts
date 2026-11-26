@@ -1,12 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/**
- * A permission rule may name one saved key: "Always allow" on a "Use your Todoist key?" card
- * saves `vault_key` with the key's id in the Vault in `key_id` (its name in `key_name`, as the
- * rule shows it), in the run's Space. A CHECK names the
- * subject kinds, so the table is rebuilt; every rule is copied as it was.
- */
 export const VAULT_KEY_RULES_TABLE = `CREATE TABLE permission_rules (
       rule_id TEXT PRIMARY KEY CHECK(length(rule_id) > 0),
       list_kind TEXT NOT NULL CHECK(list_kind IN ('global', 'space', 'system')),
@@ -58,7 +52,6 @@ export const VAULT_KEY_RULES_IDENTITY = `CREATE UNIQUE INDEX idx_permission_rule
       COALESCE(argument_prefix_json, ''), COALESCE(words, ''), COALESCE(origin, ''),
       COALESCE(path, ''), COALESCE(access, ''), COALESCE(key_id, ''))`
 
-/** Dropping the old table drops its history triggers; they come back word for word. */
 const RULE_HISTORY = [
   `CREATE TRIGGER permission_rule_saved AFTER INSERT ON permission_rules BEGIN
       INSERT INTO permission_changes (

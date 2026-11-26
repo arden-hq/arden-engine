@@ -7,9 +7,14 @@ export const FRAME_VERSION = 1
 export const MAX_FRAME_BYTES = 256 * 1024
 export const MAX_HEADER_BYTES = 8 * 1024
 
+export const RELAY_PATH = { health: "/v1/health", connect: "/v1/connect" } as const
+export type RelayPath = (typeof RELAY_PATH)[keyof typeof RELAY_PATH]
+
+export const KEEPALIVE = { ping: "ping", pong: "pong" } as const
+export type Keepalive = (typeof KEEPALIVE)[keyof typeof KEEPALIVE]
+
 export interface DecodedFrame {
   readonly ok: true
-  /** Parsed JSON object with a string `t`; narrow it with parseClientHeader/parseRelayHeader. */
   readonly header: { readonly t: string } & Record<string, unknown>
   readonly headerBytes: Uint8Array
   readonly body: Uint8Array

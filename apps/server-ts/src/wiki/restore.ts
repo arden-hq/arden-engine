@@ -1,15 +1,17 @@
-import type { Commit, ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
-import type { WikiPage, WikiRestoreSide } from "@arden-hq/protocol/wiki"
+import {
+  PATH_SEGMENT,
+  type Commit,
+  type ManagedFileRepositoryShape,
+  RESOURCE_STATE,
+  CHANGE_ACTION
+} from "@arden-hq/revisions/effect"
+import { WIKI_PAGE_LIFECYCLE, type WikiPage, type WikiRestoreSide } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
 import type { WikiLocationAuthority } from "./authority.js"
-import {
-  decodeWikiOrigin,
-  restoreArchivedPage,
-  restoreVersion,
-  type WikiCommitIdentity
-} from "./commit.js"
+import { restoreArchivedPage, restoreVersion } from "./commit.js"
+import { decodeWikiOrigin, type WikiCommitIdentity } from "./origin.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { pageIn, writerOf, type WikiChanges } from "./page-change.js"
 import { isReadme, replacementContent } from "./page.js"
@@ -54,14 +56,10 @@ interface WikiRestoreArchivedInput {
 
 export interface WikiRestoreMethods {
   readonly restore: (input: WikiRestoreInput) => Effect.Effect<WikiPage, WikiError>
-  /** The page text a restore would write, for the owner to review first. It is refused by every
-   *  rule the restore itself would meet. */
   readonly contentToRestore: (input: WikiRestoreContentInput) => Effect.Effect<string, WikiError>
   readonly restoreArchived: (input: WikiRestoreArchivedInput) => Effect.Effect<WikiPage, WikiError>
 }
 
-/** The page text restoring `version` writes over `current`, judged against the page's history
- *  newest first, and whether that text is what the page holds already. */
 export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
   repository: ManagedFileRepositoryShape,
   current: PageRecord,
@@ -71,7 +69,7 @@ export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
   const pageId = current.page.pageId
   const { commitId, side } = version
   const invalid = (message: string) => wikiError("restore", "invalid", message, { pageId })
-  if (side === "before" && current.page.lifecycle !== "active") {
+  if (side === "before" && current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
     return yield* invalid("Only active Memory pages can be restored")
   }
   const selected = pageHistory.find((commit) => commit.commitId === commitId)
@@ -89,7 +87,7 @@ export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
   const change = changes.length === 1 ? changes[0] : undefined
   const resource = yield* Effect.gen(function* () {
     if (side === "after") {
-      if (change?.after?.state !== "active") {
+      if (change?.after?.state !== RESOURCE_STATE.active) {
         return yield* invalid(
           "Selected revision does not contain one active version of this Memory page"
         )
@@ -99,7 +97,11 @@ export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
     if (decodeWikiOrigin(selected.origin).kind !== "upkeep") {
       return yield* invalid("Commit is not a Wiki Maintenance change")
     }
-    if (change?.action !== "update" || change.before === null || change.after === null) {
+    if (
+      change?.action !== CHANGE_ACTION.update ||
+      change.before === null ||
+      change.after === null
+    ) {
       return yield* invalid("Maintenance commit must contain exactly one page update")
     }
     if (
@@ -116,7 +118,7 @@ export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
     return change.before
   })
   const historical = yield* readRecord(repository, "restore", resource, "invalid")
-  if (historical.page.lifecycle !== "active") {
+  if (historical.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
     return yield* invalid("Selected revision is not an active Memory page")
   }
   const content = yield* replacementContent("restore", pageId, historical.page.content)
@@ -165,7 +167,7 @@ export const makeWikiRestoreMethods = (
             .get(input.pageId, { at: snapshot.head })
             .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
           if (resource === null) return yield* notFound("restore", input.pageId)
-          if (resource.state !== "archived") {
+          if (resource.state !== RESOURCE_STATE.archived) {
             return yield* wikiError(
               "restore",
               "invalid",
@@ -182,7 +184,7 @@ export const makeWikiRestoreMethods = (
             })
           }
           const archived = yield* readRecord(repository, "restore", resource)
-          if (archived.page.lifecycle !== "active") {
+          if (archived.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
             return yield* wikiError(
               "restore",
               "invalid",
@@ -192,7 +194,10 @@ export const makeWikiRestoreMethods = (
           }
           const own = posix.dirname(resource.path)
           const directory = isReadme(resource.path) ? posix.dirname(own) : own
-          if (directory !== "." && directoryReadme(snapshot.wholeSet, directory) === undefined) {
+          if (
+            directory !== PATH_SEGMENT.current &&
+            directoryReadme(snapshot.wholeSet, directory) === undefined
+          ) {
             return yield* wikiError(
               "restore",
               "blocked",

@@ -5,8 +5,6 @@ import {
   DELIVERY_MESSAGE_INDEX
 } from "../../migrations/0186_delivery_message_id.js"
 
-/** SQLite splices this column's text into the stored `automation_deliveries` DDL,
- *  so the schema and the communication conversion share one spelling. */
 export const communicationSequenceColumnSql = `ALTER TABLE automation_deliveries ADD COLUMN
       communication_sequence INTEGER CHECK(
         communication_sequence IS NULL OR communication_sequence > 0

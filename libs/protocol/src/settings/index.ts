@@ -29,9 +29,9 @@ export const intelligenceSettingsRequests = {
   )
 } as const
 
-export const intelligenceSettingsRoutes = {
+export const intelligenceSettingsRoutes = Object.freeze({
   settings: "/settings/intelligence"
-} as const
+})
 
 export {
   applyLimitSettingsPatch,
@@ -67,6 +67,6 @@ export const limitSettingsRequests = {
   )
 } as const
 
-export const limitSettingsRoutes = {
+export const limitSettingsRoutes = Object.freeze({
   settings: "/settings/limits"
-} as const
+})

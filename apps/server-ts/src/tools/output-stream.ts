@@ -17,11 +17,6 @@ export interface ToolOutputStream {
   readonly close: () => Promise<void>
 }
 
-/**
- * Longest prefix of `buffer` no longer than `limit` that ends on a complete
- * UTF-8 code point. A split sequence would decode to U+FFFD on both sides of
- * the frame boundary, so the trailing bytes wait for the rest of the sequence.
- */
 const sequenceWidth = (lead: number): number => {
   if (lead < 0x80) return 1
   if (lead < 0xe0) return 2

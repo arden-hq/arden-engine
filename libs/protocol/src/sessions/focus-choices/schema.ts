@@ -2,7 +2,9 @@ import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, withExtras, NonNegativeIntSchema } from "../../common/schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import {
+  FOCUS_CHOICE_DECISION,
   FOCUS_CHOICE_STATUS,
+  FOCUS_CHOICE_TARGET,
   type FocusChoice,
   type ResolveFocusChoiceResponse
 } from "./contracts.js"
@@ -11,17 +13,19 @@ const identity = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(102
 
 const FocusChoiceTargetSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("existing"),
+    kind: Schema.Literal(FOCUS_CHOICE_TARGET.existing),
     session_ref: identity,
     label: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(160))
   }),
   Schema.Struct({
-    kind: Schema.Literal("create"),
+    kind: Schema.Literal(FOCUS_CHOICE_TARGET.create),
     name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(160))
   })
 ])
 
-const DecisionSchema = Schema.Literals(["continue_here", "open_target"] as const)
+export const FocusChoiceDecisionSchema = Schema.Literals(Object.values(FOCUS_CHOICE_DECISION))
+
+export const FocusChoiceStatusSchema = Schema.Literals(Object.values(FOCUS_CHOICE_STATUS))
 
 const focusChoiceFields = {
   choice_id: identity,
@@ -37,7 +41,7 @@ const focusChoiceFields = {
 const SettledFocusChoiceSchema = withExtras({
   ...focusChoiceFields,
   status: Schema.Literal(FOCUS_CHOICE_STATUS.settled),
-  decision: DecisionSchema,
+  decision: FocusChoiceDecisionSchema,
   result_session_ref: identity,
   settled_at: IsoDateTimeStringSchema
 })
@@ -50,7 +54,7 @@ export const FocusChoiceSchema: Schema.Codec<FocusChoice> = Schema.Union([
 export const ResolveFocusChoiceInputSchema = Schema.Struct({
   expected_revision: NonNegativeIntSchema,
   client_id: identity,
-  decision: DecisionSchema
+  decision: FocusChoiceDecisionSchema
 })
 
 export const ResolveFocusChoiceResponseSchema: Schema.Codec<ResolveFocusChoiceResponse> =
@@ -66,9 +70,7 @@ export const ResolveFocusChoiceResponseSchema: Schema.Codec<ResolveFocusChoiceRe
     )
   )
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type FocusChoiceAgrees = Assert<Agrees<typeof FocusChoiceSchema.Type, FocusChoice>>
-/** @internal Compile-time check that the schema and the type agree. */
 export type ResolveFocusChoiceResponseAgrees = Assert<
   Agrees<typeof ResolveFocusChoiceResponseSchema.Type, ResolveFocusChoiceResponse>
 >

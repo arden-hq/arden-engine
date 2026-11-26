@@ -146,8 +146,6 @@ export const renderSpaceContext = (
 const fitInstructions = (instructions: string, room: number): string =>
   cutBytes(instructions, Math.max(0, room), { suffix: INSTRUCTIONS_CUT })
 
-/** How much of the Space's Memory page its context holds; `undefined` when it has no page. */
-/** How much of the Space's page the context holds: characters of its content from the start. */
 export interface SpacePageShown {
   readonly outcome: "whole" | "cut" | "dropped"
   readonly sent: number

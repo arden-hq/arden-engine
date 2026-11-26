@@ -1,8 +1,9 @@
+import { MCP_CONNECTION_STATUS, MCP_OAUTH_START } from "@arden-hq/protocol/mcp"
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js"
 
 import { closeMcpClient } from "./client.js"
-import { McpOAuthCallbacks, McpOAuthProvider } from "./oauth.js"
-import { cancelRetry, type RuntimeEntry } from "./runtime.js"
+import { isAuthorized, McpOAuthCallbacks, McpOAuthProvider } from "./oauth.js"
+import { cancelRetry, type RuntimeEntry } from "./runtime-state.js"
 import type { KeyedSerialQueue } from "./serial.js"
 import {
   assertMcpSignInSetUp,
@@ -19,8 +20,15 @@ interface PendingOAuth {
 }
 
 export type McpAuthorizationStart =
-  | { readonly name: string; readonly status: "connected" | "authorized" }
-  | { readonly name: string; readonly status: "pending"; readonly authorization_url: string }
+  | {
+      readonly name: string
+      readonly status: typeof MCP_OAUTH_START.connected | typeof MCP_OAUTH_START.authorized
+    }
+  | {
+      readonly name: string
+      readonly status: typeof MCP_OAUTH_START.pending
+      readonly authorization_url: string
+    }
 
 export const makeMcpAuthorization = ({
   runtime,
@@ -74,10 +82,16 @@ export const makeMcpAuthorization = ({
       fetchFn: createSameOriginFetch()
     }
     const result = await auth(provider, options)
-    if (result === "AUTHORIZED") {
+    if (isAuthorized(result)) {
       await provider.commitInteractiveAuthorization()
       const connected = await runtime.connectNow(current.config)
-      return { name, status: connected.status === "connected" ? "connected" : "authorized" }
+      return {
+        name,
+        status:
+          connected.status === MCP_CONNECTION_STATUS.connected
+            ? MCP_OAUTH_START.connected
+            : MCP_OAUTH_START.authorized
+      }
     }
     if (authorizationUrl === undefined) throw new Error("MCP sign-in returned no authorization URL")
     const state = await provider.state()
@@ -95,7 +109,7 @@ export const makeMcpAuthorization = ({
           if (pendingOAuth.get(name) !== pending) return
           try {
             const result = await auth(provider, { ...options, authorizationCode: code })
-            if (result !== "AUTHORIZED") throw new Error("MCP sign-in did not authorize Arden")
+            if (!isAuthorized(result)) throw new Error("MCP sign-in did not authorize Arden")
             await provider.commitInteractiveAuthorization()
           } finally {
             await releasePending()

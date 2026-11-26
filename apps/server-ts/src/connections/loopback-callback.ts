@@ -8,6 +8,15 @@ export interface LoopbackReply {
   readonly body: string
 }
 
+export const LOOPBACK_PORT = { ephemeral: "ephemeral" } as const
+
+const LOOPBACK_METHOD = { GET: "GET" } as const
+
+type LoopbackMethod = (typeof LOOPBACK_METHOD)[keyof typeof LOOPBACK_METHOD]
+
+export const isLoopbackMethod = (method: string | undefined): method is LoopbackMethod =>
+  method === LOOPBACK_METHOD.GET
+
 export interface LoopbackRequest {
   readonly method: string | undefined
   readonly params: URLSearchParams
@@ -32,26 +41,18 @@ const write = (response: ServerResponse, reply: LoopbackReply): void => {
 export const loopbackRedirectUri = (port: number, path: string): string =>
   `http://${LOOPBACK_HOST}:${port}${path}`
 
-/**
- * One OAuth redirect listener on the loopback interface. `port: "ephemeral"`
- * lets the OS pick one per flow (a desktop client accepts any loopback port);
- * a fixed port keeps a redirect URI that was registered once. Requests off
- * `path` get 404; every other request is answered by `respond`. `onError`
- * sees every server error, including a failed listen, which also rejects.
- * Lifetime (timeouts, one flow or many) belongs to the caller.
- */
 export const listenLoopback = async ({
   port,
   path,
   respond,
   onError
 }: {
-  readonly port: number | "ephemeral"
+  readonly port: number | typeof LOOPBACK_PORT.ephemeral
   readonly path: string
   readonly respond: (request: LoopbackRequest) => LoopbackReply | Promise<LoopbackReply>
   readonly onError?: (cause: Error) => void
 }): Promise<LoopbackListener> => {
-  const base = loopbackRedirectUri(port === "ephemeral" ? 0 : port, path)
+  const base = loopbackRedirectUri(port === LOOPBACK_PORT.ephemeral ? 0 : port, path)
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", base)
     if (url.pathname !== path) {
@@ -65,7 +66,7 @@ export const listenLoopback = async ({
   if (onError !== undefined) server.on("error", onError)
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject)
-    server.listen(port === "ephemeral" ? 0 : port, LOOPBACK_HOST, () => {
+    server.listen(port === LOOPBACK_PORT.ephemeral ? 0 : port, LOOPBACK_HOST, () => {
       server.off("error", reject)
       resolve()
     })

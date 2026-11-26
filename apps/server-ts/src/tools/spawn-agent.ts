@@ -338,9 +338,6 @@ const makeSpawnAgentTool = (
       await validateRequestedModel(services.models, input, ctx.signal)
       const resolved = await resolveWorkspace(services, input, ctx)
       if (resolved !== null) verifyApproval(resolved, ctx.approval, ctx.run.approvalMode)
-      // A research child reads and searches, so it runs on the Background
-      // model unless the call names one, as a script's children do. A child
-      // started from this conversation keeps its model to reuse the cache.
       const background =
         input.mode === "research" && input.model === undefined && input.fork_context !== true
           ? (await Effect.runPromise(services.modelSettings.snapshot(), { signal: ctx.signal }))

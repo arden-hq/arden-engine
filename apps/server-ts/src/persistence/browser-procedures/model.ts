@@ -1,6 +1,7 @@
 import { canonicalJson } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
-import { Schema } from "effect"
+import { isWebProtocol } from "@arden-hq/std/url"
+import { Option, Schema } from "effect"
 
 export const PAGE_TEXT_MAX_CHARS = 16_000
 const Text = Schema.String.check(Schema.isMaxLength(16_000))
@@ -101,20 +102,26 @@ const LearningMarkSchema = Schema.Struct({
     withheld: Schema.optionalKey(Schema.Literal(true))
   })
 })
-export type CaptureLearning = "safe" | "withheld" | "sensitive" | "unmarked"
+const CAPTURE_LEARNING = {
+  safe: "safe",
+  withheld: "withheld",
+  sensitive: "sensitive",
+  unmarked: "unmarked"
+} as const
+export type CaptureLearning = (typeof CAPTURE_LEARNING)[keyof typeof CAPTURE_LEARNING]
 export const captureLearning = (data: unknown): CaptureLearning => {
   const mark = Schema.decodeUnknownOption(LearningMarkSchema)(data)
-  if (mark._tag === "None") return "unmarked"
+  if (Option.isNone(mark)) return CAPTURE_LEARNING.unmarked
   const { eligible, withheld } = mark.value.procedure_learning
-  if (eligible) return "safe"
-  return withheld === true ? "withheld" : "sensitive"
+  if (eligible) return CAPTURE_LEARNING.safe
+  return withheld === true ? CAPTURE_LEARNING.withheld : CAPTURE_LEARNING.sensitive
 }
 export const learningMark = (
   ...captures: ReadonlyArray<unknown>
 ): { readonly eligible: boolean; readonly withheld?: true } => {
   const kinds = captures.map(captureLearning)
-  if (kinds.every((kind) => kind === "safe")) return { eligible: true }
-  return kinds.every((kind) => kind === "safe" || kind === "withheld")
+  if (kinds.every((kind) => kind === CAPTURE_LEARNING.safe)) return { eligible: true }
+  return kinds.every((kind) => kind === CAPTURE_LEARNING.safe || kind === CAPTURE_LEARNING.withheld)
     ? { eligible: false, withheld: true }
     : { eligible: false }
 }
@@ -129,9 +136,9 @@ export const procedureEvidenceScope = (
 ): { readonly origin: string; readonly profile: string } | undefined => {
   const scopes = evidence.calls.flatMap((call) => {
     const decoded = Schema.decodeUnknownOption(EvidenceScopeSchema)(call.result)
-    if (decoded._tag === "None" || !URL.canParse(decoded.value.data.tab.url)) return []
+    if (Option.isNone(decoded) || !URL.canParse(decoded.value.data.tab.url)) return []
     const url = new URL(decoded.value.data.tab.url)
-    if (url.protocol !== "http:" && url.protocol !== "https:") return []
+    if (!isWebProtocol(url.protocol)) return []
     return [{ origin: url.origin, profile: decoded.value.data.tab.profile_ref }]
   })
   const first = scopes[0]

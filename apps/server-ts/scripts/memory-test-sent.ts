@@ -136,7 +136,11 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
         return yield* setupFault(`No record of what ${question.id} was sent`)
       const paths = new Map<string, string>()
       for (const source of composition.sources)
-        if (source.kind !== "index" && source.page_id !== null && !paths.has(source.page_id))
+        if (
+          source.kind !== MEMORY_SOURCE.index &&
+          source.page_id !== null &&
+          !paths.has(source.page_id)
+        )
           paths.set(source.page_id, (yield* memory.readContent(source.page_id)).path)
       const text = [...memoryContext.core, ...memoryContext.space, ...memoryContext.recall]
         .map((section) => section.text)
@@ -163,7 +167,6 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
     `${JSON.stringify({ ranAt, askedAt: asked, copy: files.copy.folder, semanticRecall: SEMANTIC_RECALL, results }, null, 2)}\n`,
     { mode: 0o600 }
   )
-  // Vitest swallows console output here; a direct write reaches the terminal.
   const regressions = baseline === undefined ? [] : regressionsFrom(baseline, results)
   process.stdout.write(
     [

@@ -31,9 +31,6 @@ import { Wiki } from "../src/wiki/service.js"
 import { snapshotOf, type PageRecord } from "../src/wiki/snapshot.js"
 import { partialService, serverRunContext, sessionHeader } from "./kit.js"
 
-// The model names a page, a Task or a Chat turn; the server keeps the versions.
-// Both cases below failed in real runs while the model had to copy a hash.
-
 const hash = (character: string): string => character.repeat(64)
 const HEX_64 = /[0-9a-f]{64}/
 
@@ -263,7 +260,6 @@ describe("wiki_read_change by page link", () => {
   const [plan1, plan2, plan3, plan4] = ["5", "6", "7", "8"].map((content) =>
     version("plan", "projects/plan.md", content)
   ) as [ResourceVersion, ResourceVersion, ResourceVersion, ResourceVersion]
-  // Newest first, as the repository returns history.
   const commits = [
     commit("h", "2026-11-04T16:00:00.000000Z", [edit(plan3, plan4)]),
     commit("f", "2026-11-04T15:00:00.000000Z", [edit(plan2, plan3)]),
@@ -334,8 +330,6 @@ describe("wiki_read_change by page link", () => {
         unifiedDiff: diffText(before, after)
       })
   })
-  // The previous review ended after the plan page was created; three changes
-  // to it were saved before this review. The notes page is new to the review.
   const REVIEW_RUN = "review-run"
   const reads: SpaceReviewReads = {
     space: { name: "Arden", instructions: null },

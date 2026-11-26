@@ -1,8 +1,12 @@
 import { clipLine } from "@arden-hq/std/text"
-import type { GoogleAccount } from "@arden-hq/protocol/google"
-import { DateTime, Effect, Schema } from "effect"
+import {
+  GOOGLE_AUTHORIZATION_STATUS,
+  GOOGLE_SERVICE_ID,
+  type GoogleAccount
+} from "@arden-hq/protocol/google"
+import { DateTime, Effect, Option, Schema } from "effect"
 import type { EffectTarget } from "../../execution/tool-effect.js"
-import { GoogleConnectionError } from "../../google/errors.js"
+import { GOOGLE_DIAGNOSTIC, GoogleConnectionError } from "../../google/errors.js"
 import type { GoogleConnections } from "../../google/service.js"
 import type {
   ConnectionItemStore,
@@ -15,7 +19,6 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me"
 const FIRST_FETCH_DAYS = 3
 const MAX_MESSAGES = 200
 const MAX_HISTORY_PAGES = 10
-/** Messages read at once: a message read costs 5 of Gmail's 250 quota units a second. */
 const READ_CONCURRENCY = 5
 
 const ProfileSchema = Schema.Struct({ historyId: Schema.String })
@@ -58,7 +61,9 @@ export const gmailThreadTarget = (threadId: string): EffectTarget => ({
 
 export const hasReadyGmail = (account: GoogleAccount): boolean =>
   account.authorizations.some(
-    (authorization) => authorization.service === "gmail" && authorization.status === "ready"
+    (authorization) =>
+      authorization.service === GOOGLE_SERVICE_ID.gmail &&
+      authorization.status === GOOGLE_AUTHORIZATION_STATUS.ready
   )
 
 export const fetchGmail = Effect.fn("ConnectionItems.fetchGmail")(function* (input: {
@@ -108,7 +113,7 @@ export const fetchGmail = Effect.fn("ConnectionItems.fetchGmail")(function* (inp
     }
     return readUpTo(records, { startHistoryId, newest, complete: pageToken === undefined })
   })
-  // Gmail answers 404 for a history id it no longer keeps (about a week).
+  // 404 for a history id past its retention: https://developers.google.com/workspace/gmail/api/guides/sync
   const expired = (error: unknown) => httpStatus(error, [404])
   const found = yield* (
     input.cursor === undefined
@@ -123,18 +128,21 @@ export const fetchGmail = Effect.fn("ConnectionItems.fetchGmail")(function* (inp
     found.ids,
     (id) =>
       get(MessageSchema, `${API}/messages/${encodeURIComponent(id)}?${query}`).pipe(
-        Effect.map((message) => ({ _tag: "read" as const, message })),
+        Effect.map(Option.some),
         Effect.catchIf(
           (error) => httpStatus(error, [404, 410]),
           () =>
             Effect.logInfo("A Gmail message is gone; skipped", {
               account: input.account.id,
               id
-            }).pipe(Effect.as({ _tag: "gone" as const }))
+            }).pipe(Effect.as(Option.none<typeof MessageSchema.Type>()))
         ),
         Effect.mapError(fetchFailed),
-        Effect.flatMap((read) =>
-          read._tag === "gone" ? Effect.succeed(undefined) : toItem(input, read.message)
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeed(undefined),
+            onSome: (message) => toItem(input, message)
+          })
         )
       ),
     { concurrency: READ_CONCURRENCY }
@@ -163,7 +171,7 @@ const readUpTo = (
 
 const httpStatus = (error: unknown, statuses: ReadonlyArray<number>): boolean =>
   error instanceof GoogleConnectionError &&
-  error.diagnostic.kind === "http" &&
+  error.diagnostic.kind === GOOGLE_DIAGNOSTIC.http &&
   statuses.includes(error.diagnostic.status)
 
 const fetchFailed = (cause: unknown): FetchError =>
@@ -171,7 +179,6 @@ const fetchFailed = (cause: unknown): FetchError =>
 
 const SENT_LABEL = "SENT"
 
-/** The detail field of a mail the owner sent themselves. */
 export const SENT_BY_OWNER = "sent_by_owner"
 
 const toItem = Effect.fn("ConnectionItems.gmailItem")(function* (

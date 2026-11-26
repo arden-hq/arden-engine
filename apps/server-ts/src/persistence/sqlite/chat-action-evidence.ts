@@ -74,7 +74,6 @@ export const decodeChatToolEvidence = Effect.fn("Chat.decodeToolEvidence")(funct
   const arguments_ = yield* decodeJson(JsonObjectSchema, row.arguments_json).pipe(
     Effect.orElseSucceed(() => row.arguments_json)
   )
-  // The whole result, so a slim row cites the same revision as before it was slimmed.
   const resultJson =
     row.result_json === null
       ? null

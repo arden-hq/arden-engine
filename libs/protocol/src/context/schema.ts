@@ -3,19 +3,28 @@ import { withExtras, NonNegativeIntSchema } from "../common/schema.js"
 
 const NonEmptyTextSchema = Schema.Trim.check(Schema.isMinLength(1))
 
+export const CONTEXT_COMPACTION_STATUS = {
+  noSession: "no_session",
+  nothingToCompact: "nothing_to_compact",
+  compacted: "compacted"
+} as const
+
+export type ContextCompactionStatus =
+  (typeof CONTEXT_COMPACTION_STATUS)[keyof typeof CONTEXT_COMPACTION_STATUS]
+
 const NoSessionCompactionResponseSchema = withExtras({
-  status: Schema.Literal("no_session"),
+  status: Schema.Literal(CONTEXT_COMPACTION_STATUS.noSession),
   message: Schema.String
 })
 
 const NothingToCompactResponseSchema = withExtras({
-  status: Schema.Literal("nothing_to_compact"),
+  status: Schema.Literal(CONTEXT_COMPACTION_STATUS.nothingToCompact),
   message: Schema.String,
   message_count: NonNegativeIntSchema
 })
 
 const CompactedContextResponseSchema = withExtras({
-  status: Schema.Literal("compacted"),
+  status: Schema.Literal(CONTEXT_COMPACTION_STATUS.compacted),
   message: Schema.String,
   before_messages: NonNegativeIntSchema,
   after_messages: NonNegativeIntSchema,
@@ -36,6 +45,8 @@ export const ContextCompactionResponseSchema = Schema.Union([
   NothingToCompactResponseSchema,
   CompactedContextResponseSchema
 ])
+
+export type ContextCompactionResponse = typeof ContextCompactionResponseSchema.Type
 
 export const ContextCompactionRequestSchema = Schema.Struct({
   session_id: NonEmptyTextSchema

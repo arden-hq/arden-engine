@@ -19,9 +19,7 @@ export function permissionGrantState(raw: unknown): ComputerSetup["permissions"]
   return { kind: "granted" }
 }
 
-/** Cua's open socket is reachable before its first-launch permission gate finishes. */
 export function permissionSessionState(raw: unknown): "ready" | "pending" {
-  // The SDK supplies default content; a detached result is not a native session receipt.
   if (!Schema.is(Envelope)(raw)) throw new Error("Cua did not return a computer-use session result")
   const result = CallToolResultSchema.parse(raw)
   if (!result.isError) return "ready"

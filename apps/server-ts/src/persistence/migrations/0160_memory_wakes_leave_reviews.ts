@@ -1,8 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** Deletes the unclaimed `wiki.changed` event rows of `space_review` jobs that name no run.
- * Claimed rows, rows that name a run, and other rows and jobs are left as they are. */
 const up = (database: DatabaseSync): void => {
   database.exec(`DELETE FROM automation_event_queue
     WHERE claimed_at IS NULL AND source = 'event'

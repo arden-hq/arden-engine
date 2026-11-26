@@ -12,9 +12,6 @@ import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
-// A job run stays open only while a queue row names it. These cover each way a
-// run used to outlive its job, and the claims that must keep working as before.
-
 const MAINTENANCE = wikiMaintenanceHandler.spec.automationId
 
 const userAutomation = (key: string) =>
@@ -93,9 +90,7 @@ it("closes a run whose queue row is deleted without settlement", async () => {
   )
 })
 
-// The job is released while its chat run goes on, so no worker holds it, but
-// its run is open: removing it is refused until the run ends.
-it("refuses to remove an Automation during its chat run, and keeps the run", async () => {
+it("refuses to remove an Automation during its chat run after its job is released, and keeps the run", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const catalog = yield* AutomationCatalog

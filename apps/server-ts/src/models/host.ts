@@ -8,11 +8,6 @@ const PositiveIntSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const ModelContextLimitsSchema = Schema.Struct({
   hardLimit: PositiveIntSchema,
   compactionTrigger: PositiveIntSchema,
-  /**
-   * The most tokens the model writes in one response, where its server
-   * reports it (OpenRouter `top_provider.max_completion_tokens`); absent when
-   * none is known. Side calls never ask for more (`side-call.ts`).
-   */
   outputCap: Schema.optionalKey(PositiveIntSchema)
 }).check(
   Schema.makeFilter((limits) =>
@@ -40,9 +35,7 @@ const ModelAssignmentSchema = Schema.Struct({
 
 const ModelHostDefaultsSchema = Schema.Struct({
   chatModelId: Schema.NullOr(TextSchema),
-  /** Default reasoning effort for each model. Missing models have no default. */
   reasoningEfforts: Schema.Record(TextSchema, EffortSchema),
-  /** A null role model inherits Chat; a null effort inherits the model default. */
   roles: Schema.Struct({
     background: ModelAssignmentSchema,
     helper: ModelAssignmentSchema
@@ -132,7 +125,6 @@ const freezeAssignment = (assignment: ModelAssignment): ModelAssignment =>
 export type ModelContextLimits = typeof ModelContextLimitsSchema.Type
 export type ModelDefinition = typeof ModelDefinitionSchema.Type
 export type ModelHostDefaults = typeof ModelHostDefaultsSchema.Type
-/** Immutable, credential-free model data supplied by the bundled host. */
 export type ModelHost = typeof ModelHostSchema.Type
 
 export type ModelHostSource =
@@ -156,7 +148,6 @@ const EMPTY_MODEL_HOST: ModelHost = Object.freeze({
   })
 })
 
-/** The source of a server started without a model list. */
 export const EMPTY_MODEL_HOST_SOURCE: ModelHostSource = Object.freeze({
   kind: "ready",
   host: EMPTY_MODEL_HOST

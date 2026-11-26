@@ -5,13 +5,8 @@ import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 
-import {
-  commitWiki,
-  createPage,
-  movePage,
-  updatePage,
-  type WikiCommitOrigin
-} from "../src/wiki/commit.js"
+import { commitWiki, createPage, movePage, updatePage } from "../src/wiki/commit.js"
+import { type WikiCommitOrigin } from "../src/wiki/origin.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"

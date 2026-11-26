@@ -73,7 +73,6 @@ export interface MacRemindersCards {
 
 export const makeMacRemindersCards = (apps: MacApps): MacRemindersCards => {
   const { words } = apps
-  /** The reminder as it is now: what a card names before it is finished or deleted. */
   const context = (current: MacReminderRecord) => [
     { label: "Title", value: titleOf(current) },
     ...optionalField("Due", current.due === undefined ? undefined : words(current.due)),
@@ -133,7 +132,6 @@ export const makeMacRemindersCards = (apps: MacApps): MacRemindersCards => {
       preview: `Edit ${input.title ?? titleOf(current)}`,
       presentation: {
         title: "Change this reminder?",
-        // The document card heads itself with the subject when no field is the title.
         subject: titleOf(current),
         approve_label: "Save changes",
         fields: [

@@ -1,24 +1,31 @@
 import { formatDuration } from "@arden-hq/std/time"
 import { cutText } from "@arden-hq/std/text"
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
+import { CLI_TOOLS_PATH_SOURCE, type CliToolsPathSource } from "@arden-hq/protocol/cli-tools"
 
 import { McpTimeoutError } from "./client.js"
 import { lastLine } from "./stderr-tail.js"
 
+export const MCP_FAILURE_REASON = {
+  commandNotFound: "command_not_found",
+  notExecutable: "not_executable",
+  badFolder: "bad_folder",
+  exitedEarly: "exited_early",
+  timeout: "timeout",
+  crashed: "crashed"
+} as const
+
 export type McpFailureDetail =
   | {
-      readonly reason: "command_not_found"
+      readonly reason: typeof MCP_FAILURE_REASON.commandNotFound
       readonly command: string
-      readonly pathSource: "login_shell" | "process"
+      readonly pathSource: CliToolsPathSource
     }
-  | { readonly reason: "not_executable"; readonly path: string }
-  /** The saved working folder is missing or not a folder. */
-  | { readonly reason: "bad_folder"; readonly folder: string }
-  /** The process ended before it answered the handshake. */
-  | { readonly reason: "exited_early"; readonly stderr: string | undefined }
-  /** The process ran but did not answer the handshake in time. */
-  | { readonly reason: "timeout"; readonly seconds: number }
-  /** It connected, then stopped again after every automatic restart. */
-  | { readonly reason: "crashed"; readonly stderr: string | undefined }
+  | { readonly reason: typeof MCP_FAILURE_REASON.notExecutable; readonly path: string }
+  | { readonly reason: typeof MCP_FAILURE_REASON.badFolder; readonly folder: string }
+  | { readonly reason: typeof MCP_FAILURE_REASON.exitedEarly; readonly stderr: string | undefined }
+  | { readonly reason: typeof MCP_FAILURE_REASON.timeout; readonly seconds: number }
+  | { readonly reason: typeof MCP_FAILURE_REASON.crashed; readonly stderr: string | undefined }
 
 export type McpFailureReason = McpFailureDetail["reason"]
 
@@ -31,19 +38,19 @@ export class McpStartFailure extends Error {
 
 export const mcpFailureSentence = (detail: McpFailureDetail): string => {
   switch (detail.reason) {
-    case "command_not_found":
-      return detail.pathSource === "login_shell"
+    case MCP_FAILURE_REASON.commandNotFound:
+      return detail.pathSource === CLI_TOOLS_PATH_SOURCE.loginShell
         ? `Arden can’t find \`${cutText(detail.command, COMMAND_CHARS)}\` on your PATH. Install it, or use its full path.`
         : `Arden can’t find \`${cutText(detail.command, COMMAND_CHARS)}\` on your PATH, and couldn’t read your shell’s PATH. Install it, or use its full path.`
-    case "not_executable":
+    case MCP_FAILURE_REASON.notExecutable:
       return `\`${cutText(detail.path, COMMAND_CHARS)}\` isn’t a program Arden can run.`
-    case "bad_folder":
+    case MCP_FAILURE_REASON.badFolder:
       return `The folder \`${cutText(detail.folder, COMMAND_CHARS)}\` doesn’t exist.`
-    case "exited_early":
+    case MCP_FAILURE_REASON.exitedEarly:
       return withLastLine("The server exited during start", detail.stderr)
-    case "timeout":
+    case MCP_FAILURE_REASON.timeout:
       return `The server didn’t answer within ${formatDuration(detail.seconds * 1000)}.`
-    case "crashed":
+    case MCP_FAILURE_REASON.crashed:
       return withLastLine("The server keeps stopping", detail.stderr)
   }
 }
@@ -61,13 +68,16 @@ export const classifyMcpStartFailure = ({
 }): McpFailureDetail | undefined => {
   if (cause instanceof McpStartFailure) return cause.detail
   if (cause instanceof McpTimeoutError) {
-    return { reason: "timeout", seconds: Math.round(cause.timeoutMs / 1_000) }
+    return { reason: MCP_FAILURE_REASON.timeout, seconds: Math.round(cause.timeoutMs / 1_000) }
   }
-  const code = cause instanceof Error && "code" in cause ? cause.code : undefined
-  if (executable !== undefined && (code === "EACCES" || code === "ENOEXEC")) {
-    return { reason: "not_executable", path: executable }
+  if (
+    executable !== undefined &&
+    cause instanceof Error &&
+    (isErrnoCode(cause, ERRNO.EACCES) || isErrnoCode(cause, ERRNO.ENOEXEC))
+  ) {
+    return { reason: MCP_FAILURE_REASON.notExecutable, path: executable }
   }
-  return exited ? { reason: "exited_early", stderr } : undefined
+  return exited ? { reason: MCP_FAILURE_REASON.exitedEarly, stderr } : undefined
 }
 
 const withLastLine = (sentence: string, stderr: string | undefined): string => {

@@ -4,8 +4,6 @@ export const WIKI_PAGE_DEFAULT_LIMIT = 100
 export const WIKI_PAGE_MAX_LIMIT = 100
 export const WIKI_HISTORY_DEFAULT_LIMIT = 50
 
-/** Producer-owned report evidence, retained separately from user-authored metadata.
- * These names are the stored format; changing them requires a data migration. */
 export const WIKI_REPORT_FIELDS = {
   automationId: "producer_automation_id",
   runId: "producer_run_id",
@@ -14,7 +12,14 @@ export const WIKI_REPORT_FIELDS = {
   legacyNote: "provenance_note"
 } as const
 
-/** Only producer-owned fields are protected; ordinary notes can reuse a key. */
+export type WikiReportField = (typeof WIKI_REPORT_FIELDS)[keyof typeof WIKI_REPORT_FIELDS]
+
+const wikiReportFields: ReadonlySet<string> = new Set<WikiReportField>(
+  Object.values(WIKI_REPORT_FIELDS)
+)
+
+const isWikiReportField = (key: string): key is WikiReportField => wikiReportFields.has(key)
+
 export function isWikiProducerField({
   metadata,
   key
@@ -23,14 +28,9 @@ export function isWikiProducerField({
   readonly key: string
 }): boolean {
   const producer = metadata[WIKI_REPORT_FIELDS.automationId]
-  return (
-    typeof producer === "string" &&
-    producer.length > 0 &&
-    Object.values(WIKI_REPORT_FIELDS).some((field) => field === key)
-  )
+  return typeof producer === "string" && producer.length > 0 && isWikiReportField(key)
 }
 
-/** A normal metadata edit cannot replace its producer's retained evidence. */
 export function wikiProducerFieldsUnchanged({
   before,
   after
@@ -45,10 +45,10 @@ export function wikiProducerFieldsUnchanged({
   )
 }
 
-export type WikiResourceState = "active" | "archived"
-/** A page as a commit left it (`after`), or as it was before an upkeep commit that is still its
- *  latest change (`before`, the undo of a Wiki Maintenance change). */
-export type WikiRestoreSide = "after" | "before"
+export const WIKI_RESOURCE_STATE = { active: "active", archived: "archived" } as const
+export type WikiResourceState = (typeof WIKI_RESOURCE_STATE)[keyof typeof WIKI_RESOURCE_STATE]
+export const WIKI_RESTORE_SIDE = { after: "after", before: "before" } as const
+export type WikiRestoreSide = (typeof WIKI_RESTORE_SIDE)[keyof typeof WIKI_RESTORE_SIDE]
 
 export const WIKI_PAGE_LIFECYCLE = { active: "active", redirect: "redirect" } as const
 export const WIKI_EXCERPT = { blank: "blank", text: "text" } as const
@@ -75,8 +75,8 @@ export const WIKI_CHAT_SUMMARY = { pending: "pending", summarized: "summarized" 
 export const WIKI_CONFLICT_CURRENT = { unavailable: "unavailable", page: "page" } as const
 
 export type WikiPageLifecycle =
-  | { readonly kind: "active" }
-  | { readonly kind: "redirect"; readonly to: string }
+  | { readonly kind: typeof WIKI_PAGE_LIFECYCLE.active }
+  | { readonly kind: typeof WIKI_PAGE_LIFECYCLE.redirect; readonly to: string }
 
 export type WikiExcerpt =
   | { readonly kind: "blank" }
@@ -118,7 +118,6 @@ export type WikiPagePage =
       readonly next: WikiNextPage
     }
 
-/** The compact acknowledgement returned by archive. */
 export interface WikiArchiveResponse extends JsonRecord {
   readonly pageId: string
   readonly path: string
@@ -149,7 +148,6 @@ export type WikiCommitParent =
   | { readonly kind: "commit"; readonly id: string }
 
 export interface WikiHistoryCommit extends JsonRecord {
-  /** Counts for the requested page, excluding patch headers and context. */
   readonly addedLines: number
   readonly removedLines: number
   readonly commitId: string
@@ -159,7 +157,6 @@ export interface WikiHistoryCommit extends JsonRecord {
   readonly reason: string
   readonly timestamp: string
   readonly changes: ReadonlyArray<WikiHistoryChange>
-  /** The sides of this commit a history restore accepts now and that would change the page. */
   readonly restorable: ReadonlyArray<WikiRestoreSide>
 }
 
@@ -182,8 +179,6 @@ export interface WikiPageDiff extends JsonRecord {
   readonly unifiedDiff: string
 }
 
-/** One page's change between two of its versions, bounded: `hasMore` when
- *  the diff goes on past what was returned. */
 export interface WikiVersionDiff extends JsonRecord {
   readonly hasMore: boolean
   readonly unifiedDiff: string
@@ -226,7 +221,6 @@ export type WikiChatSummary =
   | { readonly kind: "pending" }
   | { readonly kind: "summarized"; readonly text: string }
 
-/** One of the user's chats a page was saved from. */
 export interface WikiPageChat extends JsonRecord {
   readonly sessionRef: string
   readonly name: WikiChatName
@@ -240,11 +234,9 @@ export interface WikiPageLinks extends JsonRecord {
   readonly repositoryHead: string
   readonly outgoing: ReadonlyArray<WikiLink>
   readonly backlinks: ReadonlyArray<WikiLink>
-  /** The chats the page came from, newest save first. */
   readonly cameFrom: ReadonlyArray<WikiPageChat>
 }
 
-/** The pages and links a rename changes. */
 export interface WikiRenamePlan extends JsonRecord {
   readonly oldPath: string
   readonly newPath: string
@@ -258,7 +250,6 @@ export type WikiConflictCurrent =
   | { readonly kind: "unavailable" }
   | { readonly kind: "page"; readonly version: string; readonly content: string }
 
-/** Structured detail returned for a stale Wiki write. */
 export interface WikiRevisionConflict extends JsonRecord {
   readonly error: "page_revision_conflict"
   readonly message: string
@@ -287,7 +278,6 @@ export interface WikiDiffRouteOptions {
   readonly limit: number
 }
 
-/** Two version ids of one page; `before` is "absent" for a created page. */
 export interface WikiVersionDiffRouteOptions {
   readonly before: string
   readonly after: string

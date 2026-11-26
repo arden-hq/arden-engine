@@ -27,19 +27,6 @@ import {
 import type { EndpointFailureReason } from "./failure.js"
 import type { ModelEndpointsError } from "./service.js"
 
-/**
- * The saved model servers inside the endpoint service: Check, add, replace,
- * remove, and keeping their models in the model list. They share the
- * service's key vault, settings document, lock and health rule
- * (`nextHealth`), so a model server is "Unreachable" and back exactly as a
- * search or decision endpoint is. Each server has its own key, health and
- * revision; one changing never touches another's.
- *
- * When a server is re-asked: at start (discovery only, in the background:
- * the saved lists are installed first, so a stopped server never holds up
- * start), at every Check of its edit, and by every chat request to its
- * models. There is no polling, as for the other endpoints.
- */
 export interface ChatEndpointDeps {
   readonly fetch: typeof globalThis.fetch
   readonly lock: Semaphore.Semaphore
@@ -51,7 +38,6 @@ export interface ChatEndpointDeps {
   ) => Effect.Effect<ModelEndpointSettings, ModelEndpointsError>
   readonly invalid: (message: string) => ModelEndpointsError
   readonly notFound: (message: string) => ModelEndpointsError
-  /** Each server's key, in the vault under its id. */
   readonly secrets: {
     readonly read: (id: string) => Effect.Effect<string | undefined, ModelEndpointsError>
     readonly readDocument: (id: string) => Effect.Effect<unknown | null, ModelEndpointsError>
@@ -66,23 +52,18 @@ export interface ChatEndpointDeps {
     failure: EndpointFailureReason | undefined
   ) => Effect.Effect<EndpointHealth | undefined>
   readonly switch: ModelProviderSwitch["Service"]
-  /** Tells the host the model list changed, as a ChatGPT sign-in does. */
   readonly listChanged: () => void
-  /** A new server's id. */
   readonly newId: () => string
 }
 
-/** A Check or save: of a new server, or of an edit of the saved one `editing` names. */
 export interface ChatEndpointRequest {
   readonly draft: ChatEndpointDraft
   readonly editing: string | undefined
 }
 
 export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: ChatEndpointDeps) {
-  /** Bumped when a server is replaced or removed: its old adapters' reports are then ignored. */
   const revisions = new Map<string, number>()
   const revisionOf = (id: string) => revisions.get(id) ?? 0
-  /** The keys the installed adapters use, read once at start and set by each save. */
   const keys = new Map<string, string>()
 
   const saved = Effect.fn("ChatEndpoint.saved")(function* () {
@@ -153,7 +134,6 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
       )
     )
 
-  /** Puts every saved server's models in the list; each reports to its current revision. */
   const install = (servers: ReadonlyArray<StoredChatEndpoint>) => {
     const groups = chatGroups(servers)
     return deps.switch
@@ -221,7 +201,6 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
       Effect.uninterruptible(
         Effect.gen(function* () {
           if (editing !== undefined) yield* findSaved(editing)
-          // Another save may have taken a model while this one was checked.
           const clash = takenFailure(
             stored.models.map((model) => model.id),
             takenBy(yield* saved(), editing)
@@ -267,13 +246,6 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
     return next
   })
 
-  /**
-   * Writes one server and its key together: a failure puts back both. The
-   * vault is touched only when a key is or was saved, so a server without
-   * one is saved where no vault exists (a configured server, a test). While
-   * the key changes, the server is out of the list, so no request pairs its
-   * old address with the new key; it goes back in its place.
-   */
   const replaceSaved = Effect.fn("ChatEndpoint.replaceSaved")(function* (
     id: string,
     stored: StoredChatEndpoint | undefined,
@@ -302,12 +274,6 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
     )
   })
 
-  /**
-   * At start: the saved lists go in at once, from what discovery last
-   * reported. Then each server is asked again in the background; a working
-   * answer refreshes its list (a llama.cpp server restarted with other
-   * models), a stopped server is marked unreachable and keeps its models.
-   */
   const start = Effect.fn("ChatEndpoint.start")(function* () {
     const servers = yield* saved()
     for (const stored of servers) {
@@ -327,14 +293,11 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
 
   const reprobe = (stored: StoredChatEndpoint, key: string | undefined, seen: number) =>
     Effect.gen(function* () {
-      // Discovery takes nothing here; another server's ids are left out under the lock below.
       const found = yield* Effect.promise(() =>
         discoverChatEndpoint(targetOf(stored, key, deps), new Map())
       )
       if (found.result === "unreachable" || found.result === "key_refused")
         return yield* report(stored.id, found.result, seen)
-      // Anything else (its models now refused, say) keeps the saved list and
-      // health: the next Check says what changed, and Save replaces the list.
       if (found.result !== "works")
         return yield* Effect.logWarning("A model server no longer offers its saved models", {
           id: stored.id,
@@ -371,7 +334,6 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
   return { check, save, remove, start }
 })
 
-/** The servers' views, each named beside the others. */
 export const viewAll = (
   servers: ReadonlyArray<StoredChatEndpoint>
 ): ReadonlyArray<ChatModelEndpoint> => servers.map((stored) => view(stored, servers))
@@ -392,20 +354,14 @@ const view = (
   health: stored.health
 })
 
-/** A draft's identity among the saved servers; a new server's id is not assigned yet. */
 const identity = (draft: ChatEndpointDraft, editing: string | undefined): ChatServerIdentity => ({
-  id: editing ?? NEW_SERVER,
+  id: editing ?? UNASSIGNED_NEW_SERVER_ID,
   service: draft.service,
   baseUrl: draft.baseUrl
 })
 
-/** Stands for a server being added in its Check; never an assigned id (`ChatEndpointIdSchema`). */
-const NEW_SERVER = "check"
+const UNASSIGNED_NEW_SERVER_ID = "check"
 
-/**
- * The list with `server` in its place: where it is, else where it was in
- * `order` (a server put back after its key changed), else at the end.
- */
 const placed = <S extends ChatServerIdentity>(
   servers: ReadonlyArray<S>,
   server: S,
@@ -429,7 +385,6 @@ const groupOf = (
   return group
 }
 
-/** Every model the other saved servers offer, with the group name that offers it. */
 const takenBy = (
   servers: ReadonlyArray<StoredChatEndpoint>,
   editing: string | undefined
@@ -444,7 +399,6 @@ const takenBy = (
   )
 }
 
-/** A draft that names the saved server and its saved key, so its Check is the saved one's health. */
 const isSaved = (stored: StoredChatEndpoint, draft: ChatEndpointDraft): boolean =>
   stored.service === draft.service &&
   stored.baseUrl === draft.baseUrl &&
@@ -471,7 +425,6 @@ const HEALTH_OF_RESULT: {
 const healthOf = (result: ChatEndpointCheck["result"]): EndpointFailureReason | undefined =>
   HEALTH_OF_RESULT[result]
 
-/** A saved server as discovery asks it again: llama.cpp lists, the others name their models. */
 const targetOf = (
   stored: StoredChatEndpoint,
   key: string | undefined,

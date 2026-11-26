@@ -93,12 +93,12 @@ const approvalBody = (input: typeof CreateParametersSchema.Type): string => {
   ].join("\n")
 }
 
-const FAILURE_PREVIEWS = {
+const FAILURE_PREVIEWS: Record<SkillError["reason"], string> = {
   not_found: "Skill not found",
   invalid: "Invalid Skill",
   storage: "Skills unavailable",
   unavailable: "Skill marketplace unavailable"
-} as const satisfies Record<SkillError["reason"], string>
+}
 
 const NOT_FOUND_MESSAGE = [
   "No Skill has that name.",

@@ -1,27 +1,20 @@
 import { publicServer } from "./public-server.js"
-import { after, type Timer } from "@arden-hq/std/timer"
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { after } from "@arden-hq/std/timer"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js"
-import {
-  MCP_SIGN_IN_PROMPT,
-  type McpEvent,
-  type McpServer as PublicMcpServer
-} from "@arden-hq/protocol/mcp"
+import { type McpServer as PublicMcpServer } from "@arden-hq/protocol/mcp"
 import { Effect } from "effect"
 
-import { VaultError } from "../credentials/vault.js"
 import { errorMessage } from "@arden-hq/std/errors"
-import type { McpStore, McpStoreError, McpStoredServer } from "../persistence/mcp/store.js"
+import type { McpStore, McpStoredServer } from "../persistence/mcp/store.js"
 import { sameMcpTools } from "./call-binding.js"
 import { listMcpTools, type McpToolBinding } from "./catalog.js"
 import { closeMcpClient, connectMcpClient, makeMcpClient, type ClosableClient } from "./client.js"
-import { McpConnectionError, mcpError, type McpOperation } from "./errors.js"
+import { mcpError, type McpOperation } from "./errors.js"
 import { McpChannel } from "./channel.js"
-import { listMcpEvents } from "./events/requests.js"
-import { classifyMcpStartFailure, mcpFailureSentence, type McpFailureDetail } from "./failure.js"
+import { classifyMcpStartFailure, mcpFailureSentence } from "./failure.js"
 import { canReconnect, mcpConnectBudgetMs, nextConnectRetryMs, reconnectDelayMs } from "./retry.js"
-import { McpCredentialUnavailable, type McpTokenAuth } from "./github-connection.js"
+import { type McpTokenAuth } from "./github-connection.js"
 import { mcpToolApproval, usesPresetToken } from "./presets.js"
 import type { KeyedSerialQueue } from "./serial.js"
 import type { makeMcpServerSecrets } from "./server-secrets.js"
@@ -30,135 +23,33 @@ import {
   makeMcpTransport,
   mcpOAuthVaultTarget,
   mcpServiceTitle,
-  mcpSignInNotSetUpDetail,
-  McpStdioTransport,
-  type McpOwnedTransport
+  McpStdioTransport
 } from "./transport.js"
 import {
   clearMcpOAuthCredentials,
-  MCP_CREDENTIALS_UNREADABLE,
-  McpSignInNotSetUp,
   readMcpOAuthAccountIdentity,
   type McpOAuthVault
 } from "./vault.js"
 import { type McpRuntime } from "./runtime-types.js"
-
-type McpConnectFailure =
-  | {
-      readonly kind:
-        | "credential_unavailable"
-        | "tool_name_collision"
-        | "sign_in_not_set_up"
-        | "vault_unreadable"
-      readonly retryable: false
-      readonly detail: string
-    }
-  | {
-      readonly kind: "unrunnable_program"
-      readonly retryable: false
-      readonly detail: string
-    }
-  | { readonly kind: "other"; readonly retryable: true }
-
-const shouldRetry = (
-  failure: McpConnectFailure
-): failure is Extract<McpConnectFailure, { readonly retryable: true }> => failure.retryable
-
-const toolNameCollision = (cause: unknown): McpConnectFailure | undefined =>
-  cause instanceof McpToolNameCollision
-    ? { kind: "tool_name_collision", retryable: false, detail: cause.message }
-    : undefined
-
-const classifyConnectFailure = (
-  cause: unknown,
-  config: McpStoredServer,
-  local: McpFailureDetail | undefined
-): McpConnectFailure => {
-  if (cause instanceof McpCredentialUnavailable)
-    return { kind: "credential_unavailable", retryable: false, detail: cause.detail }
-  const collision = toolNameCollision(cause)
-  if (collision !== undefined) return collision
-  if (
-    local?.reason === "command_not_found" ||
-    local?.reason === "not_executable" ||
-    local?.reason === "bad_folder"
-  )
-    return { kind: "unrunnable_program", retryable: false, detail: mcpFailureSentence(local) }
-  if (cause instanceof McpSignInNotSetUp)
-    return {
-      kind: "sign_in_not_set_up",
-      retryable: false,
-      detail: mcpSignInNotSetUpDetail(config)
-    }
-  if (cause instanceof VaultError)
-    return { kind: "vault_unreadable", retryable: false, detail: MCP_CREDENTIALS_UNREADABLE }
-  return { kind: "other", retryable: true }
-}
-
-export type RuntimeStatus = PublicMcpServer["status"]
-
-export interface RuntimeEntry {
-  readonly config: McpStoredServer
-  readonly generation: number
-  readonly status: RuntimeStatus
-  readonly detail: string | null
-  readonly diagnostics?: string
-  readonly client?: Client
-  readonly transport?: McpOwnedTransport
-  readonly channel?: McpChannel
-  readonly tools: ReadonlyArray<McpToolBinding>
-  readonly events: ReadonlyArray<McpEvent>
-  readonly retryAttempt: number
-  readonly retryTimer?: Timer
-}
-
-export interface McpLiveEvents {
-  readonly client: Client
-  readonly channel: McpChannel
-  readonly events: ReadonlyArray<McpEvent>
-}
-
-export const storeFailure = (operation: McpOperation, cause: McpStoreError): McpConnectionError => {
-  const reason =
-    cause.reason === "conflict" || cause.reason === "not_found" || cause.reason === "invalid"
-      ? cause.reason
-      : "storage"
-  return mcpError(operation, reason, cause.message, cause)
-}
-
-class McpToolNameCollision extends Error {
-  constructor(holder: string, fullName: string) {
-    super(`MCP tool name collision with server ${holder}: ${fullName}`)
-  }
-}
-
-const publicFailure = (status: RuntimeStatus): string | null => {
-  switch (status) {
-    case "needs_auth":
-      return MCP_SIGN_IN_PROMPT
-    case "failed":
-      return "Couldn’t connect. Try again in a moment."
-    case "disabled":
-    case "starting":
-    case "connected":
-    case "reconnecting":
-      return null
-  }
-}
-
-/** Streamable HTTP reports a rejected sign-in as a numeric status, not `UnauthorizedError`. */
-const httpStatusCode = (cause: unknown): number | undefined => {
-  if (!(cause instanceof Error) || !("code" in cause)) return undefined
-  return typeof cause.code === "number" ? cause.code : undefined
-}
-
-export interface ConnectOptions {
-  readonly status?: "starting" | "reconnecting"
-  readonly retryAttempt?: number
-  readonly refreshPath?: boolean
-}
-
-export const cancelRetry = (entry: RuntimeEntry): void => entry.retryTimer?.cancel()
+import {
+  type ConnectOptions,
+  type McpLiveEvents,
+  type RuntimeEntry,
+  type RuntimeStatus,
+  classifyConnectFailure,
+  httpStatusCode,
+  notifyIgnoringListenerFailures,
+  publicFailure,
+  shouldRetry,
+  storeFailure,
+  cancelRetry,
+  readEvents,
+  toolNameCollision,
+  isConnected,
+  isReconnecting,
+  usesOAuth
+} from "./runtime-state.js"
+import { assertUnclaimed, boundToolNamesOf } from "./runtime-state.js"
 
 export const makeMcpRuntime = ({
   store,
@@ -179,13 +70,7 @@ export const makeMcpRuntime = ({
   const connectedListeners = new Set<(config: McpStoredServer) => void>()
   const changeListeners = new Set<(name: string) => void>()
   const changed = (name: string): void => {
-    for (const listener of changeListeners) {
-      try {
-        listener(name)
-      } catch {
-        // A listener's failure never changes the connection.
-      }
-    }
+    notifyIgnoringListenerFailures(changeListeners, name)
   }
   const accountIdentities = new Map<string, string | null>()
   const startedConfigs = new WeakSet<McpStoredServer>()
@@ -194,21 +79,6 @@ export const makeMcpRuntime = ({
 
   const snapshotOne = (entry: RuntimeEntry): PublicMcpServer =>
     publicServer(entry, accountIdentities.get(entry.config.name) ?? null)
-
-  const readEvents = async (
-    config: McpStoredServer,
-    channel: McpChannel
-  ): Promise<ReadonlyArray<McpEvent>> => {
-    if (!channel.offersEvents) return []
-    return listMcpEvents(channel).catch((cause: unknown) => {
-      Effect.runSync(
-        Effect.logWarning("MCP server's events could not be listed").pipe(
-          Effect.annotateLogs({ server: config.name, cause: errorMessage(cause) })
-        )
-      )
-      return []
-    })
-  }
 
   const requireRuntime = (name: string, operation: McpOperation): RuntimeEntry => {
     const entry = runtimes.get(name)
@@ -227,30 +97,16 @@ export const makeMcpRuntime = ({
     ) {
       changed(entry.config.name)
     }
-    if (entry.status === "connected") lastConnectedTools.set(entry.config.name, entry.tools)
-    else if (entry.status !== "reconnecting") lastConnectedTools.delete(entry.config.name)
+    if (isConnected(entry)) lastConnectedTools.set(entry.config.name, entry.tools)
+    else if (!isReconnecting(entry)) lastConnectedTools.delete(entry.config.name)
     return entry
   }
 
-  const boundToolNames = (): Map<string, string> =>
-    new Map(
-      [...runtimes.values()].flatMap((entry) =>
-        entry.tools.map((tool) => [tool.fullName, entry.config.name] as const)
-      )
-    )
-
+  const boundToolNames = (): Map<string, string> => boundToolNamesOf(runtimes)
   const assertToolNamesUnclaimed = (
     serverName: string,
     tools: ReadonlyArray<McpToolBinding>
-  ): void => {
-    const bound = boundToolNames()
-    for (const tool of tools) {
-      const holder = bound.get(tool.fullName)
-      if (holder !== undefined && holder !== serverName) {
-        throw new McpToolNameCollision(holder, tool.fullName)
-      }
-    }
-  }
+  ): void => assertUnclaimed(runtimes, serverName, tools)
 
   const interruptConnection = (name: string): void => {
     const current = runtimes.get(name)
@@ -265,9 +121,7 @@ export const makeMcpRuntime = ({
   ): Promise<void> => {
     const credentialKey = mcpOAuthVaultTarget(config).credentialKey
     const affected = [...runtimes.values()].filter((entry) => {
-      if (entry.config.transport.type !== "http" || entry.config.transport.auth !== "oauth") {
-        return false
-      }
+      if (!usesOAuth(entry.config)) return false
       return mcpOAuthVaultTarget(entry.config).credentialKey === credentialKey
     })
     await Effect.runPromise(
@@ -278,7 +132,7 @@ export const makeMcpRuntime = ({
   }
 
   const clearOAuth = async (config: McpStoredServer): Promise<void> => {
-    if (config.transport.type !== "http" || config.transport.auth !== "oauth") return
+    if (!usesOAuth(config)) return
     await credentials.run(mcpOAuthVaultTarget(config).credentialKey, () =>
       clearMcpOAuthCredentials(vault, mcpOAuthVaultTarget(config))
     )
@@ -440,13 +294,7 @@ export const makeMcpRuntime = ({
         events,
         retryAttempt: 0
       })
-      for (const listener of connectedListeners) {
-        try {
-          listener(config)
-        } catch {
-          // A listener's failure never changes whether the server connected.
-        }
-      }
+      notifyIgnoringListenerFailures(connectedListeners, config)
       let refreshRequest = 0
       client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
         const request = ++refreshRequest

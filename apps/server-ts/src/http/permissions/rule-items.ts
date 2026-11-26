@@ -7,7 +7,7 @@ import {
 } from "@arden-hq/protocol/permissions"
 import { commandWords } from "../../persistence/permissions/command-policy.js"
 import type { PermissionRule, RuleList, RuleSubject } from "../../persistence/permissions/rules.js"
-import type { RuleNames } from "../../tools/registry.js"
+import type { RuleNames } from "../../tools/registry-profile.js"
 
 export type RulePage =
   | { readonly kind: "settings" }

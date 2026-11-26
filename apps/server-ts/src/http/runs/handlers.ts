@@ -25,8 +25,6 @@ import { ArdenApi } from "../api.js"
 import { failInternal, storeErrorToHttp } from "../errors.js"
 import { currentMillis } from "../../runtime/clock.js"
 
-/** Joins a start time and a Run id into the list's `next` cursor. A start
- * time never holds it. */
 const RUN_LIST_CURSOR_SEPARATOR = "|"
 
 const runPurpose = (purpose: string | null | undefined): RunProgress["purpose"] =>
@@ -60,7 +58,6 @@ export const RunHandlers = HttpApiBuilder.group(
       .handle(
         "list",
         Effect.fn("RunsHandlers.list")(function* ({ query }) {
-          // Every chat's Runs at once is the owner's view; the command line sees its own chats.
           if ((yield* LocalCaller) === "cli") return yield* new HttpApiError.Forbidden({})
           const options = runListOptions(query)
           const cut =

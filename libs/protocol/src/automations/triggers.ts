@@ -1,19 +1,6 @@
 import { countOf } from "@arden-hq/std/count"
 import type { AutomationConditionOperator, AutomationEventCatalogField } from "./contracts.js"
 
-/**
- * The one trigger registry (rules §6.1): every trigger type and event type an
- * Automation can use, the fields an event's conditions read, and the words a
- * person and the agent see for each. The server validates against it, the
- * desktop labels its trigger editor from it, and the agent tools describe
- * triggers from it. A new event type is one entry here plus one server producer.
- */
-
-export const CONDITION_OPERATOR = {
-  in: "in",
-  exists: "exists"
-} as const satisfies Readonly<Record<string, AutomationConditionOperator>>
-
 export const TEXT_OPERATORS = [
   "eq",
   "ne",
@@ -50,40 +37,34 @@ export const BOOLEAN_OPERATORS = [
   "exists"
 ] as const satisfies ReadonlyArray<AutomationConditionOperator>
 
-/** Every event an Automation can wait for, in the order the trigger editor offers them. */
-export const AUTOMATION_EVENT_TYPES = [
-  "event_approaching",
-  "event_ended",
-  "calendar.changed",
-  "wiki.changed",
-  "chat.quiet",
-  "email.received",
-  "github.received",
-  "task.changed",
-  "capture.arrived",
-  "automation.run_ended",
-  "automation.system_run_ended",
-  "ask.waiting",
-  "space.proposal_review_requested",
-  "mcp.event"
-] as const
-export type AutomationEventType = (typeof AUTOMATION_EVENT_TYPES)[number]
+export const AUTOMATION_EVENT_TYPE = {
+  event_approaching: "event_approaching",
+  event_ended: "event_ended",
+  calendar_changed: "calendar.changed",
+  wiki_changed: "wiki.changed",
+  chat_quiet: "chat.quiet",
+  email_received: "email.received",
+  github_received: "github.received",
+  task_changed: "task.changed",
+  capture_arrived: "capture.arrived",
+  automation_run_ended: "automation.run_ended",
+  automation_system_run_ended: "automation.system_run_ended",
+  ask_waiting: "ask.waiting",
+  space_proposal_review_requested: "space.proposal_review_requested",
+  mcp_event: "mcp.event"
+} as const
+export type AutomationEventType = (typeof AUTOMATION_EVENT_TYPE)[keyof typeof AUTOMATION_EVENT_TYPE]
+
+export const AUTOMATION_EVENT_AUDIENCE = { user: "user", internal: "internal" } as const
+export type AutomationEventAudience =
+  (typeof AUTOMATION_EVENT_AUDIENCE)[keyof typeof AUTOMATION_EVENT_AUDIENCE]
 
 export interface AutomationEventDefinition<T extends AutomationEventType = AutomationEventType> {
   readonly event_type: T
-  /**
-   * Who picks it. "user": the trigger editor's add menu offers it. "internal":
-   * Arden's own machinery; an Automation may still wait for it, but the add
-   * menu leaves it out.
-   */
-  readonly audience: "user" | "internal"
-  /** What the trigger editor's add menu and the event catalog offer. */
+  readonly audience: AutomationEventAudience
   readonly label: string
-  /** A trigger card's short name. */
   readonly name: string
-  /** When it runs, in one sentence: the editor's lead line and the agent tool's description. */
   readonly sentence: string
-  /** What one firing is, in "runs for every <each>". */
   readonly each: string
   readonly fields: ReadonlyArray<AutomationEventCatalogField>
 }
@@ -105,10 +86,8 @@ const CALENDAR_INVITE_FIELDS = [
   }
 ] as const satisfies ReadonlyArray<AutomationEventCatalogField>
 
-/** The local hour an all-day event's `event_approaching` trigger fires. */
 export const ALL_DAY_EVENT_HOUR_WORDS = "08:00"
 
-/** How far before a calendar event an `event_approaching` trigger without `lead_minutes` fires. */
 export const DEFAULT_EVENT_LEAD_MINUTES = 60
 
 export const AUTOMATION_EVENTS: {
@@ -460,14 +439,9 @@ export type ItemEventType = (typeof ITEM_EVENTS)[number]
 export const isItemEventType = (value: string): value is ItemEventType =>
   ITEM_EVENTS.some((type) => type === value)
 
-/**
- * The activity triggers. Both read only your chats: a chat an Automation owns
- * (its own chat, a system chat, a run's copy or child) never counts.
- */
 export const AUTOMATION_ACTIVITY_TRIGGERS = {
   idle: {
     name: "After inactivity",
-    /** The editor's words after the number. */
     unit: "minutes with no new message from you in any chat",
     sentence:
       "Runs once you have sent no new message in any of your chats for idle_minutes minutes.",
@@ -483,17 +457,17 @@ export const AUTOMATION_ACTIVITY_TRIGGERS = {
   }
 } as const
 
-/** An event trigger's own fields, one sentence each: what the agent tools say they do. */
-export const EVENT_TRIGGER_FIELDS = {
+export const EVENT_TRIGGER_FIELDS: Readonly<
+  Record<"lead_minutes" | "mcp_event" | "run_only_if", string>
+> = {
   lead_minutes:
     "Only for event_approaching: whole minutes before the event starts. null goes back to the default.",
   mcp_event:
     "Only for mcp.event, and required there: server (the MCP server's name), event (one event that server lists) and arguments (an object matching that event's input schema, often filters; {} for none).",
   run_only_if:
     "Run only if: one plain sentence (up to 300 characters) about this event's content, e.g. a recruiter replied about one of my applications. No field names or syntax. Set it when many of these events are irrelevant (every email, every calendar change). Without it every event runs; on a trigger sent with its id, leaving it out keeps its sentence and null removes it. A confident no skips the run, unsure runs; a skipped wake is expected and shows in the run history. For cost only; never for safety or permissions."
-} as const
+}
 
-/** When an `event_approaching` trigger fires, in words: "2 hours before each calendar event". */
 export const eventLeadWords = (minutes: number): string => {
   if (minutes === 0) return "When each calendar event starts"
   const amount = minutes % 60 === 0 ? countOf(minutes / 60, "hour") : countOf(minutes, "minute")

@@ -35,7 +35,6 @@ export const fitImageWithSips = async (input: {
     | { readonly kind: "file"; readonly file: string }
     | { readonly kind: "bytes"; readonly bytes: Uint8Array }
   readonly format: SipsImageFormat
-  /** Where absent, the image is only converted, never resized. */
   readonly limits: Pick<ImageInputLimits, "patchSize" | "fitSide" | "fitPatches"> | undefined
   readonly signal?: AbortSignal | undefined
 }): Promise<SipsFittedImage | undefined> => {

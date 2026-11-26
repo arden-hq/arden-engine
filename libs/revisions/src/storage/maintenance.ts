@@ -1,162 +1,27 @@
-import { Clock, Effect, Result } from "effect"
+import { Effect, Result } from "effect"
 
-import { Commit, ResourceVersion, normalizeRelativePath } from "../domain/model.js"
-import {
-  CorruptRepositoryError,
-  InvalidRevisionInputError,
-  RevisionStorageError,
-  UnsafePathError
-} from "../domain/errors.js"
-import { type TreeRecord } from "../domain/format.js"
+import { Commit, ResourceVersion, isActive, normalizeRelativePath } from "../domain/model.js"
+import { CorruptRepositoryError, InvalidRevisionInputError } from "../domain/errors.js"
+import { OBJECT_KIND, OBJECT_KINDS, type ObjectKind, type TreeRecord } from "../domain/format.js"
+import { isJsonlObject } from "./objects.js"
 import { corrupt, makeReader, validHash, type MaintenanceReader } from "./maintenance-reader.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
+import {
+  type IntegrityIssue,
+  type IntegrityReport,
+  type MaintenanceError,
+  type MaintenanceObjectEntry,
+  type MaintenanceProtectedTransaction,
+  type MaintenanceStorage,
+  type StorageReport
+} from "./maintenance-types.js"
 
-/** Object families owned by the revisions store. */
-export type MaintenanceObjectKind = "blob" | "tree" | "commit"
-
-/** One object-directory entry as observed by a storage adapter. */
-export interface MaintenanceObjectEntry {
-  readonly name: string
-  readonly byteSize: number
-  readonly modifiedAtMillis: number
-}
-
-interface MaintenancePublishedEntry {
-  readonly commitId: string
-}
-
-/** A validated idempotency record used as a collection root. */
-export interface MaintenanceIdempotencyRecord {
-  readonly keyHash: string
-  readonly requestHash: string
-  readonly commitId: string
-}
-
-interface MaintenanceTransactionRow {
-  readonly path: string
-  readonly oldBlob: string | null
-  readonly newBlob: string | null
-}
-
-/** A validated pending or conflict transaction supplied by the repository adapter. */
-export interface MaintenanceProtectedTransaction {
-  readonly transactionId: string
-  readonly oldHead: string | null
-  readonly newHead: string
-  readonly treeId: string
-  readonly rows: ReadonlyArray<MaintenanceTransactionRow>
-  /** True when the manifest came from conflicts/ after an external-write conflict. */
-  readonly conflicted?: boolean
-}
-
-/** Byte counts for metadata outside immutable object directories. */
-export interface MaintenanceMetadataStats {
-  readonly transactionBytes: number
-  readonly conflictBytes: number
-  readonly idempotencyBytes: number
-  readonly publicationBytes: number
-  readonly refBytes: number
-  readonly lockBytes: number | null
-}
-
-/** Errors an adapter may return while maintenance is reading or sweeping. */
-export type MaintenanceStorageError =
-  | CorruptRepositoryError
-  | RevisionStorageError
-  | UnsafePathError
-
-/** Small adapter boundary for integrity checks, accounting, and collection. */
-export interface MaintenanceStorage {
-  readonly readRef: Effect.Effect<string | null, MaintenanceStorageError>
-  readonly listObjects: (
-    kind: MaintenanceObjectKind
-  ) => Effect.Effect<ReadonlyArray<MaintenanceObjectEntry>, MaintenanceStorageError>
-  readonly readObject: (
-    kind: MaintenanceObjectKind,
-    id: string
-  ) => Effect.Effect<Uint8Array, MaintenanceStorageError>
-  readonly readWorking: (path: string) => Effect.Effect<Uint8Array | null, MaintenanceStorageError>
-  readonly listPublished: Effect.Effect<
-    ReadonlyArray<MaintenancePublishedEntry>,
-    MaintenanceStorageError
-  >
-  readonly listIdempotency: Effect.Effect<
-    ReadonlyArray<MaintenanceIdempotencyRecord>,
-    MaintenanceStorageError
-  >
-  readonly listProtectedTransactions: Effect.Effect<
-    ReadonlyArray<MaintenanceProtectedTransaction>,
-    MaintenanceStorageError
-  >
-  readonly metadataStats: Effect.Effect<MaintenanceMetadataStats, MaintenanceStorageError>
-  readonly removeObject: (
-    kind: MaintenanceObjectKind,
-    id: string
-  ) => Effect.Effect<void, MaintenanceStorageError>
-}
-
-/** One issue found by an integrity pass. */
-export interface IntegrityIssue {
-  readonly code: string
-  readonly target: string
-  readonly detail: string
-}
-
-/** Canonical integrity summary. */
-export interface IntegrityReport {
-  readonly ok: boolean
-  readonly headCommit: string | null
-  readonly resources: number
-  readonly objects: number
-  readonly issues: ReadonlyArray<IntegrityIssue>
-}
-
-/** Canonical storage accounting summary. */
-export interface StorageReport {
-  readonly totalBytes: number
-  readonly blobBytes: number
-  readonly treeBytes: number
-  readonly commitBytes: number
-  readonly recoveryBytes: number
-  readonly metadataBytes: number
-  readonly resourceCount: number
-  readonly commitCount: number
-  readonly objectCount: number
-}
-
-/** Canonical collection summary. */
-export interface CollectionReport {
-  readonly scanned: number
-  readonly removed: number
-  readonly retained: number
-  readonly bytesRemoved: number
-}
-
-/** Content-addressed roots retained by collection. */
-export interface CollectionRoots {
-  readonly commits: ReadonlySet<string>
-  readonly trees: ReadonlySet<string>
-  readonly blobs: ReadonlySet<string>
-}
-
-/** Optional clock/grace controls for collection. */
-export interface CollectionOptions {
-  readonly roots?: CollectionRoots
-  readonly nowMillis?: number
-  readonly gracePeriodMs?: number
-  readonly cutoffMillis?: number
-}
-
-export type MaintenanceError = MaintenanceStorageError | InvalidRevisionInputError
-
-const objectKinds: ReadonlyArray<MaintenanceObjectKind> = ["blob", "tree", "commit"]
-
-const invalidInput = (message: string): Effect.Effect<never, InvalidRevisionInputError> =>
+export const invalidInput = (message: string): Effect.Effect<never, InvalidRevisionInputError> =>
   Effect.fail(new InvalidRevisionInputError({ message }))
 
-const validateTransaction = Effect.fn("maintenance.validateTransaction")(function* (
+export const validateTransaction = Effect.fn("maintenance.validateTransaction")(function* (
   transaction: MaintenanceProtectedTransaction
 ): Effect.fn.Return<void, CorruptRepositoryError> {
   if (
@@ -203,7 +68,7 @@ const validateTransaction = Effect.fn("maintenance.validateTransaction")(functio
 const jsonlStem = (filename: string): string =>
   filename.endsWith(".jsonl") ? filename.slice(0, -6) : ""
 
-const objectIdFromFilenameUnsafe = (filename: string, jsonl: boolean): string => {
+export const objectIdFromFilenameUnsafe = (filename: string, jsonl: boolean): string => {
   const name = jsonl ? jsonlStem(filename) : filename
   if (!validHash(name))
     throw new CorruptRepositoryError({ message: `object filename is invalid: ${filename}` })
@@ -223,7 +88,7 @@ const addResultIssue = <A>(
 
 const listObjectEntries = Effect.fn("maintenance.listObjectEntries")(function* (
   storage: MaintenanceStorage,
-  kind: MaintenanceObjectKind,
+  kind: ObjectKind,
   issues: IntegrityIssue[]
 ): Effect.fn.Return<ReadonlyArray<MaintenanceObjectEntry>, never> {
   const result = yield* Effect.result(storage.listObjects(kind))
@@ -241,11 +106,11 @@ const validateObjectEntryWithIssues = Effect.fn("maintenance.validateObjectEntry
   function* (
     storage: MaintenanceStorage,
     reader: MaintenanceReader,
-    kind: MaintenanceObjectKind,
+    kind: ObjectKind,
     entry: MaintenanceObjectEntry,
     issues: IntegrityIssue[]
   ): Effect.fn.Return<void, never> {
-    const jsonl = kind !== "blob"
+    const jsonl = isJsonlObject(kind)
     const parsed = yield* Effect.result(
       Effect.try({
         try: () => objectIdFromFilenameUnsafe(entry.name, jsonl),
@@ -281,9 +146,9 @@ const validateObjectEntryWithIssues = Effect.fn("maintenance.validateObjectEntry
       })
       return
     }
-    if (kind === "blob") return
+    if (kind === OBJECT_KIND.blob) return
     const parse: Effect.Effect<TreeRecord | Commit, MaintenanceError> =
-      kind === "tree" ? reader.tree(id) : reader.commit(id)
+      kind === OBJECT_KIND.tree ? reader.tree(id) : reader.commit(id)
     const parsedObject = yield* Effect.result(parse)
     if (Result.isFailure(parsedObject)) {
       issues.push({
@@ -295,15 +160,14 @@ const validateObjectEntryWithIssues = Effect.fn("maintenance.validateObjectEntry
   }
 )
 
-/** Validate all immutable objects, reachable history, indexes, and materialized files. */
 export const integrityReport = Effect.fn("integrityReport")(function* (
   storage: MaintenanceStorage
 ): Effect.fn.Return<IntegrityReport, never> {
   const issues: IntegrityIssue[] = []
   const reader = makeReader(storage)
-  const entries = new Map<MaintenanceObjectKind, ReadonlyArray<MaintenanceObjectEntry>>()
+  const entries = new Map<ObjectKind, ReadonlyArray<MaintenanceObjectEntry>>()
   let objectCount = 0
-  for (const kind of objectKinds) {
+  for (const kind of OBJECT_KINDS) {
     const values = yield* listObjectEntries(storage, kind, issues)
     entries.set(kind, values)
     objectCount += values.length
@@ -377,7 +241,7 @@ export const integrityReport = Effect.fn("integrityReport")(function* (
       cursor = commitResult.success.parentId
     }
     for (const resource of resources.values()) {
-      if (resource.state !== "active") continue
+      if (!isActive(resource)) continue
       const working = yield* Effect.result(storage.readWorking(resource.path))
       if (Result.isFailure(working)) {
         issues.push({
@@ -496,15 +360,14 @@ const countResources = (
   return "size" in resources ? resources.size : resources.length
 }
 
-/** Account immutable objects and metadata bytes without reading object contents. */
 export const storageReport = Effect.fn("storageReport")(function* (
   storage: MaintenanceStorage,
   resources: ReadonlyMap<string, ResourceVersion> | ReadonlyArray<ResourceVersion> | number = 0
 ): Effect.fn.Return<StorageReport, MaintenanceError> {
-  const values: Record<MaintenanceObjectKind, ReadonlyArray<MaintenanceObjectEntry>> = {
-    blob: yield* storage.listObjects("blob"),
-    tree: yield* storage.listObjects("tree"),
-    commit: yield* storage.listObjects("commit")
+  const values: Record<ObjectKind, ReadonlyArray<MaintenanceObjectEntry>> = {
+    blob: yield* storage.listObjects(OBJECT_KIND.blob),
+    tree: yield* storage.listObjects(OBJECT_KIND.tree),
+    commit: yield* storage.listObjects(OBJECT_KIND.commit)
   }
   const metadata = yield* storage.metadataStats
   if (metadata.lockBytes === null)
@@ -520,11 +383,11 @@ export const storageReport = Effect.fn("storageReport")(function* (
   if (allStats.some((value) => !Number.isSafeInteger(value) || value < 0)) {
     return yield* corrupt("storage metadata contains an invalid byte count")
   }
-  const bytes = (kind: MaintenanceObjectKind): number =>
+  const bytes = (kind: ObjectKind): number =>
     values[kind].reduce((total, entry) => total + entry.byteSize, 0)
-  const blobBytes = bytes("blob")
-  const treeBytes = bytes("tree")
-  const commitBytes = bytes("commit")
+  const blobBytes = bytes(OBJECT_KIND.blob)
+  const treeBytes = bytes(OBJECT_KIND.tree)
+  const commitBytes = bytes(OBJECT_KIND.commit)
   const recoveryBytes = metadata.transactionBytes + metadata.conflictBytes
   const metadataBytes =
     metadata.idempotencyBytes + metadata.publicationBytes + metadata.refBytes + metadata.lockBytes
@@ -538,133 +401,6 @@ export const storageReport = Effect.fn("storageReport")(function* (
     metadataBytes,
     resourceCount,
     commitCount: values.commit.length,
-    objectCount: objectKinds.reduce((total, kind) => total + values[kind].length, 0)
+    objectCount: OBJECT_KINDS.reduce((total, kind) => total + values[kind].length, 0)
   }
 })
-
-const collectionRoots = Effect.fn("collectionRoots")(function* (
-  storage: MaintenanceStorage
-): Effect.fn.Return<CollectionRoots, MaintenanceError> {
-  const published = yield* storage.listPublished
-  const publishedIds = new Set<string>()
-  for (const marker of published) {
-    if (!validHash(marker.commitId))
-      return yield* corrupt(`published commit marker is invalid: ${marker.commitId}`)
-    publishedIds.add(marker.commitId)
-  }
-  const current = yield* storage.readRef
-  const commitRoots = new Set<string>()
-  if (current !== null) {
-    if (!validHash(current)) return yield* corrupt("current ref has an invalid commit identifier")
-    if (!publishedIds.has(current))
-      return yield* corrupt(`current ref points to unpublished commit: ${current}`)
-    commitRoots.add(current)
-  }
-
-  const transactions = yield* storage.listProtectedTransactions
-  for (const transaction of transactions) {
-    yield* validateTransaction(transaction)
-    commitRoots.add(transaction.newHead)
-    if (transaction.oldHead !== null) commitRoots.add(transaction.oldHead)
-  }
-  const idempotency = yield* storage.listIdempotency
-  for (const record of idempotency) {
-    if (
-      !validHash(record.keyHash) ||
-      !validHash(record.requestHash) ||
-      !validHash(record.commitId)
-    ) {
-      return yield* corrupt(`idempotency record ${record.keyHash} has invalid identifiers`)
-    }
-    commitRoots.add(record.commitId)
-  }
-
-  const reader = makeReader(storage)
-  const commits = new Set<string>()
-  const trees = new Set<string>()
-  const blobs = new Set<string>()
-  const pending = [...commitRoots]
-  for (let commitId = pending.pop(); commitId !== undefined; commitId = pending.pop()) {
-    if (commits.has(commitId)) continue
-    const parsed = yield* reader.commit(commitId)
-    commits.add(commitId)
-    const closure = yield* reader.treeClosure(parsed.treeId)
-    for (const treeId of closure) trees.add(treeId)
-    const resources = yield* reader.transition(parsed)
-    for (const resource of resources.values()) {
-      yield* reader.verifyBlob(resource.blobId)
-      blobs.add(resource.blobId)
-    }
-    if (parsed.parentId !== null) pending.push(parsed.parentId)
-  }
-  for (const transaction of transactions) {
-    const closure = yield* reader.treeClosure(transaction.treeId)
-    for (const treeId of closure) trees.add(treeId)
-    for (const row of transaction.rows) {
-      if (row.oldBlob !== null) blobs.add(row.oldBlob)
-      if (row.newBlob !== null) blobs.add(row.newBlob)
-    }
-  }
-  return { commits, trees, blobs }
-})
-
-const isCollectionRoots = (value: CollectionRoots | CollectionOptions): value is CollectionRoots =>
-  "commits" in value && "trees" in value && "blobs" in value
-
-const collectEffect = Effect.fn("collect")(function* (
-  storage: MaintenanceStorage,
-  input: CollectionRoots | CollectionOptions | undefined = undefined,
-  explicitCutoffMillis?: number
-): Effect.fn.Return<CollectionReport, MaintenanceError> {
-  const roots =
-    input !== undefined && isCollectionRoots(input)
-      ? input
-      : (input?.roots ?? (yield* collectionRoots(storage)))
-  const options = input !== undefined && !isCollectionRoots(input) ? input : undefined
-  const nowMillis =
-    options?.nowMillis ??
-    (explicitCutoffMillis !== undefined ? explicitCutoffMillis : yield* Clock.currentTimeMillis)
-  const gracePeriodMs = options?.gracePeriodMs ?? 30 * 24 * 60 * 60 * 1000
-  const cutoffMillis = explicitCutoffMillis ?? options?.cutoffMillis ?? nowMillis - gracePeriodMs
-  if (!Number.isFinite(nowMillis) || !Number.isFinite(cutoffMillis)) {
-    return yield* invalidInput("collection clock values must be finite")
-  }
-  if (!Number.isFinite(gracePeriodMs) || gracePeriodMs < 0) {
-    return yield* invalidInput("gracePeriodMs must not be negative")
-  }
-
-  let scanned = 0
-  let removed = 0
-  let retained = 0
-  let bytesRemoved = 0
-  const reachableByKind: Record<MaintenanceObjectKind, ReadonlySet<string>> = {
-    blob: roots.blobs,
-    tree: roots.trees,
-    commit: roots.commits
-  }
-  for (const kind of objectKinds) {
-    const entries = yield* storage.listObjects(kind)
-    for (const entry of entries) {
-      const id = objectIdFromFilenameUnsafe(entry.name, kind !== "blob")
-      scanned += 1
-      if (reachableByKind[kind].has(id) || entry.modifiedAtMillis > cutoffMillis) {
-        retained += 1
-        continue
-      }
-      const content = yield* storage.readObject(kind, id)
-      if (sha256Hex(content) !== id)
-        return yield* corrupt(`unreachable object is corrupt: ${entry.name}`)
-      yield* storage.removeObject(kind, id)
-      removed += 1
-      bytesRemoved += entry.byteSize
-    }
-  }
-  return { scanned, removed, retained, bytesRemoved }
-})
-
-/** Collect unreachable immutable objects after the configured grace period. */
-export const collect = (
-  storage: MaintenanceStorage,
-  input?: CollectionRoots | CollectionOptions,
-  cutoffMillis?: number
-): Effect.Effect<CollectionReport, MaintenanceError> => collectEffect(storage, input, cutoffMillis)

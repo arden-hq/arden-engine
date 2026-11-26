@@ -12,20 +12,12 @@ import type { ServerModels } from "./endpoints/chat.js"
 import { decodeModelHostSource, type ModelHost, type ModelHostSource } from "./host.js"
 import { ModelProviderService, type ModelRouteInput } from "./provider.js"
 
-/**
- * The model route and list in use, from two parts: the host's (the Codex
- * account in the app, a configured server's provider) and the saved model
- * servers'. Either can change while the server runs; each change installs
- * both together, so the list and the route always name the same models.
- */
 export class ModelProviderSwitch extends Context.Service<
   ModelProviderSwitch,
   {
-    /** The host's part: the Codex account signed in or out, or another provider. */
     readonly replace: (
       next: ModelProviderOptions
     ) => Effect.Effect<void, Schema.SchemaError | ModelCatalogError>
-    /** The saved model servers' part, in the order they were added; empty when none is saved. */
     readonly replaceServers: (
       next: ReadonlyArray<ServerModels>
     ) => Effect.Effect<void, ModelCatalogError>
@@ -78,21 +70,12 @@ export class ModelProviderSwitch extends Context.Service<
     )
 }
 
-/** What the host supplies: a route, its model list, and how to read the list again. */
 export interface HostPart {
   readonly route: ModelRouteInput
   readonly host: ModelHostSource
   readonly refresh: (() => Promise<ModelHost>) | undefined
 }
 
-/**
- * The host's part alone when no server is saved, exactly as before a model
- * server existed. With some, their models follow the host's, server by
- * server; the host's defaults stand, and a list without a chat model (nobody
- * signed in to ChatGPT) starts new chats on the first server's first model.
- * ChatGPT-only features stay the host's, and its plan meters only its own
- * models.
- */
 const composed = (part: HostPart, servers: ReadonlyArray<ServerModels>): HostPart => {
   if (servers.length === 0) return part
   const models = servers.flatMap((server) => server.models)
@@ -124,18 +107,10 @@ const mergedSource = (
 ): ModelHostSource => {
   if (source.kind === "ready") return { kind: "ready", host: merge(source.host) }
   const host = source.host.then(merge)
-  // The host's list may fail (no ChatGPT credential at start); the catalog
-  // reads that failure when it asks, so it must never surface unhandled.
   void host.catch(() => undefined)
   return { kind: "discovering", host }
 }
 
-/**
- * One provider over both parts, picking by the request's model id: a saved
- * server's ids go to its adapters, every other id to the host's provider. A
- * host session is opened only for a host model, so a chat on a server never
- * waits on a ChatGPT sign-in.
- */
 const mixed = (
   host: ModelProvider | undefined,
   served: ReadonlyMap<string, ModelProvider>

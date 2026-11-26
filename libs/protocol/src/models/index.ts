@@ -34,4 +34,4 @@ export const modelRoutes = {
   settings: "/config",
   resetSettings: "/config/models/reset",
   transcribe: "/transcribe"
-} as const
+}

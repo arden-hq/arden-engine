@@ -2,8 +2,15 @@ import { parseJsonText } from "@arden-hq/protocol/common"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-const TYPE = { time: "time", event: "event" } as const
-const EVENT = { lead: "event_approaching", app: "mcp.event" } as const
+const TRIGGER_TYPE = { time: "time", event: "event" } as const
+type TriggerType = (typeof TRIGGER_TYPE)[keyof typeof TRIGGER_TYPE]
+const isTriggerType = (value: unknown): value is TriggerType =>
+  Object.values<unknown>(TRIGGER_TYPE).includes(value)
+
+const TRIGGER_EVENT = { lead: "event_approaching", app: "mcp.event" } as const
+type TriggerEvent = (typeof TRIGGER_EVENT)[keyof typeof TRIGGER_EVENT]
+const isTriggerEvent = (value: unknown): value is TriggerEvent =>
+  Object.values<unknown>(TRIGGER_EVENT).includes(value)
 
 type Json = Record<string, unknown>
 const isObject = (value: unknown): value is Json =>
@@ -35,18 +42,20 @@ const scheduleOf = (trigger: Json): Json | undefined => {
 const timeTrigger = (trigger: Json): Json => {
   if (Object.hasOwn(trigger, "schedule")) return trigger
   const schedule = scheduleOf(trigger)
-  return schedule === undefined ? trigger : { id: trigger["id"], type: TYPE.time, schedule }
+  return schedule === undefined ? trigger : { id: trigger["id"], type: TRIGGER_TYPE.time, schedule }
 }
 
 const eventSpecific = (trigger: Json): Json | undefined => {
-  switch (trigger["event_type"]) {
-    case EVENT.lead: {
+  const event = trigger["event_type"]
+  if (!isTriggerEvent(event)) return {}
+  switch (event) {
+    case TRIGGER_EVENT.lead: {
       const minutes = trigger["lead_minutes"]
       return {
         lead: typeof minutes === "number" ? { kind: "minutes", minutes } : { kind: "default" }
       }
     }
-    case EVENT.app: {
+    case TRIGGER_EVENT.app: {
       const app = trigger["mcp_event"]
       if (!isObject(app)) return undefined
       const args = app["arguments"]
@@ -58,8 +67,6 @@ const eventSpecific = (trigger: Json): Json | undefined => {
         }
       }
     }
-    default:
-      return {}
   }
 }
 
@@ -71,7 +78,7 @@ const eventTrigger = (trigger: Json): Json => {
   const condition = trigger["condition"]
   return {
     id: trigger["id"],
-    type: TYPE.event,
+    type: TRIGGER_TYPE.event,
     event_type: trigger["event_type"],
     ...specific,
     run_only_if: sentence === undefined ? { kind: "any_event" } : { kind: "sentence", sentence },
@@ -81,13 +88,13 @@ const eventTrigger = (trigger: Json): Json => {
 
 export const todayTrigger = (trigger: unknown): unknown => {
   if (!isObject(trigger)) return trigger
-  switch (trigger["type"]) {
-    case TYPE.time:
+  const type = trigger["type"]
+  if (!isTriggerType(type)) return trigger
+  switch (type) {
+    case TRIGGER_TYPE.time:
       return timeTrigger(trigger)
-    case TYPE.event:
+    case TRIGGER_TYPE.event:
       return eventTrigger(trigger)
-    default:
-      return trigger
   }
 }
 

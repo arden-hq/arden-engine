@@ -14,7 +14,6 @@ export const openSignalSources: Migration = {
     ]
   },
   up: (database) => {
-    // Renaming a parent aside must leave its children's REFERENCES text alone,
     database.exec("PRAGMA legacy_alter_table = ON")
     try {
       rebuild(database, "connection_items", connectionItems, [

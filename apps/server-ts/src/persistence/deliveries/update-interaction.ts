@@ -4,7 +4,7 @@ import {
   INTERACTION_SOURCE,
   type InteractionOutcome
 } from "@arden-hq/std/message-vocabulary"
-import type { ChatUpdate } from "@arden-hq/protocol/chat"
+import { UPDATE_WEIGHT, type ChatUpdate } from "@arden-hq/protocol/chat"
 import type { StoredInteraction } from "../transcript/interaction.js"
 import type { RunDeliveryPayload } from "./model.js"
 import { doorRef } from "../transcript/chat-events.js"
@@ -25,6 +25,6 @@ export const updateInteraction = (
 })
 
 const updateOutcome = (update: ChatUpdate): InteractionOutcome => {
-  if (update.weight === "news") return INTERACTION_OUTCOME.completed
+  if (update.weight === UPDATE_WEIGHT.news) return INTERACTION_OUTCOME.completed
   return update.event === "failed" ? INTERACTION_OUTCOME.failed : INTERACTION_OUTCOME.needsAttention
 }

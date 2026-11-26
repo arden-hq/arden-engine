@@ -1,6 +1,7 @@
 import { decoderFor, makeEncoder } from "../common/boundary.js"
-export { RELAY_PAIR_REQUEST, RELAY_PRESENCE, RELAY_SETTING } from "./schema.js"
+export { RELAY_CONNECTION, RELAY_PAIR_REQUEST, RELAY_PRESENCE, RELAY_SETTING } from "./schema.js"
 import {
+  RELAY_CONNECTION,
   encodeRelayPairDecisionEffect,
   encodeRelaySettingsPatchEffect,
   RelayPairOfferSchema,
@@ -12,7 +13,7 @@ import {
 export type RelayStatus = typeof RelayStatusSchema.Type
 export type RelayDevice = RelayStatus["devices"][number]
 export type RelayPairRequest = Extract<RelayStatus["pair_request"], { readonly kind: "waiting" }>
-export type RelayConnection = RelayStatus["connection"]
+export type RelayConnection = (typeof RELAY_CONNECTION)[keyof typeof RELAY_CONNECTION]
 export type RelayPairOffer = typeof RelayPairOfferSchema.Type
 export type RelayPairDecision = typeof RelayPairDecisionSchema.Type
 export type RelaySettingsPatch = typeof RelaySettingsPatchSchema.Type

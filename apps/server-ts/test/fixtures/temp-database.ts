@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
+import type { StorageStartupError } from "../../src/persistence/service.js"
 import type { SqlitePersistence } from "../../src/persistence/sqlite/layer.js"
 import { PersistenceWriteQueue } from "../../src/persistence/write-queue.js"
 import { automationRulesLayer } from "../../src/automations/rules.js"
@@ -14,7 +15,9 @@ import {
   type SqlitePersistenceOptions
 } from "../../src/persistence/sqlite/layer.js"
 
-export const sqlitePersistenceLayer = (options: SqlitePersistenceOptions) =>
+export const sqlitePersistenceLayer = (
+  options: SqlitePersistenceOptions
+): Layer.Layer<SqlitePersistence, StorageStartupError, PersistenceWriteQueue> =>
   sqliteStoresLayer(options).pipe(Layer.provide(Layer.merge(automationRulesLayer, chatRulesLayer)))
 
 export const withTempDatabase = async <A, E>(

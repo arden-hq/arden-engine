@@ -23,7 +23,7 @@ import {
 import { makeBrowserHistorySummaryTool } from "./browser-history.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { writeIdentity, type WikiWriteIdentity } from "./wiki-identity.js"
-import { wikiFailure } from "./wiki.js"
+import { wikiFailure } from "./wiki-access.js"
 import { recordApplied, type CallEffects } from "../execution/tool-effect.js"
 import { appliedReceipt } from "./call-receipt.js"
 import { pagesReceipt } from "./wiki-records.js"

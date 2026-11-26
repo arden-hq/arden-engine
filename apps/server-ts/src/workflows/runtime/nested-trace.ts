@@ -3,16 +3,25 @@ import { Schema } from "effect"
 
 import { workflowHash } from "../identity.js"
 import type { NestedCallFacts } from "./contract.js"
+import type { NestedCallMarker } from "../../persistence/tools/tool-roles.js"
 
 export const PREVIEW_CHARS = 200
 const ARG_CHARS = 200
+
+export const SCRIPT_PROGRESS_STATUS = {
+  running: "running",
+  completed: "completed",
+  failed: "failed"
+} as const
+
+type ScriptProgressStatus = (typeof SCRIPT_PROGRESS_STATUS)[keyof typeof SCRIPT_PROGRESS_STATUS]
 
 export interface ScriptProgressTool extends NestedCallFacts {
   readonly phase_id: string | null
   readonly tool_call_id: string
   readonly name: string
   readonly phase: string | null
-  readonly status: "running" | "completed" | "failed"
+  readonly status: ScriptProgressStatus
   readonly changes_state: boolean
   readonly args: Readonly<Record<string, Schema.Json>>
   readonly preview: string | null
@@ -20,7 +29,7 @@ export interface ScriptProgressTool extends NestedCallFacts {
 
 export const nestedCallIds = (
   parentToolCallId: string,
-  marker: string
+  marker: `${NestedCallMarker}${string}`
 ): ((name: string, args: Schema.Json) => string) => {
   const occurrences = new Map<string, number>()
   return (name: string, args: Schema.Json): string => {

@@ -12,6 +12,7 @@ import {
   narrowCapabilities,
   meetCapabilities,
   runApprovalMode,
+  RUN_CAPABILITY,
   runAuthorityChat,
   SessionResourceReachSchema,
   type SessionResourceReach,
@@ -37,7 +38,13 @@ import { isUserAutomationPurpose } from "../job-classification.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 import { intersectGoogleAccounts, intersectResourceSessions } from "./run-policy-intersect.js"
 
-export const workerScopes = { code: "agent_code", research: "agent_research", work: "all" } as const
+export const workerScopes = {
+  code: RUN_CAPABILITY.agentCode,
+  research: RUN_CAPABILITY.agentResearch,
+  work: RUN_CAPABILITY.all
+} as const
+
+export type WorkerScope = (typeof workerScopes)[keyof typeof workerScopes]
 
 const failure = (message: string, cause?: unknown) =>
   new WorkStoreError({ reason: "conflict", message, ...(cause === undefined ? {} : { cause }) })
@@ -201,7 +208,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     readonly previousRunId?: string | undefined
     readonly taskItemId?: string | undefined
     readonly sharesRunId?: string | undefined
-    readonly workerScope?: "agent_code" | "agent_research" | "all"
+    readonly workerScope?: WorkerScope
   }
 ): Effect.fn.Return<RunPolicy, WorkStoreError> {
   return yield* Effect.gen(function* () {

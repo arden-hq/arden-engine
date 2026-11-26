@@ -47,12 +47,6 @@ interface WorkRow extends PositionColumns {
   readonly prepared_json: string | null
 }
 
-/**
- * Unread ranges of owner chats, archived ones included, that have a prepared batch to finish or
- * messages past where reading stopped: the open range of a chat while no run is active in it,
- * and, when `older`, closed ranges not resting. Prepared batches first, then open ranges, then
- * the range whose first unread message is oldest.
- */
 export const listCaptureWork = Effect.fn("MemoryCapturePositions.listWork")(function* (
   sql: SqlClient.SqlClient,
   limit: number,
@@ -115,12 +109,6 @@ interface StoredRange {
   readonly end_holds: number
 }
 
-/**
- * The unread range that stopped at `batch`'s start, and where it goes when the batch is read, or
- * undefined when the chat moved on: no range stops there, another batch is prepared, or the
- * message at its end is gone. When a revert removed later messages of the prepared batch, it
- * ends before the first one removed: the last message it read that is still there.
- */
 const endOf = Effect.fn("MemoryCapturePositions.endOf")(function* (
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity,
@@ -163,7 +151,6 @@ export const prepareCapture = Effect.fn("MemoryCapturePositions.prepare")(functi
   return "moved"
 })
 
-/** Moves `range` to its end; a closed range with nothing left is deleted. */
 const moveRange = Effect.fn("MemoryCapturePositions.move")(function* (
   sql: SqlClient.SqlClient,
   range: { readonly rangeId: number; readonly end: PositionColumns }
@@ -192,10 +179,6 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
   return "moved"
 })
 
-/**
- * Moves the range past `batch` as `advanceCapture` does, unread, and keeps the whole messages it
- * touched as a closed range that rests a day.
- */
 export const skipCapture = Effect.fn("MemoryCapturePositions.skip")(function* (
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity
@@ -214,13 +197,6 @@ export const skipCapture = Effect.fn("MemoryCapturePositions.skip")(function* (
   return "moved"
 })
 
-/**
- * Capture reads an owner chat from after the messages it held when it became one. A new chat
- * holds none, and a trigger starts it at its beginning (migration 0155). An Automation's working
- * copy that continues as a chat holds copies its source is read for, so it calls this before it
- * becomes an owner chat, and a trigger refuses it otherwise. A chat filled with copies after it
- * is made goes through `copyIntoOwnerChat`, the one place messages are copied between chats.
- */
 export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.start")(function* (
   sql: SqlClient.SqlClient,
   sessionId: string
@@ -237,10 +213,6 @@ export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.start")
   `
 })
 
-/**
- * Copies a chat's messages up to `throughSeq` into a new owner chat, renumbered from 0, and
- * starts Capture after them in the same step: the source is where they are read.
- */
 export const copyIntoOwnerChat = Effect.fn("MemoryCapturePositions.copyIntoOwnerChat")(function* (
   sql: SqlClient.SqlClient,
   input: { readonly from: string; readonly to: string; readonly throughSeq: number }

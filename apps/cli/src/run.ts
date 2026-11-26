@@ -1,7 +1,7 @@
 import { abortAfter } from "@arden-hq/std/timer"
 import { latestChats, oneSession } from "./session-list.js"
 import { newChat, wholeFork } from "./session-requests.js"
-import { receiptFromRun, type ReceiptResult, type ReceiptRun } from "./run-receipt-detail.js"
+import { receiptFromRun } from "./run-receipt-detail.js"
 import { nameText, runIsActive, spaceIdOf } from "@arden-hq/protocol/sessions"
 import {
   HeadlessHttpError,
@@ -33,10 +33,20 @@ import {
   type CliDependencies
 } from "./command.js"
 import { errorMessage } from "@arden-hq/std/errors"
-import { progressLines, requestResponder, type RunResponder } from "./terminal.js"
+import { requestResponder, type RunResponder } from "./terminal.js"
 import { parseJsonText } from "@arden-hq/std/json-text"
-
-export type CliOutputFormat = "text" | "json" | "jsonl"
+import {
+  type CliOutputFormat,
+  type CommandReceiptV1,
+  type DeclinedRequest,
+  type ReceiptIdentity,
+  failedReceipt,
+  noIdentity,
+  progressWriter,
+  submittedReceipt,
+  writeReceipt,
+  type CommandReceiptError
+} from "./run-receipt.js"
 
 export type ApprovalHandling = "wait" | "decline" | "ask_then_decline"
 
@@ -65,143 +75,6 @@ export interface WaitOptions {
   readonly approvals: ApprovalHandling
   readonly output: CliOutputFormat
   readonly timeoutMs: number | undefined
-}
-
-export interface CommandReceiptError {
-  readonly code: string
-  readonly message: string
-}
-
-export interface DeclinedRequest {
-  readonly kind: "approval" | "connection"
-  readonly tool_id: string
-  readonly name: string
-}
-
-export interface CommandReceiptV1 {
-  readonly version: 1
-  readonly type: "command_receipt"
-  readonly command: "run" | "wait"
-  readonly status: "completed" | "submitted" | "failed" | "cancelled" | "interrupted" | "timed_out"
-  readonly exit_code: number
-  readonly run_id: string | null
-  readonly session_id: string | null
-  readonly client_id: string | null
-  readonly run_status: RunDetail["status"] | null
-  /** The model the Run ran on, as the server names it (llama.cpp, OpenRouter: the server's own id). */
-  readonly model_id: ReceiptRun["model_id"]
-  readonly reasoning_effort: ReceiptRun["reasoning_effort"]
-  /** The server's terminal result as it sent it. Its `cost` is the dollars the
-   *  provider reported for the Run's model requests, absent when it reported
-   *  none (llama.cpp, Codex): never an estimate (see the CLI README). */
-  readonly result: ReceiptResult | null
-  readonly error: CommandReceiptError | null
-  readonly declined: ReadonlyArray<DeclinedRequest>
-}
-
-interface ReceiptIdentity {
-  readonly runId: string | null
-  readonly sessionId: string | null
-  readonly clientId: string | null
-}
-
-const noIdentity: ReceiptIdentity = { runId: null, sessionId: null, clientId: null }
-
-const failedReceipt = (
-  command: CommandReceiptV1["command"],
-  error: CommandReceiptError,
-  input: {
-    readonly identity?: ReceiptIdentity
-    readonly status?: CommandReceiptV1["status"]
-    readonly exitCode?: number
-    readonly declined?: ReadonlyArray<DeclinedRequest>
-  } = {}
-): CommandReceiptV1 => {
-  const identity = input.identity ?? noIdentity
-  return {
-    version: 1,
-    type: "command_receipt",
-    command,
-    status: input.status ?? "failed",
-    exit_code: input.exitCode ?? 1,
-    run_id: identity.runId,
-    session_id: identity.sessionId,
-    client_id: identity.clientId,
-    run_status: null,
-    model_id: null,
-    reasoning_effort: null,
-    result: null,
-    error,
-    declined: input.declined ?? []
-  }
-}
-
-const submittedReceipt = (run: SubmittedRun): CommandReceiptV1 => ({
-  version: 1,
-  type: "command_receipt",
-  command: "run",
-  status: "submitted",
-  exit_code: 0,
-  run_id: run.runId,
-  session_id: run.sessionId,
-  client_id: run.clientId,
-  run_status: null,
-  model_id: null,
-  reasoning_effort: null,
-  result: null,
-  error: null,
-  declined: []
-})
-
-export const invalidInputReceipt = (
-  command: CommandReceiptV1["command"],
-  message: string
-): CommandReceiptV1 => failedReceipt(command, { code: "invalid_input", message }, { exitCode: 2 })
-
-const progressWriter = (
-  dependencies: CliDependencies,
-  output: CliOutputFormat
-): ((identity: ReceiptIdentity, event: HeadlessRunEvent) => void) => {
-  const lineOf = progressLines()
-  return (identity, event) => {
-    if (output === "jsonl") {
-      dependencies.writeStderr(
-        `${JSON.stringify({
-          version: 1,
-          type: "run_event",
-          run_id: identity.runId,
-          session_id: identity.sessionId,
-          event: event.data
-        })}\n`
-      )
-      return
-    }
-    const line = output === "text" ? lineOf(event) : undefined
-    if (line !== undefined) dependencies.writeStderr(`arden: ${line}\n`)
-  }
-}
-
-const writeReceipt = (
-  dependencies: CliDependencies,
-  output: CliOutputFormat,
-  receipt: CommandReceiptV1
-): number => {
-  if (output !== "text") {
-    dependencies.writeStdout(`${JSON.stringify(receipt)}\n`)
-    return receipt.exit_code
-  }
-  if (receipt.status === "submitted" && receipt.run_id !== null) {
-    dependencies.writeStdout(`${receipt.run_id}\n`)
-    dependencies.writeStderr(
-      `arden: the Run goes on in Arden; follow it with: arden wait ${receipt.run_id}\n`
-    )
-  } else if (receipt.status === "completed" && receipt.result !== null) {
-    const text = receipt.result.text
-    if (text.length > 0) dependencies.writeStdout(text.endsWith("\n") ? text : `${text}\n`)
-  } else if (receipt.error !== null) {
-    dependencies.writeStderr(`arden: ${receipt.error.message}\n`)
-  }
-  return receipt.exit_code
 }
 
 const promptFor = async (options: RunOptions, dependencies: CliDependencies): Promise<string> => {
@@ -318,11 +191,6 @@ const resolveSession = async (
   }
 }
 
-/**
- * A model the server does not list would make it refuse the new chat with no
- * reason; this names the models it has. On llama.cpp and OpenRouter the ids
- * are the server's own (`arden models`).
- */
 const requireModel = async (client: CliClient, model: string): Promise<void> => {
   const ids = (await client.listModels()).providers.flatMap((provider) =>
     provider.models.map((entry) => entry.id)
@@ -361,7 +229,6 @@ export const failureOf = (
     return { error: { code: "server_unavailable", message: cause.message }, exitCode: 1 }
   }
   if (cause instanceof ProviderUnavailableError) {
-    // The configured server's own exit code for it, so `exec` and `serve` agree.
     return {
       error: { code: "provider_unavailable", message: cause.message },
       exitCode: CONFIGURED_SERVER_EXIT.providerUnreachable
@@ -421,7 +288,6 @@ export const runCommand = async (
   try {
     prompt = await promptFor(options, dependencies)
     if (prompt.length === 0) throw new UsageError("Prompt must not be empty")
-    // The message contract's own limit, said before a chat is made for it.
     if (prompt.length > CHAT_MESSAGE_MAX_LENGTH)
       throw new UsageError(
         `The prompt is ${prompt.length} characters; one message takes at most ${CHAT_MESSAGE_MAX_LENGTH}`

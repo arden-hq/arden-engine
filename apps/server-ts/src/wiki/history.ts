@@ -1,8 +1,9 @@
-import type {
-  CollectionReport,
-  Commit,
-  ManagedFileRepositoryShape,
-  ResourceVersion
+import {
+  RESOURCE_STATE,
+  type CollectionReport,
+  type Commit,
+  type ManagedFileRepositoryShape,
+  type ResourceVersion
 } from "@arden-hq/revisions/effect"
 import {
   WIKI_DIFF_BASE,
@@ -17,12 +18,13 @@ import {
   type WikiPageLinks,
   type WikiRestoreSide,
   type WikiVersionDiff,
-  type WikiVersionDiffRouteOptions
+  type WikiVersionDiffRouteOptions,
+  WIKI_PAGE_LIFECYCLE
 } from "@arden-hq/protocol/wiki"
 import { diffLines } from "diff"
 import { Effect } from "effect"
 
-import { decodeWikiOrigin, type WikiCommitOrigin, wikiOriginChat } from "./commit.js"
+import { decodeWikiOrigin, type WikiCommitOrigin, wikiOriginChat } from "./origin.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { pageWikiLinks, type WikiLinkToken } from "./links.js"
 import { contentRestoring } from "./restore.js"
@@ -84,7 +86,7 @@ const VERSION_SEARCH_COMMITS = 500
 const VERSION_DIFF_CHARS = 65_536
 
 const live = (version: ResourceVersion | null): ResourceVersion | null =>
-  version?.state === "archived" ? null : version
+  version?.state === RESOURCE_STATE.archived ? null : version
 
 interface WikiPageChat {
   readonly sessionId: string
@@ -115,7 +117,11 @@ export const makeWikiHistoryMethods = (
     const resource = yield* repository
       .get(pageId, { at: head })
       .pipe(Effect.mapError(mapRevisionError("history", pageId)))
-    if (resource === null || resource.state !== "active" || !resource.path.endsWith(".md")) {
+    if (
+      resource === null ||
+      resource.state !== RESOURCE_STATE.active ||
+      !resource.path.endsWith(".md")
+    ) {
       return yield* notFound("history", pageId)
     }
     const current = yield* readRecord(repository, "history", resource)
@@ -214,7 +220,11 @@ export const makeWikiHistoryMethods = (
     const current = yield* snapshot()
     const byId = new Map(current.wholeSet.map((record) => [record.page.pageId, record] as const))
     const record = byId.get(pageId)
-    if (record === undefined || record.page.lifecycle !== "active" || current.head === null) {
+    if (
+      record === undefined ||
+      record.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active ||
+      current.head === null
+    ) {
       return yield* notFound("links", pageId)
     }
     const names = pageNameIndex(current.wholeSet)
@@ -307,7 +317,8 @@ export const makeWikiHistoryMethods = (
     const resource = yield* repository
       .get(pageId, { at: head })
       .pipe(Effect.mapError(mapRevisionError("history", pageId)))
-    if (resource === null || resource.state !== "active") return yield* notFound("history", pageId)
+    if (resource === null || resource.state !== RESOURCE_STATE.active)
+      return yield* notFound("history", pageId)
     const readLines = (version: ResourceVersion | null) =>
       version === null
         ? Effect.succeed<ReadonlyArray<string>>([])

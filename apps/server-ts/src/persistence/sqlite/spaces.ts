@@ -1,41 +1,26 @@
 import { captureMutationVersions } from "./mutation-links.js"
 import type { MutationOperationIdentity } from "../tools/mutation-receipt.js"
 import { recordedHistoryReader } from "./recorded-history.js"
-import {
-  DEFAULT_TASK_INFERENCE_POLICY,
-  type CreateSpaceInput,
-  type SpaceKind,
-  type SpaceArchiveResponse,
-  type UpdateSpaceInput,
-  SPACE_EXPECTED
-} from "@arden-hq/protocol/spaces"
-import { assertPersonRun } from "./person-run.js"
-import {
-  CreateSpaceInputSchema,
-  SpaceArchiveResponseSchema,
-  UpdateSpaceInputSchema
-} from "@arden-hq/protocol/effect/spaces"
+import { DEFAULT_TASK_INFERENCE_POLICY, type CreateSpaceInput } from "@arden-hq/protocol/spaces"
+import { CreateSpaceInputSchema } from "@arden-hq/protocol/effect/spaces"
 import { DateTime, Effect, Schema } from "effect"
 import {
   SpaceStore,
   SpaceStoreError,
-  archiveRefusal,
   type FreeSpacePage,
   type PersistedSpace,
   type SpaceBindingRow
 } from "../spaces/store.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
-import { followSpaceName } from "./owner-chat.js"
 import { nextId } from "./deps.js"
 import type { PersistenceDeps } from "./deps.js"
-import { pauseForArchivedSpace } from "./automation-auto-pause.js"
-import { archiveSpaceChats, restoreSpaceChats } from "./space-chat-archive.js"
-import { chatHasActiveWork } from "./session-archive.js"
+import { restoreSpaceChats } from "./space-chat-archive.js"
 import { makeSpaceReads, makeSpaceLists } from "./space-read.js"
 import { decodeRow, storeError, type SpaceRow } from "./space-row.js"
-import { applySpaceChanges, instructionsColumns } from "./space-changes.js"
+import { instructionsColumns } from "./space-changes.js"
+import { makeSpaceArchive } from "./space-archive.js"
+import { makeSpaceUpdate, strict } from "./space-update.js"
 
-const strict = { onExcessProperty: "error" } as const
 const generatedInstructionsSchema = Schema.Trim.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(20_000)
@@ -167,120 +152,7 @@ export const makeSpaceStore = ({
 
   const { overview, detail } = makeSpaceReads(reader)
 
-  const update = Effect.fn("SqliteSpaceStore.update")(function* (
-    spaceId: string,
-    input: UpdateSpaceInput,
-    runId?: string,
-    toolCallId?: string
-  ): Effect.fn.Return<PersistedSpace | null, SpaceStoreError> {
-    const validSpaceId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(spaceId).pipe(
-      Effect.mapError((cause) =>
-        storeError("update", "invalid", "Space id must not be empty", undefined, cause)
-      )
-    )
-    const valid = yield* Schema.decodeUnknownEffect(UpdateSpaceInputSchema)(input, strict).pipe(
-      Effect.mapError((cause) =>
-        storeError("update", "invalid", "Invalid Space update", validSpaceId, cause)
-      )
-    )
-    const now = DateTime.formatIso(yield* DateTime.now)
-    return yield* writer
-      .transact(
-        Effect.gen(function* () {
-          const recordVersions = yield* captureMutationVersions(sql, {
-            domain: "space",
-            id: validSpaceId,
-            identity:
-              runId !== undefined && toolCallId !== undefined ? { runId, toolCallId } : undefined
-          })
-          if (runId !== undefined)
-            yield* assertPersonRun(sql, runId).pipe(
-              Effect.mapError((cause) =>
-                storeError("update", "conflict", cause.message, validSpaceId, cause)
-              )
-            )
-          const rows = yield* sql<SpaceRow & { readonly policy_generation: number }>`
-        SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-               inference_policy, mark, kind, created_at, updated_at, archived_at,
-               policy_generation
-        FROM spaces
-        WHERE space_id = ${validSpaceId} AND archived_at IS NULL
-        LIMIT 1
-      `
-          const row = rows[0]
-          if (row === undefined) return null
-          const current = yield* decodeRow(row, "update")
-          if (
-            valid.expected.kind === SPACE_EXPECTED.at &&
-            valid.expected.updated_at !== current.updated_at
-          ) {
-            return yield* storeError(
-              "update",
-              "conflict",
-              "This Space changed. Reload it and try again.",
-              validSpaceId
-            )
-          }
-          const updatedAt =
-            now > current.updated_at
-              ? now
-              : DateTime.formatIso(
-                  DateTime.add(DateTime.makeUnsafe(current.updated_at), { milliseconds: 1 })
-                )
-          const edit = applySpaceChanges(current, valid.changes)
-          const name = edit.name
-          const nameKey = name.toLowerCase()
-          const duplicate = yield* sql<{ readonly space_id: string }>`
-        SELECT space_id FROM spaces
-        WHERE name_key = ${nameKey}
-          AND space_id != ${validSpaceId}
-          AND archived_at IS NULL
-        LIMIT 1
-      `
-          if (duplicate.length > 0) {
-            return yield* storeError(
-              "update",
-              "conflict",
-              "An active Space already has that name. Pick another.",
-              validSpaceId
-            )
-          }
-          const instructions = edit.instructions
-          const instructionsSource = edit.instructions_source
-          const mark = edit.mark
-          const updated = yield* sql<SpaceRow>`
-        UPDATE spaces
-        SET name = ${name}, name_key = ${nameKey},
-            instructions = ${instructions}, instructions_source = ${instructionsSource},
-            mark = ${mark === null ? null : JSON.stringify(mark)},
-            updated_at = ${updatedAt}
-        WHERE space_id = ${validSpaceId} AND archived_at IS NULL
-        RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
-                  inference_policy, mark, kind, created_at, updated_at, archived_at
-      `
-          const next = updated[0]
-          if (next === undefined) return null
-          if (current.name !== name) yield* followSpaceName(sql, validSpaceId, current.name, name)
-          if (edit.instructionsChanged)
-            yield* spaceJobs.queueOwnerSpaceChangeWake(validSpaceId, now, runId)
-          else yield* spaceJobs.syncSpace(validSpaceId, now)
-          const generations = yield* sql<{ readonly policy_generation: number }>`
-        SELECT policy_generation FROM spaces WHERE space_id = ${validSpaceId}`
-          if (generations[0]?.policy_generation !== row.policy_generation) {
-          }
-          yield* recordVersions
-          return yield* decodeRow(next, "update")
-        })
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          cause instanceof SpaceStoreError
-            ? cause
-            : storeError("update", "storage", "Could not update Space", validSpaceId, cause)
-        )
-      )
-  })
-
+  const update = makeSpaceUpdate({ writer, spaceJobs })
   const setGeneratedInstructions = Effect.fn("SqliteSpaceStore.setGeneratedInstructions")(
     function* (
       spaceId: string,
@@ -417,7 +289,6 @@ export const makeSpaceStore = ({
       )
   })
 
-  /** Runs before a bind: the unique page indexes are checked at each statement. */
   const releaseFromArchived = (pageId: string, pagePath: string, now: string) => sql`
     UPDATE spaces
     SET page_id = NULL, page_path = NULL, updated_at = ${now}
@@ -456,93 +327,7 @@ export const makeSpaceStore = ({
       )
   })
 
-  const archive = Effect.fn("SqliteSpaceStore.archive")(function* (
-    spaceId: string,
-    mutation?: MutationOperationIdentity
-  ): Effect.fn.Return<SpaceArchiveResponse | null, SpaceStoreError> {
-    const validSpaceId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(spaceId).pipe(
-      Effect.mapError((cause) =>
-        storeError("archive", "invalid", "Space id must not be empty", undefined, cause)
-      )
-    )
-    const timestamp = DateTime.formatIso(yield* DateTime.now)
-    return yield* writer
-      .transact(
-        Effect.gen(function* () {
-          const recordVersions = yield* captureMutationVersions(sql, {
-            domain: "space",
-            id: validSpaceId,
-            identity: mutation
-          })
-          const active = yield* sql<{ readonly kind: SpaceKind }>`
-        SELECT kind FROM spaces
-        WHERE space_id = ${validSpaceId} AND archived_at IS NULL
-        LIMIT 1
-      `.pipe(
-            Effect.mapError((cause) =>
-              storeError("archive", "storage", "Could not read Space", validSpaceId, cause)
-            )
-          )
-          if (active[0] === undefined) return null
-          const refusal = archiveRefusal(active[0])
-          if (refusal !== undefined)
-            return yield* storeError("archive", "conflict", refusal, validSpaceId)
-          const busy = yield* sql`SELECT 1 FROM sessions AS s
-            WHERE s.space_id = ${validSpaceId} AND s.archived_at IS NULL
-              AND ${chatHasActiveWork(sql, sql`s`)} LIMIT 1`
-          if (busy.length > 0) {
-            return yield* storeError(
-              "archive",
-              "conflict",
-              "A chat on this Space has work running",
-              validSpaceId
-            )
-          }
-          yield* sql`
-        UPDATE spaces
-        SET archived_at = ${timestamp}, updated_at = ${timestamp}, pinned_position = NULL
-        WHERE space_id = ${validSpaceId} AND archived_at IS NULL
-      `.pipe(
-            Effect.mapError((cause) =>
-              storeError("archive", "storage", "Could not archive Space", validSpaceId, cause)
-            )
-          )
-          yield* spaceJobs.syncSpace(validSpaceId, timestamp)
-          yield* pauseForArchivedSpace({ sql, sessionEvents, spaceId: validSpaceId, mutation })
-          yield* archiveSpaceChats(sql, validSpaceId, timestamp)
-          const response = yield* Schema.decodeUnknownEffect(SpaceArchiveResponseSchema)({
-            status: "archived",
-            space_id: validSpaceId
-          }).pipe(
-            Effect.mapError((cause) =>
-              storeError(
-                "archive",
-                "storage",
-                "Space archive response is corrupt",
-                validSpaceId,
-                cause
-              )
-            )
-          )
-          yield* recordVersions
-          return response
-        })
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          cause instanceof SpaceStoreError
-            ? cause
-            : storeError(
-                "archive",
-                "storage",
-                "Could not complete Space archive",
-                validSpaceId,
-                cause
-              )
-        )
-      )
-  })
-
+  const archive = makeSpaceArchive({ writer, sessionEvents, spaceJobs })
   const restore = Effect.fn("SqliteSpaceStore.restore")(function* (
     spaceId: string,
     page: FreeSpacePage | null

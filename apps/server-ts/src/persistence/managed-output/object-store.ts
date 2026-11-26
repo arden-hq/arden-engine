@@ -28,7 +28,6 @@ export interface ManagedObjectStore {
     readonly source: ManagedObjectSource
   }) => Promise<ManagedObjectDescriptor>
   readonly read: (input: { readonly sessionId: string; readonly ref: string }) => Promise<string>
-  /** Reads an object by a ref that Arden stored itself; `read` is for refs a model names. */
   readonly readRef: (ref: string) => Promise<string>
   readonly attach: (input: {
     readonly descriptor: ManagedObjectDescriptor

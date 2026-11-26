@@ -1,32 +1,19 @@
-import type {
-  ChatSendReceipt,
-  RunCancelTarget,
-  ToolDecisionFields
-} from "../persistence/chat/send-contracts.js"
-import { boundAuthority } from "./run-authority.js"
-import type { CancelResponse, ChatAcknowledgement } from "@arden-hq/protocol/chat"
+import type { ChatSendReceipt, RunCancelTarget } from "../persistence/chat/send-contracts.js"
+import type { CancelResponse } from "@arden-hq/protocol/chat"
 import { Persistence } from "../persistence/service.js"
 import { Context, Effect, Exit, Fiber, FiberMap, Layer, Option, Scope, Semaphore } from "effect"
-import { randomUUID } from "node:crypto"
 import { ChatEventStore } from "../persistence/events/store.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { LimitSettingsStore } from "../persistence/settings/store.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
-import { runPolicyOf } from "../execution/policy.js"
 import {
   ChatWriteStore,
   type ChatWriteResume,
   type ChatWriteReceiveResult
 } from "../persistence/chat/store.js"
-import {
-  ToolExecutionStore,
-  type ApprovalAlternativeInput,
-  type ApprovalEditsInput
-} from "../persistence/tools/store.js"
+import { ToolExecutionStore } from "../persistence/tools/store.js"
 import { TerminalSessions } from "../terminals/service.js"
-import { stopRun } from "./run-stop.js"
-import type { ServerToolRun } from "./runner-contract.js"
 import { chatRunnerSource, type ChatRunnerOptions } from "./runner-source.js"
 import { ModelProviderService, planReadingFor } from "../models/provider.js"
 import { StructuredCompletion } from "../models/structured-completion.js"
@@ -36,35 +23,22 @@ import { SpaceStore } from "../persistence/spaces/store.js"
 import { makeAgentRunScheduler } from "./agent-run-scheduler.js"
 import { makePendingArrivals } from "./pending-arrivals.js"
 import { isApprovalMode } from "@arden-hq/protocol/permissions"
-import { makeDurableTools, type ToolHost } from "./durable-tools.js"
+import { type ToolHost } from "./durable-tools.js"
 import { makeHeldBackground, stopHeldOfEndedRuns } from "./held-background.js"
 import { makeHelperJobs } from "./helper-jobs.js"
 import { startRunRecovery } from "./run-recovery.js"
-import {
-  runChat,
-  type TaskContinuationInput,
-  type RunHost,
-  type RunServices
-} from "./run-driver.js"
-import {
-  ChatMessageError,
-  mapToolStoreError,
-  mapWriteError,
-  type ChatMessageFailure
-} from "./message-errors.js"
-import {
-  automationRequestHash,
-  taskContinuation,
-  makeAutomationMessage,
-  makeInputMessage,
-  receipt,
-  requestHash,
-  validateInput,
-  type ChatAutomationStartInput,
-  type ChatSendInput
-} from "./message-input.js"
+import { runChat } from "./run-driver.js"
+import { type TaskContinuationInput, type RunHost, type RunServices } from "./run-driver-support.js"
+import { ChatMessageError, mapWriteError, type ChatMessageFailure } from "./message-errors.js"
+import { taskContinuation, receipt, type ChatSendInput } from "./message-input.js"
 import type { ChatMessageShape, StopReason } from "./message-shape.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
+import { makeDeliverBootArrivals } from "./message-boot.js"
+import { makeResolveTool } from "./message-resolve-tool.js"
+import { makeStartAutomation } from "./message-automation.js"
+import { makeDetachedRun } from "./message-detached-run.js"
+import { makePrepare } from "./message-prepare.js"
+import { makeCancellation } from "./message-cancellation.js"
 
 const drainStatus = (reason: StopReason): string =>
   reason === "quit"
@@ -149,65 +123,15 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           { lifecycle }
         )
 
-        const requestCancellation = (input: RunCancelTarget) =>
-          stopRun({ store, cancelAgent }, input, fenceAndAbort(input))
-
-        const fenceAndAbort = Effect.fn("ChatMessage.fenceAndAbort")(function* (
-          input: RunCancelTarget
-        ) {
-          return yield* Effect.uninterruptible(
-            lifecycle.withPermit(
-              Effect.gen(function* () {
-                const cancelled = yield* store.cancel(input).pipe(Effect.mapError(mapWriteError))
-                terminals.stopRuns([cancelled.runId, ...cancelled.descendantRunIds])
-                yield* stopHeldOfEndedRuns(heldBackground, runs, [
-                  cancelled.runId,
-                  ...cancelled.descendantRunIds
-                ])
-                for (const runId of [cancelled.runId, ...cancelled.descendantRunIds]) {
-                  activeRuns.get(runId)?.controller.abort()
-                  activeRuns.delete(runId)
-                  yield* Effect.forkIn(FiberMap.remove(fibers, runId), serverScope)
-                }
-                for (const runId of cancelled.descendantRunIds) {
-                  yield* store.cancel({ runId }).pipe(
-                    Effect.catch((cause) =>
-                      cause._tag === "ChatWriteError" && cause.reason === "not_found"
-                        ? Effect.void
-                        : Effect.logWarning("Descendant cancellation remains pending", {
-                            runId,
-                            cause
-                          })
-                    )
-                  )
-                }
-                return cancelled
-              })
-            )
-          )
-        })
-
-        const cancelAgent: (input: {
-          readonly runId: string
-        }) => Effect.Effect<void, ChatMessageFailure> = Effect.fn("ChatMessage.cancelAgent")(
-          function* (input: { readonly runId: string }) {
-            yield* requestCancellation(input).pipe(
-              Effect.catch((error) =>
-                error instanceof ChatMessageError && error.reason === "not_found"
-                  ? Effect.void
-                  : Effect.fail(error)
-              ),
-              Effect.asVoid
-            )
-          }
-        )
-
-        const stopRuns = Effect.fn("ChatMessage.stopRuns")(function* (
-          runIds: ReadonlyArray<string>
-        ) {
-          for (const runId of runIds) yield* cancelAgent({ runId })
-          heldBackground.stop(runIds)
-          terminals.stopRuns(runIds)
+        const { requestCancellation, cancelAgent, stopRuns } = makeCancellation({
+          store,
+          terminals,
+          runs,
+          serverScope,
+          fibers,
+          lifecycle,
+          activeRuns,
+          heldBackground
         })
 
         const launch = (run: ChatWriteResume): Effect.Effect<void> => {
@@ -306,66 +230,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           )
         }
 
-        const prepare = Effect.fn("ChatMessage.prepare")(function* (
-          input: ChatSendInput,
-          admittedWith?: ReadonlyArray<string>
-        ) {
-          yield* validateInput(input)
-          if (chatRunner.current() === undefined) {
-            return yield* new ChatMessageError({
-              reason: "unavailable",
-              message: "Chat model runner is not configured"
-            })
-          }
-          yield* workStore.stopSpent({ sessionId: input.sessionId }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ChatMessageError({
-                  reason: "storage",
-                  message: "Could not check the chat's Task budget",
-                  sessionId: input.sessionId,
-                  cause
-                })
-            )
-          )
-          const message = yield* makeInputMessage(input)
-          const assistantMessageId = randomUUID()
-          const commit = yield* store
-            .prepareReceive({
-              sessionId: input.sessionId,
-              clientId: input.clientId,
-              requestHash: requestHash(input),
-              assistantMessageId,
-              message,
-              ...(input.approvalReply === undefined ? {} : { approvalReply: input.approvalReply }),
-              wake: input.wake ?? true,
-              ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
-              ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
-              ...(input.deliveryId === undefined ? {} : { deliveryId: input.deliveryId }),
-              ...(admittedWith === undefined ? {} : { admittedWith }),
-              ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
-              ...(input.modelRole === undefined ? {} : { modelRole: input.modelRole }),
-              ...(input.announce === undefined ? {} : { announce: true }),
-              ...(input.fromQueue === undefined ? {} : { fromQueue: true }),
-              ...(input.opensOnboarding === undefined ? {} : { opensOnboarding: true }),
-              ...(input.continuesTask === undefined ? {} : { continuesTask: input.continuesTask }),
-              ...(input.capture === undefined
-                ? {}
-                : {
-                    capture: {
-                      via: input.capture,
-                      note: input.message,
-                      screenshot: (input.images?.length ?? 0) > 0
-                    }
-                  })
-            })
-            .pipe(Effect.mapError(mapWriteError))
-          return commit.pipe(
-            Effect.mapError(mapWriteError),
-            Effect.tap(() => scheduleNaming(input)),
-            Effect.map((started) => ({ input, assistantMessageId, started }))
-          )
-        })
+        const prepare = makePrepare({ store, workStore, chatRunner, scheduleNaming })
 
         const send = Effect.fn("ChatMessage.send")(function* (input: ChatSendInput) {
           const admit = yield* prepare(input)
@@ -426,100 +291,19 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           )
         })
 
-        const detachedRun = Effect.fn("ChatMessage.detachedRun")(function* (input: {
-          readonly sessionId: string
-          readonly runId: string
-        }) {
-          if (chatRunner.current() === undefined) {
-            return yield* new ChatMessageError({
-              reason: "unavailable",
-              message: "Chat model runner is not configured",
-              sessionId: input.sessionId
-            })
-          }
-          const policy = yield* runs.get(input.runId).pipe(
-            Effect.flatMap(runPolicyOf),
-            Effect.mapError(
-              (cause) =>
-                new ChatMessageError({
-                  reason: "unavailable",
-                  message: "The Run's captured policy is unavailable",
-                  sessionId: input.sessionId,
-                  cause
-                })
-            )
-          )
-          const tools = yield* makeDurableTools(toolHost, {
-            sessionId: input.sessionId,
-            runId: input.runId,
-            signal: AbortSignal.any([]),
-            eventSequence: { value: undefined }
-          }).pipe(Effect.provideContext(runServices))
-          const authority = yield* boundAuthority(runs, input)
-          return {
-            sessionId: input.sessionId,
-            runId: input.runId,
-            policy,
-            authority,
-            approvalMode: "ask",
-            executeTool: tools.execute,
-            executeDetachedTool: tools.executeDetached,
-            spawnAgent: tools.spawnAgent,
-            cancelAgent: tools.cancelAgent,
-            sendMessage: tools.sendMessage,
-            detachedRun: tools.detachedRun,
-            emitToolProgress: tools.emitToolProgress,
-            emitToolOutput: tools.emitToolOutput,
-            declareEffectTarget: tools.declareEffectTarget
-          } satisfies ServerToolRun
+        const detachedRun = makeDetachedRun({
+          runServices,
+          runs,
+          chatRunner,
+          toolHost: () => toolHost
         })
 
-        const startAutomation = Effect.fn("ChatMessage.startAutomation")(function* (
-          input: ChatAutomationStartInput
-        ) {
-          if (input.prompt.trim().length === 0) {
-            return yield* new ChatMessageError({
-              reason: "invalid",
-              message: "An Automation requires a prompt",
-              sessionId: input.sessionId
-            })
-          }
-          if (chatRunner.current() === undefined) {
-            return yield* new ChatMessageError({
-              reason: "unavailable",
-              message: "Chat model runner is not configured"
-            })
-          }
-
-          const message = yield* makeAutomationMessage(input)
-          const assistantMessageId = randomUUID()
-          const commit = yield* store
-            .prepareReceive({
-              sessionId: input.sessionId,
-              clientId: input.clientId,
-              requestHash: automationRequestHash(input),
-              assistantMessageId,
-              message,
-              wake: true,
-              approvalMode: "ask",
-              automation: input.automation,
-              automationContextMode: input.contextMode,
-              automationLease: input.lease,
-              ...(input.handlerItem === undefined ? {} : { handlerItem: input.handlerItem }),
-              automationPrompt: input.prompt,
-              ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
-              ...(input.modelRole === undefined ? {} : { modelRole: input.modelRole })
-            })
-            .pipe(Effect.mapError(mapWriteError))
-          return yield* Effect.uninterruptible(
-            lifecycle.withPermit(
-              Effect.gen(function* () {
-                yield* accepting
-                const started = yield* commit.pipe(Effect.mapError(mapWriteError))
-                return yield* launchStarted(input, assistantMessageId, started)
-              })
-            )
-          )
+        const startAutomation = makeStartAutomation({
+          store,
+          lifecycle,
+          accepting,
+          chatRunner,
+          launchStarted
         })
 
         const continueTask = (input: TaskContinuationInput): Effect.Effect<void> =>
@@ -566,50 +350,13 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           } satisfies CancelResponse
         })
 
-        const resolveTool = Effect.fn("ChatMessage.resolveTool")(function* (
-          input: Omit<ToolDecisionFields, "alternative"> & {
-            readonly edits?: ApprovalEditsInput
-            readonly alternative?: ApprovalAlternativeInput
-          }
-        ) {
-          return yield* Effect.uninterruptible(
-            Effect.gen(function* () {
-              const active = yield* FiberMap.get(fibers, input.runId)
-              if (Option.isSome(active)) yield* Fiber.await(active.value)
-              return yield* lifecycle.withPermit(
-                Effect.gen(function* () {
-                  const resolution = yield* toolStore
-                    .resolve({
-                      runId: input.runId,
-                      toolCallId: input.toolId,
-                      feedback: input.result,
-                      ...(input.approved === undefined ? {} : { approved: input.approved }),
-                      ...(input.grantStanding === undefined
-                        ? {}
-                        : { grantStanding: input.grantStanding }),
-                      ...(input.grantList === undefined ? {} : { grantList: input.grantList }),
-                      ...(input.attachFolderToSpace === undefined
-                        ? {}
-                        : { attachFolderToSpace: input.attachFolderToSpace }),
-                      ...(input.edits === undefined ? {} : { edits: input.edits }),
-                      ...(input.alternative === undefined
-                        ? {}
-                        : { alternative: input.alternative }),
-                      ...(input.askedAt === undefined ? {} : { askedAt: input.askedAt }),
-                      ...(input.commandId === undefined ? {} : { commandId: input.commandId })
-                    })
-                    .pipe(Effect.mapError(mapToolStoreError))
-                  if (resolution.ready && chatRunner.current() !== undefined) {
-                    const claimed = yield* store
-                      .claimResume(resolution.runId)
-                      .pipe(Effect.mapError(mapWriteError))
-                    if (claimed !== null) yield* launch(claimed)
-                  }
-                  return { status: "ok" } satisfies ChatAcknowledgement
-                })
-              )
-            })
-          )
+        const resolveTool = makeResolveTool({
+          store,
+          toolStore,
+          fibers,
+          lifecycle,
+          chatRunner,
+          launch
         })
 
         const toolHost: ToolHost = {
@@ -622,30 +369,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           heldBackground
         }
 
-        const pendingBootArrivals = new Map(
-          (boot.arrivals?.() ?? []).map((arrival) => [
-            JSON.stringify([arrival.sessionId, arrival.clientId]),
-            arrival
-          ])
-        )
-        const deliverBootArrivals = Effect.gen(function* () {
-          for (const arrival of pendingBootArrivals.values()) {
-            yield* send(arrival).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  boot.acknowledgeArrival?.(arrival)
-                  pendingBootArrivals.delete(JSON.stringify([arrival.sessionId, arrival.clientId]))
-                })
-              ),
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Could not deliver a message left by the last shutdown", {
-                  sessionId: arrival.sessionId,
-                  cause
-                })
-              )
-            )
-          }
-        })
+        const deliverBootArrivals = makeDeliverBootArrivals({ boot, send })
         const stopOlderSideApprovals = Effect.gen(function* () {
           const runIds = yield* store
             .sideRunsAwaitingApproval()

@@ -15,14 +15,6 @@ type OutputConverter = <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S
 ) => ConvertedOutput<S["Type"]>
 
-/**
- * Strict structured output accepts a restricted JSON Schema dialect, and a
- * schema compiled straight from `Schema` does not satisfy it: `check`s arrive
- * wrapped in `allOf`, optional keys go missing from `required`, and several
- * keywords are simply not permitted. Effect ships the whole conversion, so it
- * is used rather than hand-rolled — the sibling `AnthropicStructuredOutput`
- * exists because the accepted subset differs per provider.
- */
 const openAiOutput: OutputConverter = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) => {
   const converted = toCodecOpenAI(schema)
   return {
@@ -35,11 +27,6 @@ export const STRUCTURED_OUTPUT_DIALECTS: Record<StructuredOutputDialect, OutputC
   openai: openAiOutput
 }
 
-/**
- * A JSON Schema as an Effect schema. The import only builds checks from the
- * document, never declarations that need a service, so it decodes with none;
- * Effect types the general import as `Top`, which cannot say that.
- */
 const importJsonSchema = (raw: JsonObject): Schema.Codec<unknown, unknown> =>
   SchemaRepresentation.fromJsonSchemaDocument(
     JsonSchema.fromSchemaDraft2020_12({ ...raw })

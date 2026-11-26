@@ -28,6 +28,16 @@ export const readTaskDirection = Effect.fn("TaskDirection.read")(function* (
   } satisfies TaskDirection
 })
 
+export const CALL_PLAN = {
+  noCall: "no_call",
+  current: "current",
+  needsReview: "needs_review"
+} as const
+
+type CallPlan = (typeof CALL_PLAN)[keyof typeof CALL_PLAN]
+
+const needsReview = (plan: CallPlan): boolean => plan === CALL_PLAN.needsReview
+
 export const readCallPlan = Effect.fn("TaskDirection.readCallPlan")(function* (
   sql: SqlClient.SqlClient,
   call: { readonly runId: string; readonly toolCallId: string }
@@ -41,14 +51,14 @@ export const readCallPlan = Effect.fn("TaskDirection.readCallPlan")(function* (
     FROM tool_calls AS planned JOIN chat_runs AS run ON run.run_id = planned.run_id
     WHERE planned.run_id = ${call.runId} AND planned.tool_call_id = ${call.toolCallId}`
   const row = rows[0]
-  if (row === undefined) return "no_call" as const
-  if (row.item_id === null) return "current" as const
-  if (row.planned_from_json === null) return "needs_review" as const
+  if (row === undefined) return CALL_PLAN.noCall
+  if (row.item_id === null) return CALL_PLAN.current
+  if (row.planned_from_json === null) return CALL_PLAN.needsReview
   const planned = yield* decodeJson(TaskDirectionReceiptSchema, row.planned_from_json)
   const direction = yield* readTaskDirection(sql, row.item_id)
   return direction !== undefined && sameDirection(planned, taskDirectionReceipt(direction))
-    ? ("current" as const)
-    : ("needs_review" as const)
+    ? CALL_PLAN.current
+    : CALL_PLAN.needsReview
 })
 
 export const assertCallPlan = Effect.fn("TaskDirection.assertCallPlan")(function* (
@@ -61,7 +71,7 @@ export const assertCallPlan = Effect.fn("TaskDirection.assertCallPlan")(function
         new WorkStoreError({ reason: "storage", message: "Could not check the call's plan", cause })
     )
   )
-  if (plan === "needs_review")
+  if (needsReview(plan))
     return yield* new TaskDirectionChanged({
       message: "The Task changed after this call was planned"
     })

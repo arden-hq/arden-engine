@@ -1,38 +1,30 @@
-// The "answered" half of the memory test: each question asked in fresh chats on the replay copy
-// with a model, and each reply judged against the dated expected answer. Only the parts that
-// need no model live here: the refusal to run without the paid flag, the plan of chats, the
-// judge prompt, the scoring of judged runs, and the cost estimate from measured first turns.
-
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { userChatSql } from "../../src/persistence/sqlite/chat-ownership.js"
-import type { Question } from "./questions.js"
+import { QUESTION_KIND, type Question } from "./questions.js"
 
-/** The one flag that lets the answered runner spend money. */
 export const PAID_RUN_FLAG = "--paid-run"
 
-/** Plans and prices only, unless the paid flag is given. Anything else is refused. */
-export const answeredMode = (flags: string): "plan" | "paid" => {
+export const ANSWERED_MODE = { plan: "plan", paid: "paid" } as const
+type AnsweredMode = (typeof ANSWERED_MODE)[keyof typeof ANSWERED_MODE]
+
+export const answeredMode = (flags: string): AnsweredMode => {
   const given = flags.trim()
-  if (given === "") return "plan"
-  if (given === PAID_RUN_FLAG) return "paid"
+  if (given === "") return ANSWERED_MODE.plan
+  if (given === PAID_RUN_FLAG) return ANSWERED_MODE.paid
   throw new Error(`Unknown flags: ${given}. The only flag is ${PAID_RUN_FLAG}.`)
 }
 
-/** One run is noise; three runs a question, and two must pass. */
 export const RUNS_PER_QUESTION = 3
 const RUNS_TO_PASS = 2
 
 export interface PlannedChat {
   readonly questionId: string
   readonly run: number
-  /** The Space the fresh chat opens in; null for Home. */
   readonly spaceId: string | null
-  /** The chat's first and only typed message. */
   readonly firstMessage: string
 }
 
-/** Every chat a pass opens: each question, three times, each in a fresh chat. */
 export const planAnswered = (questions: ReadonlyArray<Question>): ReadonlyArray<PlannedChat> =>
   questions.flatMap((question) =>
     Array.from({ length: RUNS_PER_QUESTION }, (_, index) => ({
@@ -63,23 +55,20 @@ const DATE_RULE =
   "Where the expected answer carries a date, the reply must carry the same date; a missing or different date fails."
 
 const expectation = (question: Question): string =>
-  question.kind === "standing_rule"
+  question.kind === QUESTION_KIND.standingRule
     ? `Expected behavior: ${question.expected_behavior}`
     : `Expected answer: ${question.expected_answer}`
 
 export interface ChatOutcome {
-  /** The assistant's visible reply. */
   readonly reply: string
-  /** One line per tool call the run made, name and input. */
   readonly actions: ReadonlyArray<string>
 }
 
-/** The prompt the judge model reads for one run. Its reply must be the verdict JSON alone. */
 export const judgePrompt = (question: Question, outcome: ChatOutcome): string =>
   [
     "You judge one reply of a personal assistant against an expected answer the user approved.",
     KIND_RULE[question.kind],
-    ...(question.kind === "standing_rule" ? [] : [DATE_RULE]),
+    ...(question.kind === QUESTION_KIND.standingRule ? [] : [DATE_RULE]),
     "Extra correct detail is fine. A vague reply that does not commit to the expected facts fails.",
     "",
     `Request: ${question.question}`,
@@ -94,15 +83,19 @@ export const judgePrompt = (question: Question, outcome: ChatOutcome): string =>
     'Answer with JSON only: {"verdict": "pass" | "fail", "reason": "<one sentence>"}'
   ].join("\n")
 
+const VERDICT = { pass: "pass", fail: "fail" } as const
+
 const Verdict = Schema.fromJsonString(
-  Schema.Struct({ verdict: Schema.Literals(["pass", "fail"]), reason: Schema.NonEmptyString })
+  Schema.Struct({
+    verdict: Schema.Literals([VERDICT.pass, VERDICT.fail]),
+    reason: Schema.NonEmptyString
+  })
 )
 const decodeVerdict = Schema.decodeUnknownOption(Verdict)
 
 export interface JudgedRun {
   readonly questionId: string
   readonly run: number
-  /** The judge model's raw output. */
   readonly judge: string
 }
 
@@ -110,12 +103,10 @@ export interface AnsweredResult {
   readonly id: string
   readonly kind: Question["kind"]
   readonly passed: number
-  /** Runs whose judge output was not a valid verdict; each counts as a fail. */
   readonly malformed: number
   readonly answered: boolean
 }
 
-/** Scores a pass. Every planned run must be judged once; a malformed verdict fails its run. */
 export const scoreJudged = (
   questions: ReadonlyArray<Question>,
   runs: ReadonlyArray<JudgedRun>
@@ -139,7 +130,7 @@ export const scoreJudged = (
     })
     const passed = verdicts.filter(
       (verdict) =>
-        verdict !== undefined && Option.isSome(verdict) && verdict.value.verdict === "pass"
+        verdict !== undefined && Option.isSome(verdict) && verdict.value.verdict === VERDICT.pass
     ).length
     const malformed = verdicts.filter(
       (verdict) => verdict === undefined || Option.isNone(verdict)
@@ -154,19 +145,13 @@ export const scoreJudged = (
   })
 }
 
-/** Measured over real first turns in owner chats: totals, not averages. */
 export interface FirstTurnUsage {
   readonly runs: number
   readonly requests: number
   readonly freshInputTokens: number
-  /** The newest chat run; the measure covers the 30 days that end there. */
   readonly through: string
 }
 
-/**
- * The model requests and fresh input tokens of real first turns: the first run of each owner
- * chat, over the 30 days that end at the newest chat run. Fresh input is the uncached prompt.
- */
 export const measureFirstTurns = Effect.fn("MemoryTest.measureFirstTurns")(function* (
   sql: SqlClient.SqlClient
 ) {
@@ -209,7 +194,6 @@ export interface PassEstimate {
   readonly chatRequests: number
   readonly chatFreshInputTokens: number
   readonly judgeRequests: number
-  /** Approximate: the judge prompts with the expected answer as the reply, at 4 characters a token. */
   readonly judgeFreshInputTokens: number
   readonly requests: number
   readonly freshInputTokens: number
@@ -217,7 +201,6 @@ export interface PassEstimate {
 
 const CHARACTERS_PER_TOKEN = 4
 
-/** Model requests and fresh input tokens for one pass over the questions. */
 export const estimatePass = (
   questions: ReadonlyArray<Question>,
   usage: FirstTurnUsage
@@ -233,7 +216,7 @@ export const estimatePass = (
     chats.reduce((sum, chat) => {
       const question = byId.get(chat.questionId)
       if (question === undefined) return sum
-      const stand = question.kind === "standing_rule" ? "" : question.expected_answer
+      const stand = question.kind === QUESTION_KIND.standingRule ? "" : question.expected_answer
       return sum + judgePrompt(question, { reply: stand, actions: [] }).length
     }, 0) / CHARACTERS_PER_TOKEN
   )

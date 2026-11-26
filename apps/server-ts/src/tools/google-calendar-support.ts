@@ -136,10 +136,6 @@ export type EventTimes = {
     | { date?: never; timeZone?: string; dateTime: string }
 }
 
-/**
- * The start and end of a write. A patch also clears the other form's fields
- * (`date` against `dateTime`), so an event can change between all-day and timed.
- */
 export const eventTimes = (
   input: {
     readonly allDay: boolean
@@ -290,7 +286,6 @@ export const rsvpFor = (
   }
 }
 
-/** Exact write target: primary is an API alias, so name it beside the account. */
 export const calendarIdentityFields = (
   account: string,
   calendarId: string

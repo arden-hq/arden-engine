@@ -1,110 +1,105 @@
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"])
 
-/**
- * The host names this machine: `localhost`, `127.0.0.1` or `::1`, bare (a
- * `Host` header without its port) or bracketed (`URL.hostname`). Exact
- * spelling only: `localhost.`, `127.0.0.2` and `LOCALHOST` are other hosts.
- */
 export const isLoopbackHost = (host: string): boolean =>
   LOOPBACK_HOSTS.has(host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host)
 
-/** Why an address is not one Arden may connect to as a server. */
-export type ServerUrlIssue = "invalid" | "credentials" | "fragment" | "insecure"
+export const WEB_PROTOCOL = { http: "http:", https: "https:" } as const
 
-/**
- * Where plain HTTP may go: `loopback` to this machine alone, `never` nowhere,
- * `any` to every host, for a caller that sends nothing secret over it.
- */
-export type PlainHttp = "loopback" | "never" | "any"
+export type WebProtocol = (typeof WEB_PROTOCOL)[keyof typeof WEB_PROTOCOL]
 
-/**
- * Why `raw` is not a server address Arden may connect to, or undefined when it
- * is one: an absolute URL with no user name, password or fragment, over https,
- * or over http where `http` allows it (to this machine, `isLoopbackHost`, by
- * default). A page's origin is checked by passing `url.origin`.
- */
+const WEB_PROTOCOLS: ReadonlySet<string> = new Set<WebProtocol>(Object.values(WEB_PROTOCOL))
+
+export const isWebProtocol = (protocol: string): protocol is WebProtocol =>
+  WEB_PROTOCOLS.has(protocol)
+
+export const SERVER_URL_ISSUE = {
+  invalid: "invalid",
+  credentials: "credentials",
+  fragment: "fragment",
+  insecure: "insecure"
+} as const
+
+export type ServerUrlIssue = (typeof SERVER_URL_ISSUE)[keyof typeof SERVER_URL_ISSUE]
+
+export const PLAIN_HTTP = { loopback: "loopback", never: "never", any: "any" } as const
+
+export type PlainHttp = (typeof PLAIN_HTTP)[keyof typeof PLAIN_HTTP]
+
 export const serverUrlIssue = (
   raw: string,
-  { http = "loopback" }: { readonly http?: PlainHttp } = {}
+  { http = PLAIN_HTTP.loopback }: { readonly http?: PlainHttp } = {}
 ): ServerUrlIssue | undefined => {
-  if (!URL.canParse(raw)) return "invalid"
+  if (!URL.canParse(raw)) return SERVER_URL_ISSUE.invalid
   const url = new URL(raw)
-  if (url.username !== "" || url.password !== "") return "credentials"
-  if (url.hash !== "") return "fragment"
-  if (url.protocol === "https:") return undefined
-  if (url.protocol !== "http:") return "insecure"
-  return http === "any" || (http === "loopback" && isLoopbackHost(url.hostname))
+  if (url.username !== "" || url.password !== "") return SERVER_URL_ISSUE.credentials
+  if (url.hash !== "") return SERVER_URL_ISSUE.fragment
+  if (url.protocol === WEB_PROTOCOL.https) return undefined
+  if (url.protocol !== WEB_PROTOCOL.http) return SERVER_URL_ISSUE.insecure
+  return http === PLAIN_HTTP.any || (http === PLAIN_HTTP.loopback && isLoopbackHost(url.hostname))
     ? undefined
-    : "insecure"
+    : SERVER_URL_ISSUE.insecure
 }
 
-/** Why an address is not a base URL Arden may append request paths to. */
-export type BaseUrlIssue = ServerUrlIssue | "query"
+export const BASE_URL_ISSUE = { ...SERVER_URL_ISSUE, query: "query" } as const
 
-/**
- * Why `raw` is not a base URL Arden may send requests under, or undefined
- * when it is one: a server address (`serverUrlIssue`, with the same `http`)
- * without a query or a fragment, even an empty one (`…/v1?`, `…/v1#`), since
- * every request path is appended to it (`${baseUrl}/chat/completions`) and
- * would land inside them.
- */
+export type BaseUrlIssue = (typeof BASE_URL_ISSUE)[keyof typeof BASE_URL_ISSUE]
+
 export const baseUrlIssue = (
   raw: string,
   options?: { readonly http?: PlainHttp }
 ): BaseUrlIssue | undefined => {
   const issue = serverUrlIssue(raw, options)
   if (issue !== undefined) return issue
-  if (raw.includes("#")) return "fragment"
-  return raw.includes("?") ? "query" : undefined
+  if (raw.includes("#")) return SERVER_URL_ISSUE.fragment
+  return raw.includes("?") ? BASE_URL_ISSUE.query : undefined
 }
 
 export const isSecureServerUrl = (
   raw: string,
-  options?: { readonly http?: "loopback" | "never" }
+  options?: { readonly http?: Exclude<PlainHttp, typeof PLAIN_HTTP.any> }
 ): boolean => serverUrlIssue(raw, options) === undefined
 
 const MAX_WEB_URL = 4_096
 
-/** Why an address is not a web page a tool may fetch or show. */
-export type WebUrlIssue = "invalid" | "scheme" | "credentials" | "too_long"
+export const WEB_URL_ISSUE = {
+  invalid: "invalid",
+  scheme: "scheme",
+  credentials: "credentials",
+  too_long: "too_long"
+} as const
+
+export type WebUrlIssue = (typeof WEB_URL_ISSUE)[keyof typeof WEB_URL_ISSUE]
+
+export const PUBLIC_WEB_URL = { ok: "ok", refused: "refused" } as const
 
 export type PublicWebUrl =
-  | { readonly kind: "ok"; readonly url: URL }
-  | { readonly kind: "refused"; readonly issue: WebUrlIssue }
+  | { readonly kind: typeof PUBLIC_WEB_URL.ok; readonly url: URL }
+  | { readonly kind: typeof PUBLIC_WEB_URL.refused; readonly issue: WebUrlIssue }
 
-/**
- * A web page a tool may fetch or show: http or https, no user name or
- * password, at most 4,096 characters as given and as parsed (fragment
- * included), returned with its fragment dropped. `raw` may be relative to
- * `base`. Whether its host resolves to a public address is the fetcher's own
- * check (web_fetch).
- */
 export const publicWebUrl = (raw: string, base?: string | URL): PublicWebUrl => {
-  if (!URL.canParse(raw, base?.toString())) return refused("invalid")
+  if (!URL.canParse(raw, base?.toString())) return refused(WEB_URL_ISSUE.invalid)
   const url = new URL(raw, base)
-  if (url.protocol !== "http:" && url.protocol !== "https:") return refused("scheme")
-  if (url.username !== "" || url.password !== "") return refused("credentials")
-  if (raw.length > MAX_WEB_URL || url.href.length > MAX_WEB_URL) return refused("too_long")
+  if (!isWebProtocol(url.protocol)) return refused(WEB_URL_ISSUE.scheme)
+  if (url.username !== "" || url.password !== "") return refused(WEB_URL_ISSUE.credentials)
+  if (raw.length > MAX_WEB_URL || url.href.length > MAX_WEB_URL)
+    return refused(WEB_URL_ISSUE.too_long)
   url.hash = ""
-  return { kind: "ok", url }
+  return { kind: PUBLIC_WEB_URL.ok, url }
 }
 
-export const isPublicWebUrl = (raw: string): boolean => publicWebUrl(raw).kind === "ok"
+export const isPublicWebUrl = (raw: string): boolean => publicWebUrl(raw).kind === PUBLIC_WEB_URL.ok
 
-const refused = (issue: WebUrlIssue): PublicWebUrl => ({ kind: "refused", issue })
+const refused = (issue: WebUrlIssue): PublicWebUrl => ({ kind: PUBLIC_WEB_URL.refused, issue })
 
-/** A source title is absent when a provider filled in only its address, its
- *  host, or the site's own name: a page that hides itself from a fetcher still
- *  says "Reddit", and that names every page of the site alike. */
 export const webSourceTitle = (title: string, url: string): string | undefined => {
   const page = publicWebUrl(url)
-  if (page.kind !== "ok") return undefined
+  if (page.kind !== PUBLIC_WEB_URL.ok) return undefined
   const own = title.trim()
   const bare = own.toLowerCase().replace(/^www\./, "")
   const host = page.url.hostname.replace(/^www\./, "")
   if (own === "" || bare === host || isSiteName(own, host)) return undefined
   const address = publicWebUrl(own)
-  return address.kind === "ok" && address.url.href === page.url.href ? undefined : own
+  return address.kind === PUBLIC_WEB_URL.ok && address.url.href === page.url.href ? undefined : own
 }
 
 const isSiteName = (title: string, host: string): boolean => {

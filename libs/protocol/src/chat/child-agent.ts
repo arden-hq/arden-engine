@@ -1,8 +1,8 @@
 import { Schema } from "effect"
-import type { PersistedChildAgentMetadata } from "./contracts.js"
+import { AGENT_MODE, type PersistedChildAgentMetadata } from "./contracts.js"
 export type { AgentMode, PersistedChildAgentMetadata } from "./contracts.js"
 
-export const AgentModeSchema = Schema.Literals(["research", "code", "work"] as const)
+export const AgentModeSchema = Schema.Literals(Object.values(AGENT_MODE))
 
 const IdentifierSchema = Schema.Trim.check(Schema.isMinLength(1))
 

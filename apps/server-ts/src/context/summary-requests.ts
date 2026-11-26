@@ -23,12 +23,6 @@ export interface PrefixInput {
   readonly history: ReadonlyArray<StoredMessageEnvelope>
 }
 
-/**
- * A provider's answer as the assistant message a replayed request carries.
- * Every field is carried except the nulls a history message spells as absent,
- * so replay state the loop adds beside `provider_state` (`origin`, which an
- * adapter checks before it replays reasoning) reaches the replay unnamed here.
- */
 export const replayedAssistant = ({
   content,
   tool_calls,

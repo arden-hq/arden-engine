@@ -1,7 +1,9 @@
-import type {
-  Commit,
-  ManagedFileRepositoryShape,
-  ResourceVersion
+import {
+  PATH_SEGMENT,
+  type Commit,
+  type ManagedFileRepositoryShape,
+  type ResourceVersion,
+  RESOURCE_STATE
 } from "@arden-hq/revisions/effect"
 import {
   WIKI_CHANGE_ACTION,
@@ -41,7 +43,6 @@ export interface PageRecord {
 
 declare const shownToRuns: unique symbol
 
-/** A page a run may be shown. Only `snapshotOf` makes one, and never of a code-owned page. */
 export type RunPage = PageRecord & { readonly [shownToRuns]: true }
 
 export interface Snapshot {
@@ -59,9 +60,12 @@ export const snapshotOf = (head: string | null, wholeSet: ReadonlyArray<PageReco
   wholeSet
 })
 
-/** The run pages a run may find, read or write: active in history and in lifecycle. */
 export const activeRunPages = (pages: ReadonlyArray<RunPage>): ReadonlyArray<RunPage> =>
-  pages.filter((record) => record.resource.state === "active" && record.page.lifecycle === "active")
+  pages.filter(
+    (record) =>
+      record.resource.state === RESOURCE_STATE.active &&
+      record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
+  )
 
 export const notFound = (operation: WikiOperation, pageId: string): WikiError =>
   wikiError(operation, "not_found", `Unknown Memory page: ${pageId}`, { pageId })
@@ -142,7 +146,6 @@ export const pageNameIndex = (
   return names
 }
 
-/** The page of the whole set that holds a name a page at `path` would take, but `exceptPageId`. */
 export const nameTakenBy = (
   snapshot: Pick<Snapshot, "wholeSet">,
   path: string,
@@ -164,7 +167,7 @@ export const followRedirect = (
     seen.add(pageId)
     const record = pages.get(pageId)
     if (record === undefined) return null
-    if (record.page.lifecycle === "active") return pageId
+    if (record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active) return pageId
     if (record.page.redirectTo === null) return null
     pageId = record.page.redirectTo
   }
@@ -175,7 +178,8 @@ export const redirectTargetAt = (snapshot: Snapshot, path: string): RunPage | nu
   const wanted = normal(path)
   const redirect = snapshot.pages.find(
     (record) =>
-      record.page.lifecycle === "redirect" && nameKeys(record.resource.path).includes(wanted)
+      record.page.lifecycle === WIKI_PAGE_LIFECYCLE.redirect &&
+      nameKeys(record.resource.path).includes(wanted)
   )
   if (redirect === undefined) return null
   const byId = new Map(snapshot.pages.map((record) => [record.page.pageId, record] as const))
@@ -196,23 +200,26 @@ export const resolveWikiLinkTarget = (
   return candidate === undefined ? null : followRedirect(pages, candidate)
 }
 
-/** The active README that maps `directory`; "." is the Memory root. */
 export const directoryReadme = (
   pages: ReadonlyArray<PageRecord>,
   directory: string
 ): PageRecord | undefined => {
-  const readme = (directory === "." ? "readme.md" : `${directory}/readme.md`).toLowerCase()
+  const readme = (
+    directory === PATH_SEGMENT.current ? "readme.md" : `${directory}/readme.md`
+  ).toLowerCase()
   return pages.find(
-    (record) => record.resource.path.toLowerCase() === readme && record.page.lifecycle === "active"
+    (record) =>
+      record.resource.path.toLowerCase() === readme &&
+      record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
   )
 }
 
-/** A redirect among `pages` whose target is missing or loops back. */
 export const brokenRedirect = (pages: ReadonlyArray<PageRecord>): PageRecord | undefined => {
   const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
   return pages.find(
     (record) =>
-      record.page.lifecycle === "redirect" && followRedirect(byId, record.page.pageId) === null
+      record.page.lifecycle === WIKI_PAGE_LIFECYCLE.redirect &&
+      followRedirect(byId, record.page.pageId) === null
   )
 }
 

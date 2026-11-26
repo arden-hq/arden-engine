@@ -1,3 +1,4 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { type RunOrigin } from "../persistence/runs/stored-context.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
@@ -46,16 +47,13 @@ export class MemoryError extends Schema.TaggedError<MemoryError>()("MemoryError"
 }) {}
 
 export interface MemoryCaptureBatches {
-  /** The next batch of new work, or, when `older`, of any unread range that is not resting. */
   readonly nextCaptureBatch: (
     older: boolean
   ) => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
   readonly completeCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
-  /** Moves past the batch unread; its messages stay unread in a range that rests a day. */
   readonly skipCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
 }
 
-/** Hands Memory Capture one batch of chat evidence at a time and records what it read. */
 export const makeMemoryCaptureBatches = (input: {
   readonly wiki: Pick<Wiki["Service"], "hasCaptureReceipt" | "finalizeCaptureBatch" | "snapshot">
   readonly captures: MemoryCaptureStore["Service"]
@@ -128,10 +126,6 @@ export const makeMemoryCaptureBatches = (input: {
   const advance = move("advance", "Could not record Memory capture progress")
   const skip = move("skip", "Could not skip the Memory capture batch")
 
-  /**
-   * Reads the work's chat from `start`, through the batch's end when it was prepared, and never
-   * past the work's last message: a revert may have cut the prepared batch.
-   */
   const readWork = Effect.fn("Memory.readCaptureWork")(function* (work: MemoryCaptureWork) {
     const start = work.prepared?.start ?? work.position
     const stop = work.prepared?.end
@@ -177,7 +171,7 @@ export const makeMemoryCaptureBatches = (input: {
       Effect.map((current) =>
         crowdedCorePages(
           current.pages
-            .filter((record) => record.page.lifecycle === "active")
+            .filter((record) => record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active)
             .map((record) => ({
               path: record.resource.path,
               pageId: record.page.pageId,
@@ -230,7 +224,6 @@ export const makeMemoryCaptureBatches = (input: {
         }
       }
       const read = yield* readWork(work)
-      // Listed work with nothing to read means the chat changed after it was listed.
       if (read === undefined) return null
       if (!read.reviewable) {
         yield* advance(read.identity)
@@ -270,19 +263,13 @@ export const makeMemoryCaptureBatches = (input: {
   }
 }
 
-/** One batch as Capture reads it: what it quotes, where it ends, and whether a model reviews it. */
 interface CaptureRead {
   readonly excerpts: ReadonlyArray<CaptureExcerpt>
   readonly end: MemoryCapturePosition
   readonly endMessageId: string
-  /** False when nothing in it is the owner's words or a known worker's: Capture skips it. */
   readonly reviewable: boolean
 }
 
-/**
- * The batch Capture reads in a chat from `start`, through message `last` at most, ending at
- * `stop` when it reads a prepared batch again. Undefined when there is nothing past `start`.
- */
 const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns" | "ownerWordsIn">,
   input: {
@@ -352,11 +339,6 @@ const evidenceKind = (
   }
 }
 
-/**
- * Picks the excerpts after `start`, in order, up to the record and character limits, and
- * stops at `stop` when a prepared batch is read again. The end is the last message read in
- * full, or the place inside a long message where the characters ran out.
- */
 const selectExcerpts = (
   records: ReadonlyArray<TranscriptMessageRecord>,
   origins: ReadonlyMap<string, RunOrigin>,
@@ -428,13 +410,11 @@ const selectExcerpts = (
       }
 }
 
-/** The characters of message `sequence` that `position` has read, if it stops inside it. */
 const offsetIn = (position: MemoryCapturePosition, sequence: number): number | undefined =>
   position._tag === "AtPosition" && position.progress.sequence === sequence
     ? position.progress.offset
     : undefined
 
-/** The last message a position has read in full; -1 before the first. */
 const afterSequence = (position: MemoryCapturePosition): number => {
   switch (position._tag) {
     case "Beginning":
@@ -446,7 +426,6 @@ const afterSequence = (position: MemoryCapturePosition): number => {
   }
 }
 
-/** The message a batch ends in. */
 const sequenceOf = (position: MemoryCapturePosition): number => {
   switch (position._tag) {
     case "Beginning":

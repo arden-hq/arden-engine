@@ -26,7 +26,6 @@ const searchScenario = Effect.fn("searchScenario")(function* (query: string, lim
     )`
   })
   const named = yield* sessions.create({ name: "Desk setup" })
-  // "desk" inside a word is no match, as in the message index.
   yield* sessions.create({ name: "Undesked notes" })
   const long = yield* sessions.create({ name: "Speech research" })
   const linked = yield* sessions.create({ name: "Lab" })
@@ -35,7 +34,6 @@ const searchScenario = Effect.fn("searchScenario")(function* (query: string, lim
   for (const index of [1, 2, 3, 4, 5])
     yield* say(long.sessionId, `long-${index}`, `The desktop app, take ${index}.`)
   yield* say(linked.sessionId, "code", "```\n[test](arden:desk/abc)\n```")
-  // Newer than "code": the chat must still show "code", whose link the chat draws.
   yield* say(linked.sessionId, "link", "Check [test](arden:desk/4521508e).")
   yield* say(accented.sessionId, "cafe", "Meet at the café near the station.")
   return {

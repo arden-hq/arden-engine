@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
-import { readFileSync, rmSync, writeFileSync } from "node:fs"
+import { rmSync, writeFileSync } from "node:fs"
 import { relative, resolve } from "node:path"
+import { parseJson, readJsonFileSync } from "./json-edge.mjs"
 import { baselinedOverrides, baselinedRules } from "./lint-plugin.mjs"
 
 const root = resolve(import.meta.dirname, "..")
@@ -26,7 +27,7 @@ const run = (rule, paths) => {
 
 
 const scan = (rule) => {
-  const report = JSON.parse(run(rule, ["."]))
+  const report = parseJson(run(rule, ["."]))
   if (report.number_of_files === 0) throw new Error(`ratchet: oxlint read no files for ${rule}; no baseline was written.`)
   const now = {}
   for (const diagnostic of report.diagnostics) {
@@ -40,7 +41,7 @@ const scan = (rule) => {
 
 const results = baselinedRules.map(({ rule, baseline }) => {
   const now = scan(rule)
-  const was = JSON.parse(readFileSync(resolve(root, baseline), "utf8"))
+  const was = readJsonFileSync(resolve(root, baseline))
   const kept = (seed ? Object.entries(now) : Object.entries(was).map(([name, count]) => [name, Math.min(count, now[name] ?? 0)]))
     .filter(([, count]) => count > 0)
     .sort(([a], [b]) => a.localeCompare(b))

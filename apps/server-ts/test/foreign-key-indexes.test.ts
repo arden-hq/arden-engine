@@ -2,10 +2,7 @@ import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { databaseSchema } from "../src/persistence/schema/database.js"
 
-// SQLite checks a foreign key from the parent side by looking up child rows:
-// on every delete of a parent row, and on every change of its key. With no
-// index that starts with a referencing column, that lookup reads the whole
-// child table, inside the write that touched the parent.
+// https://www.sqlite.org/foreignkeys.html#fk_indexes
 it("every foreign key has an index that starts with a referencing column", () => {
   const database = new DatabaseSync(":memory:")
   try {
@@ -18,7 +15,6 @@ it("every foreign key has an index that starts with a referencing column", () =>
     for (const table of tables) {
       const leading = new Set<string>()
       for (const column of database.prepare(`PRAGMA table_info("${table}")`).all()) {
-        // The first primary-key column leads the table's own key.
         if (column.pk === 1) leading.add(String(column.name))
       }
       for (const index of database.prepare(`PRAGMA index_list("${table}")`).all()) {

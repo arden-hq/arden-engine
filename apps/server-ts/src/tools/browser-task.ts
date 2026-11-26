@@ -22,14 +22,7 @@ import {
 import { withPageAfter } from "./browser-page.js"
 import { refusalOf, typingRule } from "./browser-task-rules.js"
 import { BrowserProcedures } from "../browser/procedures/service.js"
-import {
-  atNodeRef,
-  browserOutput,
-  runBrowserForRun,
-  tabInUse,
-  TabRefSchema,
-  webUrl
-} from "./browser-support.js"
+import { browserOutput, runBrowserForRun, tabInUse, webUrl } from "./browser-support.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { BROWSER_TASK_TOOL, NESTED_CALL_MARKERS, NESTING } from "../persistence/tools/tool-roles.js"
 import {
@@ -40,68 +33,17 @@ import {
   type ScriptProgressTool
 } from "../workflows/runtime/nested-trace.js"
 import type { JsonObject } from "../persistence/json.js"
-import type { ServerRunContext } from "./run-context.js"
-
-const DEFAULT_STEPS = 25
-const MAX_STEPS = 60
-const WORKER_PAGE_CHARS = 8_000
-
-const ParametersSchema = Schema.Struct({
-  tab_ref: TabRefSchema.annotate({
-    description: "The one tab the worker works in, from browser_tabs or browser_open."
-  }),
-  goal: Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)).annotate({
-    description:
-      'What to do on this page, in plain words, and where to stop: "Fill the application form and stop before Submit."'
-  }),
-  values: Schema.optionalKey(
-    Schema.String.check(Schema.isMaxLength(20_000)).annotate({
-      description:
-        "Every fact the worker may type (names, answers, a cover letter), as label: value lines. It types nothing else."
-    })
-  ),
-  secrets: Schema.optionalKey(
-    Schema.Array(Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(100)))
-      .check(Schema.isMaxLength(10))
-      .annotate({
-        description:
-          "Names of saved site secrets (from browser_ask_secret) the worker may fill. It fills no other."
-      })
-  ),
-  done_when: Schema.optionalKey(
-    Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(1_000)).annotate({
-      description:
-        'Text the page shows, word for word, once the goal is met: "Review your application". The worker checks this alongside the goal.'
-    })
-  ),
-  max_steps: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_STEPS })).annotate({
-      description: `Browser calls the task may make, 1-${MAX_STEPS}, each step of a batch counted. Defaults to ${DEFAULT_STEPS}.`
-    })
-  )
-})
-
-const ResultSchema = Schema.Struct({
-  status: Schema.Literals(["done", "blocked", "decide"] as const).annotate({
-    description:
-      "done: the goal is met. blocked: it cannot go on (an approval, a missing value, an error page, a check for a person). decide: a choice the caller must make."
-  }),
-  report: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)).annotate({
-    description:
-      "What you did and what the page shows now, in a few short lines. For blocked or decide, the exact step or question."
-  })
-})
-
-const WORKER_SYSTEM = [
-  "You carry out one browser goal on one tab for the agent that called you, through browser_snapshot, browser_act and browser_wait, then call finish once.",
-  "Start with one browser_snapshot of the tab (mode interactive). After that, never call browser_snapshot to look again: each browser_act result ends with the page after it and its new Snapshot ref, and that is the page you act on next.",
-  "On a page with several things to do (a form), use browser_steps: every field, every answer, then the button, in one call built from that page. Use browser_act for a single action.",
-  "Type only the values you were given, exactly; never invent a name, an answer or any other value. When a field needs a value you do not have, finish with decide and name the field.",
-  "Stay on the goal: do not submit, pay, send, delete or accept anything the goal does not say to. Stop at the point the goal names.",
-  "If a call is refused because it needs the user's approval, or the page asks for a person (a captcha, a sign-in, a code), finish with blocked and say which step.",
-  "If an action fails twice, finish with blocked. Do not repeat a failed action unchanged.",
-  "If browser control belongs to the user (they took control), finish with blocked at once."
-].join(" ")
+import {
+  DEFAULT_STEPS,
+  ParametersSchema,
+  ResultSchema,
+  StepsSchema,
+  WORKER_PAGE_CHARS,
+  WORKER_SYSTEM,
+  type WorkerSchema,
+  type TaskCtx
+} from "./browser-task-types.js"
+import { type StepsPlan, carried, stepsPlan } from "./browser-task-steps.js"
 
 const PAGE_BUDGET_CHARS = 120_000
 const DROPPED_PAGE =
@@ -126,15 +68,6 @@ const keepRecentPages = (): ModelRequestMiddleware => {
       )
     })
   }
-}
-
-type WorkerSchema = Schema.ConstraintDecoder<{ readonly tab_ref: string }>
-
-type TaskCtx = {
-  readonly run: ServerRunContext
-  readonly signal: AbortSignal
-  readonly toolCallId: string
-  readonly messages: Parameters<ServerRunContext["codeMode"]["call"]>[0]["messages"]
 }
 
 const makeTrail = (ctx: TaskCtx, title: string) => {
@@ -264,27 +197,6 @@ const nestedTool = (
     })
   })
 
-const StepSchema = ActParametersSchema.mapFields(
-  ({
-    tab_ref: _tab,
-    profile_ref: _profile,
-    origin: _origin,
-    snapshot_ref: _ref,
-    snapshot: _after,
-    ...step
-  }) => step
-)
-
-const StepsSchema = Schema.Struct({
-  tab_ref: ActParametersSchema.fields.tab_ref,
-  profile_ref: ActParametersSchema.fields.profile_ref,
-  origin: ActParametersSchema.fields.origin,
-  snapshot_ref: ActParametersSchema.fields.snapshot_ref,
-  steps: Schema.Array(StepSchema).check(Schema.isMinLength(1), Schema.isMaxLength(20)).annotate({
-    description: "The actions, in order, all built from that one page: each field, then the button."
-  })
-})
-
 const stepsTool = (ctx: TaskCtx, task: TaskState): Tool<void | undefined> =>
   createTool({
     name: "browser_steps",
@@ -314,102 +226,6 @@ const stepsTool = (ctx: TaskCtx, task: TaskState): Tool<void | undefined> =>
       return { result: `All ${steps.length} steps done.\n\n${last}`, preview: "Steps done" }
     }
   })
-
-interface StepsPlan {
-  readonly holds: (input: Readonly<Record<string, unknown>>) => boolean
-  readonly cover: (toolCallId: string) => void
-  readonly ran: (onPlan: boolean) => void
-  readonly close: () => void
-}
-
-const stepsPlan = (
-  ctx: TaskCtx,
-  page: Omit<typeof StepsSchema.Type, "steps">,
-  steps: (typeof StepsSchema.Type)["steps"]
-): StepsPlan => {
-  const state = ctx.run.browserObservations
-  const basis = state.latest(page.tab_ref)
-  const url = basis?.ref === page.snapshot_ref ? basis.url : undefined
-  const origin = url === undefined ? undefined : webUrl(url)?.origin
-  let expected: string | undefined = origin === page.origin ? page.snapshot_ref : undefined
-  const opened = ctx.run.reviewPlans.open({
-    name: "browser_steps",
-    description:
-      "Several browser actions on one page, judged together: each runs only while it stays on this page and origin.",
-    args: {
-      tab_ref: page.tab_ref,
-      origin: page.origin,
-      url: url ?? null,
-      steps: steps.map((step) => {
-        const nodeRef = step.target?.node_ref
-        const element =
-          nodeRef === undefined ? undefined : state.describe(page.tab_ref, atNodeRef(nodeRef))
-        return Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))({
-          ...step,
-          ...(element === undefined ? {} : { element })
-        })
-      })
-    },
-    preview: `${steps.length} browser actions on ${page.origin}: ${steps.map((step) => step.action).join(", ")}`
-  })
-  return {
-    holds: (input) => {
-      const latest = state.latest(page.tab_ref)
-      return (
-        expected !== undefined &&
-        input["tab_ref"] === page.tab_ref &&
-        input["origin"] === page.origin &&
-        input["snapshot_ref"] === expected &&
-        latest?.url !== undefined &&
-        latest.url === url &&
-        basis !== undefined &&
-        sameTarget(basis.targets, latest.targets, input)
-      )
-    },
-    cover: opened.cover,
-    ran: (onPlan) => {
-      expected = onPlan ? state.latest(page.tab_ref)?.ref : undefined
-    },
-    close: opened.close
-  }
-}
-
-const sameTarget = (
-  planned: Readonly<Record<string, string>>,
-  now: Readonly<Record<string, string>>,
-  input: Readonly<Record<string, unknown>>
-): boolean => {
-  if (!isRefAct(input)) return false
-  if (input.target === undefined)
-    return JSON.stringify(Object.entries(planned)) === JSON.stringify(Object.entries(now))
-  const nodeRef = input.target.node_ref
-  if (nodeRef === undefined) return false
-  const label = planned[atNodeRef(nodeRef)]
-  return label !== undefined && now[atNodeRef(nodeRef)] === label
-}
-
-const isRefAct = Schema.is(
-  Schema.Struct({
-    snapshot_ref: Schema.String,
-    target: Schema.optionalKey(Schema.Struct({ node_ref: Schema.optionalKey(Schema.String) }))
-  })
-)
-
-const carried = <Input extends { readonly tab_ref: string }>(
-  ctx: TaskCtx,
-  tabRef: string,
-  name: string,
-  input: Input
-): Input => {
-  if (name !== "browser_act" || !isRefAct(input)) return input
-  const nodeRef = input.target?.node_ref
-  const latest = ctx.run.browserObservations.carryOver(
-    tabRef,
-    input.snapshot_ref,
-    nodeRef === undefined ? undefined : atNodeRef(nodeRef)
-  )
-  return latest === undefined ? input : { ...input, snapshot_ref: latest }
-}
 
 const workerArgs = (name: string, input: Readonly<Record<string, unknown>>): JsonObject => {
   const args = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))({ ...input })

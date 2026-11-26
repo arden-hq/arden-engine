@@ -1,13 +1,16 @@
 import type { JsonRecord } from "../common/json.js"
 
-export type StorageCategoryId =
-  | "chats"
-  | "channels"
-  | "agents"
-  | "knowledge"
-  | "skills"
-  | "housekeeping"
-  | "other"
+export const STORAGE_CATEGORY = {
+  chats: "chats",
+  channels: "channels",
+  agents: "agents",
+  knowledge: "knowledge",
+  skills: "skills",
+  housekeeping: "housekeeping",
+  other: "other"
+} as const
+
+export type StorageCategoryId = (typeof STORAGE_CATEGORY)[keyof typeof STORAGE_CATEGORY]
 
 export interface StorageCategory extends JsonRecord {
   readonly id: StorageCategoryId
@@ -15,15 +18,18 @@ export interface StorageCategory extends JsonRecord {
   readonly totalBytes: number
   readonly itemCount: number
   readonly description: string
-  /** What the bucket holds right now, in the person's own terms ("92 current · 278 archived"). */
   readonly detail: string
 }
 
 export const STORAGE_LIMIT = { unlimited: "unlimited", limited: "limited" } as const
 
 export type StorageBudget =
-  | { readonly kind: "unlimited" }
-  | { readonly kind: "limited"; readonly maxBytes: number; readonly overBudgetBytes: number }
+  | { readonly kind: typeof STORAGE_LIMIT.unlimited }
+  | {
+      readonly kind: typeof STORAGE_LIMIT.limited
+      readonly maxBytes: number
+      readonly overBudgetBytes: number
+    }
 
 export interface StorageStatus extends JsonRecord {
   readonly totalBytes: number
@@ -33,8 +39,8 @@ export interface StorageStatus extends JsonRecord {
 }
 
 export type StorageSpaceLimit =
-  | { readonly kind: "unlimited" }
-  | { readonly kind: "limited"; readonly gib: number }
+  | { readonly kind: typeof STORAGE_LIMIT.unlimited }
+  | { readonly kind: typeof STORAGE_LIMIT.limited; readonly gib: number }
 
 export interface StorageSettings extends JsonRecord {
   readonly maxSpace: StorageSpaceLimit
@@ -46,8 +52,6 @@ export interface StorageSettings extends JsonRecord {
 
 export type StorageSettingsPatch = StorageSettings
 
-/** The factory cleanup policy. The server seeds a fresh install from it and
- *  the Desktop's "Restore defaults" writes it back, so both read one source. */
 export const DEFAULT_STORAGE_SETTINGS: StorageSettings = Object.freeze({
   maxSpace: { kind: STORAGE_LIMIT.unlimited },
   allowArchivedSessionDeletion: false,
@@ -59,8 +63,8 @@ export const DEFAULT_STORAGE_SETTINGS: StorageSettings = Object.freeze({
 export const STORAGE_CURRENT_SESSION = { none: "none", session: "session" } as const
 
 export type StorageCurrentSession =
-  | { readonly kind: "none" }
-  | { readonly kind: "session"; readonly sessionId: string }
+  | { readonly kind: typeof STORAGE_CURRENT_SESSION.none }
+  | { readonly kind: typeof STORAGE_CURRENT_SESSION.session; readonly sessionId: string }
 
 export interface StorageCleanupContext {
   readonly currentSession: StorageCurrentSession
@@ -72,22 +76,31 @@ export interface StorageOverview extends JsonRecord {
   readonly settings: StorageSettings
 }
 
-export type StorageCleanupActionKind = "delete_archived_session" | "delete_inactive_session"
+export const STORAGE_CLEANUP_ACTION = {
+  delete_archived_session: "delete_archived_session",
+  delete_inactive_session: "delete_inactive_session"
+} as const
+
+export type StorageCleanupActionKind =
+  (typeof STORAGE_CLEANUP_ACTION)[keyof typeof STORAGE_CLEANUP_ACTION]
 
 export interface StorageCleanupAction extends JsonRecord {
   readonly kind: StorageCleanupActionKind
   readonly resourceId: string
   readonly name: string
   readonly sizeBytes: number
-  /** The sessions deleted with the chat: its agents and its Side chats. */
   readonly agents: number
   readonly sideChats: number
   readonly description: string
 }
 
 export type StorageCleanupTarget =
-  | { readonly kind: "unlimited" }
-  | { readonly kind: "limited"; readonly budgetBytes: number; readonly targetBytes: number }
+  | { readonly kind: typeof STORAGE_LIMIT.unlimited }
+  | {
+      readonly kind: typeof STORAGE_LIMIT.limited
+      readonly budgetBytes: number
+      readonly targetBytes: number
+    }
 
 export interface StorageCleanupPlan extends JsonRecord {
   readonly beforeBytes: number

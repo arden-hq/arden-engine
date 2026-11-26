@@ -2,14 +2,21 @@ import type { JsonRecord } from "../common/json.js"
 
 export const SKILL_VERSION = { versioned: "versioned", unversioned: "unversioned" } as const
 export const SKILL_PLACE = { builtin: "builtin", local: "local" } as const
+export const SKILL_ORIGIN = { arden: "arden", shared: "shared" } as const
+
+export type SkillOrigin = (typeof SKILL_ORIGIN)[keyof typeof SKILL_ORIGIN]
 
 export type SkillVersion =
-  | { readonly kind: "versioned"; readonly version: string }
-  | { readonly kind: "unversioned" }
+  | { readonly kind: typeof SKILL_VERSION.versioned; readonly version: string }
+  | { readonly kind: typeof SKILL_VERSION.unversioned }
 
 export type SkillPlace =
-  | { readonly kind: "builtin"; readonly invocable: boolean }
-  | { readonly kind: "local"; readonly origin: "arden" | "shared"; readonly path: string }
+  | { readonly kind: typeof SKILL_PLACE.builtin; readonly invocable: boolean }
+  | {
+      readonly kind: typeof SKILL_PLACE.local
+      readonly origin: SkillOrigin
+      readonly path: string
+    }
 
 export interface Skill extends JsonRecord {
   readonly name: string
@@ -26,7 +33,6 @@ export interface SkillListResponse extends JsonRecord {
   readonly skills: ReadonlyArray<Skill>
 }
 
-/** One installable skill from the server-owned marketplace catalog. */
 export interface MarketplaceSkill extends JsonRecord {
   readonly id: string
   readonly name: string

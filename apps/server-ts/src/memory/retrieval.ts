@@ -1,3 +1,4 @@
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { byteLength } from "@arden-hq/std/text"
 import { utcDay } from "@arden-hq/std/time"
 import {
@@ -19,18 +20,13 @@ import { chatHref } from "../sessions/chat-href.js"
 const QUERY_LIMIT = 512
 const MIN_QUERY_LENGTH = 12
 const RESULT_LIMIT = 3
-/** A Memory source rendered into the room it was given, and the record of what it holds. */
 export interface RenderedMemory {
-  /** The prompt section, or undefined when the source holds nothing. */
   readonly text: string | undefined
   readonly sources: ReadonlyArray<RunMemorySource>
 }
 
-/** What one run may be sent from Memory, each source rendered into its allowance in bytes. */
 export interface MemorySources {
-  /** Standing facts, each page in its writer limit and in `maxPageBytes`. */
   readonly standing: (maxPageBytes: number) => RenderedMemory
-  /** Undefined when this run has no recall. */
   readonly recall: ((maxBytes: number) => RenderedMemory) | undefined
 }
 
@@ -69,7 +65,8 @@ const standingFacts = (record: PageRecord): boolean =>
 
 export const prepareMemorySearch = (pages: ReadonlyArray<RunPage>): void => {
   for (const record of pages) {
-    if (record.page.lifecycle === "active" && !standingFacts(record)) termsOf(record.page)
+    if (record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active && !standingFacts(record))
+      termsOf(record.page)
   }
 }
 
@@ -267,10 +264,8 @@ const renderRecall = (
   }
 }
 
-/** The part of a query the word search reads; the meaning search embeds all of it. */
 export const recallQuery = (query: string): string => query.slice(0, QUERY_LIMIT)
 
-/** The terms the word search reads from a query; none when it reads nothing of it. */
 const wordSearchTerms = (query: string): ReadonlySet<string> => {
   const text = normalized(recallQuery(query))
   return text.length < MIN_QUERY_LENGTH ? new Set() : searchTerms(text)
@@ -278,18 +273,9 @@ const wordSearchTerms = (query: string): ReadonlySet<string> => {
 
 export interface RankedMemoryPage {
   readonly record: RunPage
-  /** The passage that matched by meaning, when one did. */
   readonly excerpt?: string
 }
 
-/**
- * Pages ordered by how well they answer a query: the one ranking behind both the Memory
- * attached to a chat turn and the `wiki_search` tool.
- *
- * Each way of matching ranks the pages on its own (words in the page, meaning, the query as an
- * exact phrase) and the ranks are fused, so a page found several ways comes first and a page
- * found only one way is still returned.
- */
 export const rankMemoryPages = ({
   pages,
   queryTerms,
@@ -299,7 +285,6 @@ export const rankMemoryPages = ({
   readonly pages: ReadonlyArray<RunPage>
   readonly queryTerms: ReadonlySet<string>
   readonly semanticMatches: ReadonlyArray<SemanticMemoryMatch>
-  /** Page ids that hold the whole query as written, best first. */
   readonly phraseMatches?: ReadonlyArray<string>
 }): ReadonlyArray<RankedMemoryPage> => {
   const lexical = pages
@@ -360,9 +345,7 @@ export const rankMemoryPages = ({
     .map(({ record, excerpt }) => ({ record, ...(excerpt === undefined ? {} : { excerpt }) }))
 }
 
-/** What one run may be sent from Memory, prepared over one snapshot. */
 export interface PreparedMemorySources {
-  /** The pages the recall chose, best first; empty when the run has no recall. */
   readonly recalled: ReadonlyArray<RunPage>
   readonly render: (discussed: ReadonlyMap<string, ReadonlyArray<DiscussedChat>>) => MemorySources
 }
@@ -377,7 +360,6 @@ const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageK
 export interface RecallCandidates {
   readonly query: string
   readonly excluded: ReadonlySet<string>
-  /** The body of each page the run already holds in part, past what it holds. */
   readonly unsent: ReadonlyMap<string, string>
 }
 
@@ -388,7 +370,6 @@ export const recallCandidates = ({
 }: {
   readonly pages: ReadonlyArray<RunPage>
   readonly query: string
-  /** How many characters of each page's content, from its start, the run is sent elsewhere. */
   readonly sent: ReadonlyMap<string, number>
 }): RecallCandidates => {
   const active = activeRunPages(pages)
@@ -440,7 +421,6 @@ export const prepareMemorySources = ({
   readonly pages: ReadonlyArray<RunPage>
   readonly recall: RecallCandidates | undefined
   readonly semanticMatches?: ReadonlyArray<SemanticMemoryMatch>
-  /** Each page's "Last changed" line, by page id; a page without one is shown without it. */
   readonly lastChanged: ReadonlyMap<string, string>
 }): PreparedMemorySources => {
   const active = activeRunPages(pages)

@@ -1,48 +1,73 @@
 import { Schema } from "effect"
 import { NonNegativeIntSchema, withExtras } from "../common/schema.js"
-import type { LocalModelInfo, LocalModelInstall, LocalModelsStatus } from "./contracts.js"
+import { MODEL_ENDPOINT_INPUT } from "../model-endpoints/contracts.js"
+import {
+  LOCAL_MODEL_INSTALL_REASON,
+  LOCAL_MODEL_INSTALL_STATE,
+  LOCAL_MODEL_KIND,
+  LOCAL_MODEL_RUNTIME,
+  LOCAL_MODELS_FREE_SPACE,
+  type LocalModelInfo,
+  type LocalModelInstall,
+  type LocalModelsStatus
+} from "./contracts.js"
 
 const ModelIdSchema = Schema.String.check(Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
 
 const bytes = { received_bytes: NonNegativeIntSchema, total_bytes: NonNegativeIntSchema }
 
 const InstallWireSchema = Schema.Union([
-  withExtras({ state: Schema.Literal("absent") }),
-  withExtras({ state: Schema.Literals(["downloading", "stopped"] as const), ...bytes }),
+  withExtras({ state: Schema.Literal(LOCAL_MODEL_INSTALL_STATE.absent) }),
   withExtras({
-    state: Schema.Literal("failed"),
-    reason: Schema.Literals(["network", "hash", "disk"] as const),
+    state: Schema.Literals([
+      LOCAL_MODEL_INSTALL_STATE.downloading,
+      LOCAL_MODEL_INSTALL_STATE.stopped
+    ]),
     ...bytes
   }),
   withExtras({
-    state: Schema.Literal("no_space"),
+    state: Schema.Literal(LOCAL_MODEL_INSTALL_STATE.failed),
+    reason: Schema.Literals(Object.values(LOCAL_MODEL_INSTALL_REASON)),
+    ...bytes
+  }),
+  withExtras({
+    state: Schema.Literal(LOCAL_MODEL_INSTALL_STATE.noSpace),
     needed_bytes: NonNegativeIntSchema,
     free_bytes: NonNegativeIntSchema
   }),
-  withExtras({ state: Schema.Literal("installed") })
+  withExtras({ state: Schema.Literal(LOCAL_MODEL_INSTALL_STATE.installed) })
 ])
 
 const ModelWireSchema = withExtras({
   id: ModelIdSchema,
-  kind: Schema.Literals(["embedding", "decision"] as const),
+  kind: Schema.Literals(Object.values(LOCAL_MODEL_KIND)),
   name: Schema.NonEmptyString,
   license: Schema.NonEmptyString,
   license_url: Schema.NonEmptyString,
-  input: Schema.Literals(["text", "text+image"] as const),
+  input: Schema.Literals(Object.values(MODEL_ENDPOINT_INPUT)),
   total_bytes: NonNegativeIntSchema,
   install: InstallWireSchema
 })
 
 const RuntimeWireSchema = Schema.Union([
-  withExtras({ state: Schema.Literals(["stopped", "starting", "running"] as const) }),
-  withExtras({ state: Schema.Literal("failed"), error: Schema.NonEmptyString })
+  withExtras({
+    state: Schema.Literals([
+      LOCAL_MODEL_RUNTIME.stopped,
+      LOCAL_MODEL_RUNTIME.starting,
+      LOCAL_MODEL_RUNTIME.running
+    ])
+  }),
+  withExtras({ state: Schema.Literal(LOCAL_MODEL_RUNTIME.failed), error: Schema.NonEmptyString })
 ])
 
 export const LocalModelsStatusResponseSchema = withExtras({
   models: Schema.Array(ModelWireSchema),
   free_space: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("measured"), bytes: NonNegativeIntSchema }),
-    Schema.Struct({ kind: Schema.Literal("unmeasured") })
+    Schema.Struct({
+      kind: Schema.Literal(LOCAL_MODELS_FREE_SPACE.measured),
+      bytes: NonNegativeIntSchema
+    }),
+    Schema.Struct({ kind: Schema.Literal(LOCAL_MODELS_FREE_SPACE.unmeasured) })
   ]),
   runtime: RuntimeWireSchema
 })
@@ -53,49 +78,57 @@ type StatusWire = Schema.Schema.Type<typeof LocalModelsStatusResponseSchema>
 
 const installFromWire = (install: InstallWire): LocalModelInstall => {
   switch (install.state) {
-    case "absent":
-    case "installed":
+    case LOCAL_MODEL_INSTALL_STATE.absent:
+    case LOCAL_MODEL_INSTALL_STATE.installed:
       return { state: install.state }
-    case "downloading":
-    case "stopped":
+    case LOCAL_MODEL_INSTALL_STATE.downloading:
+    case LOCAL_MODEL_INSTALL_STATE.stopped:
       return {
         state: install.state,
         receivedBytes: install.received_bytes,
         totalBytes: install.total_bytes
       }
-    case "failed":
+    case LOCAL_MODEL_INSTALL_STATE.failed:
       return {
-        state: "failed",
+        state: LOCAL_MODEL_INSTALL_STATE.failed,
         reason: install.reason,
         receivedBytes: install.received_bytes,
         totalBytes: install.total_bytes
       }
-    case "no_space":
-      return { state: "no_space", neededBytes: install.needed_bytes, freeBytes: install.free_bytes }
+    case LOCAL_MODEL_INSTALL_STATE.noSpace:
+      return {
+        state: LOCAL_MODEL_INSTALL_STATE.noSpace,
+        neededBytes: install.needed_bytes,
+        freeBytes: install.free_bytes
+      }
   }
 }
 
 const installToWire = (install: LocalModelInstall): InstallWire => {
   switch (install.state) {
-    case "absent":
-    case "installed":
+    case LOCAL_MODEL_INSTALL_STATE.absent:
+    case LOCAL_MODEL_INSTALL_STATE.installed:
       return { state: install.state }
-    case "downloading":
-    case "stopped":
+    case LOCAL_MODEL_INSTALL_STATE.downloading:
+    case LOCAL_MODEL_INSTALL_STATE.stopped:
       return {
         state: install.state,
         received_bytes: install.receivedBytes,
         total_bytes: install.totalBytes
       }
-    case "failed":
+    case LOCAL_MODEL_INSTALL_STATE.failed:
       return {
-        state: "failed",
+        state: LOCAL_MODEL_INSTALL_STATE.failed,
         reason: install.reason,
         received_bytes: install.receivedBytes,
         total_bytes: install.totalBytes
       }
-    case "no_space":
-      return { state: "no_space", needed_bytes: install.neededBytes, free_bytes: install.freeBytes }
+    case LOCAL_MODEL_INSTALL_STATE.noSpace:
+      return {
+        state: LOCAL_MODEL_INSTALL_STATE.noSpace,
+        needed_bytes: install.neededBytes,
+        free_bytes: install.freeBytes
+      }
   }
 }
 
@@ -114,8 +147,8 @@ export const mapLocalModelsStatus = (status: StatusWire): LocalModelsStatus => (
   models: status.models.map(modelFromWire),
   freeSpace: status.free_space,
   runtime:
-    status.runtime.state === "failed"
-      ? { state: "failed", error: status.runtime.error }
+    status.runtime.state === LOCAL_MODEL_RUNTIME.failed
+      ? { state: LOCAL_MODEL_RUNTIME.failed, error: status.runtime.error }
       : { state: status.runtime.state }
 })
 
@@ -132,7 +165,7 @@ export const localModelsStatusResponse = (status: LocalModelsStatus): StatusWire
   })),
   free_space: status.freeSpace,
   runtime:
-    status.runtime.state === "failed"
-      ? { state: "failed", error: status.runtime.error }
+    status.runtime.state === LOCAL_MODEL_RUNTIME.failed
+      ? { state: LOCAL_MODEL_RUNTIME.failed, error: status.runtime.error }
       : { state: status.runtime.state }
 })

@@ -1,6 +1,7 @@
 import { Effect, Layer, Stream } from "effect"
 import { ChatMessage } from "../chat/message.js"
-import { SessionLifecycleEvents } from "../persistence/sessions/events.js"
+import { LIFECYCLE_DELIVERY, SessionLifecycleEvents } from "../persistence/sessions/events.js"
+import { INTERNAL_LIFECYCLE_EVENT } from "../persistence/sessions/internal-events.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { ScriptRunner } from "./script-runner.js"
 
@@ -27,7 +28,9 @@ export const FencedScriptsRuntime: Layer.Layer<
         yield* cancelFenced
         yield* follow.stream.pipe(
           Stream.filter(
-            (delivery) => delivery.kind === "reset" || delivery.event.type === "run_fenced"
+            (delivery) =>
+              delivery.kind === LIFECYCLE_DELIVERY.reset ||
+              delivery.event.type === INTERNAL_LIFECYCLE_EVENT.runFenced
           ),
           Stream.runForEach(() => cancelFenced)
         )

@@ -1,21 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** Indexes in the order the chat lists ask for.
- *
- * The chat list read every live chat through the index on archived_at and
- * sorted them all to show the newest hundred. These hold the chats by
- * archived_at and then in each list order (latest activity; last opened), and
- * a Space's or a parent chat's chats the same way, so each list reads a page
- * and stops. The first replaces idx_sessions_archived. (Without the Space and
- * parent ones, SQLite read every chat in activity order to find one Space's.)
- *
- * Search listed the owner's named chats through the index of every chat of
- * the same type, forks included; `idx_sessions_owner_chats` holds only the
- * owner's own chats, by activity. An Automation's own chat was found by
- * reading every chat it ever forked; `idx_sessions_automation_channel` holds
- * only the live channels, per Automation. The conditions repeat the queries'
- * word for word, so SQLite can use these partial indexes. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE INDEX idx_sessions_archived_activity
       ON sessions(archived_at, last_activity DESC, session_id DESC)`)

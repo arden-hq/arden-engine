@@ -1,231 +1,39 @@
-import { isWithin } from "@arden-hq/std/paths"
-import { Context, Effect, FileSystem, Layer, Option, Path, Schema, Semaphore } from "effect"
+import { Effect, FileSystem, Layer, Option, Path, Semaphore } from "effect"
 
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
+import { OBJECT_KIND } from "../domain/format.js"
 import {
   atomicWrite,
-  directoriesPresent,
   ensureDirectory,
   entryIsSymlink,
   inspectRegular,
   isAlreadyExists,
+  isDirectory,
+  isRegularFile,
   listWorkingTree,
   relativeParts,
   removeTree,
   storageFailure,
   syncDirectory
 } from "./files.js"
+import { objectDirectory as objectDirectoryName } from "./objects.js"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { sha256Hex } from "@arden-hq/std/hash"
-
-/** Filesystem roots used by a repository. Both paths may be relative. */
-export interface RevisionLockFactoryShape {
-  readonly acquire: (
-    lockPath: string,
-    staleAfterMs: number
-  ) => Effect.Effect<RevisionLock, RevisionStorageError | RevisionConflictError>
-}
-
-export interface RevisionStorageOptions {
-  readonly workingRoot: string
-  readonly historyRoot?: string
-  /** Lock age after which a crashed process may be reclaimed. Defaults to 10 minutes. */
-  readonly lockStaleAfterMs?: number
-}
-
-interface RevisionLock {
-  readonly release: Effect.Effect<void, RevisionStorageError>
-  readonly lost: Effect.Effect<never, RevisionStorageError>
-}
-
-/** Platform lock service. The core layer requires an implementation. */
-export class RevisionLockFactory extends Context.Service<
+import { makeStorageIo } from "./storage-io.js"
+import {
   RevisionLockFactory,
-  RevisionLockFactoryShape
->()("@arden-hq/revisions/RevisionLockFactory") {}
-
-export type StorageError = RevisionStorageError | RevisionConflictError | UnsafePathError
-
-interface WorkingStamp {
-  readonly id: string
-  readonly modifiedAt: number
-}
-
-export type WorkingEntry =
-  /** `stamp` is undefined for a symlink or an entry that is not a regular file. */
-  | { readonly kind: "file"; readonly path: string; readonly stamp: WorkingStamp | undefined }
-  | { readonly kind: "unreadable"; readonly path: string; readonly reason: string }
-
-type RevisionObjectKind = "blob" | "tree" | "commit"
-
-const OBJECT_DIRECTORY: Record<RevisionObjectKind, string> = {
-  blob: "objects/blobs",
-  tree: "objects/trees",
-  commit: "commits"
-}
-
-const jsonlStem = (name: string): string | null =>
-  name.endsWith(".jsonl") ? name.slice(0, -6) : null
-
-interface RevisionMetadataStat {
-  readonly size: number
-  readonly mtimeMillis: number | null
-}
-
-/**
- * Durable filesystem operations used by the repository.
- *
- * This interface depends only on Effect's `FileSystem` and `Path` services.
- * The Node implementation is deliberately kept in `./node.ts`, so the core
- * remains injectable in tests and can be given a desktop-specific adapter.
- */
-export interface RevisionStorageShape {
-  readonly workingRoot: string
-  readonly historyRoot: string
-  readonly initialize: Effect.Effect<void, StorageError>
-  /**
-   * Run `operation` holding the on-disk repository lock. Acquisition is
-   * uninterruptible and the release is registered with it, so an interrupted
-   * caller never leaves the lock held (a leaked lock keeps its heartbeat and
-   * refuses every later open in the process). Losing the lock fails `operation`.
-   */
-  readonly withLock: <A, E>(operation: Effect.Effect<A, E>) => Effect.Effect<A, E | StorageError>
-  readonly readBlob: (blobId: string) => Effect.Effect<Uint8Array, StorageError>
-  readonly writeBlob: (content: Uint8Array) => Effect.Effect<string, StorageError>
-  readonly readTree: (treeId: string) => Effect.Effect<Uint8Array, StorageError>
-  readonly writeTree: (content: Uint8Array) => Effect.Effect<string, StorageError>
-  readonly readCommit: (commitId: string) => Effect.Effect<Uint8Array, StorageError>
-  readonly writeCommit: (content: Uint8Array) => Effect.Effect<string, StorageError>
-  readonly blobSize: (blobId: string) => Effect.Effect<number, StorageError>
-  readonly commitSize: (commitId: string) => Effect.Effect<number, StorageError>
-  readonly listObjectIds: (
-    kind: RevisionObjectKind
-  ) => Effect.Effect<ReadonlyArray<string>, StorageError>
-  readonly removeObject: (
-    kind: RevisionObjectKind,
-    id: string,
-    missingOk?: boolean
-  ) => Effect.Effect<void, StorageError>
-  readonly listPublished: Effect.Effect<ReadonlyArray<string>, StorageError>
-  readonly removePublished: (
-    commitId: string,
-    missingOk?: boolean
-  ) => Effect.Effect<void, StorageError>
-  readonly metadataStat: (
-    relativePath: string
-  ) => Effect.Effect<RevisionMetadataStat | null, StorageError>
-  readonly removeMetadataFile: (
-    relativePath: string,
-    missingOk?: boolean
-  ) => Effect.Effect<void, StorageError>
-  /** Remove crash-orphaned atomic-write temporaries under one metadata
-   *  directory (`"."` for the whole history root). A missing directory has none. */
-  readonly cleanupMetadataTemps: (relativeDirectory: string) => Effect.Effect<void, StorageError>
-  readonly readRef: Effect.Effect<string | null, StorageError>
-  readonly compareAndSwapRef: (
-    expected: string | null,
-    replacement: string | null
-  ) => Effect.Effect<void, StorageError>
-  readonly compensateRef: (
-    expected: string,
-    replacement: string | null
-  ) => Effect.Effect<void, StorageError>
-  readonly readIdempotency: (keyHash: string) => Effect.Effect<Uint8Array | null, StorageError>
-  readonly writeIdempotency: (
-    keyHash: string,
-    content: Uint8Array
-  ) => Effect.Effect<void, StorageError>
-  readonly isPublished: (commitId: string) => Effect.Effect<boolean, StorageError>
-  readonly publish: (commitId: string) => Effect.Effect<void, StorageError>
-  readonly listMetadata: (
-    relativePath: string
-  ) => Effect.Effect<ReadonlyArray<string>, StorageError>
-  readonly metadataExists: (relativePath: string) => Effect.Effect<boolean, StorageError>
-  readonly readMetadata: (
-    relativePath: string,
-    allowMissing?: boolean
-  ) => Effect.Effect<Uint8Array | null, StorageError>
-  readonly writeMetadata: (
-    relativePath: string,
-    content: Uint8Array,
-    noReplace?: boolean
-  ) => Effect.Effect<void, StorageError>
-  readonly ensureMetadataDirectory: (relativePath: string) => Effect.Effect<void, StorageError>
-  readonly removeMetadataTree: (relativePath: string) => Effect.Effect<void, StorageError>
-  readonly renameMetadataDirectory: (
-    source: string,
-    target: string
-  ) => Effect.Effect<void, StorageError>
-  readonly readWorking: (
-    relativePath: string,
-    allowMissing?: boolean,
-    requireStandalone?: boolean
-  ) => Effect.Effect<Uint8Array | null, StorageError>
-  /** Every file and symlink under the working root outside history, sorted by path. An entry
-   *  that cannot be inspected or a folder that cannot be listed is reported, never fatal; an
-   *  entry removed while the listing runs is left out. */
-  readonly listWorkingFiles: Effect.Effect<ReadonlyArray<WorkingEntry>, StorageError>
-  readonly writeWorking: (
-    relativePath: string,
-    content: Uint8Array,
-    noReplace?: boolean
-  ) => Effect.Effect<void, StorageError>
-  readonly removeWorking: (
-    relativePath: string,
-    missingOk?: boolean
-  ) => Effect.Effect<void, StorageError>
-  readonly moveWorkingToMetadata: (
-    workingPath: string,
-    metadataPath: string
-  ) => Effect.Effect<void, StorageError>
-  readonly syncMetadataDirectory: (relativePath: string) => Effect.Effect<void, StorageError>
-}
-
-export class RevisionStorage extends Context.Service<RevisionStorage, RevisionStorageShape>()(
-  "@arden-hq/revisions/RevisionStorage"
-) {}
-
-const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
-  left.length === right.length && left.every((value, index) => value === right[index])
-
-const defaultLockStaleAfterMs = 10 * 60 * 1000
-const minimumLockStaleAfterMs = 5_000
-const metadataScanConcurrency = 16
-
-const encodeRef = (commitId: string): Uint8Array =>
-  new TextEncoder().encode(`{"commit_id":"${commitId}","version":2}\n`)
-
-const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
-
-const decodeRefId = Effect.fn("RevisionStorage.decodeRefId")(function* (
-  content: Uint8Array
-): Effect.fn.Return<string, StorageError> {
-  const record: unknown = yield* Effect.try({
-    try: () => decodeJsonText(new TextDecoder("utf-8", { fatal: true }).decode(content)),
-    catch: (cause) => storageFailure("decode current ref", cause)
-  })
-  if (typeof record !== "object" || record === null || Array.isArray(record))
-    return yield* new RevisionStorageError({ message: "decode current ref: invalid ref shape" })
-  const value = record as Record<string, unknown>
-  if (value.version !== 2) {
-    return yield* new RevisionStorageError({
-      message: `decode current ref: unsupported format ${String(value.version)}`
-    })
-  }
-  if (
-    typeof value.commit_id !== "string" ||
-    value.commit_id.length !== 64 ||
-    [...value.commit_id].some((char) => !"0123456789abcdef".includes(char))
-  ) {
-    return yield* new RevisionStorageError({ message: "decode current ref: invalid ref shape" })
-  }
-  if (bytesEqual(content, encodeRef(value.commit_id)) === false) {
-    return yield* new RevisionStorageError({
-      message: "decode current ref: current ref is not canonical"
-    })
-  }
-  return value.commit_id
-})
+  RevisionStorage,
+  type RevisionStorageOptions,
+  type RevisionStorageShape,
+  type StorageError
+} from "./service-types.js"
+import {
+  bytesEqual,
+  defaultLockStaleAfterMs,
+  encodeRef,
+  metadataScanConcurrency,
+  minimumLockStaleAfterMs
+} from "./storage-refs.js"
 
 const makeStorage = Effect.fn("makeRevisionStorage")(function* (
   options: RevisionStorageOptions
@@ -243,197 +51,26 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
       message: `lockStaleAfterMs must be a finite safe integer >= ${minimumLockStaleAfterMs}`
     })
   }
-  const workingCandidate = path.resolve(options.workingRoot)
-  const historyCandidate =
-    options.historyRoot === undefined
-      ? path.join(workingCandidate, ".managed-history")
-      : path.resolve(options.historyRoot)
-  yield* fs
-    .makeDirectory(workingCandidate, { recursive: true, mode: 0o700 })
-    .pipe(Effect.mapError((cause) => storageFailure("create working root", cause)))
-  yield* fs
-    .makeDirectory(historyCandidate, { recursive: true, mode: 0o700 })
-    .pipe(Effect.mapError((cause) => storageFailure("create history root", cause)))
-  const workingRoot = yield* fs
-    .realPath(workingCandidate)
-    .pipe(Effect.mapError((cause) => storageFailure("resolve working root", cause)))
-  const historyRoot = yield* fs
-    .realPath(historyCandidate)
-    .pipe(Effect.mapError((cause) => storageFailure("resolve history root", cause)))
-  const workingInfo = yield* fs
-    .stat(workingRoot)
-    .pipe(Effect.mapError((cause) => storageFailure("stat working root", cause)))
-  const historyInfo = yield* fs
-    .stat(historyRoot)
-    .pipe(Effect.mapError((cause) => storageFailure("stat history root", cause)))
-  if (workingInfo.dev !== historyInfo.dev) {
-    return yield* new UnsafePathError({
-      message: "working and history roots must be on the same filesystem"
-    })
-  }
-  const defaultHistoryRoot = path.join(workingRoot, ".managed-history")
-  if (
-    workingRoot === historyRoot ||
-    isWithin(historyRoot, workingRoot) ||
-    (isWithin(workingRoot, historyRoot) && historyRoot !== defaultHistoryRoot)
-  ) {
-    return yield* new UnsafePathError({
-      message: "history root must be separate or the default .managed-history child"
-    })
-  }
-
-  const metadataPath = (value: string, allowRoot = false) =>
-    relativeParts(value, allowRoot).pipe(
-      Effect.map((parts) => parts.reduce((current, part) => path.join(current, part), historyRoot))
-    )
-  const workingPath = Effect.fn("RevisionStorage.workingPath")(function* (value: string) {
-    const parts = yield* relativeParts(value)
-    const target = parts.reduce((current, part) => path.join(current, part), workingRoot)
-    if (isWithin(historyRoot, target))
-      return yield* new UnsafePathError({
-        message: `managed path enters repository history: ${value}`
-      })
-    return target
-  })
-  const ensureMetadata = (value: string) =>
-    relativeParts(value, true).pipe(
-      Effect.flatMap((parts) => ensureDirectory(fs, path, historyRoot, parts))
-    )
-  const readRegular = (file: string, allowMissing: boolean, standalone: boolean) =>
-    inspectRegular(fs, file, allowMissing, standalone).pipe(
-      Effect.flatMap((info) =>
-        info === null
-          ? Effect.succeed(null)
-          : fs.readFile(file).pipe(Effect.mapError((cause) => storageFailure("read file", cause)))
-      )
-    )
-  const readMetadataAsync = Effect.fn("RevisionStorage.readMetadataAsync")(function* (
-    value: string,
-    allowMissing = false
-  ) {
-    const file = yield* metadataPath(value)
-    const parts = yield* relativeParts(value)
-    yield* ensureDirectory(fs, path, historyRoot, parts.slice(0, -1))
-    return yield* readRegular(file, allowMissing, true)
-  })
-  const writeMetadataAsync = Effect.fn("RevisionStorage.writeMetadataAsync")(function* (
-    value: string,
-    content: Uint8Array,
-    noReplace = false
-  ) {
-    const file = yield* metadataPath(value)
-    const parts = yield* relativeParts(value)
-    yield* ensureDirectory(fs, path, historyRoot, parts.slice(0, -1))
-    yield* atomicWrite(fs, path, file, content, noReplace)
-  })
-  const readWorkingAsync = Effect.fn("RevisionStorage.readWorkingAsync")(function* (
-    value: string,
-    allowMissing = false,
-    standalone = true
-  ) {
-    const file = yield* workingPath(value)
-    const parts = yield* relativeParts(value)
-    if (!(yield* directoriesPresent(fs, path, workingRoot, parts.slice(0, -1)))) {
-      return allowMissing
-        ? null
-        : yield* new RevisionStorageError({ message: `file is missing: ${file}` })
-    }
-    return yield* readRegular(file, allowMissing, standalone)
-  })
-  const writeWorkingAsync = Effect.fn("RevisionStorage.writeWorkingAsync")(function* (
-    value: string,
-    content: Uint8Array,
-    noReplace = false
-  ) {
-    const file = yield* workingPath(value)
-    const parts = yield* relativeParts(value)
-    yield* ensureDirectory(fs, path, workingRoot, parts.slice(0, -1))
-    yield* atomicWrite(fs, path, file, content, noReplace)
-  })
-  const objectDirectoryName = (kind: RevisionObjectKind): string => OBJECT_DIRECTORY[kind]
-  const objectPath = (kind: "blob" | "tree" | "commit", id: string) => {
-    if (id.length !== 64 || [...id].some((char) => !"0123456789abcdef".includes(char))) {
-      return Effect.fail(new UnsafePathError({ message: `${kind} identifier is invalid: ${id}` }))
-    }
-    return metadataPath(`${objectDirectoryName(kind)}/${kind === "blob" ? id : `${id}.jsonl`}`)
-  }
-  const objectDirectory = (kind: RevisionObjectKind) => metadataPath(objectDirectoryName(kind))
-  const objectIdFromName = (kind: RevisionObjectKind, name: string): string | null => {
-    const id = kind === "blob" ? name : jsonlStem(name)
-    return id !== null &&
-      id.length === 64 &&
-      [...id].every((char) => "0123456789abcdef".includes(char))
-      ? id
-      : null
-  }
-  const readObject = Effect.fn("RevisionStorage.readObject")(function* (
-    kind: "blob" | "tree" | "commit",
-    id: string
-  ) {
-    const file = yield* objectPath(kind, id)
-    const content = yield* readRegular(file, true, true)
-    if (content === null)
-      return yield* new RevisionStorageError({ message: `required ${kind} is missing: ${id}` })
-    if (sha256Hex(content) !== id)
-      return yield* new RevisionStorageError({ message: `${kind} hash mismatch: ${id}` })
-    return content
-  })
-  const writeObject = Effect.fn("RevisionStorage.writeObject")(function* (
-    kind: "tree" | "commit",
-    content: Uint8Array
-  ) {
-    const id = sha256Hex(content)
-    const file = yield* objectPath(kind, id)
-    yield* ensureMetadata(objectDirectoryName(kind))
-    yield* atomicWrite(fs, path, file, content, true).pipe(
-      Effect.catchTag("RevisionConflictError", () =>
-        readRegular(file, false, true).pipe(
-          Effect.flatMap((existing) =>
-            existing !== null && bytesEqual(existing, content)
-              ? Effect.succeed(undefined)
-              : Effect.fail(
-                  new RevisionStorageError({ message: `immutable ${kind} differs: ${id}` })
-                )
-          )
-        )
-      )
-    )
-    return id
-  })
-  const initialize = Effect.gen(function* () {
-    yield* ensureDirectory(fs, path, workingRoot, [])
-    yield* ensureDirectory(fs, path, historyRoot, [])
-    for (const directory of [
-      "objects",
-      "objects/blobs",
-      "objects/trees",
-      "commits",
-      "published",
-      "refs",
-      "transactions",
-      "conflicts",
-      "idempotency"
-    ]) {
-      yield* ensureMetadata(directory)
-    }
-    const lockFile = path.join(historyRoot, "repository.lock")
-    const lockContent = yield* readRegular(lockFile, true, true)
-    if (lockContent === null) {
-      yield* atomicWrite(fs, path, lockFile, new Uint8Array(), true).pipe(
-        Effect.catchTag("RevisionConflictError", () => Effect.void)
-      )
-    }
-    const installedLock = yield* readRegular(lockFile, false, true)
-    if (installedLock === null || installedLock.length !== 0) {
-      return yield* new RevisionStorageError({ message: "repository lock file is not empty" })
-    }
-  })
-  const refPath = path.join(historyRoot, "refs", "current.jsonl")
-  const readCurrent = Effect.gen(function* () {
-    const content = yield* readMetadataAsync("refs/current.jsonl", true)
-    return content === null ? null : yield* decodeRefId(content)
-  })
-
+  const {
+    workingRoot,
+    historyRoot,
+    metadataPath,
+    workingPath,
+    ensureMetadata,
+    readRegular,
+    readMetadataAsync,
+    writeMetadataAsync,
+    readWorkingAsync,
+    writeWorkingAsync,
+    objectPath,
+    objectDirectory,
+    objectIdFromName,
+    readObject,
+    writeObject,
+    initialize,
+    refPath,
+    readCurrent
+  } = yield* makeStorageIo(options, fs, path)
   const storage = RevisionStorage.of({
     workingRoot,
     historyRoot,
@@ -448,10 +85,10 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
         (lock) => Effect.raceFirst(operation, lock.lost),
         (lock) => lock.release.pipe(Effect.orDie)
       ),
-    readBlob: (id) => readObject("blob", id),
+    readBlob: (id) => readObject(OBJECT_KIND.blob, id),
     writeBlob: Effect.fn("RevisionStorage.writeBlob")(function* (content) {
       const id = sha256Hex(content)
-      const file = yield* objectPath("blob", id)
+      const file = yield* objectPath(OBJECT_KIND.blob, id)
       yield* ensureMetadata("objects/blobs")
       yield* atomicWrite(fs, path, file, content, true).pipe(
         Effect.catchTag("RevisionConflictError", () =>
@@ -468,17 +105,17 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
       )
       return id
     }),
-    readTree: (id) => readObject("tree", id),
-    writeTree: (content) => writeObject("tree", content),
-    readCommit: (id) => readObject("commit", id),
-    writeCommit: (content) => writeObject("commit", content),
+    readTree: (id) => readObject(OBJECT_KIND.tree, id),
+    writeTree: (content) => writeObject(OBJECT_KIND.tree, content),
+    readCommit: (id) => readObject(OBJECT_KIND.commit, id),
+    writeCommit: (content) => writeObject(OBJECT_KIND.commit, content),
     blobSize: Effect.fn("RevisionStorage.blobSize")(function* (id) {
-      const file = yield* objectPath("blob", id)
+      const file = yield* objectPath(OBJECT_KIND.blob, id)
       const info = yield* inspectRegular(fs, file, false, true)
       return Number(info.size)
     }),
     commitSize: Effect.fn("RevisionStorage.commitSize")(function* (id) {
-      const file = yield* objectPath("commit", id)
+      const file = yield* objectPath(OBJECT_KIND.commit, id)
       const info = yield* inspectRegular(fs, file, false, true)
       return Number(info.size)
     }),
@@ -618,14 +255,14 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
               })
             )
             if (name.startsWith(".arden-")) {
-              if (info.type === "Directory") yield* removeTree(fs, path, child)
-              else if (info.type === "File")
+              if (isDirectory(info)) yield* removeTree(fs, path, child)
+              else if (isRegularFile(info))
                 yield* fs
                   .remove(child)
                   .pipe(
                     Effect.mapError((cause) => storageFailure("remove metadata temporary", cause))
                   )
-            } else if (info.type === "Directory") {
+            } else if (isDirectory(info)) {
               yield* visit(child)
             }
           }),
@@ -690,7 +327,7 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
       const info = yield* fs
         .stat(directory)
         .pipe(Effect.mapError((cause) => storageFailure("stat metadata directory", cause)))
-      if (info.type !== "Directory")
+      if (!isDirectory(info))
         return yield* new UnsafePathError({ message: `metadata path is not a directory: ${value}` })
       return yield* fs
         .readDirectory(directory)
@@ -728,7 +365,7 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
         const sourceInfo = yield* fs
           .stat(sourcePath)
           .pipe(Effect.mapError((cause) => storageFailure("stat metadata source", cause)))
-        if (sourceInfo.type !== "Directory")
+        if (!isDirectory(sourceInfo))
           return yield* new UnsafePathError({
             message: `metadata source is not a directory: ${source}`
           })
@@ -801,8 +438,6 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
         message: `${operation} requires source and target to be on the same filesystem`
       })
     }
-    // A hard-link create is the no-replace primitive. A check followed by
-    // rename would overwrite a target that appears between the two calls.
     yield* fs.link(source, target).pipe(
       Effect.mapError((cause) =>
         isAlreadyExists(cause)
@@ -821,7 +456,6 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
   return storage
 })
 
-/** Core layer: requires Effect `FileSystem`, `Path`, and an explicit lock factory; it has no Node imports. */
 export const revisionStorageLayer = (
   options: RevisionStorageOptions
 ): Layer.Layer<

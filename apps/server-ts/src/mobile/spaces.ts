@@ -1,24 +1,31 @@
 import { previewLine } from "@arden-hq/protocol/chat"
 import type { SpaceSummary } from "@arden-hq/protocol/spaces"
-import type { MobileAsk, MobileSpaces } from "@arden-hq/protocol/mobile"
-import { SESSION_RUN, type SessionListItem } from "@arden-hq/protocol/sessions"
+import { MOBILE_ASK, type MobileAsk, type MobileSpaces } from "@arden-hq/protocol/mobile"
+import {
+  SESSION_PRESENTATION,
+  SESSION_PRESENTATION_ROLE,
+  SESSION_RUN,
+  SESSION_TYPE,
+  type SessionListItem
+} from "@arden-hq/protocol/sessions"
 import { nameText, runIsActive } from "../sessions/session-states.js"
-import { chatName, SPACE_ASK, spaceState, isSystemRun } from "@arden-hq/protocol/views"
+import { chatName, SPACE_ASK, SPACE_TONE, spaceState, isSystemRun } from "@arden-hq/protocol/views"
 
 type MobileSpace = MobileSpaces["spaces"][number]
 type MobileLooseChat = MobileSpaces["loose"][number]
 
 const isConversation = (session: SessionListItem): boolean =>
-  session.presentation.kind === "conversation"
+  session.presentation.kind === SESSION_PRESENTATION.conversation
 
 export const isSpaceHome = (session: SessionListItem): boolean =>
-  session.presentation.kind === "conversation" && session.presentation.role === "space"
+  session.presentation.kind === SESSION_PRESENTATION.conversation &&
+  session.presentation.role === SESSION_PRESENTATION_ROLE.space
 
 const isWorking = (session: SessionListItem): boolean =>
   !isSystemRun(session.presentation) && runIsActive(session.run)
 
 const askLabel = (ask: MobileAsk): string => {
-  const text = ask.kind === "question" ? ask.prompt : ask.title
+  const text = ask.kind === MOBILE_ASK.question ? ask.prompt : ask.title
   return previewLine(text) ?? text
 }
 
@@ -46,7 +53,7 @@ export function mobileSpace({
     name: space.title,
     conversation: conversationOf(chats.find((chat) => isSpaceHome(chat))?.session_id),
     state_line:
-      tone === "asks" && ask.kind === SPACE_ASK.waiting
+      tone === SPACE_TONE.asks && ask.kind === SPACE_ASK.waiting
         ? { tone, text: ask.text, more: ask.more }
         : { tone, text: "", more: 0 }
   }
@@ -56,7 +63,9 @@ export function looseChats(sessions: ReadonlyArray<SessionListItem>): MobileLoos
   return sessions
     .filter(
       (session) =>
-        isConversation(session) && session.session_type !== "channel" && !isSpaceHome(session)
+        isConversation(session) &&
+        session.session_type !== SESSION_TYPE.channel &&
+        !isSpaceHome(session)
     )
     .map((session) => ({
       session_id: session.session_id,

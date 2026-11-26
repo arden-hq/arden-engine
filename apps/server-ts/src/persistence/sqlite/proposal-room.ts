@@ -2,7 +2,7 @@ import { DateTime, Effect } from "effect"
 import { Statement, type SqlClient } from "effect/unstable/sql"
 import { ownerPresentSql } from "./home-presence.js"
 import { OFFER_EXPIRY_HOURS, OFFER_LATER_HOURS } from "./offer-rules.js"
-import type { ProposalRow } from "./task-proposals.js"
+import type { ProposalRow } from "./task-proposal-support.js"
 import { workError } from "./work-records.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { Row } from "effect/unstable/sql/SqlConnection"
@@ -23,14 +23,10 @@ export const assertOpenProposalRoom = Effect.fn("Work.assertOpenProposalRoom")(f
     )
 })
 
-/** Every write that (re)opens an offer sets this: its expiry clock starts over, unput off and not
- * yet waiting, until the owner is next around. */
 export const restartOfferWait = Statement.fragment([
   Statement.literal("put_off_until = NULL, waiting_since = NULL")
 ])
 
-/** An open offer the owner can see at `at`: offered, and not put off past `at`. Its expiry clock
- * runs only then, and only then is it Home evidence. */
 export const offerInSightSql = (
   sql: SqlClient.SqlClient,
   alias: string | undefined,
@@ -42,8 +38,6 @@ export const offerInSightSql = (
     AND (${column("put_off_until")} IS NULL OR ${column("put_off_until")} <= ${at}))`
 }
 
-/** The owner's Later: the offer stays open but out of sight for `OFFER_LATER_HOURS`, and its
- * expiry clock starts over once it is back. */
 export const putOfferOff = (
   sql: SqlClient.SqlClient,
   proposalId: string,

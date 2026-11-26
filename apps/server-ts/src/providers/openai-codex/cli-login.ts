@@ -26,8 +26,7 @@ const decodeClaims = Schema.decodeUnknownSync(Claims)
 
 export class CodexLoginError extends Error {}
 
-/** The Codex CLI rule: a non-empty `CODEX_HOME`, else `~/.codex`
- *  (codex-rs/utils/home-dir/src/lib.rs, `find_codex_home`). */
+// Codex CLI's own rule: https://github.com/openai/codex/blob/main/codex-rs/utils/home-dir/src/lib.rs
 export const codexHome = (env: NodeJS.ProcessEnv = process.env): string => {
   const configured = env.CODEX_HOME
   return configured === undefined || configured === "" ? join(homedir(), ".codex") : configured

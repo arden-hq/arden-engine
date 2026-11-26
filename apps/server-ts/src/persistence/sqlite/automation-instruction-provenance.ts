@@ -4,6 +4,7 @@ import { Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { AutomationTriggersSchema } from "./automation-schedule.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import type { AutomationWriteTool } from "../automations/tool-names.js"
 import { triggerRecord, type TriggerRecord } from "../automations/trigger-record.js"
 
 export interface AutomationWriteSource {
@@ -118,7 +119,7 @@ export const prepareInstructionRevision = Effect.fn("Automation.prepareInstructi
       readonly previousRevisionId: number | null
       readonly promptAuthor: string | null
       readonly source: AutomationWriteSource | undefined
-      readonly toolName: "automation_create" | "automation_update"
+      readonly toolName: AutomationWriteTool
       readonly writtenAt: string
     }
   ) {

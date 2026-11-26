@@ -1,18 +1,17 @@
+export { JOURNAL_START_AT, JournalError } from "./contracts.js"
+export { initializeJournalSchema, journalSqliteSchema } from "./schema.js"
 export {
-  JournalError,
   appendInTransaction,
   deleteStreamInTransaction,
-  initializeJournalSchema,
   JOURNAL_HEAD_SEQUENCE_SQL,
   journalHeadSequenceSql,
   journalRecordsSql,
   journalStreamsSql,
-  journalSqliteSchema,
-  makeJournalRuntime,
   readHeadSequence,
   retainFromInTransaction,
   truncateBeforeInTransaction
-} from "./runtime.js"
+} from "./store.js"
+export { makeJournalRuntime } from "./runtime.js"
 export type {
   JournalFollowInput,
   JournalOperation,
@@ -20,8 +19,10 @@ export type {
   JournalReadPage,
   JournalRuntime,
   JournalRuntimeOptions,
+  JournalStartAt,
   JournalWatermarks
-} from "./runtime.js"
+} from "./contracts.js"
+export { JOURNAL_DELIVERY } from "../types.js"
 export type {
   JournalAppendResult,
   JournalDelivery,

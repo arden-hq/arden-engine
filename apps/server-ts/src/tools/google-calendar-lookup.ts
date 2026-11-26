@@ -193,7 +193,6 @@ export const makeCalendarLookupTools = ({
             "Choose an account"
           )
         }
-        // Google answers by the id it was asked for; the primary calendar's id is the account's email.
         const requested = [
           ...new Set(input.calendars.map((id) => (id === PRIMARY_CALENDAR ? (own ?? id) : id)))
         ]

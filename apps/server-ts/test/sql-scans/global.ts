@@ -2,11 +2,6 @@ import { writeFileSync } from "node:fs"
 import { APPROVED_SCANS } from "./approved.js"
 import { collectTableScans } from "./collect.js"
 
-/**
- * Runs after the whole test run. Every statement the tests executed was
- * planned by its SQLite thread (ARDEN_SQL_SCAN_LOG); this fails the run when
- * one of them reads a growing table from start to end and is not approved.
- */
 export default function setup(): () => void {
   return () => {
     const directory = process.env.ARDEN_SQL_SCAN_LOG

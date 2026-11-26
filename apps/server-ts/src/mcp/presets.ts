@@ -1,27 +1,39 @@
 import { McpPresetIdSchema } from "@arden-hq/protocol/effect/mcp"
 import { mcpOAuthClientReferences } from "@arden-hq/protocol/mcp"
-import type { McpPreset, McpPresetId } from "@arden-hq/protocol/mcp"
+import {
+  MCP_AUTH,
+  MCP_OAUTH_CLIENT,
+  MCP_PRESET_AUTH,
+  MCP_TRANSPORT,
+  type McpAuth,
+  type McpOAuthClient,
+  type McpPreset,
+  type McpPresetId
+} from "@arden-hq/protocol/mcp"
 import type { ToolDefaultApproval } from "@arden-hq/protocol/tools"
 
 interface McpOAuthMetadata {
   readonly credentialKey: string
-  readonly clientType: "confidential" | "dynamic"
+  readonly clientType: McpOAuthClient
   readonly scopes: ReadonlyArray<string>
 }
 
 export interface McpStaticOAuthMetadata extends McpOAuthMetadata {
-  readonly clientType: "confidential"
+  readonly clientType: typeof MCP_OAUTH_CLIENT.confidential
   readonly expectedIssuer: string
   readonly clientIdReference: string
   readonly clientSecretReference: string
 }
 
 type McpPresetOAuthMetadata =
-  | (McpStaticOAuthMetadata & { readonly type: "oauth" })
-  | (McpOAuthMetadata & { readonly type: "oauth"; readonly clientType: "dynamic" })
+  | (McpStaticOAuthMetadata & { readonly type: typeof MCP_PRESET_AUTH.oauth })
+  | (McpOAuthMetadata & {
+      readonly type: typeof MCP_PRESET_AUTH.oauth
+      readonly clientType: typeof MCP_OAUTH_CLIENT.dynamic
+    })
 
 interface McpPresetTokenAuth {
-  readonly type: "token"
+  readonly type: typeof MCP_PRESET_AUTH.token
 }
 
 export interface McpPresetServerDefinition {
@@ -43,11 +55,11 @@ interface PresetCandidate {
   readonly name: string
   readonly presetId: McpPresetId | null
   readonly transport:
-    | { readonly type: "stdio" }
+    | { readonly type: typeof MCP_TRANSPORT.stdio }
     | {
-        readonly type: "http"
+        readonly type: typeof MCP_TRANSPORT.http
         readonly url: string
-        readonly auth: "none" | "oauth" | "headers"
+        readonly auth: McpAuth
         readonly headerKeys: ReadonlyArray<string>
       }
 }
@@ -183,24 +195,27 @@ export const mcpPresetCatalog = (): ReadonlyArray<McpPreset> =>
         url: server.url
       })),
       auth:
-        preset.auth.type === "token"
+        preset.auth.type === MCP_PRESET_AUTH.token
           ? { type: "token" }
           : { type: "oauth", clientType: preset.auth.clientType, scopes: preset.auth.scopes }
     }
   })
 
-export const mcpPresetTransportAuth = (presetId: McpPresetId): "oauth" | "none" =>
-  MCP_PRESETS[presetId].auth.type === "token" ? "none" : "oauth"
+export const mcpPresetTransportAuth = (
+  presetId: McpPresetId
+): typeof MCP_AUTH.oauth | typeof MCP_AUTH.none =>
+  MCP_PRESETS[presetId].auth.type === MCP_PRESET_AUTH.token ? MCP_AUTH.none : MCP_AUTH.oauth
 
 export const usesPresetToken = (candidate: PresetCandidate): boolean =>
   candidate.presetId !== null &&
-  MCP_PRESETS[candidate.presetId].auth.type === "token" &&
+  MCP_PRESETS[candidate.presetId].auth.type === MCP_PRESET_AUTH.token &&
   resolveMcpPresetServer(candidate) !== undefined
 
 export const resolveMcpPresetServer = (
   candidate: PresetCandidate
 ): McpPresetServerDefinition | undefined => {
-  if (candidate.presetId === null || candidate.transport.type !== "http") return undefined
+  if (candidate.presetId === null || candidate.transport.type !== MCP_TRANSPORT.http)
+    return undefined
   if (
     candidate.transport.auth !== mcpPresetTransportAuth(candidate.presetId) ||
     candidate.transport.headerKeys.length > 0

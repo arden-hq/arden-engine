@@ -10,17 +10,12 @@ import { boundedDiff } from "./bounded-diff.js"
 import { chatLinkOf } from "./call-receipt.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
-import {
-  changePages,
-  loadSnapshot,
-  pageNotFound,
-  readablePage,
-  wikiFailure,
-  writtenPageData
-} from "./wiki.js"
+import { changePages } from "./wiki-page-writes.js"
+import { loadSnapshot, pageNotFound, readablePage, wikiFailure } from "./wiki-access.js"
+import { writtenPageData } from "./wiki-render.js"
 import { changeFailure, ChangeTimeSchema } from "./wiki-change.js"
 import { writeIdentity } from "./wiki-identity.js"
-import { wikiOriginChat, wikiOriginSource } from "../wiki/commit.js"
+import { wikiOriginChat, wikiOriginSource } from "../wiki/origin.js"
 import { pageSource, requireObserved } from "./wiki-records.js"
 import { WikiPathSchema } from "./wiki-schemas.js"
 
@@ -154,7 +149,6 @@ const restoreSource = async (
 const restoreReason = (path: string, savedAt: string): string =>
   `restore wiki page ${path} to its version saved ${savedAt}`
 
-/** A page's saved history, where one of its lines came from, and bringing back an earlier version. */
 export const makeWikiPageHistoryTools = ({
   wiki,
   runs,

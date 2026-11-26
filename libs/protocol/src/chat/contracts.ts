@@ -1,39 +1,26 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { SERVER_EVENT_TYPE } from "../common/event-types.js"
 import type { ChatProjectionEvent } from "./events/stream.js"
 import type { ApprovalMode } from "../permissions/modes.js"
+import type { PERMISSION_RULE_LIST } from "../permissions/contracts.js"
 import type { JsonRecord, JsonValue } from "../common/json.js"
-import type { HistoryImage, HistoryImageMediaType } from "./history.js"
+import type { HistoryImage, ImageMediaType } from "./history.js"
 import type { SentFrom } from "./history-message.js"
 
-export type AgentMode = "research" | "code" | "work"
+export const AGENT_MODE = { research: "research", code: "code", work: "work" } as const
+export type AgentMode = (typeof AGENT_MODE)[keyof typeof AGENT_MODE]
 export type ChatApprovalMode = ApprovalMode
 
-/**
- * Stream events that are lossy live presentation: the server assigns them a
- * sequence and publishes them to attached followers, but never journals them
- * durably. Whatever matters is restated — by a terminal event
- * (TEXT_MESSAGE_CONTENT -> TEXT_MESSAGE_END.content, REASONING_MESSAGE_CONTENT
- * -> REASONING_MESSAGE_END.content, TOOL_CALL_OUTPUT_DELTA ->
- * TOOL_CALL_RESULT.content), by the durable transcript (TOOL_CALL_ARGS), or
- * not at all
- * (TOOL_CALL_PROGRESS, stream_retry — fire-and-forget status), or by the
- * history header (token_usage: the session's stored last_input_tokens and
- * message count restate context pressure on every load). Clients must
- * never rely on replay carrying any of these types; a server may still choose
- * to persist an individual event (a backgrounded workflow's detached progress),
- * which is a persistence refinement, not a wire guarantee.
- * Mirrored by the delta contract on the event schemas in `schema.ts`.
- */
 export const EPHEMERAL_CHAT_EVENT_TYPES = [
-  "TEXT_MESSAGE_CONTENT",
-  "REASONING_MESSAGE_CONTENT",
-  "TOOL_CALL_ARGS",
-  "TOOL_CALL_OUTPUT_DELTA",
-  "TOOL_CALL_PROGRESS",
-  "run_activity",
-  "input_taken",
-  "stream_retry",
-  "token_usage"
+  SERVER_EVENT_TYPE.textMessageContent,
+  SERVER_EVENT_TYPE.reasoningMessageContent,
+  SERVER_EVENT_TYPE.toolCallArgs,
+  SERVER_EVENT_TYPE.toolCallOutputDelta,
+  SERVER_EVENT_TYPE.toolCallProgress,
+  SERVER_EVENT_TYPE.runActivity,
+  SERVER_EVENT_TYPE.inputTaken,
+  SERVER_EVENT_TYPE.streamRetry,
+  SERVER_EVENT_TYPE.tokenUsage
 ] as const satisfies ReadonlyArray<ChatProjectionEvent["type"]>
 
 export type EphemeralChatEventType = (typeof EPHEMERAL_CHAT_EVENT_TYPES)[number]
@@ -45,7 +32,6 @@ export const isEphemeralChatEvent = <Event extends { readonly type: string }>(
 ): event is Extract<Event, { readonly type: EphemeralChatEventType }> =>
   ephemeralChatEventTypes.has(event.type)
 
-/** Canonical metadata persisted in a successful spawn_agent tool result. */
 export interface PersistedChildAgentMetadata extends JsonRecord {
   readonly session_id: string
   readonly session_ref: string
@@ -55,22 +41,18 @@ export interface PersistedChildAgentMetadata extends JsonRecord {
 }
 
 export interface ChatImageInput {
-  readonly mediaType: HistoryImageMediaType
-  /** Base64 bytes without a data-URL prefix. */
+  readonly mediaType: ImageMediaType
   readonly data: string
 }
 
-/** Snapshot shown to the model with a human reply. */
 export interface ChatReplyContext extends JsonRecord {
   readonly messageId: string
   readonly role: typeof ROLE.user | typeof ROLE.assistant
   readonly content: string
 }
 
-/** How many messages one reply can quote. */
 export const CHAT_REPLY_QUOTES_MAX = 10
 
-/** Every message a reply quotes, in the order they were quoted. */
 export const chatReplyContexts = (
   replyTo: ChatReplyContext | ReadonlyArray<ChatReplyContext> | undefined
 ): ReadonlyArray<ChatReplyContext> => {
@@ -78,7 +60,6 @@ export const chatReplyContexts = (
   return "messageId" in replyTo ? [replyTo] : replyTo
 }
 
-/** A message sent as a capture: the quick-capture window, or iPhone. */
 export type ChatCaptureVia = "quick" | "phone"
 
 export const APPROVAL_REPLY = { none: "none", deny: "deny" } as const
@@ -121,7 +102,6 @@ export interface ChatMessageInput {
   readonly outputSchema: AnswerShape
 }
 
-/** One reusable message body plus its generated correlation identity. */
 export interface PreparedChatMessage {
   readonly body: string
   readonly clientId: string
@@ -190,13 +170,15 @@ export interface ToolResultInput {
   readonly command: RelayCommand
 }
 
-/** The rules list a card's "Always allow" saves to (see `ToolResultInput`). */
-export type StandingRuleList = "space" | "global"
+export type StandingRuleList =
+  | typeof PERMISSION_RULE_LIST.space
+  | typeof PERMISSION_RULE_LIST.global
 
-/** What a card may choose instead of the call as asked (see `ToolResultInput`). */
-export type ToolApprovalAlternative = "draft"
+export const TOOL_APPROVAL_ALTERNATIVE = { draft: "draft" } as const
 
-/** Values accepted by `POST /connections/result`. */
+export type ToolApprovalAlternative =
+  (typeof TOOL_APPROVAL_ALTERNATIVE)[keyof typeof TOOL_APPROVAL_ALTERNATIVE]
+
 export interface ConnectionResultInput {
   readonly runId: string
   readonly toolId: string
@@ -237,27 +219,8 @@ export const CHAT_RECEIPT_STATUS = {
   interrupted: "interrupted"
 } as const
 
-export type ChatReceiptStatus =
-  | "running"
-  | "queued"
-  | "ingested"
-  | "accepted"
-  | "cancelled"
-  | "busy"
-  | "steered"
-  | "active"
-  | "resumed"
-  | "completed"
-  | "error"
-  | "failed"
-  | "interrupted"
+export type ChatReceiptStatus = (typeof CHAT_RECEIPT_STATUS)[keyof typeof CHAT_RECEIPT_STATUS]
 
-/**
- * What a sent message did. `started`: it began a new Run. `steered`: a Run was
- * already going in the chat and the message joined it; the model reads it
- * before its next step. A message that must wait for the Run to end goes to the
- * chat's queue instead (`POST /sessions/:id/queue`).
- */
 export const CHAT_DELIVERY = { started: "started", steered: "steered", none: "none" } as const
 
 export type ChatDelivery = (typeof CHAT_DELIVERY)[keyof typeof CHAT_DELIVERY]
@@ -268,7 +231,6 @@ export const chatDelivery = (status: ChatReceiptStatus): ChatDelivery => {
   return CHAT_DELIVERY.none
 }
 
-/** Receipt returned by `POST /chat/message`. Busy has no run identity. */
 export const RECEIPT_RUN = { none: "none", run: "run" } as const
 
 export type ReceiptRun =
@@ -293,7 +255,6 @@ export interface CancelResponse extends JsonRecord {
   readonly cancelRequested: boolean
 }
 
-/** Only live runs are returned by `GET /chat/runs/status`. */
 export type ActiveRunStatus = "pending" | "running"
 
 export interface ActiveRunSummary extends JsonRecord {
@@ -323,15 +284,8 @@ export interface QueuedCancelResponse extends JsonRecord {
 
 export const CHAT_MESSAGE_MAX_LENGTH = 100_000
 
-/**
- * How many fresh turns one Session may park behind its active run. The composer
- * enforces the same number before it ever calls the server; this is the durable
- * ceiling, so a second client cannot grow the queue past what the composer can
- * show.
- */
 export const CHAT_QUEUE_LIMIT = 10
 
-/** One parked turn: composed, not sent, and durable across a reload. */
 export interface QueuedChatMessage extends JsonRecord {
   readonly client_id: string
   readonly message: string
@@ -352,8 +306,6 @@ export interface QueuedChatMessages extends JsonRecord {
   readonly messages: ReadonlyArray<QueuedChatMessage>
 }
 
-/** Values accepted by `POST /sessions/:sessionId/queue`. The client id is the
- *  one the composer already minted, so the eventual send stays idempotent. */
 export interface EnqueueChatMessageInput {
   readonly sessionId: string
   readonly clientId: string
@@ -362,7 +314,6 @@ export interface EnqueueChatMessageInput {
   readonly sentFrom: SentFrom
 }
 
-/** Complete desired order; rejects membership changed by another queue operation. */
 export interface ReorderChatQueueInput {
   readonly sessionId: string
   readonly clientIds: ReadonlyArray<string>
@@ -399,9 +350,9 @@ export interface HistoryRouteOptions {
   readonly window: HistoryWindow
 }
 
-export type TurnWorkView = "full" | "compact"
-
 export const TURN_WORK_VIEW = { full: "full", compact: "compact" } as const
+
+export type TurnWorkView = (typeof TURN_WORK_VIEW)[keyof typeof TURN_WORK_VIEW]
 
 export interface TurnWorkRouteOptions {
   readonly sessionId: string
@@ -411,7 +362,6 @@ export interface TurnWorkRouteOptions {
   readonly view: TurnWorkView
 }
 
-/** Options for `GET /session/turn-details`. */
 export interface TurnDetailsRouteOptions {
   readonly sessionId: string
   readonly turnId: string
@@ -423,15 +373,12 @@ export interface ToolCallRouteOptions {
   readonly toolCallId: string
 }
 
-/** One value from a tool call's result in this chat (an answer block's
- *  `Query("tool_result", …)`); never another chat's, never a new call. */
 export interface ToolResultValueRouteOptions {
   readonly sessionId: string
   readonly toolCallId: string
   readonly path: string
 }
 
-/** One call in full, for the viewer: what the model sent and what came back. */
 export interface ToolCallResponse extends JsonRecord {
   readonly tool_call_id: string
   readonly name: string
@@ -470,7 +417,7 @@ export type {
   HistoryAssistantOutputPart,
   HistoryContextBlock,
   HistoryImage,
-  HistoryImageMediaType,
+  ImageMediaType,
   HistoryMessage,
   HistoryPage,
   HistoryResponse,

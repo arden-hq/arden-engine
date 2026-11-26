@@ -1,8 +1,31 @@
 import type { Migration } from "./index.js"
 
+const RUN_ERROR_CODE = {
+  requestInvalid: "request_invalid",
+  providerError: "provider_error"
+} as const
+type RunErrorCode = (typeof RUN_ERROR_CODE)[keyof typeof RUN_ERROR_CODE]
+
+const STOP_CAUSE = {
+  requestInvalid: "request_invalid",
+  runInterrupted: "run_interrupted",
+  providerUnavailable: "provider_unavailable",
+  rateLimited: "rate_limited",
+  stalled: "stalled",
+  failed: "failed"
+} as const
+type StopCause = (typeof STOP_CAUSE)[keyof typeof STOP_CAUSE]
+
+const STALLED_TASK_EVENT = "stalled"
+
+const CODES_DECIDED_BY_TEXT: ReadonlySet<string | null> = new Set<RunErrorCode | null>([
+  RUN_ERROR_CODE.providerError,
+  null
+])
+
 const requestInvalid = (code: string | null, message: string): boolean =>
-  code === "request_invalid" ||
-  ((code === "provider_error" || code === null) &&
+  code === RUN_ERROR_CODE.requestInvalid ||
+  (CODES_DECIDED_BY_TEXT.has(code) &&
     [
       /request failed with status 400\b[\s\S]*"type"\s*:\s*"invalid_request_error"/,
       /^Stored (?:OpenAI|provider) (?:tool|response) history /,
@@ -34,20 +57,22 @@ export const taskStopCause: Migration = {
       const code = typeof row.error_code === "string" ? row.error_code : null
       const error = typeof row.error_message === "string" ? row.error_message : ""
       const invalidSummary = requestInvalid(null, previousSummary)
-      const cause = () => {
-        if (previousSummary.startsWith("A restart cut the run off")) return "run_interrupted"
-        if (row.event_type === "stalled") return "stalled"
+      const eventType = row.event_type
+      const cause = (): StopCause => {
+        if (previousSummary.startsWith("A restart cut the run off"))
+          return STOP_CAUSE.runInterrupted
+        if (eventType === STALLED_TASK_EVENT) return STOP_CAUSE.stalled
         if (
           requestInvalid(code, error) ||
           invalidSummary ||
           previousSummary.startsWith("Arden couldn't send this Task's work to the model.")
         )
-          return "request_invalid"
+          return STOP_CAUSE.requestInvalid
         if (previousSummary.startsWith("Couldn't reach the model provider"))
-          return "provider_unavailable"
+          return STOP_CAUSE.providerUnavailable
         if (previousSummary.startsWith("The model provider asked Arden to slow down"))
-          return "rate_limited"
-        return "failed"
+          return STOP_CAUSE.rateLimited
+        return STOP_CAUSE.failed
       }
       const legacyFailureText =
         /image you provided requires \d+ patches|resize the image and try again/i.test(

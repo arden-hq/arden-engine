@@ -1,3 +1,4 @@
+import { strict } from "../common/boundary.js"
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../common/schema.js"
 import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
@@ -38,7 +39,6 @@ import {
 
 type EncodedText = Effect.Effect<string, Schema.SchemaError>
 
-const strict = { onExcessProperty: "error" } as const
 const chatResult = Schema.String.check(Schema.isMaxLength(100_000))
 
 export const ActiveRunStatusSchema = Schema.Literals(ACTIVE_RUN_STATUSES)
@@ -211,7 +211,6 @@ export const ChatAcknowledgementSchema = withExtras({
   status: Schema.Literal("ok")
 })
 
-/** `POST /connections/resume`: the paused calls whose connection now checks out and that resumed. */
 export const ConnectionResumeResponseSchema = withExtras({
   resumed: Schema.Array(
     withExtras({

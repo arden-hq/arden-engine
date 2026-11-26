@@ -7,13 +7,7 @@ export interface ImageSize {
   readonly height: number
 }
 
-/**
- * OpenAI Responses image input: 32 px patches, and a request with one image
- * over 30,000 of them is refused outright (developers.openai.com/api/docs/guides/images-vision).
- * Images are fitted to Codex's high-detail policy (`PromptImageMode::HIGH_DETAIL`:
- * 2048 px longest side, 2,500 patches), which Codex applies to every image sent
- * without an explicit detail — as Arden sends them.
- */
+// https://developers.openai.com/api/docs/guides/images-vision
 export const OPENAI_IMAGE_INPUT: ImageInputLimits = {
   patchSize: 32,
   fitSide: 2048,
@@ -174,7 +168,6 @@ const resampleAxis = (input: {
   return out
 }
 
-/** Width and height from the first start-of-frame marker (SOF0–SOF15 except DHT, JPG, DAC). */
 const jpegSize = (bytes: Uint8Array): ImageSize | undefined => {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return undefined
   let offset = 2

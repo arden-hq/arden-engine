@@ -8,8 +8,9 @@ import type {
 } from "@arden-hq/loop"
 import { Option, Schema } from "effect"
 import type { ChatRunnerInput } from "./runner-contract.js"
-import { appendDeveloperContext } from "./developer-context.js"
-import { localTargetOf } from "../execution/local-target.js"
+import { appendDeveloperContext, DEVELOPER_CONTEXT_SOURCE } from "./developer-context.js"
+import { TOOL_ACTION } from "@arden-hq/protocol/tools"
+import { localTargetOf, type LocalTargetKind } from "../execution/local-target.js"
 import {
   localInstructionManifest,
   renderLocalInstructions,
@@ -43,7 +44,7 @@ export type LocalInstructionLoader = (input: {
   readonly runId: string
   readonly signal: AbortSignal
   readonly target?: string
-  readonly targetKind?: "directory" | "file"
+  readonly targetKind?: LocalTargetKind
 }) => PromiseLike<LocalInstructionSnapshot | undefined>
 
 export type LocalInstructionRecorder = (input: {
@@ -60,11 +61,6 @@ export const makeLocalInstructionRuntime = ({
   readonly load: LocalInstructionLoader
   readonly record: LocalInstructionRecorder | undefined
   readonly input: Pick<ChatRunnerInput, "sessionId" | "runId" | "turnId" | "signal">
-  /**
-   * Folders whose instructions the model sees from its first step. A chat has
-   * no folder of its own, so without this it meets a folder's instructions
-   * only when its first call there is refused and retried.
-   */
   readonly directories?: ReadonlyArray<string>
 }): {
   readonly modelMiddleware: ModelRequestMiddleware
@@ -78,7 +74,7 @@ export const makeLocalInstructionRuntime = ({
   let recordedManifest: string | undefined
   const sourceKey = (source: LocalInstructionManifestEntry): string =>
     JSON.stringify([source.root, source.path, source.scope, source.status, source.digest])
-  const snapshotFor = (target?: string, targetKind?: "directory" | "file") =>
+  const snapshotFor = (target?: string, targetKind?: LocalTargetKind) =>
     load({
       sessionId: input.sessionId,
       runId: input.runId,
@@ -101,7 +97,8 @@ export const makeLocalInstructionRuntime = ({
     directoriesInitialized = true
     const latest = messages.findLast(
       (message) =>
-        message.role === ROLE.developer && message.arden_context_source === "local_instructions"
+        message.role === ROLE.developer &&
+        message.arden_context_source === DEVELOPER_CONTEXT_SOURCE.localInstructions
     )
     const evidence = decodeEvidence(latest?.arden_local_instruction_evidence)
     if (Option.isNone(evidence)) return
@@ -125,7 +122,8 @@ export const makeLocalInstructionRuntime = ({
       .slice(0, Math.max(0, callIndex))
       .findLast(
         (message) =>
-          message.role === ROLE.developer && message.arden_context_source === "local_instructions"
+          message.role === ROLE.developer &&
+          message.arden_context_source === DEVELOPER_CONTEXT_SOURCE.localInstructions
       )
     if (previous === undefined) return undefined
     const evidence = decodeEvidence(previous.arden_local_instruction_evidence)
@@ -164,7 +162,7 @@ export const makeLocalInstructionRuntime = ({
     return appendDeveloperContext({
       request: prepared,
       input,
-      source: "local_instructions",
+      source: DEVELOPER_CONTEXT_SOURCE.localInstructions,
       content: sections.join("\n\n"),
       metadata: { arden_local_instruction_evidence: evidence }
     })
@@ -195,7 +193,7 @@ export const makeLocalInstructionRuntime = ({
       current.some((source) => !presented.has(sourceKey(source)))
     if (!unseen) return undefined
     activateDirectory(snapshot.directory)
-    if (host?.["action"] === "read") return undefined
+    if (host?.["action"] === TOOL_ACTION.read) return undefined
     return {
       content: `Local folder instructions for ${snapshot.directory} changed or were not yet shown. No operation ran. Review the new instructions and retry this call.`,
       preview: "Read Local folder instructions before retrying",

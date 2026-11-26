@@ -1,7 +1,3 @@
-#!/usr/bin/env node
-// Copies the owner's database and Memory folder into a replay folder, reading
-// the source only. Run it with `just replay-copy <folder>`.
-
 import {
   chmodSync,
   cpSync,
@@ -27,6 +23,7 @@ Copies <data folder>/arden.db and <data folder>/memory/wiki (default ~/.arden) i
 <absolute folder>, reading the source only. Copies nothing else. --replace deletes an
 earlier copy in <absolute folder> first; without it an earlier copy is refused.`
 
+const QUICK_CHECK_OK = "ok"
 const MIN_FREE_BYTES = 10 * 1024 ** 3
 const REPORTED_TABLES = [
   "automation_runs",
@@ -58,7 +55,6 @@ const into = assertReplayFolder(values.into)
 type Stamp = { readonly size: number; readonly mtimeMs: number }
 type Snapshot = ReadonlyMap<string, Stamp>
 
-/** Size and modification time of every file in the source folder's top level and in its wiki. */
 const snapshot = (): Snapshot => {
   const stamps = new Map<string, Stamp>()
   const add = (path: string, relative: string) => {
@@ -116,9 +112,8 @@ if (!existsSync(sourceDatabase) || !lstatSync(sourceDatabase).isFile())
 if (!existsSync(sourceWiki) || !lstatSync(sourceWiki).isDirectory())
   fail(`No Memory folder at ${sourceWiki}`)
 
-// A journal or WAL with content means a write is open or unfinished. The
-// immutable read below ignores both, so the copy would be torn or stale.
-for (const name of ["arden.db-journal", "arden.db-wal"]) {
+const UNFINISHED_WRITE_FILES = ["arden.db-journal", "arden.db-wal"]
+for (const name of UNFINISHED_WRITE_FILES) {
   const path = join(source, name)
   if (existsSync(path) && lstatSync(path).size > 0)
     fail(`${path} is not empty: Arden is writing. Quit it or try again later.`)
@@ -144,8 +139,7 @@ mkdirSync(into.folder, { recursive: true, mode: 0o700 })
 const started = performance.now()
 const before = snapshot()
 
-// `immutable=1` opens the file read-only with no lock and no journal or WAL
-// files, so nothing is created or changed in the source folder.
+// immutable=1 takes no lock and skips change detection: https://www.sqlite.org/uri.html#uriimmutable
 const sourceUri = pathToFileURL(sourceDatabase)
 sourceUri.searchParams.set("mode", "ro")
 sourceUri.searchParams.set("immutable", "1")
@@ -161,7 +155,7 @@ try {
 const check = new DatabaseSync(partial)
 try {
   const result = check.prepare("PRAGMA quick_check").all()
-  if (result.length !== 1 || result[0]?.quick_check !== "ok")
+  if (result.length !== 1 || result[0]?.quick_check !== QUICK_CHECK_OK)
     fail(`The copy failed its integrity check: ${JSON.stringify(result.slice(0, 5))}`)
   const version = check.prepare("PRAGMA user_version").get()?.user_version
   if (version !== sourceVersion)
@@ -211,8 +205,6 @@ console.log(
       seconds: Number(seconds.toFixed(1)),
       schema_version: sourceVersion,
       rows: counts,
-      // Other files in the source folder that changed during the copy. The copy
-      // opens nothing there for writing, so these are the running app's own.
       source_changed_elsewhere: moved
     },
     null,

@@ -9,7 +9,6 @@ import {
 import { asyncIterableBoundary, runBoundary } from "../common/boundary.js"
 import type { DecodedServerEventFrame, SseDecodeOptions, SseFrame } from "./contracts.js"
 
-/** Parse a complete SSE buffer. Prefer `decodeServerEventStream` for live data. */
 export function decodeSseFrames(
   input: string,
   options?: SseDecodeOptions
@@ -17,7 +16,6 @@ export function decodeSseFrames(
   return runBoundary(decodeSseFramesEffect(input, options), "Invalid SSE stream", "stream")
 }
 
-/** Decode a complete SSE buffer and validate each event payload. */
 export function decodeServerEventStreamBuffer(
   input: string,
   options?: SseDecodeOptions
@@ -29,11 +27,6 @@ export function decodeServerEventStreamBuffer(
   )
 }
 
-/**
- * Decode a live SSE source. It accepts text or UTF-8 byte chunks and preserves
- * event ids, names, and decoded JSON data. Returning/closing the iterator
- * interrupts the underlying Effect stream and source.
- */
 export function decodeServerEventStream(
   input: AsyncIterable<string | Uint8Array>,
   options?: SseDecodeOptions
@@ -42,10 +35,6 @@ export function decodeServerEventStream(
   return asyncIterableBoundary(stream, "Invalid server event stream", "stream")
 }
 
-/**
- * Decode a live SSE source into its frames without reading their payloads: a
- * stream whose data is not a server event (the relay's) frames the same way.
- */
 export function decodeSseFrameStream(
   input: AsyncIterable<string | Uint8Array>,
   options?: SseDecodeOptions

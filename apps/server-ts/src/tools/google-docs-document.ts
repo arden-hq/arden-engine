@@ -56,9 +56,6 @@ const StructuralElementSchema: Schema.Codec<StructuralElement> = Schema.Struct({
   tableOfContents: Schema.optionalKey(Schema.Struct({ content: StructuralContentSchema }))
 })
 
-/** An image or drawing placed in a document (Docs `EmbeddedObject`). Google
- *  serves an image's bytes at `contentUri`, an address tagged with the
- *  reader's account that lives about 30 minutes. A drawing has none. */
 interface EmbeddedObject {
   readonly title?: string
   readonly description?: string
@@ -298,6 +295,5 @@ const docsBatchUpdate = decodeGoogle(
   { service: "google_drive", label: "document update" }
 )
 
-/** Matches changed by a one-request `replaceAllText` batch; Google omits the count when it is 0. */
 export const replacedCount = (value: unknown): number =>
   docsBatchUpdate(value).replies?.[0]?.replaceAllText?.occurrencesChanged ?? 0

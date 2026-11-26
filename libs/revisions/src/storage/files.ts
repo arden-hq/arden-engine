@@ -1,10 +1,40 @@
 import { Effect, FileSystem, Option, Path, Result } from "effect"
 import { PlatformError, type SystemErrorTag } from "effect/PlatformError"
 
-import { normalizeRelativePath } from "../domain/model.js"
+import { PATH_SEGMENT, normalizeRelativePath } from "../domain/model.js"
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
-import type { StorageError, WorkingEntry } from "./service.js"
+import type { StorageError } from "./service-types.js"
 import { errorMessage } from "@arden-hq/std/errors"
+
+interface WorkingStamp {
+  readonly id: string
+  readonly modifiedAt: number
+}
+
+export const WORKING_ENTRY_KIND = { file: "file", unreadable: "unreadable" } as const
+
+export type WorkingEntry =
+  | {
+      readonly kind: typeof WORKING_ENTRY_KIND.file
+      readonly path: string
+      readonly stamp: WorkingStamp | undefined
+    }
+  | {
+      readonly kind: typeof WORKING_ENTRY_KIND.unreadable
+      readonly path: string
+      readonly reason: string
+    }
+
+const FILE_TYPE = { file: "File", directory: "Directory" } as const
+type EntryType = (typeof FILE_TYPE)[keyof typeof FILE_TYPE]
+const hasType =
+  (type: EntryType) =>
+  (info: FileSystem.File.Info): boolean =>
+    info.type === type
+export const isDirectory = hasType(FILE_TYPE.directory)
+export const isRegularFile = hasType(FILE_TYPE.file)
+
+const NOT_A_LINK_CODE = "EINVAL"
 
 export const storageFailure = (operation: string, cause: unknown): RevisionStorageError =>
   new RevisionStorageError({
@@ -23,20 +53,19 @@ const isNotSymlink = (cause: unknown): boolean => {
   if (isMissing(cause)) return true
   if (
     !isPlatform(cause) ||
-    cause.reason._tag !== "Unknown" ||
+    !isPlatformReason(cause, "Unknown") ||
     typeof cause.reason.cause !== "object" ||
     cause.reason.cause === null
   )
     return false
-  return "code" in cause.reason.cause && cause.reason.cause.code === "EINVAL"
+  return "code" in cause.reason.cause && cause.reason.cause.code === NOT_A_LINK_CODE
 }
 
-/** Internal repository paths are canonical POSIX-relative values. */
 export const relativeParts = Effect.fn("RevisionStorage.relativeParts")(function* (
   value: string,
   allowRoot = false
 ): Effect.fn.Return<ReadonlyArray<string>, UnsafePathError> {
-  if (allowRoot && value === ".") return []
+  if (allowRoot && value === PATH_SEGMENT.current) return []
   const normalized = yield* normalizeRelativePath(value)
   return normalized.split("/")
 })
@@ -58,22 +87,24 @@ export const ensureDirectory = (
   root: string,
   parts: ReadonlyArray<string>
 ): Effect.Effect<void, StorageError> =>
-  walkDirectories(fs, path, root, parts, "create").pipe(Effect.asVoid)
+  walkDirectories(fs, path, root, parts, MISSING_DIRECTORY.create).pipe(Effect.asVoid)
 
-/** Whether every directory on the way exists, without creating any. */
 export const directoriesPresent = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   root: string,
   parts: ReadonlyArray<string>
-): Effect.Effect<boolean, StorageError> => walkDirectories(fs, path, root, parts, "check")
+): Effect.Effect<boolean, StorageError> =>
+  walkDirectories(fs, path, root, parts, MISSING_DIRECTORY.check)
+
+const MISSING_DIRECTORY = { create: "create", check: "check" } as const
 
 const walkDirectories = Effect.fn("RevisionStorage.walkDirectories")(function* (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   root: string,
   parts: ReadonlyArray<string>,
-  missing: "create" | "check"
+  missing: (typeof MISSING_DIRECTORY)[keyof typeof MISSING_DIRECTORY]
 ): Effect.fn.Return<boolean, StorageError> {
   const rootInfo = yield* fs
     .stat(root)
@@ -81,7 +112,7 @@ const walkDirectories = Effect.fn("RevisionStorage.walkDirectories")(function* (
   const rootLink = yield* entryIsSymlink(fs, root).pipe(
     Effect.mapError((cause) => storageFailure("inspect repository root", cause))
   )
-  if (rootInfo.type !== "Directory" || rootLink) {
+  if (!isDirectory(rootInfo) || rootLink) {
     return yield* new UnsafePathError({ message: `repository root is not a directory: ${root}` })
   }
   let current = root
@@ -90,7 +121,7 @@ const walkDirectories = Effect.fn("RevisionStorage.walkDirectories")(function* (
     const exists = yield* fs
       .exists(current)
       .pipe(Effect.mapError((cause) => storageFailure("check repository directory", cause)))
-    if (!exists && missing === "check") return false
+    if (!exists && missing === MISSING_DIRECTORY.check) return false
     if (!exists) {
       yield* fs
         .makeDirectory(current, { mode: 0o700 })
@@ -108,7 +139,7 @@ const walkDirectories = Effect.fn("RevisionStorage.walkDirectories")(function* (
     const linked = yield* entryIsSymlink(fs, current).pipe(
       Effect.mapError((cause) => storageFailure("inspect repository directory", cause))
     )
-    if (info.type !== "Directory" || linked) {
+    if (!isDirectory(info) || linked) {
       return yield* new UnsafePathError({
         message: `repository path is not a directory: ${current}`
       })
@@ -117,7 +148,6 @@ const walkDirectories = Effect.fn("RevisionStorage.walkDirectories")(function* (
   return true
 })
 
-/** Only a caller that allows a missing file gets `null` back. */
 export function inspectRegular(
   fs: FileSystem.FileSystem,
   file: string,
@@ -159,7 +189,7 @@ const inspectRegularEntry = Effect.fn("RevisionStorage.inspectRegular")(function
     })
   )
   if (info === null) return null
-  if (info.type !== "File")
+  if (!isRegularFile(info))
     return yield* new UnsafePathError({ message: `path is not a regular file: ${file}` })
   if (requireStandalone && Option.getOrElse(info.nlink, () => 1) !== 1) {
     return yield* new UnsafePathError({ message: `file has unsupported hard links: ${file}` })
@@ -196,7 +226,7 @@ export const removeTree = Effect.fn("RevisionStorage.removeTree")(function* (
   const info = yield* fs
     .stat(directory)
     .pipe(Effect.mapError((cause) => storageFailure("stat directory", cause)))
-  if (info.type !== "Directory")
+  if (!isDirectory(info))
     return yield* new UnsafePathError({ message: `path is not a directory: ${directory}` })
   const children = yield* fs
     .readDirectory(directory)
@@ -211,8 +241,8 @@ export const removeTree = Effect.fn("RevisionStorage.removeTree")(function* (
     const childInfo = yield* fs
       .stat(childPath)
       .pipe(Effect.mapError((cause) => storageFailure("stat directory entry", cause)))
-    if (childInfo.type === "Directory") yield* removeTree(fs, path, childPath)
-    else if (childInfo.type === "File")
+    if (isDirectory(childInfo)) yield* removeTree(fs, path, childPath)
+    else if (isRegularFile(childInfo))
       yield* fs
         .remove(childPath)
         .pipe(Effect.mapError((cause) => storageFailure("remove file", cause)))
@@ -297,18 +327,18 @@ const listWorkingEntry = Effect.fn("RevisionStorage.listWorkingEntry")(function*
   const linked = yield* entryIsSymlink(fs, entry).pipe(
     Effect.mapError((cause) => storageFailure("inspect working entry", cause))
   )
-  if (linked) return [{ kind: "file", path: relative, stamp: undefined }]
+  if (linked) return [{ kind: WORKING_ENTRY_KIND.file, path: relative, stamp: undefined }]
   const info = yield* fs
     .stat(entry)
     .pipe(Effect.mapError((cause) => storageFailure("stat working entry", cause)))
-  if (info.type === "File") {
+  if (isRegularFile(info)) {
     const modifiedAt = Option.match(info.mtime, {
       onNone: () => 0,
       onSome: (date) => date.getTime()
     })
     return [
       {
-        kind: "file",
+        kind: WORKING_ENTRY_KIND.file,
         path: relative,
         stamp: {
           id: [info.dev, Option.getOrElse(info.ino, () => 0), info.size, modifiedAt].join(":"),
@@ -317,7 +347,8 @@ const listWorkingEntry = Effect.fn("RevisionStorage.listWorkingEntry")(function*
       }
     ]
   }
-  if (info.type !== "Directory") return [{ kind: "file", path: relative, stamp: undefined }]
+  if (!isDirectory(info))
+    return [{ kind: WORKING_ENTRY_KIND.file, path: relative, stamp: undefined }]
   return yield* listWorkingFolder(fs, path, historyRoot, entry, `${relative}/`)
 })
 
@@ -338,15 +369,16 @@ const listWorkingFolder = Effect.fn("RevisionStorage.listWorkingFolder")(functio
     const relative = `${prefix}${name}`
     const listed = yield* Effect.result(listWorkingEntry(fs, path, historyRoot, entry, relative))
     if (Result.isSuccess(listed)) entries.push(...listed.success)
-    else if (!(listed.failure._tag === "RevisionStorageError" && isMissing(listed.failure.cause)))
-      entries.push({ kind: "unreadable", path: relative, reason: listed.failure.message })
+    else if (!(listed.failure instanceof RevisionStorageError && isMissing(listed.failure.cause)))
+      entries.push({
+        kind: WORKING_ENTRY_KIND.unreadable,
+        path: relative,
+        reason: listed.failure.message
+      })
   }
   return entries
 })
 
-/** Every entry under the working root outside history. A folder that cannot be listed or an
- *  entry that cannot be inspected is reported; an entry removed while the listing runs is left
- *  out. Only the root itself failing fails the listing. */
 export const listWorkingTree = (
   fs: FileSystem.FileSystem,
   path: Path.Path,

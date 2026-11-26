@@ -1,5 +1,6 @@
 import {
   ACTIVE_RUN_STATUSES,
+  RUN_STATUS,
   EXECUTING_RUN_STATUSES,
   FOREGROUND_RUN_STATUSES,
   TERMINAL_RUN_STATUSES,
@@ -8,7 +9,6 @@ import {
 import { Statement } from "effect/unstable/sql"
 import type { StoredProcedure } from "../browser-procedures/model.js"
 
-/** A SQL `IN` list of status literals, for statements kept as plain text. */
 export const statusSqlList = (statuses: ReadonlyArray<string>): string =>
   `(${statuses.map((status) => `'${status}'`).join(", ")})`
 
@@ -24,8 +24,18 @@ export const failedRunStatusList = statusList([
 export const modelTurnRunStatusList = statusList(EXECUTING_RUN_STATUSES)
 export const foregroundRunStatusList = statusList(FOREGROUND_RUN_STATUSES)
 
-export const TOOL_STATUSES = ["running", "ready", "completed", "paused", "uncertain"] as const
-export type ToolStatus = (typeof TOOL_STATUSES)[number]
+export const STORED_RUN_STATUS = { ...RUN_STATUS, failed: "failed" } as const
+export type StoredRunStatus = (typeof STORED_RUN_STATUS)[keyof typeof STORED_RUN_STATUS]
+
+export const TOOL_STATUS = {
+  running: "running",
+  ready: "ready",
+  completed: "completed",
+  paused: "paused",
+  uncertain: "uncertain"
+} as const
+export const TOOL_STATUSES = Object.values(TOOL_STATUS)
+export type ToolStatus = (typeof TOOL_STATUS)[keyof typeof TOOL_STATUS]
 export const liveToolStatusList = statusList([
   "running",
   "ready",
@@ -65,9 +75,6 @@ export const openDeferredCallStatusList = statusList(["pending", "approved"])
 export const followUpRecordableStatusList = statusList(["approved", "rejected"])
 export const answeredApprovalStatusList = statusList(["approved", "rejected"])
 export const openProposalStatusList = statusList(["offered", "held"])
-/** An offer the owner said no to, or left unanswered until it expired: final either way. The Space
- * review lists these as refused, and a later propose of the same Task key in the same place gets
- * the stored offer back unchanged, whatever records it cites. */
 const REFUSED_PROPOSAL_STATUSES = ["rejected", "expired"] as const
 export const refusedProposalStatusList = statusList(REFUSED_PROPOSAL_STATUSES)
 export const answeredProposalStatusList = statusList(["accepted", "rejected"])

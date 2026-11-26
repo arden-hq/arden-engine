@@ -324,7 +324,6 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
             `Updated the event: ${titleOf(updated)}`,
             eventTimeLine(updated),
             ...(span === "future" ? ["Applied to this and every later occurrence."] : []),
-            // A moved occurrence has a new reference: the old one names its old start.
             `Reference: ${updated.id}`
           ].join("\n"),
           preview: `Updated ${titleOf(updated)}`,

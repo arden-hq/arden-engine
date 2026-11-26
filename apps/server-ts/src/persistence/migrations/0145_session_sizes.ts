@@ -1,11 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** The size of each chat, kept as a number. The Storage page added up the
- * length of every message each time it opened (17 s on an 8 GB database).
- * Triggers now keep `session_sizes`, one row per chat, and
- * `session_type_sizes`, one row per kind of chat, as rows change. The first
- * fill reads every message once. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TABLE session_sizes (
       session_id TEXT PRIMARY KEY,

@@ -32,10 +32,22 @@ export interface ToolExecutionApprovalContext {
   readonly alternative?: "draft"
 }
 
+const TOOL_EXECUTION_BEGIN = {
+  started: "Started",
+  recovered: "Recovered",
+  notAdmitted: "NotAdmitted"
+} as const
+
 export type ToolExecutionBeginResult =
-  | { readonly _tag: "Started"; readonly approval?: ToolExecutionApprovalContext }
-  | { readonly _tag: "Recovered"; readonly outcome: ToolExecutionOutcome }
-  | { readonly _tag: "NotAdmitted"; readonly authority: "settling" | "revoked" }
+  | {
+      readonly _tag: typeof TOOL_EXECUTION_BEGIN.started
+      readonly approval?: ToolExecutionApprovalContext
+    }
+  | { readonly _tag: typeof TOOL_EXECUTION_BEGIN.recovered; readonly outcome: ToolExecutionOutcome }
+  | {
+      readonly _tag: typeof TOOL_EXECUTION_BEGIN.notAdmitted
+      readonly authority: "settling" | "revoked"
+    }
 
 export interface ToolApprovalPrompt {
   readonly reason: string
@@ -65,10 +77,16 @@ export interface ApprovalAlternativeInput {
   readonly offeredBy: (toolName: string) => boolean
 }
 
+export const APPROVAL_EDIT_OUTCOME = {
+  Edited: "Edited",
+  Unchanged: "Unchanged",
+  Refused: "Refused"
+} as const
+
 export type ApprovalEditOutcome =
-  | { readonly _tag: "Edited"; readonly arguments: JsonObject }
-  | { readonly _tag: "Unchanged" }
-  | { readonly _tag: "Refused"; readonly reason: string }
+  | { readonly _tag: typeof APPROVAL_EDIT_OUTCOME.Edited; readonly arguments: JsonObject }
+  | { readonly _tag: typeof APPROVAL_EDIT_OUTCOME.Unchanged }
+  | { readonly _tag: typeof APPROVAL_EDIT_OUTCOME.Refused; readonly reason: string }
 
 export interface ApprovalEditsInput {
   readonly patch: JsonObject
@@ -84,6 +102,22 @@ export interface ResolveToolApprovalResult {
   readonly ready: boolean
 }
 
+export const TOOL_STORE_FAILURE = {
+  invalid: "invalid",
+  not_found: "not_found",
+  conflict: "conflict",
+  blocked: "blocked",
+  corrupt: "corrupt",
+  storage: "storage"
+} as const
+
+export const PENDING_DECISION_OPERATION = {
+  approvals: "pending_approvals",
+  connections: "pending_connections"
+} as const
+export type PendingDecisionOperation =
+  (typeof PENDING_DECISION_OPERATION)[keyof typeof PENDING_DECISION_OPERATION]
+
 export class ToolExecutionStoreError extends Schema.TaggedError<ToolExecutionStoreError>()(
   "ToolExecutionStoreError",
   {
@@ -98,17 +132,10 @@ export class ToolExecutionStoreError extends Schema.TaggedError<ToolExecutionSto
       "recover",
       "resolve",
       "history",
-      "pending_approvals",
-      "pending_connections"
+      PENDING_DECISION_OPERATION.approvals,
+      PENDING_DECISION_OPERATION.connections
     ] as const),
-    reason: Schema.Literals([
-      "invalid",
-      "not_found",
-      "conflict",
-      "blocked",
-      "corrupt",
-      "storage"
-    ] as const),
+    reason: Schema.Literals(Object.values(TOOL_STORE_FAILURE)),
     message: Schema.String,
     runId: Schema.optionalKey(Schema.NonEmptyString),
     toolCallId: Schema.optionalKey(Schema.NonEmptyString),
@@ -120,7 +147,13 @@ export const TOOL_OUTCOME_UNCERTAIN = "tool_outcome_uncertain"
 export const TOOL_PERSISTENCE_FAILED = "tool_persistence_failed"
 export const TOOL_MUTATION_STALLED = "tool_mutation_stalled"
 
-export type MutationBlocker = "decision_required" | "awaiting_approval" | "stalled"
+const MUTATION_BLOCKER = {
+  decisionRequired: "decision_required",
+  awaitingApproval: "awaiting_approval",
+  stalled: "stalled"
+} as const
+
+export type MutationBlocker = (typeof MUTATION_BLOCKER)[keyof typeof MUTATION_BLOCKER]
 
 const feedbackSuffix = (feedback: string | null): string =>
   feedback === null ? "" : ` Feedback: ${feedback}`

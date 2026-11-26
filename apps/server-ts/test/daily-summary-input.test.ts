@@ -41,7 +41,6 @@ it("the day's chat excerpts come from every chat, the owner's words first and ne
 })
 
 it("Arden's replies are read only with the room the owner's words leave", () => {
-  // Each text is 9 characters: two owner messages, two newest replies, and 4 characters of a third.
   const { picked, shortened } = pickChatExcerpts([chat("a", 1, 2), chat("b", 1, 2)], {
     excerpts: 30,
     chars: 40

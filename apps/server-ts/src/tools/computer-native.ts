@@ -1,16 +1,10 @@
-import { nativeObservation } from "../computer/observation.js"
 import { nativeVisual, nativeFeedback } from "../computer/feedback.js"
-import { createHash, randomUUID } from "node:crypto"
-import { ToolExecutionError, type ToolResultOutput, type ModelContentBlock } from "@arden-hq/loop"
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
+import { randomUUID } from "node:crypto"
+import { ToolExecutionError } from "@arden-hq/loop"
 import { Schema } from "effect"
-import type { JsonObject } from "../persistence/json.js"
-import { pointTarget, resolveRef, uiTargetData } from "./ui-target.js"
 import {
   type NativeAction,
-  type NativeObservation,
   NativeActionSchema,
-  NativeTargetSchema,
   nativeDriverAction,
   nativeDelivery,
   requireForegroundWindow
@@ -20,13 +14,11 @@ import type { NativeDriver } from "../computer/driver.js"
 import { defineServerTool, type ServerTool, type ServerToolMetadataInput } from "./define.js"
 import { waivesRequirement } from "../execution/decide.js"
 import { nativeActImpact } from "./input-impact.js"
-import type { ComputerStep } from "@arden-hq/protocol/computer"
 import {
   actStep,
   appNameOf,
   actionQuestion,
   actionWords,
-  elementWords,
   findStep,
   keyChord,
   lookStep,
@@ -35,111 +27,17 @@ import {
 import { appTarget, launchedAppTarget } from "./action-targets.js"
 import { currentMillis } from "../runtime/clock.js"
 import { ownWindowIssue } from "../computer/own-windows.js"
-
-const ReadSchema = Schema.Union([
-  Schema.Struct({
-    operation: Schema.Literal("apps").annotate({
-      description:
-        "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
-    })
-  }),
-  Schema.Struct({
-    operation: Schema.Literal("windows").annotate({
-      description:
-        "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
-    }),
-    pid: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
-      description: "Process id of the app, from the apps operation. Used by windows."
-    })
-  }),
-  Schema.Struct({
-    operation: Schema.Literal("state").annotate({
-      description:
-        "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
-    }),
-    target: NativeTargetSchema.annotate({
-      description:
-        "Exact pid and window_id of the window to observe, from the windows operation. Used by state."
-    }),
-    screenshot: Schema.optionalKey(
-      Schema.Boolean.annotate({
-        description:
-          "Return the window screenshot to you, scaled to at most 1,400 pixels, with element screenshot_frame boxes. Defaults to false. Use it before pixel_click or drag. Used by state."
-      })
-    ),
-    accessibility: Schema.optionalKey(
-      Schema.Boolean.annotate({
-        description:
-          "Walk the accessibility tree and return elements with their tokens. Defaults to true. false skips the walk and requires screenshot=true. Used by state."
-      })
-    ),
-    max_depth: Schema.optionalKey(
-      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 25 })).annotate({
-        description: "Maximum accessibility-tree depth (1-25). Defaults to 12. Used by state."
-      })
-    ),
-    timeout_ms: Schema.optionalKey(
-      Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 10000 })).annotate({
-        description:
-          "Time budget for the accessibility walk in milliseconds (100-10,000). Defaults to 5,000. Used by state."
-      })
-    ),
-    max_elements: Schema.optionalKey(
-      Schema.Int.check(Schema.isBetween({ minimum: 50, maximum: 2000 })).annotate({
-        description: "Maximum elements to return (50-2,000). Defaults to 500. Used by state."
-      })
-    ),
-    query: Schema.optionalKey(
-      Schema.String.check(Schema.isMaxLength(200)).annotate({
-        description:
-          "Case-insensitive substring, not a regex, that filters returned elements (up to 200 characters). Matches include their ancestors. It does not shorten the walk. Used by state."
-      })
-    )
-  })
-])
-const StateSchema = Schema.Struct({
-  pid: Schema.Int,
-  window_id: Schema.Int,
-  app_name: Schema.optionalKey(Schema.String),
-  window_title: Schema.optionalKey(Schema.String),
-  snapshot_id: Schema.optionalKey(Schema.String),
-  capture_id: Schema.optionalKey(Schema.String)
-})
-const isState = Schema.is(StateSchema)
-const isElementList = Schema.is(
-  Schema.Struct({
-    elements: Schema.Array(
-      Schema.Struct({
-        element_token: Schema.String,
-        role: Schema.optionalKey(Schema.String),
-        label: Schema.optionalKey(Schema.String)
-      })
-    )
-  })
-)
-
-function elementNames(state: unknown): ReadonlyMap<string, string> {
-  const names = new Map<string, string>()
-  if (!isElementList(state)) return names
-  for (const element of state.elements) {
-    const words = elementWords(element)
-    if (words !== undefined) names.set(element.element_token, words)
-  }
-  return names
-}
-const isConfirmed = Schema.is(Schema.Struct({ effect: Schema.Literal("confirmed") }))
-const isJson = Schema.is(Schema.Json)
-
-const changedFrames = () => {
-  const last = new Map<string, string>()
-  return (key: string, data: string): boolean => {
-    const digest = createHash("sha1").update(data).digest("base64")
-    if (last.get(key) === digest) return false
-    if (last.size >= 256) last.clear()
-    last.set(key, digest)
-    return true
-  }
-}
+import { ReadSchema } from "./computer-native-schemas.js"
+import {
+  actTarget,
+  actionLabel,
+  changedFrames,
+  elementNames,
+  foregroundCard,
+  isConfirmed,
+  isState,
+  output
+} from "./computer-native-results.js"
 
 const ACT_METADATA = {
   effect: "external",
@@ -404,8 +302,6 @@ export const computerNativeTools = (
             })
             const state = result.structuredContent
             if (result.isError || !isState(state)) return output(result)
-            // An answer for another window than asked is dropped whole (the driver path drops it
-            // first; this holds even if a state ever came another way).
             if (state.pid !== input.target.pid || state.window_id !== input.target.window_id)
               return output({ isError: true, content: [] })
             const application = await driver.application(state.pid, signal)
@@ -558,107 +454,4 @@ export const computerNativeTools = (
       }
     })
   ]
-}
-
-const actTarget = (
-  input: NativeAction,
-  seen: NativeObservation | undefined
-): { readonly ui_target?: JsonObject } => {
-  if (input.action === "pixel_click")
-    return uiTargetData(
-      pointTarget(`A click on capture ${input.capture} at (${input.x}, ${input.y})`)
-    )
-  if (input.action === "drag")
-    return uiTargetData(
-      pointTarget(
-        `A drag on capture ${input.capture} from (${input.from_x}, ${input.from_y}) to (${input.to_x}, ${input.to_y})`
-      )
-    )
-  if (!("element" in input) || input.element === undefined) return {}
-  return uiTargetData(
-    resolveRef({
-      ref: input.element,
-      label: seen?.elements.get(input.element),
-      near: undefined,
-      why: "it is not named in this run's latest observation of the window"
-    })
-  )
-}
-
-const foregroundCard = <P extends { presentation: object; data: object }>(prompt: P) => ({
-  ...prompt,
-  preview: "Arden asks to use your mouse and keyboard",
-  presentation: {
-    ...prompt.presentation,
-    title: "Let Arden use your mouse and keyboard?",
-    note: "Arden brings the app forward and clicks or types in it. This holds for this chat until you take control.",
-    approve_label: "Allow for this chat",
-    reject_label: "Not now"
-  },
-  data: { ...prompt.data, reviewer: "user", grant: "foreground" }
-})
-
-const output = (
-  result: CallToolResult,
-  observation?: string,
-  screenshot = false,
-  step?: ComputerStep
-): ToolResultOutput => {
-  const text = result.content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-    .join("\n")
-    .slice(0, 24_000)
-  if (result.isError)
-    throw new ToolExecutionError(text || "Native driver refused the operation", {
-      preview: "Computer action failed; inspect state",
-      retryable: false
-    })
-  const images: ModelContentBlock[] = result.content
-    .flatMap((block): ModelContentBlock[] =>
-      block.type === "image" && block.data.length <= 8_000_000
-        ? [{ type: "image", media_type: block.mimeType, data: block.data }]
-        : []
-    )
-    .slice(0, 1)
-  const structured = isJson(result.structuredContent) ? result.structuredContent : null
-  // MCP's text block may be only "Found N windows". The model needs the
-  // structured IDs and element tokens too, not just the script-only data field.
-  const visibleState = nativeObservation(structured, screenshot)
-  const visible =
-    structured === null
-      ? `${observation === undefined ? "" : `Observation: ${observation}\n`}${text}`
-      : JSON.stringify({ observation: observation ?? null, state: visibleState })
-  return {
-    result: visible,
-    preview: observation === undefined ? "Native computer result" : "Observed native window",
-    data: {
-      observation: observation ?? null,
-      state: visibleState,
-      ...(step === undefined ? {} : { computer: step })
-    },
-    ...(images.length === 0 ? {} : { model_content: [{ type: "text", text: visible }, ...images] })
-  }
-}
-
-const actionLabel = (action: NativeAction): string => {
-  switch (action.action) {
-    case "activate":
-      return "Bringing window forward"
-    case "menu":
-      return action.path.join(" → ")
-    case "click":
-      return action.button === "right" ? "Right-clicking control" : "Clicking control"
-    case "pixel_click":
-      return "Clicking in window"
-    case "type":
-      return "Typing text"
-    case "set_value":
-      return "Updating field"
-    case "key":
-      return `Pressing ${keyChord(action)}`
-    case "scroll":
-      return `Scrolling ${action.direction}`
-    case "drag":
-      return "Dragging in window"
-  }
 }

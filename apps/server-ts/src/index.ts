@@ -13,7 +13,7 @@ export type {
 } from "./chat/runner-contract.js"
 export type { ServerOptions } from "./config/options.js"
 export type { ServerErrorCode, ServerHandle } from "./server.js"
-export type { LoopChatRunnerOptions } from "./chat/loop-runner.js"
+export type { LoopChatRunnerOptions } from "./chat/loop-runner-options.js"
 export type {
   ModelContextLimits,
   ModelDefinition,

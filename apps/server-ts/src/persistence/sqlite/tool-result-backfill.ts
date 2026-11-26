@@ -12,10 +12,6 @@ import {
   storedResultJson
 } from "./tool-result-storage.js"
 
-/**
- * These rewrite `result_json` text in place; a result must have its final
- * text before it is saved as an object.
- */
 const AFTER: ReadonlyArray<string> = [scriptProgressBackfill.name, spaceWordsBackfill.name]
 
 const decodeResult = Schema.decodeUnknownOption(Schema.fromJsonString(PersistedToolResultSchema))
@@ -28,7 +24,6 @@ interface LargeRow {
   readonly result_json: string
 }
 
-/** Writes each slim row only if the row still holds the text its object was made from. */
 const swapRows = Effect.fn("ToolResults.slimBackfillSwap")(function* (
   swaps: ReadonlyArray<{ readonly rowKey: number; readonly from: string; readonly to: string }>
 ) {
@@ -44,13 +39,6 @@ const swapRows = Effect.fn("ToolResults.slimBackfillSwap")(function* (
   return converted
 })
 
-/**
- * Moves results stored before the slim rows into their chat's managed objects
- * and slims their rows, walking `tool_calls` by rowid. The objects are saved
- * outside the write queue; a chunk then swaps each row only if it still holds
- * the text that was saved. Objects are named by digest, so a repeated chunk
- * saves nothing new.
- */
 export const slimToolResultsBackfill: PreparedBackfill = {
   name: "slim_tool_results",
   landed: "2026-11-13",

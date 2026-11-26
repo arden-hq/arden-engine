@@ -1,14 +1,17 @@
-export type AppSettingsTabId =
-  | "integrations"
-  | "models"
-  | "usage"
-  | "tools"
-  | "skills"
-  | "permissions"
-  | "appearance"
-  | "storage"
-  | "archive"
-  | "iphone"
+export const APP_SETTINGS_TAB = {
+  integrations: "integrations",
+  models: "models",
+  usage: "usage",
+  tools: "tools",
+  skills: "skills",
+  permissions: "permissions",
+  appearance: "appearance",
+  storage: "storage",
+  archive: "archive",
+  iphone: "iphone"
+} as const
+
+export type AppSettingsTabId = (typeof APP_SETTINGS_TAB)[keyof typeof APP_SETTINGS_TAB]
 
 export const SESSION_DESTINATION_TURN = { latest: "latest", turn: "turn" } as const
 export const SETTINGS_DESTINATION_TAB = { general: "general", tab: "tab" } as const
@@ -31,18 +34,31 @@ export type MemoryDestinationTarget =
   | { readonly kind: typeof MEMORY_DESTINATION.index }
   | { readonly kind: typeof MEMORY_DESTINATION.page; readonly path: string }
 
+export const APP_DESTINATION = {
+  home: "home",
+  session: "session",
+  settings: "settings",
+  automation: "automation",
+  task: "task",
+  memory: "memory",
+  space: "space"
+} as const
+
 export type AppDestination =
-  | { readonly kind: "home" }
+  | { readonly kind: typeof APP_DESTINATION.home }
   | {
-      readonly kind: "session"
+      readonly kind: typeof APP_DESTINATION.session
       readonly session_id: string
       readonly turn: SessionDestinationTurn
     }
-  | { readonly kind: "settings"; readonly tab: SettingsDestinationTab }
-  | { readonly kind: "automation"; readonly target: AutomationDestinationTarget }
-  | { readonly kind: "task"; readonly item_id: string }
-  | { readonly kind: "memory"; readonly target: MemoryDestinationTarget }
-  | { readonly kind: "space"; readonly space_id: string }
+  | { readonly kind: typeof APP_DESTINATION.settings; readonly tab: SettingsDestinationTab }
+  | {
+      readonly kind: typeof APP_DESTINATION.automation
+      readonly target: AutomationDestinationTarget
+    }
+  | { readonly kind: typeof APP_DESTINATION.task; readonly item_id: string }
+  | { readonly kind: typeof APP_DESTINATION.memory; readonly target: MemoryDestinationTarget }
+  | { readonly kind: typeof APP_DESTINATION.space; readonly space_id: string }
 
 export const NAVIGATION_ASKED_BY = { untracked: "untracked", tool_call: "tool_call" } as const
 

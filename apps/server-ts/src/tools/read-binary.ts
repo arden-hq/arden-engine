@@ -14,8 +14,7 @@ export type FileKind =
   | { readonly kind: "image"; readonly format: ImageFormat }
   | { readonly kind: "binary"; readonly label: string }
 
-/** Git's rule: a NUL byte in the first 8 KB marks a file as binary. */
-const SNIFF_BYTES = 8_000
+const GIT_BINARY_SNIFF_BYTES = 8_000
 
 const startsWith = (bytes: Uint8Array, signature: ReadonlyArray<number>, at = 0): boolean =>
   signature.every((byte, index) => bytes[at + index] === byte)
@@ -23,7 +22,6 @@ const startsWith = (bytes: Uint8Array, signature: ReadonlyArray<number>, at = 0)
 const ascii = (bytes: Uint8Array, from: number, to: number): string =>
   String.fromCharCode(...bytes.subarray(from, to))
 
-/** HEIF stills (HEIC from an iPhone) open with an `ftyp` box naming one of these brands. */
 const HEIF_BRANDS: ReadonlySet<string> = new Set(["heic", "heix", "heim", "heis", "mif1", "msf1"])
 
 const imageFormat = (bytes: Uint8Array): ImageFormat | undefined => {
@@ -61,7 +59,7 @@ export const fileKind = (input: {
   if (ascii(bytes, 0, 5) === "%PDF-") return { kind: "pdf" }
   const format = imageFormat(bytes)
   if (format !== undefined) return { kind: "image", format }
-  if (bytes.subarray(0, SNIFF_BYTES).includes(0)) {
+  if (bytes.subarray(0, GIT_BINARY_SNIFF_BYTES).includes(0)) {
     return { kind: "binary", label: binaryLabel(bytes, input.name) }
   }
   return { kind: "text" }
@@ -79,7 +77,6 @@ export type PdfText =
 export const readPdfText = async (bytes: Uint8Array): Promise<PdfText> => {
   let document: Awaited<ReturnType<typeof getDocumentProxy>>
   try {
-    // pdf.js takes ownership of the buffer it is given; hand it a copy.
     document = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 })
   } catch (cause) {
     return cause instanceof Error && cause.name === "PasswordException"
@@ -151,11 +148,6 @@ export const imageRefusal = (name: string, format: ImageFormat): string =>
 export const imageConversionRefusal = (name: string, format: ImageFormat): string =>
   `${name} is a ${FORMAT_NAMES[format]} image that could not be converted for the model here.`
 
-/**
- * An image as the route takes it: shrunk to the route's `limits`, or, where
- * the route states none (`ImageInput.limits` undefined), at its stored size,
- * only converted to PNG or JPEG.
- */
 export const imageForModel = async (input: {
   readonly file: string
   readonly bytes: Uint8Array

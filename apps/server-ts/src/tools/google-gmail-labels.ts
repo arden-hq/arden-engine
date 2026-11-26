@@ -1,10 +1,21 @@
 import { toolRefusal } from "./tool-failure.js"
 
+const GMAIL_LABEL_TYPE = { system: "system", user: "user" } as const
+
+type GmailLabelType = (typeof GMAIL_LABEL_TYPE)[keyof typeof GMAIL_LABEL_TYPE]
+
 export interface GmailLabel {
   readonly id: string
   readonly name: string
-  readonly type: "system" | "user"
+  readonly type: GmailLabelType
 }
+
+export const gmailLabelType = (type: string | undefined): GmailLabelType =>
+  type === GMAIL_LABEL_TYPE.system ? GMAIL_LABEL_TYPE.system : GMAIL_LABEL_TYPE.user
+
+export const compareLabels = (left: GmailLabel, right: GmailLabel): number =>
+  Number(left.type === GMAIL_LABEL_TYPE.user) - Number(right.type === GMAIL_LABEL_TYPE.user) ||
+  left.name.localeCompare(right.name)
 
 export interface MailboxFlags {
   readonly archive?: boolean
@@ -18,19 +29,22 @@ export interface LabelChange {
   readonly remove: ReadonlyArray<string>
 }
 
+const OPPOSITE_CHANGE: Record<keyof LabelChange, keyof LabelChange> = {
+  add: "remove",
+  remove: "add"
+}
+
 export const flagLabelChanges = (flags: MailboxFlags): LabelChange => {
-  const add: Array<string> = []
-  const remove: Array<string> = []
-  const toggle = (on: boolean | undefined, label: string, whenOn: "add" | "remove"): void => {
+  const changes: Record<keyof LabelChange, Array<string>> = { add: [], remove: [] }
+  const toggle = (on: boolean | undefined, label: string, whenOn: keyof LabelChange): void => {
     if (on === undefined) return
-    const addsIt = whenOn === "add" ? on : !on
-    ;(addsIt ? add : remove).push(label)
+    changes[on ? whenOn : OPPOSITE_CHANGE[whenOn]].push(label)
   }
   toggle(flags.archive, "INBOX", "remove")
   toggle(flags.read, "UNREAD", "remove")
   toggle(flags.starred, "STARRED", "add")
   toggle(flags.important, "IMPORTANT", "add")
-  return { add, remove }
+  return changes
 }
 
 export const resolveLabelIds = (

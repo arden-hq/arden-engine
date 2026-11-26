@@ -13,7 +13,7 @@ import {
   type MemoryCaptureBatchIdentity
 } from "../persistence/memory/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY, type WikiLocationAuthority } from "../wiki/authority.js"
-import { automationOrigin, upkeepOrigin, type WikiCommitOrigin } from "../wiki/commit.js"
+import { automationOrigin, upkeepOrigin, type WikiCommitOrigin } from "../wiki/origin.js"
 
 export interface WikiRunIdentityContext {
   readonly runId: string
@@ -124,8 +124,6 @@ const automationWriter = (cause: RunCause & { readonly automationId: string }) =
   }
 }
 
-/** A Memory write by a chat run that is no Automation's: the owner's turn, an in-chat Task step,
- *  or a helper of either. It carries the depth its run was woken at. */
 export const agentOrigin = (sessionId: string, cause: RunCause): WikiCommitOrigin => ({
   kind: "agent",
   sessionId,

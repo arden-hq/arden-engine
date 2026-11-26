@@ -17,7 +17,8 @@ import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, inChatTarget } from "./call-receipt.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
-import { readTaskAt, taskWriteMetadata, workFailure, type TaskToolServices } from "./task-tools.js"
+import { taskWriteMetadata } from "./task-tools.js"
+import { readTaskAt, workFailure, type TaskToolServices } from "./task-work-access.js"
 import { toolFailure } from "./tool-failure.js"
 
 const TaskParameters = {

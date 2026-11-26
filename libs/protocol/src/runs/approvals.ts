@@ -11,6 +11,11 @@ import type { RuleSavedIn } from "./questions.js"
 
 export const APPROVAL_TEXT = { none: "none", text: "text" } as const
 
+export const INTEGRATION_CONNECTION_APPROVAL = "integration_connection"
+
+export const isConnectionApproval = (approval: Pick<RunApproval, "kind">): boolean =>
+  approval.kind === INTEGRATION_CONNECTION_APPROVAL
+
 export type RunApprovalText =
   | { readonly kind: typeof APPROVAL_TEXT.none }
   | { readonly kind: typeof APPROVAL_TEXT.text; readonly text: string }
@@ -24,6 +29,10 @@ export type RunApprovalConnection =
       readonly connection: RuntimeConnectionSnapshot
     }
 
+export const DECISION_DELIVERY = { blocking: "blocking", deferred: "deferred" } as const
+
+export type DecisionDelivery = (typeof DECISION_DELIVERY)[keyof typeof DECISION_DELIVERY]
+
 export interface RunApproval extends JsonRecord {
   readonly at: string
   readonly run_id: string
@@ -31,7 +40,7 @@ export interface RunApproval extends JsonRecord {
   readonly destination_session_id: string
   readonly asker: ApprovalAsker
   readonly tool_call_id: string
-  readonly decision_delivery: "blocking" | "deferred"
+  readonly decision_delivery: DecisionDelivery
   readonly kind: string
   readonly connection: RunApprovalConnection
   readonly tool_name: string

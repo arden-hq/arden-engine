@@ -13,7 +13,7 @@ import {
   type EventAutomationTrigger
 } from "@arden-hq/protocol/automations"
 import type { JsonValue } from "@arden-hq/protocol"
-import { Predicate } from "effect"
+import { readField } from "./event-context.js"
 
 export const runOnlyIfSentences = (
   matched: ReadonlyArray<EventAutomationTrigger>
@@ -27,20 +27,6 @@ export const runOnlyIfSentences = (
   const [first, ...rest] = sentences
   return first === undefined ? undefined : [first, ...rest]
 }
-
-const readField = (
-  context: Readonly<Record<string, JsonValue>>,
-  path: string
-): JsonValue | undefined =>
-  path
-    .split(".")
-    .reduce<JsonValue | undefined>(
-      (value, part) =>
-        Predicate.isObject(value) && !Array.isArray(value) && Object.hasOwn(value, part)
-          ? value[part]
-          : undefined,
-      context
-    )
 
 const NO_LINK: AutomationEventLink = { kind: "none" }
 

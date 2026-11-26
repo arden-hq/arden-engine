@@ -1,7 +1,12 @@
-import { MCP_FOLDER, type McpFolderInput, type McpTransportInput } from "@arden-hq/protocol/mcp"
+import {
+  MCP_FOLDER,
+  MCP_TRANSPORT,
+  type McpFolderInput,
+  type McpTransportInput
+} from "@arden-hq/protocol/mcp"
 
 import type { McpStoredServer, McpStoredTransport } from "../persistence/mcp/store.js"
-import { mcpError } from "./errors.js"
+import { MCP_OPERATION, mcpError, type McpSaveOperation } from "./errors.js"
 import { mcpTransportSecretTarget } from "./transport.js"
 import {
   clearMcpTransportSecrets,
@@ -13,9 +18,9 @@ import {
 const secretPatch = (
   input: { readonly set: Readonly<Record<string, string>>; readonly retain: ReadonlyArray<string> },
   existing: Readonly<Record<string, string>> | undefined,
-  operation: "create" | "update"
+  operation: McpSaveOperation
 ): Readonly<Record<string, string>> => {
-  if (operation === "create" && input.retain.length > 0) {
+  if (operation === MCP_OPERATION.create && input.retain.length > 0) {
     throw mcpError("create", "invalid", "New MCP servers cannot retain unknown secrets")
   }
   const retained = Object.fromEntries(
@@ -34,7 +39,7 @@ const storedTransport = (
   secretKeys: ReadonlyArray<string>,
   existing: McpStoredTransport | undefined
 ): McpStoredTransport =>
-  input.type === "stdio"
+  input.type === MCP_TRANSPORT.stdio
     ? {
         type: "stdio",
         command: input.command,
@@ -55,14 +60,14 @@ const storedFolder = (
 ): string | null => {
   if (input.kind === MCP_FOLDER.folder) return input.path
   if (input.kind === MCP_FOLDER.home) return null
-  return existing?.type === "stdio" ? existing.cwd : null
+  return existing?.type === MCP_TRANSPORT.stdio ? existing.cwd : null
 }
 
 const storedSecretKeys = (transport: McpStoredTransport): ReadonlyArray<string> =>
-  transport.type === "stdio" ? transport.environmentKeys : transport.headerKeys
+  transport.type === MCP_TRANSPORT.stdio ? transport.environmentKeys : transport.headerKeys
 
 const inputSecretPatch = (transport: McpTransportInput) =>
-  transport.type === "stdio" ? transport.environment : transport.headers
+  transport.type === MCP_TRANSPORT.stdio ? transport.environment : transport.headers
 
 export interface McpServerSecrets {
   readonly read: (config: McpStoredServer) => Promise<Readonly<Record<string, string>>>
@@ -70,7 +75,7 @@ export interface McpServerSecrets {
     name: string,
     input: McpTransportInput,
     existing: McpStoredServer | undefined,
-    operation: "create" | "update"
+    operation: McpSaveOperation
   ) => Promise<{
     readonly transport: McpStoredTransport
     readonly secrets: Readonly<Record<string, string>>
@@ -95,7 +100,7 @@ export const makeMcpServerSecrets = (vault: McpOAuthVault | undefined): McpServe
     name: string,
     input: McpTransportInput,
     existing: McpStoredServer | undefined,
-    operation: "create" | "update"
+    operation: McpSaveOperation
   ): Promise<{
     readonly transport: McpStoredTransport
     readonly secrets: Readonly<Record<string, string>>

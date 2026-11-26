@@ -139,11 +139,6 @@ const spawnedRunSql = Statement.fragment([
   )
 ])
 
-/** A spawn owns its admitted run only. Later assignments in that Chat never join.
- * UNION and a recursive cap bound malformed/cyclic ancestry as well as large trees.
- * Only agent sessions have a parent call (the sessions CHECK), and saying so
- * lets SQLite use the partial `idx_sessions_agent_origin`; without it every
- * call's read scanned all of `chat_runs` (34 ms each on a 12k-run database). */
 export const readMutationChildren = Effect.fn("MutationLinks.children")(function* (
   sql: SqlClient.SqlClient,
   identity: MutationOperationIdentity

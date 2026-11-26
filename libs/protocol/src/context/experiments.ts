@@ -11,6 +11,12 @@ export const contextParts = [
   { key: "cliTools", label: "Command-line tool catalog" }
 ] as const
 export type ContextPart = (typeof contextParts)[number]["key"]
+export const CONTEXT_STAGE_OUTCOME = {
+  completed: "completed",
+  failed: "failed",
+  skipped: "skipped"
+} as const
+export type ContextStageOutcome = (typeof CONTEXT_STAGE_OUTCOME)[keyof typeof CONTEXT_STAGE_OUTCOME]
 export const ContextSelectionSchema = Schema.Struct({
   memory: Schema.Boolean,
   space: Schema.Boolean,
@@ -29,9 +35,9 @@ export const fullContext: ContextSelection = {
   cliTools: true
 }
 export const ContextStageSchema = Schema.Struct({
-  part: Schema.Literals(["memory", "space", "threads", "answers", "skills", "cliTools"]),
+  part: Schema.Literals(contextParts.map((part) => part.key)),
   durationMs: NonNegativeIntSchema,
-  outcome: Schema.Literals(["completed", "failed", "skipped"])
+  outcome: Schema.Literals(Object.values(CONTEXT_STAGE_OUTCOME))
 })
 export type ContextStage = typeof ContextStageSchema.Type
 export const ContextRunSchema = Schema.Struct({

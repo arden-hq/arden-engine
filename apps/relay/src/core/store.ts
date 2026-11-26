@@ -1,9 +1,5 @@
 import type { PresenceState } from "@arden-hq/relay-protocol"
 
-// Persistent state for ONE Mac (a Durable Object's storage, or rows scoped by
-// `mac` in the Bun relay's shared database). Synchronous on purpose: both
-// `ctx.storage.sql` and `bun:sqlite` are synchronous, and the core then needs
-
 export interface MacRecord {
   readonly mac: string
   readonly edPub: string
@@ -32,6 +28,9 @@ export interface QueuedRow {
   readonly storedAt: number
 }
 
+export const ENQUEUE_RESULT = { stored: "stored", duplicate: "duplicate" } as const
+export type EnqueueResult = (typeof ENQUEUE_RESULT)[keyof typeof ENQUEUE_RESULT]
+
 export interface Store {
   getMac(): MacRecord | undefined
   putMac(record: MacRecord): void
@@ -53,7 +52,7 @@ export interface Store {
   countPairOffers(): number
   deletePairOffersExpiredBy(now: number): void
 
-  enqueue(row: QueuedRow): "stored" | "duplicate"
+  enqueue(row: QueuedRow): EnqueueResult
   queueUsage(): { rows: number; bytes: number }
   listQueued(): QueuedRow[]
   dequeue(id: string): void

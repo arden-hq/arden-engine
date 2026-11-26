@@ -1,6 +1,9 @@
 import type { SqlClient, Statement } from "effect/unstable/sql"
 
 import {
+  AUTOMATION_EVENT_TYPE,
+  TRIGGER_TYPE,
+  AUTOMATION_OCCURRENCE,
   isAutomationEventType,
   type AutomationTrigger,
   type EventAutomationTrigger
@@ -30,7 +33,7 @@ export const eventBatchOf = (
   if (context.event_batch !== undefined)
     return { ...context.event_batch, overflow: context.event_batch.overflow ?? [] }
   const snapshot = context.trigger_context_snapshot
-  if (snapshot?.source !== "event") return undefined
+  if (snapshot?.source !== AUTOMATION_OCCURRENCE.event) return undefined
   const event = batchedEventOf(snapshot)
   return {
     events: [
@@ -45,7 +48,7 @@ export const eventBatchOf = (
 export const listensFor = (input: {
   readonly pausedAt: string | null
   readonly eventType: string
-}): boolean => input.pausedAt === null || input.eventType !== "chat.quiet"
+}): boolean => input.pausedAt === null || input.eventType !== AUTOMATION_EVENT_TYPE.chat_quiet
 
 export const batchSize = (batch: QueueContext["event_batch"]): number =>
   batch === undefined ? 1 : batch.events.length + (batch.overflow?.length ?? 0)
@@ -57,15 +60,18 @@ export const matchEvent = (
 ): { matched: EventAutomationTrigger[]; runOnlyIf: readonly [string, ...string[]] | undefined } => {
   const matched = triggers.filter(
     (trigger): trigger is EventAutomationTrigger =>
-      trigger.type === "event" && rules.eventMatches(trigger, event)
+      trigger.type === TRIGGER_TYPE.event && rules.eventMatches(trigger, event)
   )
-  // Which Automations may hold a sentence is decided where triggers are written.
   return { matched, runOnlyIf: matched.length > 0 ? runOnlyIfSentences(matched) : undefined }
 }
 
 export const eventFromSnapshot = (context: QueueContext): AutomationTriggerEvent | undefined => {
   const snapshot = context.trigger_context_snapshot
-  if (snapshot?.source !== "event" || !isAutomationEventType(snapshot.event_type)) return undefined
+  if (
+    snapshot?.source !== AUTOMATION_OCCURRENCE.event ||
+    !isAutomationEventType(snapshot.event_type)
+  )
+    return undefined
   return {
     eventType: snapshot.event_type,
     eventKey: snapshot.event_key,

@@ -8,7 +8,7 @@ import type { RevisionError } from "../domain/errors.js"
 import type { TreeRecord } from "../domain/format.js"
 import { validateSnapshotTransition } from "../domain/integrity.js"
 import { materializeSnapshot } from "../domain/tree.js"
-import type { RevisionStorageShape } from "../storage/service.js"
+import type { RevisionStorageShape } from "../storage/service-types.js"
 
 export type RepositoryError = RevisionError | RevisionStorageError
 
@@ -79,7 +79,6 @@ export const timestamp = (milliseconds: number): string => {
   return `${value.slice(0, 19)}.${value.slice(20, 23)}000Z`
 }
 
-/** Materialize a complete immutable tree while checking its structural invariants. */
 export const materializeTree = (
   storage: RevisionStorageShape,
   treeId: string,
@@ -114,7 +113,6 @@ export const currentMap = (
         return yield* materializeTree(storage, commit.treeId, cache)
       })
 
-/** Validate a commit's complete parent/tree transition and path invariants. */
 export const validateTransition = Effect.fn("Revision.validateTransition")(function* (
   storage: RevisionStorageShape,
   commit: Commit,

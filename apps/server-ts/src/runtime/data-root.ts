@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { Context, Effect, Layer } from "effect"
-import type { DataLocation } from "../config/service.js"
+import { DATA_LOCATION, type DataLocation } from "../config/service.js"
 
 export interface DataRootShape {
   readonly dir: string
@@ -10,7 +10,6 @@ export interface DataRootShape {
   readonly databaseName: string | null
   readonly wiki: { readonly workingRoot: string; readonly historyRoot: string }
   readonly skills: string
-  /** The old rules file, moved into Memory as its `AGENTS.md` page at start. */
   readonly globalInstructions: string
   readonly conversations: string
   readonly uploads: string
@@ -48,7 +47,7 @@ const paths = (
 
 export const dataRootLayer = (location: DataLocation): Layer.Layer<DataRoot> => {
   switch (location.kind) {
-    case "disk": {
+    case DATA_LOCATION.disk: {
       const dir = dirname(location.databasePath)
       return Layer.succeed(
         DataRoot,
@@ -59,7 +58,7 @@ export const dataRootLayer = (location: DataLocation): Layer.Layer<DataRoot> => 
         )
       )
     }
-    case "ephemeral":
+    case DATA_LOCATION.ephemeral:
       return Layer.effect(
         DataRoot,
         Effect.acquireRelease(

@@ -1,19 +1,46 @@
 import { mkdir, readFile, writeFile, realpath, stat } from "node:fs/promises"
 import { resolve, join, relative, isAbsolute } from "node:path"
-import { DatabaseSync } from "node:sqlite"
-import { setTimeout as sleep } from "node:timers/promises"
 import { Schema } from "effect"
 import { fileURLToPath } from "node:url"
 import { readProfile, modelHost, modelSettings } from "./profile.mjs"
 import { createHeadlessClient, startConfiguredServer } from "../libs/headless/dist/index.js"
+import { automationRoutes } from "../libs/protocol/dist/automations/index.js"
 import { contextRoutes } from "../libs/protocol/dist/context/index.js"
 import { permissionRoutes } from "../libs/protocol/dist/permissions/index.js"
 import { toolRoutes } from "../libs/protocol/dist/tools/index.js"
-import { sessionRoutes } from "../libs/protocol/dist/sessions/index.js"
-import { errorMessage } from "../libs/std/dist/errors.js"
+import {
+  SESSION_MODEL,
+  SESSION_NAME,
+  SESSION_ORIGIN,
+  SESSION_SPACE,
+  sessionRoutes
+} from "../libs/protocol/dist/sessions/index.js"
+import {
+  ANSWER_SHAPE,
+  APPROVAL_ASKED,
+  APPROVAL_REPLY,
+  CHAT_CAPTURE,
+  CONNECTION_RESULT,
+  DECISION_ASKED,
+  RELAY_COMMAND,
+  REQUESTED_MODE,
+  SENT_FROM,
+  STANDING_GRANT,
+  TOOL_DECISION
+} from "../libs/protocol/dist/chat/index.js"
+import { RUN_FAILURE, RUN_RESULT, RUN_STATUS } from "../libs/protocol/dist/runs/index.js"
+import { SERVER_EVENT_TYPE } from "../libs/protocol/dist/index.js"
+import { ERRNO, errorMessage, isErrnoCode } from "../libs/std/dist/errors.js"
+import { parseJsonText } from "../libs/std/dist/json-text.js"
+import { sleep } from "../libs/std/dist/sleep.js"
 import { importHistory } from "./history.mjs"
 
-// The server's own entry file; the runner starts it and imports none of it.
+const resultText = (run) =>
+  run?.result?.kind === RUN_RESULT.none ? "" : (run?.result?.result?.text ?? "")
+
+const failureMessage = (run) =>
+  run.failure?.kind === RUN_FAILURE.failed ? run.failure.message : undefined
+
 const SERVER_ENTRY = fileURLToPath(new URL("../apps/server-ts/dist/main.js", import.meta.url))
 
 const Job = Schema.Struct({
@@ -21,9 +48,7 @@ const Job = Schema.Struct({
   workspace: Schema.NonEmptyString,
   output: Schema.NonEmptyString,
   prompts: Schema.NonEmptyArray(Schema.NonEmptyString),
-  // A folder of Skills the task itself ships; each one is a folder with SKILL.md.
   skills: Schema.optionalKey(Schema.NonEmptyString),
-  // False sends each prompt as written, for a suite whose task uses no files.
   restartAfter: Schema.optionalKey(Schema.Array(Schema.Natural)),
   history: Schema.optionalKey(
     Schema.Array(
@@ -48,9 +73,8 @@ async function main() {
   const [profileFile, jobFile] = process.argv.slice(2)
   if (!profileFile || !jobFile) throw new Error("Usage: node benchmarks/candidate.mjs PROFILE JOB")
   const profile = await readProfile(profileFile)
-  // The time limit counts from here, so setup and history import are inside it.
   const deadline = AbortSignal.timeout(profile.timeoutMs)
-  const job = Schema.decodeUnknownSync(Job)(JSON.parse(await readFile(jobFile, "utf8")), {
+  const job = Schema.decodeUnknownSync(Job)(parseJsonText(await readFile(jobFile, "utf8")), {
     onExcessProperty: "error"
   })
   const state = process.env.ARDEN_DIR
@@ -71,7 +95,7 @@ async function main() {
       "Candidate requires fresh state; resume only completed trials through the driver"
     )
   } catch (error) {
-    if (error.code !== "ENOENT") throw error
+    if (!isErrnoCode(error, ERRNO.ENOENT)) throw error
   }
   await mkdir(output, { recursive: true, mode: 0o700 })
   await save(join(output, "profile.json"), profile)
@@ -80,33 +104,21 @@ async function main() {
     ? await importHistory({ databasePath, models, history: job.history })
     : []
   await save(join(output, "history-import.json"), imported)
-  // An Automation that is off runs nothing, a run asked for by hand included, so
-  // Memory Capture stays on until the history it ingests is captured (below).
   const MEMORY_CAPTURE = "builtin-memory-capture"
-  // The trial as a settings file: everything Arden is told is in it. The key is
-  // not; the file names the variable that holds it.
   const settings = {
     dataDirectory: stateRoot,
     ...modelSettings(profile),
     maxModelRequests: profile.maxModelRequests,
-    // Without tool search the loop declares every allowed tool up front, as
-    // other harnesses present a benchmark's tools.
     toolSearch: profile.toolSearch === true,
     ...(profile.tools ? { tools: profile.tools } : { blockedTools: profile.blockedTools }),
-    // The task folder is the one place file tools may change.
     workspace,
-    // `memory: false` keeps past chats out of every prompt: Memory recall and related chats.
     memory: profile.memory,
     automations: false,
     ...(imported.length ? { keepAutomations: [MEMORY_CAPTURE] } : {}),
     ...(profile.mcpServers ? { mcpServers: profile.mcpServers } : {}),
-    // A trial reads the task's own Skills only, never the host's shared folder,
-    // and compacts only when the context fills: idle compaction would fire on
-    // wall-clock time and make two equal trials differ.
     skillRoots: job.skills === undefined ? [] : [job.skills],
     idleCompactionAfterMs: 0,
     ...(profile.commandSandbox === false ? { commandSandbox: false } : {}),
-    // Nobody is there to answer a card.
     approvalMode: "allow"
   }
   const settingsFile = join(output, "settings.json")
@@ -116,11 +128,6 @@ async function main() {
   process.on("SIGTERM", onSignal)
   process.on("SIGINT", onSignal)
   const signal = AbortSignal.any([deadline, interrupted.signal])
-  // Arden runs as its own process, started from the settings file and reached
-  // over HTTP with the secret in its access file, as any outside driver would.
-  // The server reads the provider's key variable itself, and a start that
-  // fails rejects with the server's own reason (a missing variable, a
-  // provider that does not answer), which result.json keeps.
   const start = async () => {
     const started = await startConfiguredServer({
       entry: SERVER_ENTRY,
@@ -160,42 +167,60 @@ async function main() {
     const response = await send(path, method, body)
     if (!response.ok)
       throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`)
-    return response.json()
+    return parseJsonText(await response.text())
   }
-  // A chat has no working folder of its own, so every prompt names the task's.
   const prompted = (prompt) =>
     `Your working folder is ${workspace}. Use absolute paths inside it, and pass it as the working directory of every command.\n\n${prompt}`
-  // Nobody is there to answer a card, so the trial declines it and the model
-  // carries on. Three tools always ask (tools-without-rule.json); a connection
-  // request asks too.
   const DECLINED = "No one is here to answer this, so it was declined. Carry on without it."
   const declined = []
   const decline = (runId) => async (event) => {
     const data = event.data
-    if (data.type !== "approval_needed" && data.type !== "connection_needed") return
+    if (
+      data.type !== SERVER_EVENT_TYPE.approvalNeeded &&
+      data.type !== SERVER_EVENT_TYPE.connectionNeeded
+    )
+      return
     if (declined.some((entry) => entry.toolId === data.tool_id)) return
-    const answer = {
-      runId: data.run_id ?? runId,
-      toolId: data.tool_id,
+    const toolId = data.tool_id
+    const answeredRunId = data.run_id ?? runId
+    declined.push({
+      runId: answeredRunId,
+      toolId,
       result: DECLINED,
-      approved: false
-    }
-    declined.push({ ...answer, kind: data.type, name: data.name ?? data.label })
-    if (data.type === "approval_needed") await client.answerApproval(answer)
-    else await client.answerConnection({ ...answer, connectionId: data.connection_id })
+      approved: false,
+      kind: data.type,
+      name: data.name ?? data.label
+    })
+    if (data.type === SERVER_EVENT_TYPE.approvalNeeded)
+      await client.answerApproval({
+        runId: answeredRunId,
+        toolId,
+        result: DECLINED,
+        decision: { kind: TOOL_DECISION.denied, grant: { kind: STANDING_GRANT.once } },
+        asked:
+          data.asked.kind === APPROVAL_ASKED.recorded
+            ? { kind: DECISION_ASKED.at, at: data.asked.at }
+            : { kind: DECISION_ASKED.unstated },
+        command: { kind: RELAY_COMMAND.none }
+      })
+    else
+      await client.answerConnection({
+        runId: answeredRunId,
+        toolId,
+        connectionId: data.connection_id,
+        result: { kind: CONNECTION_RESULT.stated, text: DECLINED },
+        approved: false
+      })
   }
   let submitted
   let sessionId
   const runs = []
   let baselineRuns = new Set()
-  // The server's own word on whether anything is still going: a Run, or an
-  // Automation delivery that will start one.
   const settle = async () => {
     while (true) {
       signal.throwIfAborted()
-      // Only the Runs still going: the answer still says whether the server is idle.
       if ((await client.listRuns({ active: true })).idle) return
-      await sleep(100, undefined, { signal })
+      await sleep(100, signal)
     }
   }
   try {
@@ -205,61 +230,56 @@ async function main() {
     await save(join(output, "effective-config.json"), await request("/config"))
     await save(join(output, "tool-catalog.json"), await request(toolRoutes.catalog))
     await save(join(output, "permission-rules.json"), await request(permissionRoutes.rules))
-    // The server's own answer on whether a sandboxed command can run here.
     await save(join(output, "command-sandbox.json"), await request(permissionRoutes.commandSandbox))
     if (imported.length) {
       if (!profile.memory) throw new Error("History ingestion requires a memory-enabled profile")
       await request(`/automations/${MEMORY_CAPTURE}/run`, "POST", "{}")
-      const db = new DatabaseSync(databasePath, { readOnly: true })
-      try {
-        while (true) {
-          signal.throwIfAborted()
-          const pending = db
-            .prepare(
-              "SELECT COUNT(*) AS count FROM run_sidecars WHERE json_extract(evidence_json, '$.memory_capture.status') = 'pending'"
-            )
-            .get()
-          if (pending.count === 0) break
-          await sleep(200, undefined, { signal })
-        }
-        const captures = db
-          .prepare(
-            "SELECT run_id, json_extract(evidence_json, '$.memory_capture') AS capture FROM run_sidecars WHERE json_type(evidence_json, '$.memory_capture') = 'object'"
-          )
-          .all()
-        await save(join(output, "memory-capture.json"), captures)
-        // `skipped` is a finished capture too: the chat held nothing to keep.
-        if (captures.some((row) => !["done", "skipped"].includes(JSON.parse(row.capture).status)))
-          throw new Error("Memory capture did not complete successfully")
-      } finally {
-        db.close()
+      let captureRuns
+      while (true) {
+        signal.throwIfAborted()
+        captureRuns = (await request(automationRoutes.runs(MEMORY_CAPTURE, { limit: 20 }))).runs
+        if (captureRuns.length > 0 && captureRuns.every((run) => run.status !== RUN_STATUS.running))
+          break
+        await sleep(200, signal)
       }
+      await save(join(output, "memory-capture.json"), captureRuns)
+      if (captureRuns.some((run) => run.status !== RUN_STATUS.completed))
+        throw new Error("Memory capture did not complete successfully")
       await toggle(MEMORY_CAPTURE)
     }
     baselineRuns = new Set((await client.listRuns()).runs.map((run) => run.run_id))
-    const session = await client.createSession({ name: job.id })
+    const session = await client.createSession({
+      name: { kind: SESSION_NAME.named, name: job.id },
+      space: { kind: SESSION_SPACE.none },
+      chat_model: { kind: SESSION_MODEL.inherited },
+      origin: SESSION_ORIGIN.ordinary
+    })
     sessionId = session.session_id
     for (const [index, prompt] of job.prompts.entries()) {
       submitted = await client.submit({
         sessionId,
         clientId: `${job.id}-${index}`,
-        message: prompted(prompt)
+        message: prompted(prompt),
+        images: [],
+        replyTo: [],
+        approvalReply: { kind: APPROVAL_REPLY.none },
+        approvalMode: { kind: REQUESTED_MODE.current },
+        sentFrom: { kind: SENT_FROM.typed },
+        capture: { kind: CHAT_CAPTURE.none },
+        outputSchema: { kind: ANSWER_SHAPE.free }
       })
       await client.wait(submitted, { signal, onEvent: decline(submitted.runId) })
       await settle()
-      // A message sent mid-run joins that Run; a queued one starts another. The
-      // chat's last Run is the one that answered.
       const latest = (await client.listRuns({ sessionId })).runs.at(-1)
       const run = await client.getRun(latest.run_id)
       runs.push(run)
       await save(join(output, `run-${index}.json`), run)
-      // Which context parts this chat's runs used; the server forgets it on a restart.
       await save(
         join(output, `context-${index}.json`),
         await request(contextRoutes.experiments(sessionId))
       )
-      if (run.status !== "completed")
-        throw new Error(`Run ended ${run.status}: ${run.error?.message ?? run.stop_reason}`)
+      if (run.status !== RUN_STATUS.completed)
+        throw new Error(`Run ended ${run.status}: ${failureMessage(run) ?? run.stop_reason}`)
       if (job.restartAfter?.includes(index)) {
         await server.stop()
         server = await start()
@@ -270,7 +290,7 @@ async function main() {
     await save(join(output, "result.json"), {
       id: job.id,
       status: "completed",
-      text: runs.at(-1)?.result?.text ?? "",
+      text: resultText(runs.at(-1)),
       runs
     })
   } catch (error) {
@@ -293,13 +313,12 @@ async function main() {
     throw error
   } finally {
     try {
-      // Preserve native evidence even after timeout; do not reuse the aborted request signal.
       if (sessionId) {
         const exported = await server.fetch(sessionRoutes.export(sessionId, "archive"), {
           headers: server.headers
         })
         if (!exported.ok) throw new Error(`Transcript export failed: ${exported.status}`)
-        await save(join(output, "session.json"), await exported.json())
+        await save(join(output, "session.json"), parseJsonText(await exported.text()))
       }
       const trialRows = (await client.listRuns()).runs
       await save(
@@ -318,7 +337,7 @@ async function main() {
           headers: server.headers
         })
         if (!exported.ok) throw new Error(`Child transcript export failed: ${exported.status}`)
-        await save(join(output, `session-${childId}.json`), await exported.json())
+        await save(join(output, `session-${childId}.json`), parseJsonText(await exported.text()))
       }
       for (const run of trialRows) {
         let afterSequence = 0
@@ -343,10 +362,9 @@ async function main() {
       throw error
     } finally {
       try {
-        // The server keeps the trial's model requests and tokens in its data folder.
         await save(
           join(output, "usage.json"),
-          JSON.parse(await readFile(server.ready.usageFile, "utf8"))
+          parseJsonText(await readFile(server.ready.usageFile, "utf8"))
         )
         await save(join(output, "declined-requests.json"), declined)
       } finally {

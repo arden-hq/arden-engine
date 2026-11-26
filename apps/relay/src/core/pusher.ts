@@ -1,4 +1,5 @@
-import type { ApnsEnvironment } from "@arden-hq/relay-protocol"
+import { PUSH_STATUS } from "@arden-hq/relay-protocol"
+import type { ApnsEnvironment, PushOutcome, PushPriority } from "@arden-hq/relay-protocol"
 
 export interface PushRequest {
   readonly mac: string
@@ -7,18 +8,14 @@ export interface PushRequest {
   readonly env: ApnsEnvironment
   readonly topic: string
   readonly collapseId: string
-  readonly priority: "high" | "normal"
+  readonly priority: PushPriority
   readonly body: Uint8Array
 }
 
-export type PushResult =
-  | { readonly status: "accepted" }
-  | { readonly status: "rejected" | "unavailable"; readonly reason: string }
-
 export interface Pusher {
-  push(request: PushRequest): Promise<PushResult>
+  push(request: PushRequest): Promise<PushOutcome>
 }
 
 export const noopPusher: Pusher = {
-  push: () => Promise.resolve({ status: "unavailable", reason: "NotConfigured" })
+  push: () => Promise.resolve({ status: PUSH_STATUS.unavailable, reason: "NotConfigured" })
 }

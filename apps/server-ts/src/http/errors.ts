@@ -1,11 +1,14 @@
 import { Effect, Predicate, Schema } from "effect"
 import { HttpApiError } from "effect/unstable/httpapi"
-import type { StructuredCompletionError } from "../models/structured-completion.js"
+import {
+  STRUCTURED_COMPLETION_FAILURE,
+  type StructuredCompletionError
+} from "../models/structured-completion.js"
 import { SpaceStoreError } from "../persistence/spaces/store.js"
-import type { StoreReason } from "../persistence/errors.js"
+import { STORE_REASON, type StoreReason } from "../persistence/errors.js"
 import { SessionStoreError } from "../persistence/sessions/store.js"
 import { ModelStoreError } from "../persistence/models/store.js"
-import type { WikiError } from "../wiki/errors.js"
+import { WIKI_ERROR_REASON, type WikiError } from "../wiki/errors.js"
 
 export class StoreConflict extends Schema.Error<StoreConflict>("StoreConflict")(
   { detail: Schema.optionalKey(Schema.String) },
@@ -50,12 +53,6 @@ export const storeErrorToHttp = <R extends StoreReason>(error: {
   readonly message: string
 }): StoreReasonHttp[R] => statuses[error.reason](ownerWorded(error) ? error.message : undefined)
 
-/**
- * Stores whose `invalid` and `conflict` messages are written for the person
- * who sent the request, so a refusal carries them as `detail`. A model the
- * server does not list is one (`Model <id> is not available`): without it a
- * client saw a bare 422 `{}` for `chat_model`.
- */
 const ownerWorded = (error: object): boolean =>
   error instanceof SessionStoreError ||
   error instanceof SpaceStoreError ||
@@ -68,8 +65,14 @@ interface StoreFailure<R extends StoreReason = StoreReason> {
   readonly cause?: unknown
 }
 
+const SERVER_SIDE_REASONS: ReadonlySet<StoreReason> = new Set([
+  STORE_REASON.corrupt,
+  STORE_REASON.storage,
+  STORE_REASON.unavailable
+])
+
 export const logStoreFailure = (error: StoreFailure): Effect.Effect<void> =>
-  error.reason === "corrupt" || error.reason === "storage" || error.reason === "unavailable"
+  SERVER_SIDE_REASONS.has(error.reason)
     ? Effect.logError("Store failure answered 5xx").pipe(
         Effect.annotateLogs({
           reason: error.reason,
@@ -103,9 +106,14 @@ export const wikiErrorToHttp = (
 ):
   | StoreConflict
   | HttpApiError.ServiceUnavailable
-  | StoreReasonHttp[Exclude<WikiError["reason"], "blocked" | "closed">] => {
-  if (error.reason === "closed") return new HttpApiError.ServiceUnavailable({})
-  return statuses[error.reason === "blocked" ? "conflict" : error.reason](error.message)
+  | StoreReasonHttp[Exclude<
+      WikiError["reason"],
+      typeof WIKI_ERROR_REASON.blocked | typeof WIKI_ERROR_REASON.closed
+    >] => {
+  if (error.reason === WIKI_ERROR_REASON.closed) return new HttpApiError.ServiceUnavailable({})
+  return statuses[
+    error.reason === WIKI_ERROR_REASON.blocked ? STORE_REASON.conflict : error.reason
+  ](error.message)
 }
 
 export const orNotFound = <A>(
@@ -133,10 +141,10 @@ export const completionErrorToHttp = (
   error: StructuredCompletionError
 ): CompletionUnavailable | CompletionInvalidOutput => {
   switch (error.reason) {
-    case "unavailable":
-    case "provider":
+    case STRUCTURED_COMPLETION_FAILURE.unavailable:
+    case STRUCTURED_COMPLETION_FAILURE.provider:
       return new CompletionUnavailable({ detail: error.message })
-    case "invalid_output":
+    case STRUCTURED_COMPLETION_FAILURE.invalid_output:
       return new CompletionInvalidOutput({ detail: error.message })
   }
 }

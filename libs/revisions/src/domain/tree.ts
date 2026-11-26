@@ -1,9 +1,9 @@
 import { Effect } from "effect"
 
 import type { ResourceSnapshot } from "./change-set.js"
-import { ResourceVersion } from "./model.js"
+import { ResourceVersion, isActive } from "./model.js"
 import { CorruptRepositoryError } from "./errors.js"
-import { type TreeRecord } from "./format.js"
+import { TREE_ENTRY_KIND, type TreeRecord } from "./format.js"
 import { validateActivePaths } from "./integrity.js"
 import { compareCodePoints } from "@arden-hq/std/json"
 
@@ -33,7 +33,7 @@ export const materializeSnapshot = Effect.fn("Revision.materializeSnapshot")(fun
       const activePaths = new Set<string>()
       for (const entry of tree.entries) {
         const versions =
-          entry.kind === "subtree"
+          entry.kind === TREE_ENTRY_KIND.subtree
             ? (yield* visit(entry.tree_id, `${prefix}${entry.name}/`, depth + 1)).values()
             : [
                 new ResourceVersion(
@@ -48,9 +48,9 @@ export const materializeSnapshot = Effect.fn("Revision.materializeSnapshot")(fun
                 )
               ]
         for (const version of versions) {
-          if (version.state === "active" && activePaths.has(version.path))
+          if (isActive(version) && activePaths.has(version.path))
             return yield* failCorrupt(`tree repeats active path ${version.path}`)
-          if (version.state === "active") activePaths.add(version.path)
+          if (isActive(version)) activePaths.add(version.path)
           if (resources.has(version.resourceId))
             return yield* failCorrupt(`tree repeats resource ${version.resourceId}`)
           resources.set(version.resourceId, version)

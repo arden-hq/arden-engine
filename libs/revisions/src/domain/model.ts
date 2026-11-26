@@ -9,11 +9,45 @@ import { sha256Hex } from "@arden-hq/std/hash"
 const NonEmptyText = Schema.String.check(Schema.isMinLength(1))
 const Hash = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 
-/** The only states represented by a resource version. */
-export const ResourceState = Schema.Union([Schema.Literal("active"), Schema.Literal("archived")])
-export type ResourceState = typeof ResourceState.Type
+export const RESOURCE_STATE = { active: "active", archived: "archived" } as const
+export type ResourceState = (typeof RESOURCE_STATE)[keyof typeof RESOURCE_STATE]
+export const ResourceState = Schema.Literals(Object.values(RESOURCE_STATE))
 
-/** A normalized, immutable resource version. */
+export const isActive = (version: { readonly state: ResourceState }): boolean =>
+  version.state === RESOURCE_STATE.active
+
+export const CHANGE_ACTION = {
+  create: "create",
+  update: "update",
+  move: "move",
+  archive: "archive",
+  restore: "restore"
+} as const
+export type ChangeAction = (typeof CHANGE_ACTION)[keyof typeof CHANGE_ACTION]
+export const ChangeAction = Schema.Literals(Object.values(CHANGE_ACTION))
+
+export const OPERATION_TAG = {
+  Create: "Create",
+  Update: "Update",
+  Move: "Move",
+  Archive: "Archive",
+  Restore: "Restore"
+} as const
+type OperationTag = (typeof OPERATION_TAG)[keyof typeof OPERATION_TAG]
+
+export const CHANGE_ACTION_OF: Readonly<Record<OperationTag, ChangeAction>> = {
+  Create: CHANGE_ACTION.create,
+  Update: CHANGE_ACTION.update,
+  Move: CHANGE_ACTION.move,
+  Archive: CHANGE_ACTION.archive,
+  Restore: CHANGE_ACTION.restore
+}
+
+export const PATH_SEGMENT = { current: ".", parent: ".." } as const
+type DotSegment = (typeof PATH_SEGMENT)[keyof typeof PATH_SEGMENT]
+const DOT_SEGMENTS: ReadonlySet<string> = new Set<DotSegment>(Object.values(PATH_SEGMENT))
+export const isDotSegment = (part: string): part is DotSegment => DOT_SEGMENTS.has(part)
+
 export class ResourceVersion extends Schema.Class<ResourceVersion>(
   "arden/revisions/ResourceVersion"
 )({
@@ -24,34 +58,31 @@ export class ResourceVersion extends Schema.Class<ResourceVersion>(
   versionId: Hash
 }) {}
 
-/** A newly created resource. */
-export class Create extends Schema.TaggedClass<Create>()("Create", {
+export class Create extends Schema.TaggedClass<Create>()(OPERATION_TAG.Create, {
   resourceId: NonEmptyText,
   path: NonEmptyText,
   content: Schema.Uint8Array
 }) {}
 
-/** A replacement guarded by an exact previous version. */
-export class Update extends Schema.TaggedClass<Update>()("Update", {
+export class Update extends Schema.TaggedClass<Update>()(OPERATION_TAG.Update, {
   resourceId: NonEmptyText,
   expectedVersion: Hash,
   content: Schema.Uint8Array
 }) {}
 
-class Move extends Schema.TaggedClass<Move>()("Move", {
+class Move extends Schema.TaggedClass<Move>()(OPERATION_TAG.Move, {
   resourceId: NonEmptyText,
   expectedVersion: Hash,
   path: NonEmptyText,
   content: Schema.optionalKey(Schema.Uint8Array)
 }) {}
 
-class Archive extends Schema.TaggedClass<Archive>()("Archive", {
+class Archive extends Schema.TaggedClass<Archive>()(OPERATION_TAG.Archive, {
   resourceId: NonEmptyText,
   expectedVersion: Hash
 }) {}
 
-/** Re-activates an archived resource, optionally changing path/content. */
-export class Restore extends Schema.TaggedClass<Restore>()("Restore", {
+export class Restore extends Schema.TaggedClass<Restore>()(OPERATION_TAG.Restore, {
   resourceId: NonEmptyText,
   expectedVersion: Hash,
   path: Schema.optionalKey(NonEmptyText),
@@ -61,7 +92,6 @@ export class Restore extends Schema.TaggedClass<Restore>()("Restore", {
 export const Operation = Schema.Union([Create, Update, Move, Archive, Restore])
 export type Operation = typeof Operation.Type
 
-/** A validated immutable request submitted to the repository boundary. */
 export class ChangeSet extends Schema.Class<ChangeSet>("arden/revisions/ChangeSet")({
   operations: Schema.Array(Operation).check(Schema.isMinLength(1)),
   actor: NonEmptyText,
@@ -73,12 +103,11 @@ export class ChangeSet extends Schema.Class<ChangeSet>("arden/revisions/ChangeSe
 }) {}
 
 export class ResourceChange extends Schema.Class<ResourceChange>("arden/revisions/ResourceChange")({
-  action: NonEmptyText,
+  action: ChangeAction,
   before: Schema.NullOr(ResourceVersion),
   after: Schema.NullOr(ResourceVersion)
 }) {}
 
-/** A parsed immutable commit. Timestamp is kept as canonical text to retain microseconds. */
 export class Commit extends Schema.Class<Commit>("arden/revisions/Commit")({
   commitId: Hash,
   parentId: Schema.NullOr(Hash),
@@ -90,7 +119,6 @@ export class Commit extends Schema.Class<Commit>("arden/revisions/Commit")({
   changes: Schema.Array(ResourceChange).check(Schema.isMinLength(1))
 }) {}
 
-/** Validate and return an already-normalized POSIX-relative managed path. */
 export const normalizeRelativePath = Effect.fn("normalizeRelativePath")(function* (
   value: string
 ): Effect.fn.Return<string, UnsafePathError> {
@@ -103,7 +131,7 @@ export const normalizeRelativePath = Effect.fn("normalizeRelativePath")(function
     posix.isAbsolute(value) ||
     win32.isAbsolute(value) ||
     normalized !== value ||
-    parts.some((part) => part.length === 0 || part === "." || part === "..")
+    parts.some((part) => part.length === 0 || isDotSegment(part))
   if (invalid) {
     return yield* new UnsafePathError({
       message: `managed path must be normalized and relative: ${value}`
@@ -112,7 +140,6 @@ export const normalizeRelativePath = Effect.fn("normalizeRelativePath")(function
   return normalized
 })
 
-/** Build the canonical version token from an immutable resource identity. */
 export const makeVersion = Effect.fn("makeVersion")(function* (
   resourceId: string,
   path: string,

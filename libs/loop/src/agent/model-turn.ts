@@ -1,23 +1,23 @@
 import { isAbortError, raceAbort } from "../abort.js"
 import { InvalidModelResponseError, ModelProviderError } from "../errors.js"
 import {
+  ASSISTANT_OUTPUT_PART_TYPE,
+  isTextPart,
+  isToolCallPart,
   messageId as newMessageId,
+  TOOL_EXECUTION,
+  toolCallPart,
   type AssistantOutputPart,
-  type ChatMessage,
-  type JsonObject,
-  type Metadata,
   type ProviderToolCall,
-  type ToolCall
+  type ReadablePartType,
+  type ToolExecution
 } from "../contracts/messages.js"
-import type { ToolDisplayTitle, ToolMeta } from "../contracts/tools.js"
-import type {
-  CompletionResponse,
-  ModelProvider,
-  ModelProviderRequest,
-  ModelStreamItem
+import {
+  MODEL_STREAM_ITEM_TAG,
+  type CompletionResponse,
+  type ModelStreamItem
 } from "../contracts/provider.js"
-import type { AgentEvent } from "../contracts/events.js"
-import { parseModelItem, validateCompletion } from "../internal/validate.js"
+import { parseModelItem, validateCompletion } from "../internal/stream-items.js"
 
 import {
   assistantMessage,
@@ -29,34 +29,11 @@ import {
   type ToolStartEvent,
   type ToolStartSnapshot
 } from "./model-output.js"
+import { openProviderStream } from "./provider-stream.js"
 import { StreamedCallHistory } from "./streamed-call-history.js"
 import { ModelOutputProjection } from "./model-output-projection.js"
 import { errorMessage } from "@arden-hq/std/errors"
-
-type AgentEventEmitter = (event: AgentEvent) => Promise<void>
-
-export interface ModelTurnInput {
-  readonly provider: ModelProvider
-  readonly request: ModelProviderRequest
-  readonly history: ChatMessage[]
-  readonly metas: ReadonlyMap<string, ToolMeta>
-  readonly emit: AgentEventEmitter
-  readonly displayTitle?: ToolDisplayTitle
-  readonly persistHost?: (host: Metadata) => JsonObject
-  readonly mintMessageId?: (
-    kind: "text" | "reasoning",
-    position: { readonly fragment: number; readonly index: number }
-  ) => string
-  readonly onToolCallReady?: (call: ToolCall, checkpoint: () => Promise<void>) => Promise<void>
-  readonly checkpoint?: () => Promise<void>
-  readonly commitOutput?: (operation: () => Promise<void>) => Promise<void>
-}
-
-export interface ModelTurnOutput {
-  readonly response: CompletionResponse
-  readonly streamedToolInputIds: ReadonlySet<string>
-  readonly lastTextId: string | null
-}
+import { type ModelTurnInput, type ModelTurnOutput } from "./model-turn-types.js"
 
 interface StreamedToolInput {
   toolId: string | null
@@ -66,26 +43,10 @@ interface StreamedToolInput {
   ended: boolean
 }
 
-const openProviderStream = async (
-  input: ModelTurnInput
-): Promise<AsyncIterator<ModelStreamItem>> => {
-  let source: Iterable<ModelStreamItem> | AsyncIterable<ModelStreamItem>
-  try {
-    source = await input.provider.stream(input.request)
-  } catch (cause) {
-    if (isAbortError(cause)) throw cause
-    throw new ModelProviderError(`model provider failed: ${errorMessage(cause)}`, cause)
-  }
-  if (Symbol.asyncIterator in source) return source[Symbol.asyncIterator]()
-  return (async function* () {
-    yield* source
-  })()
-}
-
 export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutput> => {
   const readyCalls = new StreamedCallHistory(input.history)
   const minter = input.mintMessageId
-  const mintId = (kind: "text" | "reasoning", index: number): string =>
+  const mintId = (kind: ReadablePartType, index: number): string =>
     minter === undefined ? newMessageId(kind) : minter(kind, { fragment: readyCalls.count, index })
   let response: CompletionResponse | undefined
   const projection = new ModelOutputProjection(input.emit, mintId)
@@ -97,10 +58,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
   let cutAtCommit = false
   const now = Date.now
 
-  const emitToolStart = async (
-    event: ToolStartEvent,
-    execution: "runtime" | "provider"
-  ): Promise<void> => {
+  const emitToolStart = async (event: ToolStartEvent, execution: ToolExecution): Promise<void> => {
     const timestamp = now()
     const parentId = event.parent_id ?? null
     toolStarts.set(startKey(execution, event.tool_id), {
@@ -148,13 +106,6 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
     })
   }
 
-  /**
-   * Retracts every call that was announced while streaming but is not in the
-   * final answer, so no call stays shown as started forever. An adapter drops
-   * a call the output limit cut off (Responses on `max_output_tokens`, Chat
-   * Completions on `length`); this is the one place that tells the host, for
-   * both, with a `ModelResponseReset` naming only those calls.
-   */
   const retractDroppedCalls = async (message: CompletionResponse["message"]): Promise<void> => {
     const final = new Set([
       ...(message.tool_calls ?? []).map((call) => call.id),
@@ -218,23 +169,23 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
       await emitProjectionReset()
       resetProjection()
     }
-    if (parts.length > 0 && parts.every((part) => part.type === "tool_call")) {
+    if (parts.length > 0 && parts.every(isToolCallPart)) {
       await projection.ensureText()
       await projection.close()
     }
     for (const [index, part] of parts.entries()) {
       const streamed = projection.parts[index] !== undefined
       switch (part.type) {
-        case "reasoning":
-        case "text":
+        case ASSISTANT_OUTPUT_PART_TYPE.reasoning:
+        case ASSISTANT_OUTPUT_PART_TYPE.text:
           await projection.completePart(part, index)
           break
-        case "tool_call": {
+        case ASSISTANT_OUTPUT_PART_TYPE.toolCall: {
           if (!streamed) {
             await projection.close()
             projection.parts.push({ ...part })
           }
-          if (part.execution === "provider") {
+          if (part.execution === TOOL_EXECUTION.provider) {
             const call = providerCalls.get(part.tool_call_id)
             if (call === undefined) {
               throw new InvalidModelResponseError(
@@ -299,15 +250,15 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
     const item = parseModelItem(raw)
 
     switch (item._tag) {
-      case "TextDelta":
-        await projection.delta("text", item.content)
+      case MODEL_STREAM_ITEM_TAG.textDelta:
+        await projection.delta(ASSISTANT_OUTPUT_PART_TYPE.text, item.content)
         return
 
-      case "ReasoningDelta":
-        await projection.delta("reasoning", item.content)
+      case MODEL_STREAM_ITEM_TAG.reasoningDelta:
+        await projection.delta(ASSISTANT_OUTPUT_PART_TYPE.reasoning, item.content)
         return
 
-      case "ToolCallDelta": {
+      case MODEL_STREAM_ITEM_TAG.toolCallDelta: {
         const delta = item.delta
         const state = toolInput(delta.index)
         if (delta.tool_id !== null) state.toolId = delta.tool_id
@@ -317,11 +268,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
           await projection.close()
           state.started = true
           streamedToolInputIds.add(state.toolId)
-          projection.parts.push({
-            type: "tool_call",
-            tool_call_id: state.toolId,
-            execution: "runtime"
-          })
+          projection.parts.push(toolCallPart(state.toolId, TOOL_EXECUTION.runtime))
           await emitToolStart(
             {
               _tag: "ToolInputStarted",
@@ -363,23 +310,19 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
         return
       }
 
-      case "ProviderToolCall": {
+      case MODEL_STREAM_ITEM_TAG.providerToolCall: {
         const call = item.call
         if (!call.done && streamedProviderToolIds.has(call.id)) return
         if (!streamedProviderToolIds.has(call.id)) {
           await projection.close()
           streamedProviderToolIds.add(call.id)
-          projection.parts.push({
-            type: "tool_call",
-            tool_call_id: call.id,
-            execution: "provider"
-          })
+          projection.parts.push(toolCallPart(call.id, TOOL_EXECUTION.provider))
           await emitToolStart(providerStarted(call, input.metas), "provider")
         }
         return
       }
 
-      case "OutputItemReady": {
+      case MODEL_STREAM_ITEM_TAG.outputItemReady: {
         const commit = async (): Promise<void> => {
           const fragment: CompletionResponse = {
             _tag: "Completed",
@@ -400,7 +343,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
             assistantMessage(
               fragment,
               projection.fragmentId,
-              parts.some((part) => part.type === "text") ? projection.fragmentId : null,
+              parts.some(isTextPart) ? projection.fragmentId : null,
               parts,
               toolStarts,
               input.displayTitle
@@ -408,8 +351,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
           )
           for (const [index, part] of parts.entries()) {
             const messageId = projection.textMessageIdsByPartIndex.get(index)
-            if (part.type !== "text" || part.phase === undefined || messageId === undefined)
-              continue
+            if (!isTextPart(part) || part.phase === undefined || messageId === undefined) continue
             await input.emit({
               _tag: "TextPhaseResolved",
               depth: 0,
@@ -436,7 +378,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
         return
       }
 
-      case "ProviderStreamRetry": {
+      case MODEL_STREAM_ITEM_TAG.providerStreamRetry: {
         if (readyCalls.persisted) {
           if (
             projection.messageIds.size > 0 ||
@@ -471,7 +413,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
         return
       }
 
-      case "Completed": {
+      case MODEL_STREAM_ITEM_TAG.completed: {
         if (response !== undefined) {
           throw new InvalidModelResponseError(
             "model stream emitted more than one CompletionResponse"
@@ -534,7 +476,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
 
   const resolvedTextPhases = (readyCalls.persisted ? [] : canonicalOutputParts).flatMap(
     (part, index) => {
-      if (part.type !== "text" || part.phase === undefined) return []
+      if (!isTextPart(part) || part.phase === undefined) return []
       const messageId = projection.textMessageIdsByPartIndex.get(index)
       if (messageId === undefined) {
         throw new InvalidModelResponseError("text output part is missing its projected message id")
@@ -547,7 +489,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
     assistantMessage(
       validResponse,
       projection.fragmentId,
-      canonicalOutputParts.some((part) => part.type === "text") ? projection.fragmentId : null,
+      canonicalOutputParts.some(isTextPart) ? projection.fragmentId : null,
       canonicalOutputParts,
       toolStarts,
       input.displayTitle

@@ -14,7 +14,10 @@ import {
   DueAtSchema,
   SpaceTaskActivitySchema,
   TaskCommentKindSchema,
-  TaskApprovalSchema
+  TaskApprovalSchema,
+  SpaceTaskCreatedBySchema,
+  SpaceTaskEventContentKindSchema,
+  SpaceTaskEventTypeSchema
 } from "@arden-hq/protocol/effect/spaces/work"
 import {
   EVENT_CONTENT,
@@ -145,7 +148,7 @@ const taskRecordFields = {
   created_at: WorkTimestampSchema,
   updated_at: WorkTimestampSchema,
   completed_at: NullableWorkTimestampSchema,
-  created_by: Schema.NullOr(Schema.String),
+  created_by: Schema.NullOr(SpaceTaskCreatedBySchema),
   seq: Schema.NullOr(NonNegativeIntSchema),
   block_count: NonNegativeIntSchema,
   sources: Schema.Array(TaskSourceRecordSchema),
@@ -212,9 +215,9 @@ export const TaskEventRecordSchema = withExtras({
   space_id: Schema.NullOr(NonEmptyStringSchema),
   item_id: Schema.NullOr(Schema.String),
   run_ref: Schema.NullOr(Schema.String),
-  event_type: NonEmptyStringSchema,
+  event_type: SpaceTaskEventTypeSchema,
   content: Schema.Struct({
-    kind: Schema.Literals(["summary", "result"]),
+    kind: SpaceTaskEventContentKindSchema,
     text: NonEmptyStringSchema
   }),
   source_refs: Schema.Array(EvidenceSourceRefSchema),

@@ -1,10 +1,55 @@
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
-import { markdownWords, type CommunicationArrival } from "@arden-hq/protocol/chat"
+import {
+  ARRIVAL_EVENT,
+  COMMUNICATION_DOOR,
+  markdownWords,
+  type CommunicationArrival
+} from "@arden-hq/protocol/chat"
 import { CommunicationEnvelopeSchema } from "@arden-hq/protocol/effect/chat"
 import { formatClock, localDayOf } from "@arden-hq/std/time"
 import { Option, Predicate, Schema } from "effect"
 import type { StoredMessageEnvelope } from "./model.js"
+
+const CHAT_EVENT = {
+  arrival: "arrival",
+  waiting: "waiting",
+  answer: "answer",
+  approval: "approval",
+  proposal: "proposal",
+  focus: "focus",
+  failedTurn: "failed_turn"
+} as const
+
+const ARRIVAL_SOURCE = { task: "Task", automation: "Automation", run: "Run" } as const
+
+type ArrivalSource = (typeof ARRIVAL_SOURCE)[keyof typeof ARRIVAL_SOURCE]
+
+const WAITING_ASK = { question: "question", approval: "approval" } as const
+
+const OWNER_ANSWER = { said: "said", hold: "hold" } as const
+
+const CHAT_APPROVAL_DECISION = {
+  approved: "approved",
+  edited: "edited",
+  drafted: "drafted",
+  rejected: "rejected"
+} as const
+
+const APPROVAL_ASKER = {
+  task: "Task",
+  automation: "automation",
+  agent: "agent",
+  chat: "chat"
+} as const
+
+type ApprovalAskerKind = (typeof APPROVAL_ASKER)[keyof typeof APPROVAL_ASKER]
+
+const PROPOSAL_DECISION = { started: "started", skipped: "skipped" } as const
+
+type ProposalDecision = (typeof PROPOSAL_DECISION)[keyof typeof PROPOSAL_DECISION]
+
+const FOCUS_DECISION = { here: "here", moved: "moved" } as const
 
 export type ChatEvent =
   | ArrivalEvent
@@ -21,9 +66,9 @@ interface EventBase {
 }
 
 export interface ArrivalEvent extends EventBase {
-  readonly kind: "arrival"
-  readonly event: Exclude<CommunicationArrival["event"], "needs_you">
-  readonly source: "Task" | "Automation" | "Run"
+  readonly kind: typeof CHAT_EVENT.arrival
+  readonly event: Exclude<CommunicationArrival["event"], typeof ARRIVAL_EVENT.needsYou>
+  readonly source: ArrivalSource
   readonly name: string
   readonly line: string
   readonly subject: string
@@ -31,54 +76,59 @@ export interface ArrivalEvent extends EventBase {
 }
 
 interface WaitingEvent extends EventBase {
-  readonly kind: "waiting"
+  readonly kind: typeof CHAT_EVENT.waiting
   readonly asker: ApprovalAsker
   readonly what:
-    | { readonly kind: "question"; readonly prompt: string }
-    | { readonly kind: "approval"; readonly step: string }
+    | { readonly kind: typeof WAITING_ASK.question; readonly prompt: string }
+    | { readonly kind: typeof WAITING_ASK.approval; readonly step: string }
   readonly ref: string | undefined
 }
 
 interface AnswerEvent extends EventBase {
-  readonly kind: "answer"
+  readonly kind: typeof CHAT_EVENT.answer
   readonly prompt: string
-  readonly answer: { readonly kind: "said"; readonly text: string } | { readonly kind: "hold" }
+  readonly answer:
+    | { readonly kind: typeof OWNER_ANSWER.said; readonly text: string }
+    | { readonly kind: typeof OWNER_ANSWER.hold }
   readonly ref: string | undefined
 }
 
 export interface ApprovalEvent extends EventBase {
-  readonly kind: "approval"
+  readonly kind: typeof CHAT_EVENT.approval
   readonly decision:
-    | { readonly kind: "approved" }
-    | { readonly kind: "edited"; readonly changes: ReadonlyArray<string> }
-    | { readonly kind: "drafted" }
-    | { readonly kind: "rejected"; readonly reason: string | undefined }
+    | { readonly kind: typeof CHAT_APPROVAL_DECISION.approved }
+    | {
+        readonly kind: typeof CHAT_APPROVAL_DECISION.edited
+        readonly changes: ReadonlyArray<string>
+      }
+    | { readonly kind: typeof CHAT_APPROVAL_DECISION.drafted }
+    | { readonly kind: typeof CHAT_APPROVAL_DECISION.rejected; readonly reason: string | undefined }
   readonly step: string
   readonly asker: ApprovalAsker
   readonly ref: string | undefined
 }
 
 export interface ApprovalAsker {
-  readonly kind: "Task" | "automation" | "agent" | "chat"
+  readonly kind: ApprovalAskerKind
   readonly name: string
 }
 
 interface ProposalEvent extends EventBase {
-  readonly kind: "proposal"
-  readonly decision: "started" | "skipped"
+  readonly kind: typeof CHAT_EVENT.proposal
+  readonly decision: ProposalDecision
   readonly text: string
   readonly ref: string | undefined
 }
 
 interface FocusEvent extends EventBase {
-  readonly kind: "focus"
+  readonly kind: typeof CHAT_EVENT.focus
   readonly decision:
-    | { readonly kind: "here" }
-    | { readonly kind: "moved"; readonly name: string; readonly ref: string }
+    | { readonly kind: typeof FOCUS_DECISION.here }
+    | { readonly kind: typeof FOCUS_DECISION.moved; readonly name: string; readonly ref: string }
 }
 
 interface FailedTurnEvent extends EventBase {
-  readonly kind: "failed_turn"
+  readonly kind: typeof CHAT_EVENT.failedTurn
   readonly reason: string
   readonly runId: string
 }
@@ -126,55 +176,55 @@ const arrivalSummary = (arrival: {
 
 export const doorRef = (door: CommunicationArrival["door"], stableKey: string | null): string => {
   switch (door.kind) {
-    case "task":
-    case "artifact":
+    case COMMUNICATION_DOOR.task:
+    case COMMUNICATION_DOOR.artifact:
       return `task:${stableKey ?? door.item_id}`
-    case "automation":
+    case COMMUNICATION_DOOR.automation:
       return `automation:${door.automation_ref}`
-    case "session":
-    case "run":
-    case "automation_run":
+    case COMMUNICATION_DOOR.session:
+    case COMMUNICATION_DOOR.run:
+    case COMMUNICATION_DOOR.automationRun:
       return `session:${door.session_ref}`
   }
 }
 
 export const arrivalSource = (door: CommunicationArrival["door"]): ArrivalEvent["source"] => {
   switch (door.kind) {
-    case "task":
-    case "artifact":
-      return "Task"
-    case "automation":
-    case "automation_run":
-      return "Automation"
-    case "session":
-    case "run":
-      return "Run"
+    case COMMUNICATION_DOOR.task:
+    case COMMUNICATION_DOOR.artifact:
+      return ARRIVAL_SOURCE.task
+    case COMMUNICATION_DOOR.automation:
+    case COMMUNICATION_DOOR.automationRun:
+      return ARRIVAL_SOURCE.automation
+    case COMMUNICATION_DOOR.session:
+    case COMMUNICATION_DOOR.run:
+      return ARRIVAL_SOURCE.run
   }
 }
 
 const eventText = (event: ChatEvent): string => {
   switch (event.kind) {
-    case "arrival":
+    case CHAT_EVENT.arrival:
       return `${arrivalSummary(event)} (${event.ref})`
-    case "waiting":
+    case CHAT_EVENT.waiting:
       return `${event.asker.kind} "${clip(event.asker.name, NAME_CHARS)}" ${
-        event.what.kind === "question"
+        event.what.kind === WAITING_ASK.question
           ? `asked "${clip(event.what.prompt, WHAT_CHARS)}"`
           : `asks approval for ${event.what.step}`
       }${refSuffix(event.ref)}`
-    case "answer":
-      return event.answer.kind === "hold"
+    case CHAT_EVENT.answer:
+      return event.answer.kind === OWNER_ANSWER.hold
         ? `You put on hold · "${clip(event.prompt, QUOTE_CHARS)}"${refSuffix(event.ref)}`
         : `You answered · "${clip(event.prompt, QUOTE_CHARS)}" → "${clip(event.answer.text, WHAT_CHARS)}"${refSuffix(event.ref)}`
-    case "approval":
+    case CHAT_EVENT.approval:
       return approvalText(event)
-    case "proposal":
+    case CHAT_EVENT.proposal:
       return `You ${event.decision} a suggested Task · "${clip(event.text, QUOTE_CHARS)}"${refSuffix(event.ref)}`
-    case "focus":
-      return event.decision.kind === "here"
+    case CHAT_EVENT.focus:
+      return event.decision.kind === FOCUS_DECISION.here
         ? "You kept this thread here, so it goes on in this chat now"
         : `This thread moved to "${clip(event.decision.name, NAME_CHARS)}" (${event.decision.ref}) and goes on there`
-    case "failed_turn":
+    case CHAT_EVENT.failedTurn:
       return `Your reply failed; the user saw an error instead: ${clip(event.reason, WHAT_CHARS)} (run:${event.runId})`
   }
 }
@@ -182,13 +232,13 @@ const eventText = (event: ChatEvent): string => {
 const approvalText = (event: ApprovalEvent): string => {
   const subject = `${event.step} · for ${event.asker.kind} "${clip(event.asker.name, NAME_CHARS)}"`
   switch (event.decision.kind) {
-    case "approved":
+    case CHAT_APPROVAL_DECISION.approved:
       return `You approved · ${subject}${refSuffix(event.ref)}`
-    case "drafted":
+    case CHAT_APPROVAL_DECISION.drafted:
       return `You saved it as a draft instead of sending · ${subject}${refSuffix(event.ref)}`
-    case "edited":
+    case CHAT_APPROVAL_DECISION.edited:
       return `You approved with changes · ${subject} · ${clip(event.decision.changes.join("; "), WHAT_CHARS)}${refSuffix(event.ref)}`
-    case "rejected":
+    case CHAT_APPROVAL_DECISION.rejected:
       return `You rejected · ${subject}${
         event.decision.reason === undefined
           ? ""
@@ -218,11 +268,11 @@ const shownValue = (value: unknown): string => {
 }
 
 const urgent = (event: ChatEvent): boolean =>
-  event.kind === "waiting" ||
-  event.kind === "answer" ||
-  (event.kind === "approval" && event.decision.kind !== "approved") ||
-  event.kind === "failed_turn" ||
-  (event.kind === "arrival" && event.event === "failed")
+  event.kind === CHAT_EVENT.waiting ||
+  event.kind === CHAT_EVENT.answer ||
+  (event.kind === CHAT_EVENT.approval && event.decision.kind !== CHAT_APPROVAL_DECISION.approved) ||
+  event.kind === CHAT_EVENT.failedTurn ||
+  (event.kind === CHAT_EVENT.arrival && event.event === ARRIVAL_EVENT.failed)
 
 const byTime = (left: ChatEvent, right: ChatEvent): number =>
   left.at === right.at ? left.key.localeCompare(right.key) : left.at.localeCompare(right.at)
@@ -239,10 +289,12 @@ export const chatEventLines = (
   const maxLines = options.maxLines ?? CHAT_EVENTS_MAX_LINES
   const sorted = [...events].sort(byTime)
   const latestBySubject = new Map(
-    sorted.flatMap((event) => (event.kind === "arrival" ? [[event.subject, event.key]] : []))
+    sorted.flatMap((event) =>
+      event.kind === CHAT_EVENT.arrival ? [[event.subject, event.key]] : []
+    )
   )
   const current = sorted.filter(
-    (event) => event.kind !== "arrival" || latestBySubject.get(event.subject) === event.key
+    (event) => event.kind !== CHAT_EVENT.arrival || latestBySubject.get(event.subject) === event.key
   )
   const kept = keepWithin(current, maxLines)
   const keptKeys = new Set(kept.map((event) => event.key))

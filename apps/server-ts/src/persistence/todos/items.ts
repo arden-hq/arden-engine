@@ -95,10 +95,20 @@ export const planGaps = (items: ReadonlyArray<TodoListItem>): ReadonlyArray<stri
     return isOpenTodo(item) ? [`${item.content} (left open)`] : []
   })
 
+export const ORIGINAL_REQUEST = {
+  message: "message",
+  snapshot: "snapshot",
+  current: "current"
+} as const
+
 export type OriginalRequest =
-  | { readonly kind: "message"; readonly messageId: string; readonly text: string }
-  | { readonly kind: "snapshot"; readonly text: string }
-  | { readonly kind: "current"; readonly text: string }
+  | {
+      readonly kind: typeof ORIGINAL_REQUEST.message
+      readonly messageId: string
+      readonly text: string
+    }
+  | { readonly kind: typeof ORIGINAL_REQUEST.snapshot; readonly text: string }
+  | { readonly kind: typeof ORIGINAL_REQUEST.current; readonly text: string }
 
 export const originalRequest = (row: {
   readonly text: string
@@ -108,9 +118,14 @@ export const originalRequest = (row: {
   readonly origin_text: string | null
 }): OriginalRequest => {
   if (row.origin_message_id !== null && row.origin_text !== null && row.origin_text.trim() !== "")
-    return { kind: "message", messageId: row.origin_message_id, text: row.origin_text }
-  if (row.original_body !== null) return { kind: "snapshot", text: row.original_body }
-  return { kind: "current", text: taskWords(row) }
+    return {
+      kind: ORIGINAL_REQUEST.message,
+      messageId: row.origin_message_id,
+      text: row.origin_text
+    }
+  if (row.original_body !== null)
+    return { kind: ORIGINAL_REQUEST.snapshot, text: row.original_body }
+  return { kind: ORIGINAL_REQUEST.current, text: taskWords(row) }
 }
 
 export const taskWords = (row: { readonly text: string; readonly body: string | null }): string =>

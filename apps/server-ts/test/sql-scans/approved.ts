@@ -1,9 +1,3 @@
-/**
- * Statements allowed to read a growing table from start to end, each with
- * the reason that is acceptable. Keep this list short: the fix for a new
- * entry is almost always to start the query from a key or a short list.
- * `id` comes from the failure message of the scan check.
- */
 export interface ApprovedScan {
   readonly id: string
   readonly table: string

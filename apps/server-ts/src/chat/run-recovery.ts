@@ -3,7 +3,7 @@ import { Cause, Effect, Scope, Stream, type Semaphore } from "effect"
 import { ChatWriteStore, type ChatWriteResume } from "../persistence/chat/store.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { mapWriteError, type ChatMessageFailure } from "./message-errors.js"
-import type { TaskContinuationInput } from "./run-driver.js"
+import type { TaskContinuationInput } from "./run-driver-support.js"
 import { currentIso } from "../runtime/clock.js"
 
 const STRANDED_RUN_SWEEP_INTERVAL = "1 minute"

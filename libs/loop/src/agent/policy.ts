@@ -130,13 +130,8 @@ export const appendBudgetDenials = (
   policy: RunPolicy
 ): void => appendDenials(messages, calls, budgetDenialResult(reason, policy).content)
 
-/** Consecutive replies cut off at the output limit that the run continues past before it stops. */
 export const maxOutputLimitContinuations = 2
 
-/**
- * Continues a run whose reply the provider cut off at the output limit: calls the reply did not
- * finish are answered as not run, and one meta message asks the model to go on.
- */
 export const appendOutputLimitContinuation = (
   messages: ChatMessage[],
   calls: ReadonlyArray<ToolCall>

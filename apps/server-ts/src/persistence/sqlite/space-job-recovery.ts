@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import type { SpaceJobSql } from "./space-jobs.js"
+import type { SpaceJobSql } from "./space-job-types.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { taskMayWakeSql } from "./task-wake.js"

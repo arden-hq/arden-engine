@@ -1,29 +1,12 @@
 import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { backfills } from "../../src/persistence/sqlite/backfills/index.js"
+import { lateSteps } from "./full-size-database-late.js"
 
-/**
- * Fills an initialized Arden database to about the size of a five-month
- * owner database, in the same shape: a few hundred chats, thousands of
- * Automation forks, agents and channels, and the rows that hang off their
- * runs. Everything goes in with bulk SQL, with triggers and foreign keys on,
- * so the tables the triggers keep (session_sizes, row_counts, trace_trim_due,
- * session_revisions, message_turns, automation_delivery_runs, the search
- * change list) come out as the app would leave them.
- *
- * The file must already hold the current schema and the rows a first start
- * writes (start the server on it once); this only adds the history.
- */
-
-/** Real ids from the seeded rows, for calling routes with ids that exist. */
 export interface FullSizeIds {
-  /** A user chat with many runs. */
   readonly chat: string
   readonly chatRun: string
-  /** The user message that started `chatRun`: its turn id. */
   readonly chatTurn: string
   readonly chatToolCall: string
-  /** The chat an Automation with thousands of runs forks from. */
   readonly thread: string
   readonly fork: string
   readonly forkRun: string
@@ -31,31 +14,24 @@ export interface FullSizeIds {
   readonly agentRun: string
   readonly channel: string
   readonly space: string
-  /** The Automation with the most runs. */
   readonly busyAutomation: string
-  /** An Automation that runs in its own chat. */
   readonly freshAutomation: string
   readonly taskItem: string
 }
 
 const DAY = 86_400
-/** Days of history at scale 1. */
 const SPAN_DAYS = 150
-/** Open Tasks and open questions: what is waiting now does not grow with history. */
 const OPEN_TASKS = 120
 const OPEN_QUESTIONS = 25
 
-/** Message id suffix of the n-th message of a turn (m.n). */
 const MESSAGE_SUFFIX = `CASE m.n WHEN 0 THEN '-u' WHEN 1 THEN '-a1' WHEN 2 THEN '-t1' WHEN 3 THEN '-a3' WHEN 4 THEN '-t3' ELSE '-a2' END`
 
-/** Filler text of `length` characters, so rows are as wide as real ones. */
-const text = (length: number) =>
+const fillerText = (length: number) =>
   `substr(replace(hex(zeroblob(${Math.ceil(length / 14) + 1})), '0', 'checked item '), 1, ${length})`
 
 const pad = (width: number, expression: string) => `printf('%0${width}d', ${expression})`
 
 export interface SeedOptions {
-  /** 1 is about the owner's five-month database; 4 is four times the history. */
   readonly scale?: number
   readonly now?: number
 }
@@ -63,50 +39,41 @@ export interface SeedOptions {
 export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}): FullSizeIds => {
   const scale = options.scale ?? 1
   const now = options.now ?? Date.now()
-  // Scale stretches the history: the same rate of chats, runs and
-  // Automation runs over `scale` times as many days. What one chat holds,
-  // what is open now and what happened this week stay the same.
-  const size = (count: number) => Math.round(count * scale)
+  const growsWithHistory = (count: number) => Math.round(count * scale)
   const SPAN = SPAN_DAYS * scale
-  const USER_CHATS = size(250)
-  const USER_RUNS = size(9_000)
-  const FORK_RUNS = size(3_500)
-  const THREAD_RUNS = size(1_070)
-  const AGENTS = size(1_100)
-  const CHANNELS = size(190)
-  const CHANNEL_RUNS = size(1_330)
+  const USER_CHATS = growsWithHistory(250)
+  const USER_RUNS = growsWithHistory(9_000)
+  const FORK_RUNS = growsWithHistory(3_500)
+  const THREAD_RUNS = growsWithHistory(1_070)
+  const AGENTS = growsWithHistory(1_100)
+  const CHANNELS = growsWithHistory(190)
+  const CHANNEL_RUNS = growsWithHistory(1_330)
   const AUTOMATIONS = 12
-  // Three Automations hold most runs; the other nine share the rest.
-  const BIG_AUTOMATION_RUNS = size(10_500)
-  const TASK_AUTOMATION_RUNS = size(17_000)
-  const AUTOMATION_RUNS = size(20_000)
+  const BIG_AUTOMATION_RUNS = growsWithHistory(10_500)
+  const TASK_AUTOMATION_RUNS = growsWithHistory(17_000)
+  const AUTOMATION_RUNS = growsWithHistory(20_000)
   const SPACES = 20
-  const SPACE_TASKS = size(300)
-  const SPACE_TASK_EVENTS = size(2_000)
-  const QUESTIONS = size(450)
-  /** Space reviews of space-00: about one an hour, like the owner's reviewer. */
-  const SPACE_REVIEWS = size(3_500)
+  const SPACE_TASKS = growsWithHistory(300)
+  const SPACE_TASK_EVENTS = growsWithHistory(2_000)
+  const QUESTIONS = growsWithHistory(450)
+  const SPACE_REVIEWS = growsWithHistory(3_500)
 
   const FORK_FROM = USER_RUNS
   const THREAD_FROM = FORK_FROM + FORK_RUNS
   const AGENT_FROM = THREAD_FROM + THREAD_RUNS
   const CHANNEL_FROM = AGENT_FROM + AGENTS
   const RUNS = CHANNEL_FROM + CHANNEL_RUNS
-  // Automation runs from this index on fork a chat; older forks are gone.
   const FORK_AUTOMATION_FROM = BIG_AUTOMATION_RUNS - FORK_RUNS
-  // Automation runs from this index on ran in their own chat.
   const THREAD_AUTOMATION_FROM = TASK_AUTOMATION_RUNS - THREAD_RUNS
 
   const end = Math.floor(now / 1000) - 1_800
   const t0 = end - SPAN * DAY
   const span = end - t0
-  /** An ISO time `seconds` after the start of the history. */
   const at = (seconds: string) =>
     `strftime('%Y-%m-%dT%H:%M:%fZ', ${t0} + (${seconds}), 'unixepoch')`
   const runId = (idx: string) => `'run-' || ${pad(5, idx)}`
   const automationId = (task: string) => `'auto-' || ${pad(2, task)}`
   const threadId = (task: string) => `'thread-' || ${pad(2, task)}`
-  // An Automation run's outcome, spread evenly by a hash of its index.
   const outcome = (a: string) => `CASE
       WHEN (${a}) * 37 % 100 < 2 THEN 'failed'
       WHEN (${a}) * 37 % 100 = 2 THEN 'cancelled'
@@ -129,9 +96,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
       `INSERT INTO nums WITH RECURSIVE c(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM c WHERE n < 199999)
          SELECT n FROM c`,
 
-      // Every run, with the chat it ran in and its place in that chat.
-      // kind: user (a person's chat), fork (an Automation's fork of its chat),
-      // thread (an Automation run in its own chat), agent, channel.
       `CREATE TEMP TABLE runs (
          idx INTEGER PRIMARY KEY, run_id TEXT, kind TEXT, session_id TEXT, k INTEGER,
          first_k INTEGER, start_s INTEGER, a INTEGER, task INTEGER, status TEXT, outcome TEXT,
@@ -153,7 +117,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          n - ${THREAD_FROM} + ${THREAD_AUTOMATION_FROM},
          ${automationTask(`n - ${THREAD_FROM} + ${THREAD_AUTOMATION_FROM}`)}, NULL
        FROM nums WHERE n >= ${THREAD_FROM} AND n < ${AGENT_FROM}`,
-      // Each agent was started by a tool call of a user run.
       `INSERT INTO runs (idx, kind, session_id, k, first_k, start_s, a, task, parent_idx)
        SELECT n, 'agent', 'agent-' || ${pad(4, `n - ${AGENT_FROM}`)}, 0, 0,
          (n - ${AGENT_FROM}) * 8 * ${span} / ${USER_RUNS} + (n - ${AGENT_FROM}) * 8 * 7919 % 600 + 30,
@@ -172,13 +135,11 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          WHEN kind = 'agent' AND idx % 100 = 5 THEN 'error'
          ELSE 'completed' END`,
 
-      // Spaces and their Tasks.
       `INSERT INTO spaces (space_id, name, name_key, created_at, updated_at, archived_at)
        SELECT 'space-' || ${pad(2, "n")}, 'Space ' || n, 'space ' || n, ${at("n * 3600")},
          ${at(`${span} - n * 3600`)}, CASE WHEN n >= ${SPACES - 2} THEN ${at(`${span} - 86400`)} END
        FROM nums WHERE n < ${SPACES}`,
 
-      // Chats: a person's chats, one chat per Automation, forks, agents, channels.
       `INSERT INTO sessions (session_id, public_ref, started_at, last_activity, name, archived_at,
          session_type, space_id, chat_model, context_from_seq)
        SELECT 'chat-' || ${pad(4, "n")}, 'ref-chat-' || ${pad(4, "n")}, ${at(`n * 60`)}, ${at("n * 60")},
@@ -213,7 +174,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          ${at("n * 120")}, 'Channel ' || n, 'channel', 'claude-sonnet-4-5', 0
        FROM nums WHERE n < ${CHANNELS}`,
 
-      // The Automations: three fork their chat on every run and hold most runs.
       `INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, model, context_mode, triggers,
          enabled, created_at, last_run_at, next_run_at, last_result, thread_id, tool_scope, purpose,
          prompt_author)
@@ -226,7 +186,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          strftime('%Y-%m-%dT%H:%M:%fZ', ${end} + 1800 + 86400, 'unixepoch'), 'Nothing new.',
          ${threadId("n")}, 'read_only', 'user_automation', 'owner'
        FROM nums WHERE n < ${AUTOMATIONS}`,
-      // Automations 3 and on run in their own chat.
       `UPDATE scheduled_tasks SET context_mode = 'fresh' WHERE task_id >= ${automationId("3")}`,
 
       `INSERT INTO chat_runs (run_id, session_id, status, stop_reason, started_at, updated_at, ended_at,
@@ -253,15 +212,12 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
       `UPDATE chat_runs SET metadata_json = json_set(metadata_json,
          '$.accounted_usage', json_object('total', 30000, 'completion', 1200, 'cache_read', 20000, 'cache_write', 900))`,
       `UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.run_policy', json_object(
-           'budget_id', 'budget-' || CAST(substr(run_id, 5) AS INTEGER),
+           'budget_id', 'budget-' || (SELECT r.idx FROM runs AS r WHERE r.run_id = chat_runs.run_id),
            'execution', json_object('mode', 'inline', 'observe', json('false')),
            'capabilities', json_array('read_only'), 'auto_approve', json('false'),
            'google_accounts', NULL, 'space', NULL))
-       WHERE CAST(substr(run_id, 5) AS INTEGER) < ${size(9_700)}`,
+       WHERE (SELECT r.idx FROM runs AS r WHERE r.run_id = chat_runs.run_id) < ${growsWithHistory(9_700)}`,
 
-      // Six messages a turn: the ask, two tool calls with their results, the
-      // answer. Each Automation chat starts with three turns no run wrote, and
-      // every fork starts with copies of them.
       `CREATE TEMP TABLE turns (session_id TEXT, k INTEGER, prefix TEXT, start_s INTEGER, run_idx INTEGER,
          copied_from TEXT)`,
       `INSERT INTO turns SELECT session_id, k, run_id, start_s, idx, NULL FROM runs`,
@@ -284,10 +240,10 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
            CASE m.n WHEN 0 THEN 'user' WHEN 2 THEN 'tool' WHEN 4 THEN 'tool' ELSE 'assistant' END AS role,
            CASE m.n
              WHEN 0 THEN json_object('role', 'user', 'content', 'Look into item ' || t.prefix, 'turn_id', t.prefix || '-u')
-             WHEN 5 THEN json_object('role', 'assistant', 'content', 'Done with item ' || t.prefix || '. ' || ${text(500)},
+             WHEN 5 THEN json_object('role', 'assistant', 'content', 'Done with item ' || t.prefix || '. ' || ${fillerText(500)},
                'turn_id', t.prefix || '-u')
              WHEN 2 THEN json_object('role', 'tool', 'tool_call_id', 'call-' || COALESCE(t.run_idx, t.prefix) || '-0',
-               'content', 'Three results for item ' || t.prefix || ': ' || ${text(800)}, 'turn_id', t.prefix || '-u')
+               'content', 'Three results for item ' || t.prefix || ': ' || ${fillerText(800)}, 'turn_id', t.prefix || '-u')
              WHEN 4 THEN json_object('role', 'tool', 'tool_call_id', 'call-' || COALESCE(t.run_idx, t.prefix) || '-1',
                'content', 'One page about item ' || t.prefix, 'turn_id', t.prefix || '-u')
              ELSE json_object('role', 'assistant', 'content', NULL, 'turn_id', t.prefix || '-u',
@@ -296,7 +252,7 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
            END AS body,
            CASE WHEN m.n = 0 AND t.run_idx IS NOT NULL THEN 'client-' || t.prefix END AS client_id,
            ${at("t.start_s + m.n * 5")} AS created_at,
-           CASE m.n WHEN 0 THEN 'Look into item ' || t.prefix WHEN 5 THEN 'Done with item ' || t.prefix || '. ' || ${text(500)} END AS search_text
+           CASE m.n WHEN 0 THEN 'Look into item ' || t.prefix WHEN 5 THEN 'Done with item ' || t.prefix || '. ' || ${fillerText(500)} END AS search_text
          FROM turns AS t JOIN nums AS m ON m.n < 6)
        ORDER BY start_s, session_id, k, n`,
       `INSERT INTO session_turns (session_id, turn_id, turn_index, user_message_id, message_start_id,
@@ -312,7 +268,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
            WHERE m.session_id = sessions.session_id), last_activity)
        WHERE session_id IN (SELECT session_id FROM turns)`,
 
-      // About ten and a half tool calls a run; one run in forty used the browser.
       `INSERT INTO tool_calls (run_id, session_id, tool_call_id, tool_name, arguments_json, changes_state,
          status, result_json, started_at, ended_at, effect)
        SELECT r.run_id, r.session_id, 'call-' || r.idx || '-' || c.n,
@@ -324,13 +279,10 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
              WHEN 3 THEN 'web_fetch' WHEN 4 THEN 'space_task_update' WHEN 5 THEN 'report' ELSE 'web_search' END
          END,
          '{"query":"item"}', CASE WHEN (r.idx + c.n) % 7 = 1 THEN 1 ELSE 0 END, 'completed',
-         json_object('is_error', json('false'), 'content', ${text(600)}), ${at("r.start_s + 5 + c.n")}, ${at("r.start_s + 6 + c.n")},
+         json_object('is_error', json('false'), 'content', ${fillerText(600)}), ${at("r.start_s + 5 + c.n")}, ${at("r.start_s + 6 + c.n")},
          CASE WHEN (r.idx + c.n) % 7 = 1 THEN 'local_files' ELSE 'none' END
        FROM runs AS r JOIN nums AS c ON c.n < 1 + (r.idx * 13 + 5) % 20`,
 
-      // The Automations' runs: forks for the newest of the three big ones,
-      // a run in its own chat for the newest of the others, and older runs
-      // whose fork is gone. The last three thousand were started by a chat.
       `INSERT INTO automation_runs (id, task_id, automation_ref, origin, purpose, context_mode, claim_count,
          disposition, chat_run_id, chat_session_id, started_at, ended_at, status, result, error, outcome)
        SELECT a.n + 1, ${automationId(automationTask("a.n"))}, 'ref-auto-' || ${pad(2, automationTask("a.n"))},
@@ -345,7 +297,7 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          ${at(automationStart("a.n"))}, ${at(`${automationStart("a.n")} + 130`)},
          CASE o.outcome WHEN 'failed' THEN 'failed' WHEN 'cancelled' THEN 'cancelled'
            WHEN 'interrupted' THEN 'interrupted' ELSE 'completed' END,
-         CASE WHEN o.outcome IN ('finished', 'no_change', 'needs_you') THEN 'Checked. ' || ${text(1200)} END,
+         CASE WHEN o.outcome IN ('finished', 'no_change', 'needs_you') THEN 'Checked. ' || ${fillerText(1200)} END,
          CASE WHEN o.outcome = 'failed' THEN 'The model provider did not answer.' END,
          o.outcome
        FROM nums AS a
@@ -368,8 +320,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
            ELSE (a.n - ${TASK_AUTOMATION_RUNS + AGENTS + CHANNEL_RUNS}) * 15 END
        WHERE a.n >= ${TASK_AUTOMATION_RUNS} AND a.n < ${AUTOMATION_RUNS}`,
 
-      // The reviewer of space-00, with its runs over the whole history; the
-      // Space page counts today's. Off, so the timer jobs leave it alone.
       `INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers, enabled, created_at,
          purpose, owner_space_id, context_mode)
        VALUES ('space:space-00', 'ref-space-00', 'Space review', 'Review the Space.', '[]', 0, ${at("0")},
@@ -384,7 +334,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          CASE WHEN n % 5 = 0 THEN 'no_change' ELSE 'completed' END
        FROM nums WHERE n < ${SPACE_REVIEWS}`,
 
-      // How each Automation run, agent run and some chat runs ended.
       `INSERT INTO run_endings (run_id, purpose, status, detail, text, place, place_kind, occurred_at,
          shown, decided)
        SELECT r.run_id,
@@ -399,20 +348,18 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
        FROM runs AS r LEFT JOIN runs AS p ON p.idx = r.parent_idx
        WHERE r.kind IN ('fork', 'thread', 'agent') OR (r.kind = 'user' AND r.idx % 14 = 0)`,
 
-      // Reports the Automations delivered to their chat.
       `INSERT INTO automation_deliveries (delivery_id, task_id, delivered_at, subject, body, payload, status,
          created_at, destinations)
        SELECT printf('%064x', r.idx), ${automationId("r.task")}, ${at("r.start_s + 200")},
-         'Report ' || r.a, ${text(1500)},
+         'Report ' || r.a, ${fillerText(1500)},
          json_object('kind', 'result', 'sessionId', r.session_id,
            'context', json_object('origin', json_object('kind', 'automation',
              'automation_id', ${automationId("r.task")}, 'occurrence_id', 'occ-' || r.a), 'task', NULL),
            'runIds', json_array(r.run_id), 'questionId', NULL),
          'delivered', ${at("r.start_s + 190")}, json_array('chat:' || ${threadId("r.task")})
        FROM runs AS r WHERE r.kind = 'fork' AND r.status = 'completed'
-       ORDER BY r.idx DESC LIMIT ${size(2_500)}`,
+       ORDER BY r.idx DESC LIMIT ${growsWithHistory(2_500)}`,
 
-      // Model calls: six and a half a run.
       `INSERT INTO run_model_usage (run_id, sample_id, usage_json, admitted_at, responded_at)
        SELECT r.run_id, 's' || u.n,
          json_object('prompt', 4000 + u.n * 300, 'completion', 200 + r.idx % 300, 'total', 4200 + u.n * 300 + r.idx % 300,
@@ -420,7 +367,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          ${at("r.start_s + u.n * 4")}, ${at("r.start_s + u.n * 4 + 3")}
        FROM runs AS r JOIN nums AS u ON u.n < 1 + r.idx * 5 % 12`,
 
-      // Questions runs asked: most answered or closed long ago, a few open now.
       `CREATE TEMP TABLE questions AS
        SELECT 'question-' || r.idx AS question_id, r.run_id, r.session_id, 'call-' || r.idx || '-0' AS tool_call_id,
          r.start_s + 20 AS asked_s, CASE WHEN r.idx % 200 = 3 THEN 'closed' ELSE 'answered' END AS fate
@@ -443,7 +389,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
       `UPDATE run_questions SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', julianday(created_at, '+1 day'))
        WHERE question_id IN (SELECT question_id FROM questions WHERE fate = 'closed')`,
 
-      // The event journal: seven events a run, in the order they happened.
       `CREATE TEMP TABLE journal_rows AS
        SELECT r.session_id AS stream_id, (r.k - r.first_k) * 7 + e.n + 1 AS sequence,
          CASE e.n WHEN 0 THEN 'RUN_STARTED' WHEN 1 THEN 'TEXT_MESSAGE_START' WHEN 2 THEN 'TEXT_MESSAGE_CONTENT'
@@ -454,7 +399,7 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
              'turn_id', r.run_id || '-u')
            WHEN 1 THEN json_object('type', 'TEXT_MESSAGE_START', 'message_id', r.run_id || '-a2', 'record', json_object('kind', 'part', 'record_id', r.run_id || '-a2'))
            WHEN 2 THEN json_object('type', 'TEXT_MESSAGE_CONTENT', 'message_id', r.run_id || '-a2',
-             'delta', 'Done with item ' || r.run_id || '. ' || ${text(300)})
+             'delta', 'Done with item ' || r.run_id || '. ' || ${fillerText(300)})
            WHEN 3 THEN json_object('type', 'TEXT_MESSAGE_END', 'message_id', r.run_id || '-a2')
            WHEN 4 THEN json_object('type', 'TOOL_CALL_START', 'tool_call_id', 'call-' || r.idx || '-0',
              'tool_call_name', 'web_search')
@@ -463,8 +408,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          json_object('runId', r.run_id) AS attributes_json,
          r.start_s + e.n * 5 AS at_s
        FROM runs AS r JOIN nums AS e ON e.n < 7`,
-      // The lifecycle stream every screen follows: a change for each
-      // Automation run, and one for each question asked and each one settled.
       `CREATE TEMP TABLE lifecycle_rows AS
        SELECT 'entity_changed' AS event_type,
          json_object('type', 'entity_changed', 'kind', 'automation', 'id', ${automationId(automationTask("n"))}) AS data_json,
@@ -484,7 +427,6 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
       `INSERT INTO journal_streams (stream_id, head_sequence, retained_from_sequence)
        SELECT stream_id, MAX(sequence), 1 FROM journal_rows WHERE true GROUP BY stream_id
        ON CONFLICT(stream_id) DO UPDATE SET head_sequence = excluded.head_sequence`,
-      // The trigger listener has read the whole lifecycle stream.
       `INSERT OR REPLACE INTO automation_trigger_cursor (stream_id, after_sequence)
        SELECT stream_id, head_sequence FROM journal_streams WHERE stream_id = 'automation:events'`,
       `INSERT INTO journal_records (stream_id, sequence, event_type, data_json, attributes_json, created_at)
@@ -492,90 +434,23 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
        FROM journal_rows ORDER BY at_s, stream_id, sequence`,
       `INSERT INTO session_event_checkpoints (session_id, checkpoint_seq)
        SELECT stream_id, head_sequence FROM journal_streams WHERE stream_id IN (SELECT session_id FROM sessions)`,
-      // The weekly status trim has already walked everything older than a week.
       `INSERT OR REPLACE INTO journal_retention_cursors (name, after_rowid, stream_id, sequence)
        SELECT 'lifecycle_status', rowid, stream_id, sequence FROM journal_records
        WHERE rowid = (SELECT MAX(rowid) FROM journal_records
          WHERE created_at < strftime('%Y-%m-%dT%H:%M:%fZ', ${end} - 8 * 86400, 'unixepoch'))`,
 
-      `INSERT INTO space_tasks (item_id, space_id, stable_key, text, status, owner, runs_in, created_at,
-         updated_at, completed_at, created_by)
-       SELECT 'item-' || ${pad(5, "n")}, 'space-' || ${pad(2, `n % ${SPACES - 2}`)}, 'task-' || n,
-         'Follow up on item ' || n,
-         CASE WHEN n >= ${SPACE_TASKS - OPEN_TASKS} THEN 'open' WHEN n % 10 < 9 THEN 'done' ELSE 'cancelled' END,
-         CASE WHEN n % 3 = 0 THEN 'user' ELSE 'worker' END, 'background',
-         ${at(`n * ${span} / ${SPACE_TASKS}`)}, ${at(`n * ${span} / ${SPACE_TASKS} + 3600`)},
-         CASE WHEN n < ${SPACE_TASKS - OPEN_TASKS} THEN ${at(`n * ${span} / ${SPACE_TASKS} + 3600`)} END, 'owner'
-       FROM nums WHERE n < ${SPACE_TASKS}`,
-      `INSERT INTO space_task_events (space_id, item_id, event_type, summary, created_at)
-       SELECT t.space_id, t.item_id,
-         CASE e.n % 5 WHEN 0 THEN 'created' WHEN 1 THEN 'updated' WHEN 2 THEN 'scheduled'
-           WHEN 3 THEN 'comment' ELSE CASE WHEN t.status = 'done' THEN 'done' ELSE 'updated' END END,
-         'Step ' || e.n || ' on ' || t.item_id, ${at(`e.n * ${span} / ${SPACE_TASK_EVENTS}`)}
-       FROM nums AS e JOIN space_tasks AS t ON t.item_id = 'item-' || ${pad(5, `e.n % ${SPACE_TASKS}`)}
-       WHERE e.n < ${SPACE_TASK_EVENTS} ORDER BY e.n`,
-
-      `INSERT INTO usage_daily (day, space_id, origin, session_type, model_id, kind, total_tokens,
-         output_tokens, cache_read_tokens, cache_write_tokens, runs)
-       SELECT strftime('%Y-%m-%d', ${t0} + d.n * 86400, 'unixepoch'), '',
-         CASE WHEN c.n < 8 THEN 'user' ELSE 'automation' END,
-         CASE c.n % 3 WHEN 0 THEN 'chat' WHEN 1 THEN 'agent' ELSE 'channel' END,
-         CASE WHEN c.n % 2 = 0 THEN 'claude-sonnet-4-5' ELSE 'gpt-5' END,
-         CASE c.n % 5 WHEN 0 THEN 'chat' WHEN 1 THEN 'chat_title' WHEN 2 THEN 'compaction'
-           WHEN 3 THEN 'letter_subject' ELSE 'run_activity' END,
-         50000 + c.n * 1000, 3000, 40000, 2000, 5 + c.n
-       FROM nums AS d JOIN nums AS c ON c.n < 15 WHERE d.n < ${SPAN}`,
-
-      `INSERT INTO chat_idempotency_keys (session_id, client_id, request_hash, run_id, message_id, status,
-         created_at, updated_at)
-       SELECT session_id, 'client-' || run_id, 'hash-' || idx, run_id, run_id || '-u',
-         CASE status WHEN 'completed' THEN 'completed' WHEN 'error' THEN 'error' ELSE status END,
-         ${at("start_s")}, ${at("start_s + 40")}
-       FROM runs`,
-      `INSERT INTO execution_budgets (budget_id, generation, tokens_used, focus_session_id)
-       SELECT 'budget-' || idx, 0, 20000 + idx % 5000, session_id FROM runs WHERE idx < ${size(9_700)}`,
-      `INSERT INTO run_sidecars (run_id, session_id, updated_at)
-       SELECT run_id, session_id, ${at("start_s + 60")} FROM runs WHERE kind <> 'user' LIMIT ${size(5_100)}`,
-      `INSERT INTO tool_call_targets (run_id, tool_call_id, source, object_id, at, title, href)
-       SELECT run_id, tool_call_id, 'web', 'https://example.com/' || rowid, started_at, 'Page ' || rowid,
-         'https://example.com/' || rowid
-       FROM tool_calls WHERE tool_name = 'web_fetch' LIMIT ${size(4_900)}`,
-      `INSERT INTO approval_reviews (run_id, tool_call_id, session_id, tool_name, reviewed_at, rung, decision,
-         decided_by, verdict, risk, user_authorization, authorization_source, policy_category)
-       SELECT run_id, tool_call_id, session_id, tool_name, started_at, 'default', 'allow', 'outcome', 'allow',
-         'low', 'high', 'owner', 'none'
-       FROM tool_calls WHERE changes_state = 1 LIMIT ${size(4_200)}`,
-      `INSERT INTO letter_subjects (session_id, message_id, subject)
-       SELECT session_id, run_id || '-a2', 'Report on ' || run_id FROM runs
-       WHERE kind IN ('fork', 'thread', 'user') ORDER BY idx DESC LIMIT ${size(7_000)}`,
-      `INSERT INTO home_presence (client_id, sequence, last_seen_at, lease_until)
-       SELECT 'device-' || n, n, ${at(`n * ${span} / ${size(2_400)}`)}, ${at(`n * ${span} / ${size(2_400)} + 60`)}
-       FROM nums WHERE n < ${size(2_400)}`,
-      // Browser procedure learning is on, so its job looks at every run that used the browser.
-      `INSERT INTO browser_procedure_settings (singleton, enabled, since)
-       VALUES (1, 1, ${at("0")})
-       ON CONFLICT(singleton) DO UPDATE SET enabled = 1, since = excluded.since`,
-      // The hourly trim keeps only the answer of a fork nobody used for a
-      // week; on an old database every older fork is trimmed already.
-      `CREATE TEMP TABLE trimmed AS SELECT session_id, run_id FROM runs
-       WHERE kind = 'fork' AND start_s + 130 < ${span} - 7 * 86400 - 3600`,
-      `DELETE FROM session_messages WHERE session_id IN (SELECT session_id FROM trimmed)
-         AND message_id NOT IN (SELECT run_id || '-a2' FROM trimmed)`,
-      `UPDATE session_messages SET seq = 0 WHERE session_id IN (SELECT session_id FROM trimmed)`,
-      `DELETE FROM session_turns WHERE session_id IN (SELECT session_id FROM trimmed)`,
-      `DELETE FROM tool_calls WHERE session_id IN (SELECT session_id FROM trimmed)`,
-      `DELETE FROM chat_idempotency_keys WHERE session_id IN (SELECT session_id FROM trimmed)`,
-      `DELETE FROM run_sidecars WHERE session_id IN (SELECT session_id FROM trimmed)`,
-      `DELETE FROM trace_trim_due WHERE session_id IN (SELECT session_id FROM trimmed)`,
-      `UPDATE sessions SET context_generation = 1, active_message_count = 1, visible_message_count = 1,
-         metadata = json_set(metadata, '$.agent_trace_retained_at', last_activity,
-           '$.agent_trace_retained_run_id', (SELECT run_id FROM trimmed WHERE trimmed.session_id = sessions.session_id))
-       WHERE session_id IN (SELECT session_id FROM trimmed)`,
-      `DROP TABLE trimmed`,
-      // An old database has finished every backfill; the rows above are already in their final form.
-      `INSERT OR REPLACE INTO data_backfills (name, converted, started_at, updated_at, finished_at)
-       SELECT value, 0, ${at("0")}, ${at("0")}, ${at("0")}
-       FROM json_each('${JSON.stringify(backfills.map((backfill) => backfill.name))}')`,
+      ...lateSteps({
+        at,
+        pad,
+        t0,
+        span,
+        SPAN,
+        SPACES,
+        SPACE_TASKS,
+        SPACE_TASK_EVENTS,
+        OPEN_TASKS,
+        growsWithHistory
+      }),
       `DROP TABLE journal_rows`,
       `DROP TABLE questions`,
       `DROP TABLE turns`,
@@ -592,11 +467,7 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
     const broken = database.prepare("PRAGMA foreign_key_check").all()
     if (broken.length > 0)
       throw new Error(`Seeded rows break foreign keys: ${JSON.stringify(broken.slice(0, 5))}`)
-    // No ANALYZE: Arden never runs it, so the planner works without statistics
-    // here as it does on the owner's database.
     database.exec("COMMIT")
-    // The search index of an old database holds every message; the change
-    // list behind it is empty.
     database.prepare("ATTACH DATABASE ? AS search").run(join(dirname(filename), "search.sqlite"))
     database.exec("BEGIN IMMEDIATE")
     database.exec(`INSERT INTO search.session_messages_fts (rowid, search_text)

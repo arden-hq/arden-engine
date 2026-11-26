@@ -67,7 +67,6 @@ const save = Effect.fn("HandlerItem.save")(function* (
   return item
 })
 
-/** Where the item starts, the same each run that tries it again. */
 const streakItem = (data: HandlerItemData): string =>
   data.kind === "memory"
     ? JSON.stringify([data.batch.identity.sessionId, data.batch.identity.start])

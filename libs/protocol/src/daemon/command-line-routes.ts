@@ -1,37 +1,88 @@
-export type CommandLineRule =
-  | "open"
-  | "plain_new_chat"
-  | "own_chat_in_path"
-  | "own_run_in_path"
-  | "own_question_in_path"
-  | "own_chat_in_body"
-  | "own_run_in_body"
-  | "own_run_or_chat_in_body"
+export const COMMAND_LINE_RULE = {
+  open: "open",
+  plain_new_chat: "plain_new_chat",
+  own_chat_in_path: "own_chat_in_path",
+  own_run_in_path: "own_run_in_path",
+  own_question_in_path: "own_question_in_path",
+  own_chat_in_body: "own_chat_in_body",
+  own_run_in_body: "own_run_in_body",
+  own_run_or_chat_in_body: "own_run_or_chat_in_body"
+} as const
+
+export type CommandLineRule = (typeof COMMAND_LINE_RULE)[keyof typeof COMMAND_LINE_RULE]
+
+export const COMMAND_LINE_METHOD = { get: "GET", post: "POST", delete: "DELETE" } as const
+
+export type CommandLineMethod = (typeof COMMAND_LINE_METHOD)[keyof typeof COMMAND_LINE_METHOD]
 
 export interface CommandLineRoute {
-  readonly method: "GET" | "POST" | "DELETE"
+  readonly method: CommandLineMethod
   readonly path: string
   readonly rule: CommandLineRule
 }
 
 export const COMMAND_LINE_ROUTES: ReadonlyArray<CommandLineRoute> = [
-  { method: "GET", path: "/health", rule: "open" },
-  { method: "GET", path: "/spaces", rule: "open" },
-  { method: "GET", path: "/models", rule: "open" },
-  { method: "GET", path: "/tools", rule: "open" },
-  { method: "GET", path: "/sessions", rule: "open" },
-  { method: "POST", path: "/sessions", rule: "plain_new_chat" },
-  { method: "POST", path: "/sessions/:id/branch", rule: "own_chat_in_path" },
-  { method: "DELETE", path: "/sessions/:id", rule: "own_chat_in_path" },
-  { method: "DELETE", path: "/sessions/:id/permanent", rule: "own_chat_in_path" },
-  { method: "POST", path: "/chat/message", rule: "own_chat_in_body" },
-  { method: "GET", path: "/chat/events/:id", rule: "own_chat_in_path" },
-  { method: "GET", path: "/chat/runs/:id", rule: "own_run_in_path" },
-  { method: "GET", path: "/chat/runs/:id/events", rule: "own_run_in_path" },
-  { method: "POST", path: "/tools/result", rule: "own_run_in_body" },
-  { method: "POST", path: "/connections/result", rule: "own_run_in_body" },
-  { method: "POST", path: "/chat/questions/:id/answer", rule: "own_question_in_path" },
-  { method: "POST", path: "/cancel", rule: "own_run_or_chat_in_body" }
+  { method: COMMAND_LINE_METHOD.get, path: "/health", rule: COMMAND_LINE_RULE.open },
+  { method: COMMAND_LINE_METHOD.get, path: "/spaces", rule: COMMAND_LINE_RULE.open },
+  { method: COMMAND_LINE_METHOD.get, path: "/models", rule: COMMAND_LINE_RULE.open },
+  { method: COMMAND_LINE_METHOD.get, path: "/tools", rule: COMMAND_LINE_RULE.open },
+  { method: COMMAND_LINE_METHOD.get, path: "/sessions", rule: COMMAND_LINE_RULE.open },
+  { method: COMMAND_LINE_METHOD.post, path: "/sessions", rule: COMMAND_LINE_RULE.plain_new_chat },
+  {
+    method: COMMAND_LINE_METHOD.post,
+    path: "/sessions/:id/branch",
+    rule: COMMAND_LINE_RULE.own_chat_in_path
+  },
+  {
+    method: COMMAND_LINE_METHOD.delete,
+    path: "/sessions/:id",
+    rule: COMMAND_LINE_RULE.own_chat_in_path
+  },
+  {
+    method: COMMAND_LINE_METHOD.delete,
+    path: "/sessions/:id/permanent",
+    rule: COMMAND_LINE_RULE.own_chat_in_path
+  },
+  {
+    method: COMMAND_LINE_METHOD.post,
+    path: "/chat/message",
+    rule: COMMAND_LINE_RULE.own_chat_in_body
+  },
+  {
+    method: COMMAND_LINE_METHOD.get,
+    path: "/chat/events/:id",
+    rule: COMMAND_LINE_RULE.own_chat_in_path
+  },
+  {
+    method: COMMAND_LINE_METHOD.get,
+    path: "/chat/runs/:id",
+    rule: COMMAND_LINE_RULE.own_run_in_path
+  },
+  {
+    method: COMMAND_LINE_METHOD.get,
+    path: "/chat/runs/:id/events",
+    rule: COMMAND_LINE_RULE.own_run_in_path
+  },
+  {
+    method: COMMAND_LINE_METHOD.post,
+    path: "/tools/result",
+    rule: COMMAND_LINE_RULE.own_run_in_body
+  },
+  {
+    method: COMMAND_LINE_METHOD.post,
+    path: "/connections/result",
+    rule: COMMAND_LINE_RULE.own_run_in_body
+  },
+  {
+    method: COMMAND_LINE_METHOD.post,
+    path: "/chat/questions/:id/answer",
+    rule: COMMAND_LINE_RULE.own_question_in_path
+  },
+  {
+    method: COMMAND_LINE_METHOD.post,
+    path: "/cancel",
+    rule: COMMAND_LINE_RULE.own_run_or_chat_in_body
+  }
 ]
 
 export interface CommandLineMatch {

@@ -1,4 +1,9 @@
-import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
+import { SYSTEM_HANDLER } from "../automations/model.js"
+import { JOB_PURPOSE } from "../job-classification.js"
+import {
+  AUTOMATION_OCCURRENCE,
+  type AutomationTriggerContext
+} from "@arden-hq/protocol/automations"
 import { Clock, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
@@ -45,16 +50,18 @@ export const batchWindow = (job: {
   readonly purpose: string
   readonly handler: string | null
 }): BatchWindow | undefined => {
-  if (job.purpose === "space_review") return SPACE_REVIEW_WINDOW
-  if (job.handler === "home_letter") return HOME_WINDOW
+  if (job.purpose === JOB_PURPOSE.spaceReview) return SPACE_REVIEW_WINDOW
+  if (job.handler === SYSTEM_HANDLER.homeLetter) return HOME_WINDOW
   return undefined
 }
 
 const runsAtOnce = (source: AutomationQueueSource): boolean =>
-  source === "manual" || source === "scheduled"
+  source === AUTOMATION_OCCURRENCE.manual || source === AUTOMATION_OCCURRENCE.scheduled
 
 const firedByTrigger = (source: AutomationQueueSource): boolean =>
-  source === "event" || source === "idle" || source === "count"
+  source === AUTOMATION_OCCURRENCE.event ||
+  source === AUTOMATION_OCCURRENCE.idle ||
+  source === AUTOMATION_OCCURRENCE.count
 
 export const freshRow = (sql: SqlClient.SqlClient): Statement<Row> =>
   sql`claimed_at IS NULL AND attempt_count = 0
@@ -141,7 +148,7 @@ export const enqueue = Effect.fn("AutomationQueue.enqueue")(function* (
         NULL, 0, NULL, ${due}
       )`
   }
-  if (entry.source === "event") yield* capWaitingEvents(sql, entry)
+  if (entry.source === AUTOMATION_OCCURRENCE.event) yield* capWaitingEvents(sql, entry)
   if (window !== undefined && due !== null)
     yield* sql`UPDATE automation_event_queue SET next_attempt_at = ${due}
       WHERE task_id = ${entry.automationId} AND ${freshRow(sql)}
@@ -164,7 +171,7 @@ const capWaitingEvents = Effect.fn("AutomationQueue.capWaitingEvents")(function*
   entry: QueueEntry
 ) {
   const snapshot = entry.context.trigger_context_snapshot
-  if (snapshot?.source !== "event") return
+  if (snapshot?.source !== AUTOMATION_OCCURRENCE.event) return
   const type = snapshot.event_type
   if (runsAlone(type)) return
   const waiting = sql`task_id = ${entry.automationId} AND source = 'event' AND ${freshRow(sql)}
@@ -258,7 +265,7 @@ const mergedContext = (
   const causes = [before, entry.context.trigger_context_snapshot].flatMap(
     (trigger): ReadonlyArray<Exclude<AutomationTriggerContext, { source: "coalesced" }>> => {
       if (trigger === undefined) return []
-      return trigger.source === "coalesced" ? trigger.causes : [trigger]
+      return trigger.source === AUTOMATION_OCCURRENCE.coalesced ? trigger.causes : [trigger]
     }
   )
   const [first, ...rest] = causes
@@ -278,7 +285,7 @@ const mergedContext = (
 
 const queuedCause = (entry: QueueEntry) => {
   const snapshot = entry.context.trigger_context_snapshot
-  return snapshot?.source === "event"
+  return snapshot?.source === AUTOMATION_OCCURRENCE.event
     ? {
         eventType: snapshot.event_type,
         producedBy: producerAutomationId(snapshot.produced_by),

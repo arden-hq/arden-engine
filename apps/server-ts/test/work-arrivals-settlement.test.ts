@@ -28,7 +28,7 @@ const receipts = (sql: SqlClient.SqlClient, sessionId: string) =>
     readonly run_id: string | null
     readonly status: string
   }>`SELECT client_id, run_id, status FROM chat_idempotency_keys
-    WHERE session_id = ${sessionId} AND client_id LIKE 'arrival:%' ORDER BY created_at, client_id`
+    WHERE session_id = ${sessionId} AND client_id IN (SELECT message_id FROM automation_deliveries) ORDER BY created_at, client_id`
 
 const settled = (sessionId: string, destination: string) => ({
   status: "delivered",

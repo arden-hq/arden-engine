@@ -1,4 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { CONTEXT_COMPACTION_STATUS } from "@arden-hq/protocol/context"
 import { randomUUID } from "node:crypto"
 import { ModelCatalog } from "../models/catalog.js"
 import { ServerConfig } from "../config/service.js"
@@ -35,14 +36,14 @@ import {
 } from "../persistence/settings/store.js"
 
 export type ManualCompactionResult =
-  | { readonly status: "no_session"; readonly message: string }
+  | { readonly status: typeof CONTEXT_COMPACTION_STATUS.noSession; readonly message: string }
   | {
-      readonly status: "nothing_to_compact"
+      readonly status: typeof CONTEXT_COMPACTION_STATUS.nothingToCompact
       readonly message: string
       readonly messageCount: number
     }
   | {
-      readonly status: "compacted"
+      readonly status: typeof CONTEXT_COMPACTION_STATUS.compacted
       readonly message: string
       readonly beforeMessages: number
       readonly afterMessages: number
@@ -53,24 +54,25 @@ export interface AutomaticCompactionInput {
   readonly sessionId: string
   readonly runId: string
   readonly inputTokens: number | null
-  /** The provider refused the request as too long, so the token count is not trusted. */
   readonly overflow: boolean
   readonly pendingCallIds?: ReadonlySet<string>
   readonly signal: AbortSignal
 }
 
+export const CONTEXT_COMPACTION_FAILURE = {
+  invalid: "invalid",
+  notFound: "not_found",
+  conflict: "conflict",
+  unavailable: "unavailable",
+  provider: "provider",
+  storage: "storage"
+} as const
+
 export class ContextCompactionError extends Schema.TaggedError<ContextCompactionError>()(
   "ContextCompactionError",
   {
     operation: Schema.Literals(["manual", "automatic", "idle"] as const),
-    reason: Schema.Literals([
-      "invalid",
-      "not_found",
-      "conflict",
-      "unavailable",
-      "provider",
-      "storage"
-    ] as const),
+    reason: Schema.Literals(Object.values(CONTEXT_COMPACTION_FAILURE)),
     message: Schema.String,
     sessionId: Schema.optionalKey(Schema.NonEmptyString),
     runId: Schema.optionalKey(Schema.NonEmptyString),

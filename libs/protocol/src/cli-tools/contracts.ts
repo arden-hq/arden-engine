@@ -1,26 +1,35 @@
 import type { JsonRecord } from "../common/json.js"
 
-/**
- * Whether a detected tool looks signed in, from a harmless local status
- * command. "unknown" — the tool has no such command, or it did not answer.
- */
-export type CliToolSignIn = "signed_in" | "signed_out" | "unknown"
+export const CLI_TOOL_SIGN_IN = {
+  signedIn: "signed_in",
+  signedOut: "signed_out",
+  unknown: "unknown"
+} as const
 
-/** The Skill that teaches agents a tool, if one is there. */
+export type CliToolSignIn = (typeof CLI_TOOL_SIGN_IN)[keyof typeof CLI_TOOL_SIGN_IN]
+
+export const CLI_TOOL_SKILL = { builtIn: "built_in", installed: "installed", none: "none" } as const
+
 export type CliToolSkill =
-  | { readonly kind: "built_in"; readonly name: string }
-  | { readonly kind: "installed"; readonly name: string; readonly enabled: boolean }
-  | { readonly kind: "none" }
+  | { readonly kind: typeof CLI_TOOL_SKILL.builtIn; readonly name: string }
+  | {
+      readonly kind: typeof CLI_TOOL_SKILL.installed
+      readonly name: string
+      readonly enabled: boolean
+    }
+  | { readonly kind: typeof CLI_TOOL_SKILL.none }
 
 export const CLI_TOOL_VERSION = { reported: "reported", unreported: "unreported" } as const
 
 export type CliToolVersion =
-  | { readonly kind: "reported"; readonly text: string }
-  | { readonly kind: "unreported" }
+  | { readonly kind: typeof CLI_TOOL_VERSION.reported; readonly text: string }
+  | { readonly kind: typeof CLI_TOOL_VERSION.unreported }
+
+export const CLI_TOOL_LOGIN = { command: "command", none: "none" } as const
 
 export type CliToolLogin =
-  | { readonly kind: "command"; readonly command: string }
-  | { readonly kind: "none" }
+  | { readonly kind: typeof CLI_TOOL_LOGIN.command; readonly command: string }
+  | { readonly kind: typeof CLI_TOOL_LOGIN.none }
 
 export interface CliTool extends JsonRecord {
   readonly id: string
@@ -34,11 +43,9 @@ export interface CliTool extends JsonRecord {
   readonly skill: CliToolSkill
 }
 
-/**
- * Where the PATH came from. "login_shell" — the person's own shell, as their
- * terminal sees it; "process" — Arden's own environment, when the shell did not answer.
- */
-export type CliToolsPathSource = "login_shell" | "process"
+export const CLI_TOOLS_PATH_SOURCE = { loginShell: "login_shell", process: "process" } as const
+
+export type CliToolsPathSource = (typeof CLI_TOOLS_PATH_SOURCE)[keyof typeof CLI_TOOLS_PATH_SOURCE]
 
 export interface CliToolsReport extends JsonRecord {
   readonly tools: ReadonlyArray<CliTool>

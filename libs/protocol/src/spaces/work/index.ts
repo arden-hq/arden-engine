@@ -1,16 +1,15 @@
 import { decoderFor, makeEncoder, runBoundary } from "../../common/boundary.js"
+import type { SpaceWorkPageOptions, SpaceTask } from "./contracts.js"
 import type {
+  AcknowledgeTaskResultInput,
+  CreateChatTaskInput,
+  CreateLooseTaskInput,
   CreateSpaceTaskAttachmentInput,
   CreateSpaceTaskCommentInput,
-  NewTaskInput,
-  CreateLooseTaskInput,
-  CreateChatTaskInput,
-  SpaceWorkPageOptions,
-  SpaceTask,
-  TaskChange,
   MoveTaskToChatInput,
-  AcknowledgeTaskResultInput
-} from "./contracts.js"
+  NewTaskInput,
+  TaskChange
+} from "./input-contracts.js"
 import {
   WorkOkResponseSchema,
   SpaceWorkPageSchema,
@@ -44,9 +43,9 @@ import {
 } from "./routes.js"
 
 export * from "./contracts.js"
+export * from "./input-contracts.js"
 export * from "./words.js"
 
-/** Plain response decoders for the live Space Work routes. */
 export const workDecoders = {
   ok: decoderFor(WorkOkResponseSchema, "Invalid Work response"),
   task: decoderFor(SpaceTaskSchema, "Invalid Space task response"),
@@ -56,7 +55,6 @@ export const workDecoders = {
   page: decoderFor(SpaceWorkPageSchema, "Invalid Work page response")
 } as const
 
-/** Validate and serialize the strict work mutation bodies. */
 export const workRequests = {
   moveToChat: makeEncoder<MoveTaskToChatInput>(
     encodeMoveTaskToChatEffect,
@@ -99,7 +97,6 @@ export const workRequests = {
   }
 } as const
 
-/** Validated paths for global Work reads and Space-owned task operations. */
 export const workRoutes = {
   taskChat(itemId: string): string {
     return runBoundary(encodeTaskChatPathEffect(itemId), "Invalid Task chat route", "encode")
@@ -111,7 +108,6 @@ export const workRoutes = {
       "encode"
     )
   },
-  /** Where a chat starts the Task it works on in place. */
   chatTask(sessionId: string): string {
     return runBoundary(encodeChatTaskPathEffect(sessionId), "Invalid chat Task route", "encode")
   },
@@ -132,7 +128,6 @@ export const workRoutes = {
       "encode"
     )
   },
-  /** Where a Task without a Space is created: in a chat (`session_id`) or in none. */
   looseCollection(): string {
     return "/spaces/work"
   },

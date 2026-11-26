@@ -13,3 +13,4 @@ build/
 !.claude/skills/
 .*.node-gyp/
 .arden-tmp/
+.oxlintrc.ratchet-*.json

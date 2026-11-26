@@ -1,8 +1,16 @@
-/**
- * Runs `work` now and hands back its outcome as a promise: a value or a
- * resolved promise resolves, and a throw (synchronous or not) rejects. A
- * `.catch`/`.finally` chain on it then covers what a try block around
- * `await work()` covered, a throw before the first await included.
- */
 export const attempt = <T>(work: () => T | PromiseLike<T>): Promise<T> =>
   new Promise<T>((resolve) => resolve(work()))
+
+export const SETTLED = {
+  fulfilled: "fulfilled",
+  rejected: "rejected"
+} as const satisfies { readonly [Status in PromiseSettledResult<unknown>["status"]]: Status }
+
+export type SettledStatus = (typeof SETTLED)[keyof typeof SETTLED]
+
+export const isFulfilled = <T>(
+  result: PromiseSettledResult<T>
+): result is PromiseFulfilledResult<T> => result.status === SETTLED.fulfilled
+
+export const isRejected = <T>(result: PromiseSettledResult<T>): result is PromiseRejectedResult =>
+  result.status === SETTLED.rejected

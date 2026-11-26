@@ -1,21 +1,27 @@
 import type { CommunicationDoor } from "@arden-hq/protocol/chat"
+import { RECORD_TOLD_STATUS } from "@arden-hq/protocol"
+import { AUTOMATION_CONTEXT_MODE, type AutomationContextMode } from "@arden-hq/protocol/automations"
+import { PLACE_KIND } from "../runs/ending.js"
 import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { serializeOperationalCause } from "../../runtime/operational-events.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
-import { announceNotice } from "./notices.js"
+import { ENTITY_KIND, announceNotice, type EntityKind } from "./notices.js"
 import { taskDoor } from "./ending-arrival.js"
 import { entityWeight, tellChat } from "./owner-update.js"
 import { entityPlaces, type ChatPlace, type Place } from "./run-destination.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { failedRunStatusList, restartCutRunSql } from "./status-sets.js"
 
-const ENTITY_EVENTS = ["done", "paused", "failed", "posted"] as const
-export type EntityEventName = (typeof ENTITY_EVENTS)[number]
+export type EntityEventName =
+  | typeof RECORD_TOLD_STATUS.done
+  | typeof RECORD_TOLD_STATUS.paused
+  | typeof RECORD_TOLD_STATUS.failed
+  | typeof RECORD_TOLD_STATUS.posted
 
 interface EntityEvent {
   readonly key: string
-  readonly entity: "task" | "automation"
+  readonly entity: EntityKind
   readonly entityId: string
   readonly event: EntityEventName
   readonly runId: string | null
@@ -29,35 +35,38 @@ interface EntityEvent {
 const placeKind = (
   first: Place | undefined,
   ownSession: string | null
-): "own" | "chat" | "gone" => {
-  if (first === undefined || first.kind === "gone") return "gone"
-  return first.sessionId === ownSession ? "own" : "chat"
+): typeof PLACE_KIND.own | typeof PLACE_KIND.chat | typeof PLACE_KIND.gone => {
+  if (first === undefined || first.kind === PLACE_KIND.gone) return PLACE_KIND.gone
+  return first.sessionId === ownSession ? PLACE_KIND.own : PLACE_KIND.chat
 }
 
 export type EntityFact =
   | {
-      readonly entity: "task"
-      readonly event: "done"
+      readonly entity: typeof ENTITY_KIND.task
+      readonly event: typeof RECORD_TOLD_STATUS.done
       readonly result: string
       readonly recurring: boolean
     }
   | {
-      readonly entity: "task"
-      readonly event: "failed"
+      readonly entity: typeof ENTITY_KIND.task
+      readonly event: typeof RECORD_TOLD_STATUS.failed
       readonly text: string
       readonly retryPending: boolean
     }
-  | { readonly entity: "automation"; readonly event: "failed" | "paused" }
+  | {
+      readonly entity: typeof ENTITY_KIND.automation
+      readonly event: typeof RECORD_TOLD_STATUS.failed | typeof RECORD_TOLD_STATUS.paused
+    }
 
 const entityShown = (fact: EntityFact): boolean => {
   switch (fact.entity) {
-    case "automation":
+    case ENTITY_KIND.automation:
       return true
-    case "task":
+    case ENTITY_KIND.task:
       switch (fact.event) {
-        case "done":
+        case RECORD_TOLD_STATUS.done:
           return fact.result.trim() !== "" && !fact.recurring
-        case "failed":
+        case RECORD_TOLD_STATUS.failed:
           return fact.text.trim() !== "" && !fact.retryPending
       }
   }
@@ -92,9 +101,11 @@ const recordEntityEvent = Effect.fn("EntityEvents.record")(function* (
     ON CONFLICT(key) DO NOTHING RETURNING key`
   if (stored.length === 0) return
   yield* announceNotice(sql, sessionEvents, event.key)
-  if (kind === "own" || kind === "gone") return
+  if (kind === PLACE_KIND.own || kind === PLACE_KIND.gone) return
   yield* Effect.forEach(event.places, (place) =>
-    place.kind === "chat" ? draw(place, `entity:${event.key}:${place.sessionId}`) : Effect.void
+    place.kind === PLACE_KIND.chat
+      ? draw(place, `entity:${event.key}:${place.sessionId}`)
+      : Effect.void
   ).pipe(
     Effect.catch(
       (cause) =>
@@ -251,21 +262,21 @@ export const recordAutomationEvent = Effect.fn("EntityEvents.automation")(functi
     readonly automationId: string
     readonly attemptId: number
     readonly runId?: string | null
-    readonly event: "failed" | "paused"
+    readonly event: typeof RECORD_TOLD_STATUS.failed | typeof RECORD_TOLD_STATUS.paused
     readonly text: string
   }
 ) {
   const automation = (yield* sql<{
     readonly name: string
     readonly automation_ref: string
-    readonly context_mode: string
+    readonly context_mode: AutomationContextMode
   }>`SELECT name, automation_ref, context_mode FROM scheduled_tasks
     WHERE task_id = ${options.automationId}`)[0]
   if (automation === undefined) return
   const ended = (yield* sql<{ readonly ended_at: string | null }>`
     SELECT ended_at FROM automation_runs WHERE id = ${options.attemptId}`)[0]
   const at = ended?.ended_at ?? DateTime.formatIso(yield* DateTime.now)
-  if (options.event === "paused") {
+  if (options.event === RECORD_TOLD_STATUS.paused) {
     const payload: PausePayload = {
       kind: "automation_paused",
       attemptId: options.attemptId,
@@ -281,7 +292,9 @@ export const recordAutomationEvent = Effect.fn("EntityEvents.automation")(functi
   const places = yield* entityPlaces(sql, {
     kind: "automation",
     automationId: options.automationId,
-    ownChats: options.event === "paused" && automation.context_mode === "fresh"
+    ownChats:
+      options.event === RECORD_TOLD_STATUS.paused &&
+      automation.context_mode === AUTOMATION_CONTEXT_MODE.fresh
   })
   const door = {
     kind: "automation",

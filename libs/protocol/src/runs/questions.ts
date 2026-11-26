@@ -38,11 +38,20 @@ const uniqueIds = Schema.makeFilter((ids: ReadonlyArray<string>) =>
   new Set(ids).size === ids.length ? undefined : "choice ids must be unique"
 )
 
+export const RUN_QUESTION_ANSWER = {
+  text: "text",
+  choice: "choice",
+  choices: "choices",
+  hold: "hold",
+  dismiss: "dismiss",
+  wait: "wait"
+} as const
+
 export const RunQuestionAnswerSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("text"), text }),
-  Schema.Struct({ kind: Schema.Literal("choice"), choice_id: identity }),
+  Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_ANSWER.text), text }),
+  Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_ANSWER.choice), choice_id: identity }),
   Schema.Struct({
-    kind: Schema.Literal("choices"),
+    kind: Schema.Literal(RUN_QUESTION_ANSWER.choices),
     choice_ids: Schema.Array(identity).check(
       Schema.isMinLength(1),
       Schema.isMaxLength(6),
@@ -50,8 +59,8 @@ export const RunQuestionAnswerSchema = Schema.Union([
     ),
     typed: givenText(text)
   }),
-  Schema.Struct({ kind: Schema.Literal("hold") }),
-  Schema.Struct({ kind: Schema.Literal("dismiss") })
+  Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_ANSWER.hold) }),
+  Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_ANSWER.dismiss) })
 ])
 
 export const QUESTION_RESOLUTION = { unresolved: "unresolved", resolved: "resolved" } as const
@@ -66,21 +75,43 @@ const resolutionSchema = Schema.Union([
   })
 ])
 
-export const AnswerWithdrawalReasonSchema = Schema.Literals([
-  "execution_allowance_unavailable",
-  "destination_deleted",
-  "task_changed",
-  "space_policy_changed"
-])
+export const ANSWER_WITHDRAWAL_REASON = {
+  executionAllowanceUnavailable: "execution_allowance_unavailable",
+  destinationDeleted: "destination_deleted",
+  taskChanged: "task_changed",
+  spacePolicyChanged: "space_policy_changed"
+} as const
+
+export type AnswerWithdrawalReason =
+  (typeof ANSWER_WITHDRAWAL_REASON)[keyof typeof ANSWER_WITHDRAWAL_REASON]
+
+export const AnswerWithdrawalReasonSchema = Schema.Literals(Object.values(ANSWER_WITHDRAWAL_REASON))
+
+export const RUN_QUESTION_CONTINUATION = {
+  none: "none",
+  queued: "queued",
+  steering: "steering",
+  steered: "steered",
+  started: "started",
+  withdrawn: "withdrawn"
+} as const
 
 const continuationSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("none") }),
-  Schema.Struct({ kind: Schema.Literal("queued") }),
-  Schema.Struct({ kind: Schema.Literal("steering"), run_id: identity }),
-  Schema.Struct({ kind: Schema.Literal("steered"), run_id: identity, at: IsoDateTimeStringSchema }),
-  Schema.Struct({ kind: Schema.Literal("started"), run_id: identity, at: IsoDateTimeStringSchema }),
+  Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_CONTINUATION.none) }),
+  Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_CONTINUATION.queued) }),
+  Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_CONTINUATION.steering), run_id: identity }),
   Schema.Struct({
-    kind: Schema.Literal("withdrawn"),
+    kind: Schema.Literal(RUN_QUESTION_CONTINUATION.steered),
+    run_id: identity,
+    at: IsoDateTimeStringSchema
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(RUN_QUESTION_CONTINUATION.started),
+    run_id: identity,
+    at: IsoDateTimeStringSchema
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(RUN_QUESTION_CONTINUATION.withdrawn),
     reason: AnswerWithdrawalReasonSchema,
     at: IsoDateTimeStringSchema
   })
@@ -94,10 +125,12 @@ const optionalPart = <F extends Schema.Struct.Fields>(fields: F) =>
     Schema.Struct({ kind: Schema.Literal(QUESTION_PART.present), ...fields })
   ])
 
+export const RULE_SAVED_IN = { space: "space", system: "system", everywhere: "everywhere" } as const
+
 export const RuleSavedInSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("space"), name: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("system") }),
-  Schema.Struct({ kind: Schema.Literal("everywhere") })
+  Schema.Struct({ kind: Schema.Literal(RULE_SAVED_IN.space), name: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal(RULE_SAVED_IN.system) }),
+  Schema.Struct({ kind: Schema.Literal(RULE_SAVED_IN.everywhere) })
 ])
 export type RuleSavedIn = typeof RuleSavedInSchema.Type
 export const isRuleSavedIn = Schema.is(RuleSavedInSchema)
@@ -123,11 +156,27 @@ export const RUN_QUESTION_STATUS = {
   resolved: "resolved"
 } as const
 
+export type RunQuestionStatus = (typeof RUN_QUESTION_STATUS)[keyof typeof RUN_QUESTION_STATUS]
+
+export const RUN_QUESTION_TIMER_STATUS = {
+  pending: "pending",
+  elapsed: "elapsed",
+  cancelled: "cancelled"
+} as const
+
+export const FOCUS_CHOICE_OFFER = { offered: "offered", settled: "settled" } as const
+
+export const CONTRACT_PROPOSAL_CHANGE = {
+  add: "add",
+  replace: "replace",
+  remove: "remove"
+} as const
+
 const timerSchema = optionalPart({
   expires_at: IsoDateTimeStringSchema,
   seconds: Schema.Int.check(Schema.isGreaterThan(0)),
   fallback_choice_id: identity,
-  status: Schema.Literals(["pending", "elapsed", "cancelled"])
+  status: Schema.Literals(Object.values(RUN_QUESTION_TIMER_STATUS))
 })
 
 export const RunQuestionSchema = Schema.Struct({
@@ -138,24 +187,19 @@ export const RunQuestionSchema = Schema.Struct({
   destination_session_id: identity,
   context: RunContextSchema,
   content: RunQuestionContentSchema,
-  status: Schema.Literals([
-    RUN_QUESTION_STATUS.open,
-    RUN_QUESTION_STATUS.suspended,
-    RUN_QUESTION_STATUS.closed,
-    RUN_QUESTION_STATUS.resolved
-  ]),
+  status: Schema.Literals(Object.values(RUN_QUESTION_STATUS)),
   resolution: resolutionSchema,
   continuation: continuationSchema,
   focus_choice: optionalPart({
     space_id: identity,
     revision: NonNegativeIntSchema,
-    status: Schema.Literals(["offered", "settled"] as const)
+    status: Schema.Literals(Object.values(FOCUS_CHOICE_OFFER))
   }),
   permission_offer: RunQuestionPermissionOfferSchema,
   contract_proposal: optionalPart({
     item_id: identity,
     task: Schema.String,
-    change: Schema.Literals(["add", "replace", "remove"]),
+    change: Schema.Literals(Object.values(CONTRACT_PROPOSAL_CHANGE)),
     line: Schema.String
   }),
   source_title: optionalPart({ title: Schema.String }),
@@ -186,7 +230,10 @@ export const RunQuestionListSchema = Schema.Struct({
 })
 export const ResolveRunQuestionInputSchema = Schema.Struct({
   client_id: identity,
-  answer: Schema.Union([RunQuestionAnswerSchema, Schema.Struct({ kind: Schema.Literal("wait") })])
+  answer: Schema.Union([
+    RunQuestionAnswerSchema,
+    Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_ANSWER.wait) })
+  ])
 })
 
 type RunQuestionAnswer = typeof RunQuestionAnswerSchema.Type
@@ -213,18 +260,18 @@ export const answerSaid = (
     ...ids.filter((id) => !choices.some((choice) => choice.id === id))
   ]
   switch (answer.kind) {
-    case "text":
+    case RUN_QUESTION_ANSWER.text:
       return { chosen: [], typed: { kind: QUESTION_TEXT.given, text: answer.text.trim() } }
-    case "choice":
+    case RUN_QUESTION_ANSWER.choice:
       return { chosen: labelsOf([answer.choice_id]), typed: { kind: QUESTION_TEXT.none } }
-    case "choices":
+    case RUN_QUESTION_ANSWER.choices:
       return {
         chosen: labelsOf(answer.choice_ids),
         typed:
           answer.typed.kind === QUESTION_TEXT.none ? answer.typed : typedText(answer.typed.text)
       }
-    case "hold":
-    case "dismiss":
+    case RUN_QUESTION_ANSWER.hold:
+    case RUN_QUESTION_ANSWER.dismiss:
       return undefined
   }
 }

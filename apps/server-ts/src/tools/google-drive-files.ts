@@ -2,7 +2,7 @@ import { Schema } from "effect"
 
 import type { DriveUploadStore } from "../persistence/drive-uploads/store.js"
 import { defineGoogleTool, type GoogleGrantDescription } from "./google-tool-grant.js"
-import { parseFileRef } from "./google-drive.js"
+import { parseFileRef } from "./google-drive-support.js"
 import { readDriveFileMetadata } from "./google-drive-metadata.js"
 import { decodeGoogle, googleCall } from "./google-request.js"
 import { makeDriveDownloadTools } from "./google-drive-download.js"
@@ -48,11 +48,11 @@ const shareApproval = Schema.Struct({
   role: Schema.Literals(["reader", "writer"])
 })
 
-const SHARE_GRANT = {
+const SHARE_GRANT: GoogleGrantDescription = {
   grant: "drive_manage",
   what: "change Drive file access",
   note: "Google requires Drive management access to grant access to existing files. Only the person and role shown on this card will be changed."
-} as const satisfies GoogleGrantDescription
+}
 
 export const makeDriveFileTools = ({
   google,

@@ -1,20 +1,26 @@
 import { TaskRecordSchema } from "../work/task-record.js"
-import { type TaskCommentRecord, type TaskRecord } from "../work/task-record.js"
-import { countOf } from "@arden-hq/std/count"
+import { type TaskRecord } from "../work/task-record.js"
 import { captureMutationVersions } from "./mutation-links.js"
 import { readRecordedHistory } from "./recorded-history.js"
 import { freshRow } from "./automation-enqueue.js"
-import { readRunTaskContext, readTaskWorkerContext } from "./space-job-context.js"
 import { makeWorkExecution } from "./work-execution.js"
 import { makeWorkEvents } from "./work-events.js"
 import { assertRunTaskAuthority } from "./run-task-authority.js"
 import { assertCallPlan } from "./task-direction.js"
 import { TaskDirectionChanged } from "../work/task-direction.js"
 import { verifyTaskCompletion } from "./work-completion.js"
-import { makeFinishCheck, readTaskIntent } from "./task-plan.js"
+import { makeFinishCheck } from "./task-plan.js"
 import { readWorkState } from "./work-activity.js"
-import { isTaskUnfinished, type CreateSpaceTaskCommentInput } from "@arden-hq/protocol/spaces/work"
-import { decodeCreateSpaceTaskCommentInputEffect } from "@arden-hq/protocol/effect/spaces/work"
+import {
+  isTaskUnfinished,
+  SPACE_TASK_CREATED_BY,
+  SPACE_TASK_EVENT_TYPE,
+  SPACE_TASK_RUNS_IN,
+  TASK_STATUS,
+  type SpaceTaskActor
+} from "@arden-hq/protocol/spaces/work"
+import { STORE_REASON } from "../errors.js"
+import { RecordedHistoryError } from "../history.js"
 import {
   decodeTaskUpdateRequestEffect,
   decodeUpdateSpaceTaskPatchEffect,
@@ -24,9 +30,9 @@ import { DateTime, Effect, Schema } from "effect"
 import { taskJobId } from "../space-job-id.js"
 import { renameOwnedJob } from "./job-labels.js"
 import { WorkStore, WorkStoreError, type TaskAddress } from "../work/store.js"
-import { spaceChoices } from "../spaces/store.js"
 import { REVIEWED_TASK_FIELDS } from "../automations/space-review.js"
-import { makeSpaceJobSql, taskWaker } from "./space-jobs.js"
+import { makeSpaceJobSql } from "./space-jobs.js"
+import { taskWaker } from "./space-job-types.js"
 import {
   decodeWorkItem as decodeWorkItemWithSources,
   workItemColumns,
@@ -47,66 +53,26 @@ import { makeWorkPage } from "./work-page.js"
 import { makeWorkAttempts } from "./work-attempts.js"
 import { makeWorkQuestionSql } from "./work-questions.js"
 import { makeTaskContractSql } from "./task-contract.js"
-import { recordTell } from "./run-tell.js"
 import { makeWorkDeliverySql } from "./work-deliveries.js"
-import { decodeWorkComment, workError, type WorkCommentRow } from "./work-records.js"
+import { workError } from "./work-records.js"
 import { makeWorkSourceSql } from "./work-sources.js"
 import { makeWorkAttachments } from "./work-attachments.js"
 import { makeWorkVisibility } from "./work-visibility.js"
 import type { PersistenceDeps } from "./deps.js"
-import type { UnitOfWork } from "../unit-of-work.js"
 import { stampTaskState, taskStateWrite } from "../work/task-state.js"
-import { readWorkOwner } from "./automation-rows.js"
+import { makeWorkJobTarget } from "./work-job-target.js"
+import { makeTaskContextReads } from "./task-context-reads.js"
+import { makeTaskComments } from "./task-comments.js"
+import { makeTaskBlockLoop } from "./task-block-loop.js"
+import {
+  onlyScheduleChanged,
+  normalizeBlockState,
+  taskChanged,
+  taskChangeWords
+} from "./task-update-fields.js"
 
 const utcInstant = (value: string | null): string | null =>
   value === null ? null : new Date(value).toISOString()
-
-const summarizedTaskFields = [
-  "text",
-  "body",
-  "status",
-  "owner",
-  "runs_in",
-  "token_budget",
-  "blocked",
-  "waiting_on",
-  "due_at",
-  "next_attempt_at"
-] as const
-
-const mutableTaskFields = [...summarizedTaskFields, "completed_at"] as const
-
-const normalizeBlockState = (
-  current: Pick<TaskRecord, "blocked" | "waiting_on">,
-  patch: TaskPatch
-): Effect.Effect<Pick<TaskRecord, "blocked" | "waiting_on">, WorkStoreError> => {
-  if (!Object.hasOwn(patch, "blocked") && !Object.hasOwn(patch, "waiting_on")) {
-    return Effect.succeed({ blocked: current.blocked, waiting_on: current.waiting_on })
-  }
-
-  const blocked = patch.blocked ?? current.blocked
-  if (!blocked) {
-    if (
-      Object.hasOwn(patch, "waiting_on") &&
-      patch.waiting_on !== undefined &&
-      patch.waiting_on !== null
-    ) {
-      return Effect.fail(workError("invalid", "waiting_on is only meaningful on a blocked task"))
-    }
-    return Effect.succeed({ blocked: false, waiting_on: null })
-  }
-
-  const waitingOn = Object.hasOwn(patch, "waiting_on") ? patch.waiting_on : current.waiting_on
-  if (waitingOn === null || waitingOn === undefined) {
-    return Effect.fail(workError("invalid", "a blocked task must say what it waits on"))
-  }
-  return Effect.succeed({ blocked: true, waiting_on: waitingOn })
-}
-
-const BLOCK_STRIKE_LIMIT = 3
-
-const taskChanged = (current: TaskRecord, next: TaskRecord): boolean =>
-  mutableTaskFields.some((field) => current[field] !== next[field])
 
 export const makeWorkStore = ({
   writer,
@@ -140,51 +106,7 @@ export const makeWorkStore = ({
 
   const { taskEvent } = makeWorkEvents(sql, sessionEvents)
 
-  const rememberBlock = Effect.fn("SqliteWorkStore.rememberBlock")(function* (
-    itemId: string,
-    reason: string
-  ): Effect.fn.Return<number, WorkStoreError> {
-    const rows = yield* sql<Pick<WorkItemRow, "block_count">>`
-      UPDATE space_tasks
-      SET block_count = CASE WHEN last_block_reason IS ${reason} THEN block_count + 1 ELSE 1 END,
-          last_block_reason = ${reason}
-      WHERE item_id = ${itemId}
-      RETURNING block_count
-    `.pipe(
-      Effect.mapError((cause) =>
-        workError("storage", "Could not record the Space task block", cause)
-      )
-    )
-    const row = rows[0]
-    if (row === undefined) return yield* workError("not_found", "Space task not found")
-    return row.block_count
-  })
-
-  const forgetBlocks = (itemId: string): Effect.Effect<void, WorkStoreError> =>
-    sql`
-    UPDATE space_tasks
-    SET block_count = 0, last_block_reason = NULL
-    WHERE item_id = ${itemId}
-  `.pipe(
-      Effect.asVoid,
-      Effect.mapError((cause) =>
-        workError("storage", "Could not clear the Space task blocks", cause)
-      )
-    )
-
-  const breakBlockLoop = Effect.fn("SqliteWorkStore.breakBlockLoop")(function* (
-    spaceId: string | null,
-    itemId: string,
-    reason: string,
-    at: string
-  ): Effect.fn.Return<void, WorkStoreError, UnitOfWork> {
-    yield* taskEvent(spaceId, itemId, "block_loop", reason, at)
-    return yield* spaceJobs
-      .stopTask(itemId)
-      .pipe(
-        Effect.mapError((cause) => workError("storage", "Could not stop the Space task job", cause))
-      )
-  })
+  const blocks = makeTaskBlockLoop({ sql, taskEvent, spaceJobs })
 
   const { create, createFromChat, createInChat } = makeWorkCaptureSql({
     writer,
@@ -198,7 +120,7 @@ export const makeWorkStore = ({
     address: TaskAddress,
     expectedUpdatedAt: string,
     patch: TaskPatch,
-    actor: "user" | "worker",
+    actor: SpaceTaskActor,
     runId?: string,
     fromJob = false,
     toolCallId?: string
@@ -212,6 +134,7 @@ export const makeWorkStore = ({
       )
     )
     const expectedTimestamp = validRequest.expected_updated_at
+    const byWorker = actor === SPACE_TASK_CREATED_BY.worker
 
     return yield* writer
       .transact(
@@ -242,7 +165,7 @@ export const makeWorkStore = ({
             ? yield* assertRunTaskAuthority(sql, runId, row.item_id)
             : undefined
           if (runId && toolCallId) yield* assertCallPlan(sql, { runId, toolCallId })
-          const ownAttempt = runId ? attemptOf !== undefined : actor === "worker"
+          const ownAttempt = runId ? attemptOf !== undefined : byWorker
           const { continuation_context: currentContext, ...publicRow } = row
           const current = yield* decodeWorkItem(publicRow)
           const currentAt = yield* Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString)(
@@ -258,7 +181,7 @@ export const makeWorkStore = ({
 
           if (fromJob && validPatch.body !== undefined && attemptOf !== row.item_id)
             return yield* workError("conflict", "A run may change the body only of its own Task")
-          if (actor === "worker" && validPatch.token_budget !== undefined)
+          if (byWorker && validPatch.token_budget !== undefined)
             return yield* workError("invalid", "Only you change a Task's token budget")
           const resumed =
             validPatch.token_budget !== undefined &&
@@ -274,9 +197,9 @@ export const makeWorkStore = ({
             return yield* workError("invalid", "A completion result requires a new Done transition")
           }
           if (
-            actor === "worker" &&
+            byWorker &&
             statusChanged &&
-            status === "done" &&
+            status === TASK_STATUS.done &&
             !validPatch.completion_result
           ) {
             return yield* workError(
@@ -285,7 +208,7 @@ export const makeWorkStore = ({
             )
           }
           const completionResult =
-            actor === "worker" && statusChanged && status === "done"
+            byWorker && statusChanged && status === TASK_STATUS.done
               ? yield* verifyTaskCompletion({ sql, itemId: row.item_id, runId, patch: validPatch })
               : validPatch.completion_result
           const {
@@ -305,9 +228,9 @@ export const makeWorkStore = ({
           }
           const live = isTaskUnfinished(candidate.status)
           if (
-            candidate.runs_in === "chat" &&
+            candidate.runs_in === SPACE_TASK_RUNS_IN.chat &&
             live &&
-            (current.runs_in !== "chat" || current.status !== candidate.status)
+            (current.runs_in !== SPACE_TASK_RUNS_IN.chat || current.status !== candidate.status)
           ) {
             if (current.home_session_id === null)
               return yield* workError(
@@ -341,7 +264,7 @@ export const makeWorkStore = ({
           if (statePatch === null) context = null
           else if (stateSections !== undefined)
             context = stampTaskState(stateSections, { at: updatedAt, runId })
-          const finished = status === "done" || status === "cancelled"
+          const finished = !isTaskUnfinished(status)
           let completedAt = current.completed_at
           if (statusChanged) completedAt = finished ? updatedAt : null
 
@@ -349,9 +272,8 @@ export const makeWorkStore = ({
             blockState.blocked && (!current.blocked || blockState.waiting_on !== current.waiting_on)
               ? blockState.waiting_on
               : null
-          const strikes = blockReason === null ? 0 : yield* rememberBlock(row.item_id, blockReason)
-          const stopped = blockReason !== null && strikes >= BLOCK_STRIKE_LIMIT
-          if (statusChanged && status === "done") yield* forgetBlocks(row.item_id)
+          const stopped = blockReason !== null && (yield* blocks.strike(row.item_id, blockReason))
+          if (statusChanged && status === TASK_STATUS.done) yield* blocks.forget(row.item_id)
 
           const next = yield* Schema.decodeUnknownEffect(TaskRecordSchema)({
             ...candidate,
@@ -388,7 +310,8 @@ export const makeWorkStore = ({
           }
           if (
             current.token_budget !== next.token_budget ||
-            (next.runs_in === "chat" && current.runs_in !== "chat")
+            (next.runs_in === SPACE_TASK_RUNS_IN.chat &&
+              current.runs_in !== SPACE_TASK_RUNS_IN.chat)
           )
             yield* ensureTaskBudget(sql, updatedRow.item_id, next.token_budget)
           const spent = yield* stopSpentTasks(
@@ -397,12 +320,12 @@ export const makeWorkStore = ({
             updatedAt
           )
 
-          const onlyScheduleChanged = mutableTaskFields
-            .filter((field) => field !== "next_attempt_at")
-            .every((field) => current[field] === next[field])
-          const changeType = blockReason === null ? "updated" : "blocked"
-          const statusEvent = statusChanged && finished ? next.status : changeType
-          const eventType = onlyScheduleChanged ? "scheduled" : statusEvent
+          const changeType =
+            blockReason === null ? SPACE_TASK_EVENT_TYPE.updated : SPACE_TASK_EVENT_TYPE.blocked
+          const outcome = statusChanged && !isTaskUnfinished(next.status) ? next.status : changeType
+          const eventType = onlyScheduleChanged(current, next)
+            ? SPACE_TASK_EVENT_TYPE.scheduled
+            : outcome
           if (publicChanged)
             yield* taskEvent(
               updatedRow.space_id,
@@ -412,57 +335,25 @@ export const makeWorkStore = ({
                 (next.blocked && validPatch.block_reason !== undefined
                   ? validPatch.block_reason
                   : undefined) ??
-                summarizedTaskFields
-                  .filter((field) => current[field] !== next[field])
-                  .map((field) => {
-                    switch (field) {
-                      case "text":
-                        return `Renamed Task to ${next.text}.`
-                      case "body":
-                        return "Task details updated."
-                      case "status":
-                        return `Status changed to ${next.status}.`
-                      case "owner":
-                        return next.owner === "worker" ? "Assigned to Arden." : "Assigned to you."
-                      case "runs_in":
-                        return next.runs_in === "chat"
-                          ? "Arden works on it in its chat."
-                          : "Arden works on it in the background."
-                      case "token_budget":
-                        return next.token_budget === null
-                          ? "Token budget removed."
-                          : `Token budget set to ${countOf(next.token_budget, "token")}.`
-                      case "blocked":
-                        return next.blocked ? "Task blocked." : "Task unblocked."
-                      case "waiting_on":
-                        return next.waiting_on === null
-                          ? "Waiting cleared."
-                          : `Waiting on ${next.waiting_on}.`
-                      case "due_at":
-                        return next.due_at === null
-                          ? "Due date removed."
-                          : `Due date set to ${next.due_at}.`
-                      case "next_attempt_at":
-                        return next.next_attempt_at === null
-                          ? "Next check removed."
-                          : `Next check scheduled for ${next.next_attempt_at}.`
-                    }
-                  })
-                  .join(" "),
+                taskChangeWords(current, next),
               updatedAt,
               runId,
               completionResult === undefined ? "summary" : "result",
               validPatch.completion_result
             )
           if (stopped)
-            yield* breakBlockLoop(updatedRow.space_id, updatedRow.item_id, blockReason, updatedAt)
+            yield* blocks.breakLoop(updatedRow.space_id, updatedRow.item_id, blockReason, updatedAt)
           if (current.text !== next.text)
             yield* renameOwnedJob(sql, taskJobId(updatedRow.item_id), next.text)
 
-          if (status !== "open") {
-            const settling = actor === "worker" && statusChanged && finished ? runId : undefined
+          if (status !== TASK_STATUS.open) {
+            const settling = byWorker && statusChanged && finished ? runId : undefined
             yield* spaceJobs.stopTask(updatedRow.item_id, settling)
-          } else if (!ownAttempt || (current.runs_in === "chat" && next.runs_in === "background")) {
+          } else if (
+            !ownAttempt ||
+            (current.runs_in === SPACE_TASK_RUNS_IN.chat &&
+              next.runs_in === SPACE_TASK_RUNS_IN.background)
+          ) {
             const rescheduled = current.next_attempt_at !== next.next_attempt_at
             if (rescheduled && next.next_attempt_at !== null && next.next_attempt_at > updatedAt)
               yield* sql`DELETE FROM automation_event_queue
@@ -481,7 +372,7 @@ export const makeWorkStore = ({
 
           if (
             runId === undefined &&
-            actor === "user" &&
+            actor === SPACE_TASK_CREATED_BY.user &&
             REVIEWED_TASK_FIELDS.some((field) => row[field] !== updatedRow[field])
           )
             yield* spaceJobs.queueTaskChangedByHand(updatedRow.item_id, updatedAt)
@@ -516,7 +407,7 @@ export const makeWorkStore = ({
       address,
       expectedUpdatedAt,
       patch,
-      actor ?? (runId ? "worker" : "user"),
+      actor ?? (runId ? SPACE_TASK_CREATED_BY.worker : SPACE_TASK_CREATED_BY.user),
       runId,
       false,
       toolCallId
@@ -527,12 +418,12 @@ export const makeWorkStore = ({
       const task = yield* updateFor(
         address,
         expectedUpdatedAt,
-        { status: "cancelled" },
-        "user"
+        { status: TASK_STATUS.cancelled },
+        SPACE_TASK_CREATED_BY.user
       ).pipe(
         Effect.catchTag("TaskDirectionChanged", (error) => Effect.die(error)),
         Effect.catchTag("WorkStoreError", (error) => {
-          if (error.reason !== "conflict") return Effect.fail(error)
+          if (error.reason !== STORE_REASON.conflict) return Effect.fail(error)
           return resolveTaskItem(sql, address).pipe(
             Effect.flatMap(
               (itemId) => sql<WorkItemRow>`
@@ -557,141 +448,7 @@ export const makeWorkStore = ({
     }
   )
 
-  const commentFor = Effect.fn("SqliteWorkStore.commentFor")(function* (
-    address: TaskAddress,
-    input: CreateSpaceTaskCommentInput,
-    actor: "user" | "worker",
-    runId?: string,
-    toolCallId?: string
-  ): Effect.fn.Return<TaskCommentRecord, WorkStoreError | TaskDirectionChanged> {
-    const valid = yield* decodeCreateSpaceTaskCommentInputEffect(input).pipe(
-      Effect.mapError((cause) => workError("invalid", "Invalid Space task comment", cause))
-    )
-    const now = DateTime.formatIso(yield* DateTime.now)
-    return yield* writer
-      .transact(
-        Effect.gen(function* () {
-          const itemId = yield* resolveTaskItem(sql, address)
-          const tasks = yield* sql<Pick<WorkItemRow, "item_id" | "space_id">>`
-        SELECT item_id, space_id FROM space_tasks WHERE item_id = ${itemId}
-      `
-          const task = tasks[0]
-          if (task === undefined) return yield* workError("not_found", "Space task not found")
-          if (runId) yield* assertRunTaskAuthority(sql, runId, task.item_id)
-          if (runId && toolCallId) yield* assertCallPlan(sql, { runId, toolCallId })
-          const rows = yield* sql<WorkCommentRow>`
-        INSERT INTO space_task_comments (space_id, item_id, author, body, created_at, kind)
-        VALUES (${task.space_id}, ${task.item_id}, ${actor}, ${valid.body}, ${now}, 'note')
-        RETURNING comment_id, space_id, item_id, author, body, created_at, kind
-      `
-          const row = rows[0]
-          if (row === undefined)
-            return yield* workError("storage", "Space task comment insert returned no row")
-          return yield* decodeWorkComment(row)
-        })
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          cause instanceof WorkStoreError || cause instanceof TaskDirectionChanged
-            ? cause
-            : workError("storage", "Could not create Space task comment", cause)
-        )
-      )
-  })
-
-  const comment: WorkStore["Service"]["comment"] = (address, input, runId, toolCallId) =>
-    commentFor(address, input, runId ? "worker" : "user", runId, toolCallId)
-
-  const jobOrigin = Effect.fn("SqliteWorkStore.jobOrigin")(function* (
-    originAutomationId: string
-  ): Effect.fn.Return<
-    {
-      readonly spaceId: string | undefined
-      readonly stableKey: string | null
-      readonly itemId: string | null
-    },
-    WorkStoreError
-  > {
-    const storage = (cause: unknown) =>
-      workError("storage", "Could not resolve job ownership", cause)
-    const owner = yield* readWorkOwner(sql, originAutomationId).pipe(Effect.mapError(storage))
-    if (owner === undefined) return yield* workError("invalid", "This job cannot change Tasks")
-    switch (owner.kind) {
-      case "task": {
-        const items = yield* sql<{ readonly stable_key: string | null }>`
-          SELECT stable_key FROM space_tasks WHERE item_id = ${owner.itemId}
-        `.pipe(Effect.mapError(storage))
-        return {
-          spaceId: owner.spaceId ?? undefined,
-          stableKey: items[0]?.stable_key ?? null,
-          itemId: owner.itemId
-        }
-      }
-      case "space_review":
-        return { spaceId: owner.spaceId, stableKey: null, itemId: null }
-      case "automation": {
-        if (owner.purpose === "system")
-          return yield* workError("invalid", "This job cannot change Tasks")
-        const chats = yield* sql<{ readonly space_id: string | null }>`
-          SELECT space_id FROM sessions
-          WHERE session_id = ${owner.authored.chatId} AND archived_at IS NULL
-        `.pipe(Effect.mapError(storage))
-        return { spaceId: chats[0]?.space_id ?? undefined, stableKey: null, itemId: null }
-      }
-    }
-  })
-
-  const spaceChoiceWords = sql<{ readonly space_id: string; readonly name: string }>`
-    SELECT space_id, name FROM spaces WHERE archived_at IS NULL ORDER BY name, space_id
-  `.pipe(
-    Effect.map(spaceChoices),
-    Effect.mapError((cause) => workError("storage", "Could not list the Spaces", cause))
-  )
-
-  const jobSpace = Effect.fn("SqliteWorkStore.jobSpace")(function* (
-    origin: { readonly spaceId: string | undefined },
-    requestedSpaceId: string | undefined
-  ): Effect.fn.Return<string, WorkStoreError> {
-    const spaceId = requestedSpaceId ?? origin.spaceId
-    if (spaceId === undefined)
-      return yield* workError(
-        "invalid",
-        `This run's chat is in no Space, so name the Space for the Task. ${yield* spaceChoiceWords}`
-      )
-    if (requestedSpaceId === undefined) return spaceId
-    const active = yield* sql`
-      SELECT 1 FROM spaces WHERE space_id = ${requestedSpaceId} AND archived_at IS NULL
-    `.pipe(Effect.mapError((cause) => workError("storage", "Could not validate the Space", cause)))
-    if (active.length === 0)
-      return yield* workError(
-        "not_found",
-        `No active Space has id '${requestedSpaceId}'. ${yield* spaceChoiceWords}`
-      )
-    return spaceId
-  })
-
-  const jobTarget = Effect.fn("SqliteWorkStore.jobTarget")(function* (
-    originAutomationId: string,
-    key: string,
-    requestedSpaceId: string | undefined
-  ): Effect.fn.Return<TaskAddress, WorkStoreError> {
-    const origin = yield* jobOrigin(originAutomationId)
-    if (origin.stableKey !== null && origin.stableKey !== key) {
-      return yield* workError("invalid", "This job cannot mutate that Space task")
-    }
-    if (
-      origin.spaceId !== undefined &&
-      requestedSpaceId !== undefined &&
-      requestedSpaceId !== origin.spaceId
-    )
-      return yield* workError("invalid", "This job can change only Tasks on its own Space")
-    if (origin.itemId !== null) return { kind: "item", itemId: origin.itemId }
-    return {
-      kind: "key",
-      scope: { kind: "space", spaceId: yield* jobSpace(origin, requestedSpaceId) },
-      key
-    }
-  })
+  const jobTarget = makeWorkJobTarget(sql)
 
   const updateFromJob = Effect.fn("SqliteWorkStore.updateFromJob")(function* (
     originAutomationId: string,
@@ -703,20 +460,18 @@ export const makeWorkStore = ({
     toolCallId?: string
   ): Effect.fn.Return<TaskRecord, WorkStoreError | TaskDirectionChanged> {
     const target = yield* jobTarget(originAutomationId, key, requestedSpaceId)
-    return yield* updateFor(target, expectedUpdatedAt, patch, "worker", runId, true, toolCallId)
+    return yield* updateFor(
+      target,
+      expectedUpdatedAt,
+      patch,
+      SPACE_TASK_CREATED_BY.worker,
+      runId,
+      true,
+      toolCallId
+    )
   })
 
-  const commentFromJob = Effect.fn("SqliteWorkStore.commentFromJob")(function* (
-    originAutomationId: string,
-    key: string,
-    input: CreateSpaceTaskCommentInput,
-    requestedSpaceId?: string,
-    runId?: string,
-    toolCallId?: string
-  ): Effect.fn.Return<TaskCommentRecord, WorkStoreError | TaskDirectionChanged> {
-    const target = yield* jobTarget(originAutomationId, key, requestedSpaceId)
-    return yield* commentFor(target, input, "worker", runId, toolCallId)
-  })
+  const comments = makeTaskComments({ writer, jobTarget })
 
   const get: WorkStore["Service"]["get"] = (address) => readTask(sql, page, address)
 
@@ -729,28 +484,13 @@ export const makeWorkStore = ({
             cause instanceof WorkStoreError
               ? cause
               : workError(
-                  cause._tag === "RecordedHistoryError" ? cause.reason : "storage",
+                  cause instanceof RecordedHistoryError ? cause.reason : "storage",
                   "Could not read Task history",
                   cause
                 )
           )
         ),
-    continuationContext: (runId) =>
-      readRunTaskContext(sql, runId).pipe(
-        Effect.mapError((cause) => workError("storage", "Could not read Task continuation", cause))
-      ),
-    taskContext: (itemId) =>
-      readTaskWorkerContext(sql, itemId).pipe(
-        Effect.mapError((cause) => workError("storage", "Could not read Task context", cause))
-      ),
-    taskIntent: (itemId) =>
-      readTaskIntent(sql, itemId).pipe(
-        Effect.mapError((cause) => workError("storage", "Could not read the Task's request", cause))
-      ),
-    tell: (input) =>
-      writer
-        .transact(recordTell(sql, input))
-        .pipe(Effect.mapError((cause) => workError("storage", "Could not record the tell", cause))),
+    ...makeTaskContextReads({ writer }),
     execution: makeWorkExecution(sql),
     ...makeWorkVisibility({ writer }),
     attempts: makeWorkAttempts(sql),
@@ -767,11 +507,11 @@ export const makeWorkStore = ({
     update,
     ...makeInChatTaskStore({ writer, sessionEvents }),
     stop,
-    comment,
+    comment: comments.comment,
     inferenceReview,
     finishCheck: makeFinishCheck(sql),
     updateFromJob,
-    commentFromJob,
+    commentFromJob: comments.commentFromJob,
     ...makeWorkAttachments({ writer })
   })
 }

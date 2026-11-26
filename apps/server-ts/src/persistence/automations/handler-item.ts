@@ -4,20 +4,27 @@ import { JOB_RETRY_LADDER_MS } from "./retry-ladders.js"
 
 export const MAX_HANDLER_ITEM_ATTEMPTS = JOB_RETRY_LADDER_MS.length + 1
 
+const HANDLER_ITEM_KIND = { memory: "memory", daily: "daily", wiki: "wiki" } as const
+
+const HANDLER_ITEM_PHASE = { pending: "pending", settled: "settled" } as const
+
 export const HandlerItemInputSchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,
   name: Schema.NonEmptyString,
   instructions: Schema.NonEmptyString,
   data: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("memory"), batch: MemoryCaptureBatchSchema }),
     Schema.Struct({
-      kind: Schema.Literal("daily"),
+      kind: Schema.Literal(HANDLER_ITEM_KIND.memory),
+      batch: MemoryCaptureBatchSchema
+    }),
+    Schema.Struct({
+      kind: Schema.Literal(HANDLER_ITEM_KIND.daily),
       date: Schema.NonEmptyString,
       timezone: Schema.NonEmptyString,
       markdown: Schema.NonEmptyString
     }),
     Schema.Struct({
-      kind: Schema.Literal("wiki"),
+      kind: Schema.Literal(HANDLER_ITEM_KIND.wiki),
       processedHead: Schema.NullOr(Schema.NonEmptyString),
       sourceHead: Schema.NonEmptyString,
       markdown: Schema.NonEmptyString
@@ -48,12 +55,12 @@ const itemFields = {
 export const HandlerItemSchema = Schema.Union([
   Schema.Struct({
     ...itemFields,
-    phase: Schema.Literal("pending"),
+    phase: Schema.Literal(HANDLER_ITEM_PHASE.pending),
     runId: Schema.NullOr(Schema.NonEmptyString)
   }),
   Schema.Struct({
     ...itemFields,
-    phase: Schema.Literal("settled"),
+    phase: Schema.Literal(HANDLER_ITEM_PHASE.settled),
     runId: Schema.NonEmptyString,
     failure: Schema.NullOr(Schema.NonEmptyString)
   })

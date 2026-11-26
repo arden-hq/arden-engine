@@ -34,7 +34,6 @@ interface HistoryWalk {
   readonly tail: HistoryWalkNode | undefined
 }
 
-/** Repository-local, derived metadata. Returned revisions are always read and validated afresh. */
 export const makeHistoryQuery = (): {
   readonly prepare: (
     input: Pick<HistoryInput, "head" | "loadCommit">

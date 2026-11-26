@@ -2,7 +2,7 @@ import { makeAutomationEventDispatch } from "./automation-event-dispatch.js"
 import { makeAutomationEventFeeds, readTaskHistory } from "./automation-event-feeds.js"
 import { readOpenAsk } from "./automation-ask-feed.js"
 import { cooldownEnd } from "./automation-enqueue.js"
-import type { EventAutomationTrigger } from "@arden-hq/protocol/automations"
+import { TRIGGER_TYPE, type EventAutomationTrigger } from "@arden-hq/protocol/automations"
 import { readHeadSequence } from "@arden-hq/journal/effect"
 import { Clock, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -231,7 +231,7 @@ export const makeAutomationTriggerFeed = ({
       for (const row of rows) {
         for (const trigger of (yield* listenerTriggers(row)) ?? []) {
           if (
-            trigger.type === "event" &&
+            trigger.type === TRIGGER_TYPE.event &&
             listensFor({ pausedAt: row.paused_at, eventType: trigger.event_type })
           )
             events.push(trigger)

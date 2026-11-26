@@ -68,15 +68,10 @@ export const snippetWithFileNames = (marked: string, searchText: string): string
   return out
 }
 
-/** Code the chat draws as written: fenced blocks (``` or ~~~) and inline code spans. */
 const CODE = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/u
 const MARKDOWN_IMAGE = /!\[[^\]\n]*\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"\n]*")?\)/gu
 const MARKDOWN_LINK = /\[([^\]\n]*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"\n]*")?\)/gu
 
-/** The text a chat draws for a message: a Markdown link shows its label, not its
- * target, and an image shows no text. Code draws its source, so links in code stay
- * as written. The search index keeps the targets, so an agent can still find a
- * message by its URL. */
 export const visibleText = (text: string): string =>
   text
     .split(CODE)
@@ -87,9 +82,6 @@ export const visibleText = (text: string): string =>
 
 const WORD_CHAR = /[\p{L}\p{N}]/u
 
-/** `text` with each accented letter replaced by its base letter, one code unit for
- * one, so offsets still point into `text`. The index folds accents the same way
- * (unicode61 remove_diacritics 2). */
 const foldAccents = (text: string): string =>
   text
     .split("")
@@ -99,9 +91,6 @@ const foldAccents = (text: string): string =>
     })
     .join("")
 
-/** Where each word of `query` matches `text` the way the search index matches it:
- * a whole word, and the last word also the start of one; accents and case ignored.
- * Undefined when a word has no such place. */
 export const wordStartRanges = (
   text: string,
   query: string
@@ -117,16 +106,11 @@ export const wordStartRanges = (
   return perWord.flat().toSorted((a, b) => a[0] - b[0] || b[1] - a[1])
 }
 
-/** `text` with each match of every word of `query` between snippet marks, or
- * undefined when a word does not occur: the index matched a part the chat does not draw. */
 export const markWords = (text: string, query: string): string | undefined => {
   const ranges = wordStartRanges(text, query)
   return ranges === undefined ? undefined : markRanges(text, ranges)
 }
 
-/** `text` with every word a word of the FTS5 query `query` matches between
- * snippet marks, the whole word for a prefix (`stag*` marks "staging").
- * Operators, column filters and NEAR distances are not words. */
 export const markFtsQueryWords = (text: string, query: string): string => {
   const folded = foldAccents(text)
   const ranges = ftsQueryWords(foldAccents(query)).flatMap((term) =>
@@ -148,7 +132,6 @@ const wordEnd = (text: string, from: number): number => {
 
 interface IndexedWord {
   readonly word: string
-  /** The word may be the start of a longer one (`word*`). */
   readonly prefix: boolean
 }
 
@@ -159,8 +142,6 @@ const indexedWordRanges = (folded: string, { word, prefix }: IndexedWord) =>
   )
 
 const FTS_OPERATORS = new Set(["AND", "OR", "NOT", "NEAR"])
-/** A NEAR distance, a quoted phrase, or a bareword, each with a trailing `*`
- * (prefix) or `:` (column filter). */
 const FTS_TOKEN = /,\s*\d+|"((?:[^"]|"")*)"(\*?)|([\p{L}\p{N}_]+)(\*?)(:?)/gu
 const INDEX_WORD = /[\p{L}\p{N}]+/gu
 

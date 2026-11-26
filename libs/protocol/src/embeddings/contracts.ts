@@ -1,25 +1,48 @@
 import type { JsonRecord } from "../common/json.js"
 
-/** An embedding model Arden can run now. */
+export const EMBEDDING_STATE = {
+  off: "off",
+  unavailable: "unavailable",
+  done: "done",
+  indexing: "indexing",
+  paused: "paused",
+  failed: "failed"
+} as const
+
+export const EMBEDDING_MODEL_REF = { none: "none", model: "model" } as const
+
+export type EmbeddingIndexState = (typeof EMBEDDING_STATE)[keyof typeof EMBEDDING_STATE]
+
+export const EMBEDDING_INDEX_ROLE = { serving: "serving", building: "building" } as const
+
+export type EmbeddingIndexRole = (typeof EMBEDDING_INDEX_ROLE)[keyof typeof EMBEDDING_INDEX_ROLE]
+
+export const EMBEDDING_ETA = { estimating: "estimating", estimated: "estimated" } as const
+
+export const EMBEDDING_PHASE = { loading: "loading", pages: "pages" } as const
+
+export type EmbeddingPhase = (typeof EMBEDDING_PHASE)[keyof typeof EMBEDDING_PHASE]
+
+export const EMBEDDING_MODEL_CHOICE = { model: "model", off: "off" } as const
+
 export interface EmbeddingModelInfo extends JsonRecord {
   readonly modelId: string
   readonly dimensions: number
 }
 
-/** A vector index stored on this Mac and the bytes its vectors and chunk text take. */
 export interface EmbeddingStoredIndex extends JsonRecord {
   readonly modelId: string
-  readonly role: "serving" | "building"
+  readonly role: EmbeddingIndexRole
   readonly bytes: number
 }
 
 export type EmbeddingModelRef =
-  | { readonly kind: "none" }
-  | { readonly kind: "model"; readonly modelId: string }
+  | { readonly kind: typeof EMBEDDING_MODEL_REF.none }
+  | { readonly kind: typeof EMBEDDING_MODEL_REF.model; readonly modelId: string }
 
 export type EmbeddingEta =
-  | { readonly kind: "estimating" }
-  | { readonly kind: "estimated"; readonly seconds: number }
+  | { readonly kind: typeof EMBEDDING_ETA.estimating }
+  | { readonly kind: typeof EMBEDDING_ETA.estimated; readonly seconds: number }
 
 interface EmbeddingIndexCatalog extends JsonRecord {
   readonly models: ReadonlyArray<EmbeddingModelInfo>
@@ -33,35 +56,35 @@ interface EmbeddingIndexProgress extends EmbeddingIndexCatalog {
 }
 
 interface EmbeddingIndexOff extends EmbeddingIndexCatalog {
-  readonly state: "off"
+  readonly state: typeof EMBEDDING_STATE.off
   readonly kept: EmbeddingModelRef
 }
 
 interface EmbeddingIndexUnavailable extends EmbeddingIndexCatalog {
-  readonly state: "unavailable"
+  readonly state: typeof EMBEDDING_STATE.unavailable
   readonly modelId: string
 }
 
 interface EmbeddingIndexDone extends EmbeddingIndexProgress {
-  readonly state: "done"
+  readonly state: typeof EMBEDDING_STATE.done
 }
 
 interface EmbeddingIndexIndexing extends EmbeddingIndexProgress {
-  readonly state: "indexing"
+  readonly state: typeof EMBEDDING_STATE.indexing
   readonly previous: EmbeddingModelRef
   readonly startedAt: string
-  readonly phase: "loading" | "pages"
+  readonly phase: EmbeddingPhase
   readonly eta: EmbeddingEta
 }
 
 interface EmbeddingIndexPaused extends EmbeddingIndexProgress {
-  readonly state: "paused"
+  readonly state: typeof EMBEDDING_STATE.paused
   readonly previous: EmbeddingModelRef
   readonly startedAt: string
 }
 
 interface EmbeddingIndexFailed extends EmbeddingIndexProgress {
-  readonly state: "failed"
+  readonly state: typeof EMBEDDING_STATE.failed
   readonly previous: EmbeddingModelRef
   readonly error: string
 }
@@ -73,17 +96,6 @@ export type EmbeddingIndexStatus =
   | EmbeddingIndexIndexing
   | EmbeddingIndexPaused
   | EmbeddingIndexFailed
-
-export const EMBEDDING_STATE = {
-  off: "off",
-  unavailable: "unavailable",
-  done: "done",
-  indexing: "indexing",
-  paused: "paused",
-  failed: "failed"
-} as const
-
-export const EMBEDDING_MODEL_REF = { none: "none", model: "model" } as const
 
 export const isEmbeddingSearchStopped = (
   status: EmbeddingIndexStatus
@@ -110,7 +122,6 @@ export const embeddingSearchUsesModel = (
   }
 }
 
-/** Which model embeds the Wiki, or Off, keeping or deleting the current index. */
 export type EmbeddingModelChoice =
-  | { readonly kind: "model"; readonly modelId: string }
-  | { readonly kind: "off"; readonly keepIndex: boolean }
+  | { readonly kind: typeof EMBEDDING_MODEL_CHOICE.model; readonly modelId: string }
+  | { readonly kind: typeof EMBEDDING_MODEL_CHOICE.off; readonly keepIndex: boolean }

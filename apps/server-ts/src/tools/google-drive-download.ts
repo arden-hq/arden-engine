@@ -2,7 +2,7 @@ import { sha256Hex } from "@arden-hq/std/hash"
 import { Schema } from "effect"
 
 import { defineGoogleTool, type GoogleGrantDescription } from "./google-tool-grant.js"
-import { parseFileRef } from "./google-drive.js"
+import { parseFileRef } from "./google-drive-support.js"
 import { readDriveFileMetadata } from "./google-drive-metadata.js"
 import { googleCall } from "./google-request.js"
 import type { GoogleToolConnections } from "./google-accounts.js"
@@ -34,11 +34,11 @@ const ExportParametersSchema = Schema.Struct({
       "Format to export to. Docs: PDF, Word, plain text or HTML. Sheets: Excel, PDF, or CSV or TSV (first sheet only). Slides: PowerPoint, PDF or plain text."
   })
 })
-const READ_GRANT = {
+const READ_GRANT: GoogleGrantDescription = {
   grant: "drive_read",
   what: "read and download Drive files",
   note: "Approving asks Google for read-only access to Drive file contents. It does not allow edits or sharing."
-} as const satisfies GoogleGrantDescription
+}
 
 const exportExtension = (
   sourceMime: string,

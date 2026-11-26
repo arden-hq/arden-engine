@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import type { Automation, AutomationHistory, AutomationListResponse } from "./contracts.js"
+import { AUTOMATION_CHAT_CHOICE, AUTOMATION_WAITING_ON } from "./contracts.js"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../common/schema.js"
 import {
   AutomationHistorySchema,
@@ -14,9 +15,12 @@ export const AutomationOwnChatSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("chat"), session_id: Schema.NonEmptyString })
 ]).pipe(Schema.toTaggedUnion("kind"))
 
-const ownChatFields = { kind: Schema.Literal("own"), session_id: Schema.NonEmptyString }
+const ownChatFields = {
+  kind: Schema.Literal(AUTOMATION_CHAT_CHOICE.own),
+  session_id: Schema.NonEmptyString
+}
 const yourChatFields = {
-  kind: Schema.Literal("yours"),
+  kind: Schema.Literal(AUTOMATION_CHAT_CHOICE.yours),
   session_id: Schema.NonEmptyString,
   own_chat: AutomationOwnChatSchema
 }
@@ -64,7 +68,7 @@ export const AutomationActivitySchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("waiting"),
     since: IsoDateTimeStringSchema,
-    on: Schema.Literals(["approval", "connection"] as const)
+    on: Schema.Literals(Object.values(AUTOMATION_WAITING_ON))
   })
 ]).pipe(Schema.toTaggedUnion("kind"))
 

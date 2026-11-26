@@ -1,13 +1,19 @@
 import { syntheticOutputId } from "./output-id.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { clipLine } from "@arden-hq/std/text"
-import type {
-  AssistantOutputPart,
-  JsonValue,
-  MessageOrigin,
-  ToolCall
+import {
+  TOOL_EXECUTION,
+  toolCallPart,
+  type AssistantOutputPart,
+  type JsonValue,
+  type MessageOrigin,
+  type ToolCall
 } from "../../contracts/messages.js"
-import type { CompletionResponse, FinishReason, ModelStreamItem } from "../../contracts/provider.js"
+import {
+  FinishReason,
+  type CompletionResponse,
+  type ModelStreamItem
+} from "../../contracts/provider.js"
 import type { ToolSearch } from "../../contracts/tools.js"
 import { OpenAiCitationFilter, stripOpenAiCitations } from "./citations.js"
 import {
@@ -20,9 +26,15 @@ import { TERMINAL_RESPONSE_CODES } from "./errors.js"
 import {
   API,
   asRecord,
+  INCOMPLETE_REASON,
+  incompleteReason,
+  isResponseEventType,
+  ITEM_STATUS,
   messageItemText,
   normalizeOutputItem,
   PROVIDER_STATE_KEY,
+  RESPONSE_EVENT_TYPE,
+  RESPONSE_ITEM_TYPE,
   stringValue,
   WEB_SEARCH_TOOL_NAME,
   type OutputItem,
@@ -43,7 +55,7 @@ const hasOutputIndex = (value: unknown): value is number =>
 
 const toolCalls = (response: ResponseShape): ReadonlyArray<ToolCall> =>
   response.output.flatMap((item) =>
-    item.type === "function_call"
+    item.type === RESPONSE_ITEM_TYPE.functionCall
       ? [
           {
             id: item.call_id,
@@ -55,6 +67,9 @@ const toolCalls = (response: ResponseShape): ReadonlyArray<ToolCall> =>
       : []
   )
 
+const itemKey = (item: OutputItem): string =>
+  item.type === RESPONSE_ITEM_TYPE.functionCall ? item.call_id : item.id
+
 const reasoningItemText = (item: ReasoningOutputItem): string => {
   const content = item.content?.map((part) => part.text).filter((text) => text.length > 0) ?? []
   return (content.length > 0 ? content : item.summary.map((part) => part.text))
@@ -64,7 +79,7 @@ const reasoningItemText = (item: ReasoningOutputItem): string => {
 
 const rawResponseText = (response: ResponseShape): string | null => {
   const parts = response.output.flatMap((item) => {
-    if (item.type !== "message") return []
+    if (item.type !== RESPONSE_ITEM_TYPE.message) return []
     const text = messageItemText(item)
     return text.length === 0 ? [] : [text]
   })
@@ -78,7 +93,7 @@ const responseText = (response: ResponseShape): string | null => {
 
 const reasoningText = (response: ResponseShape): string | null => {
   const parts = response.output.flatMap((item) => {
-    if (item.type !== "reasoning") return []
+    if (item.type !== RESPONSE_ITEM_TYPE.reasoning) return []
     const text = reasoningItemText(item)
     return text.length === 0 ? [] : [text]
   })
@@ -89,7 +104,7 @@ const outputParts = (response: ResponseShape): ReadonlyArray<AssistantOutputPart
   const citationFilter = new OpenAiCitationFilter()
   const parts = response.output.flatMap((item): ReadonlyArray<AssistantOutputPart> => {
     switch (item.type) {
-      case "message": {
+      case RESPONSE_ITEM_TYPE.message: {
         const text = citationFilter.push(messageItemText(item))
         return text.length === 0
           ? []
@@ -101,15 +116,15 @@ const outputParts = (response: ResponseShape): ReadonlyArray<AssistantOutputPart
               }
             ]
       }
-      case "reasoning": {
+      case RESPONSE_ITEM_TYPE.reasoning: {
         const text = reasoningItemText(item)
         return text.length === 0 ? [] : [{ type: "reasoning", text }]
       }
-      case "function_call":
-        return [{ type: "tool_call", tool_call_id: item.call_id, execution: "runtime" }]
-      case "web_search_call":
-      case "tool_search_call":
-        return [{ type: "tool_call", tool_call_id: item.id, execution: "provider" }]
+      case RESPONSE_ITEM_TYPE.functionCall:
+        return [toolCallPart(item.call_id, TOOL_EXECUTION.runtime)]
+      case RESPONSE_ITEM_TYPE.webSearchCall:
+      case RESPONSE_ITEM_TYPE.toolSearchCall:
+        return [toolCallPart(item.id, TOOL_EXECUTION.provider)]
     }
   })
   citationFilter.finish()
@@ -144,7 +159,10 @@ const completion = (
       provider_state: { [PROVIDER_STATE_KEY]: replayItems(searches.items) },
       origin
     },
-    finish_reason: finishReason === "stop" && calls.length > 0 ? "tool_calls" : finishReason,
+    finish_reason:
+      finishReason === FinishReason.STOP && calls.length > 0
+        ? FinishReason.TOOL_CALLS
+        : finishReason,
     usage: {
       prompt_tokens: Math.max(0, (usage?.input_tokens ?? 0) - cacheReadTokens - cacheWriteTokens),
       completion_tokens: usage?.output_tokens ?? 0,
@@ -202,12 +220,6 @@ export const responseFailureMessage = (event: RawResponseEvent): string => {
   return message === undefined || message.length === 0 ? label : `${label}: ${message}`
 }
 
-/**
- * Maps one response's events. `providerId` names who serves this wire in the
- * origin stamp; the stamped model is the one the response reports, else the
- * requested one. This adapter replays its own `provider_state` whatever the
- * origin: whether OpenAI accepts encrypted reasoning across models is open.
- */
 export const makeEventMapper = ({
   requestedModel,
   toolSearch,
@@ -236,12 +248,17 @@ export const makeEventMapper = ({
       ? syntheticOutputId(value)
       : syntheticOutputId(`event-${fallbackSequence++}`)
 
+  const functionCallIndex = (outputIndexValue: unknown): number => {
+    const callId = functionCallsByIndex.get(outputIndex(outputIndexValue))
+    return items.findIndex(
+      (item) => item.type === RESPONSE_ITEM_TYPE.functionCall && item.call_id === callId
+    )
+  }
+
   const upsert = (item: OutputItem): void => {
-    const key = item.type === "function_call" ? item.call_id : item.id
+    const key = itemKey(item)
     const index = items.findIndex(
-      (candidate) =>
-        candidate.type === item.type &&
-        (candidate.type === "function_call" ? candidate.call_id : candidate.id) === key
+      (candidate) => candidate.type === item.type && itemKey(candidate) === key
     )
     if (index < 0) items.push(item)
     else items[index] = item
@@ -257,7 +274,10 @@ export const makeEventMapper = ({
     if (
       options.requireCompletedCalls === true &&
       (!Array.isArray(raw.output) || raw.output.length === 0) &&
-      items.some((item) => item.type === "function_call" && item.status !== "completed")
+      items.some(
+        (item) =>
+          item.type === RESPONSE_ITEM_TYPE.functionCall && item.status !== ITEM_STATUS.completed
+      )
     ) {
       throw new SemanticResponseError("OpenAI completed with an unfinished function call")
     }
@@ -295,7 +315,7 @@ export const makeEventMapper = ({
   const emittedItems = new Set<string>()
   const readyItems = (output: ReadonlyArray<OutputItem>): ReadonlyArray<ModelStreamItem> =>
     output.flatMap((item) => {
-      const key = item.type === "function_call" ? item.call_id : item.id
+      const key = itemKey(item)
       if (emittedItems.has(key)) return []
       emittedItems.add(key)
       return [
@@ -315,27 +335,31 @@ export const makeEventMapper = ({
   return (event: RawResponseEvent): ReadonlyArray<ModelStreamItem> => {
     const reported = stringValue(asRecord(event.response)?.model)
     if (reported !== null && reported.length > 0) answeredBy = reported
-    switch (event.type) {
-      case "response.output_text.delta":
-      case "response.refusal.delta": {
+    switch (isResponseEventType(event.type) ? event.type : undefined) {
+      case RESPONSE_EVENT_TYPE.outputTextDelta:
+      case RESPONSE_EVENT_TYPE.refusalDelta: {
         const delta = stringValue(event.delta)
         if (delta === null) throw new SemanticResponseError("OpenAI returned an invalid text delta")
         outputText += delta
         const visibleDelta = citationFilter.push(delta)
         return visibleDelta.length === 0 ? [] : [{ _tag: "TextDelta", content: visibleDelta }]
       }
-      case "response.reasoning_summary_text.delta":
-      case "response.reasoning_text.delta": {
+      case RESPONSE_EVENT_TYPE.reasoningSummaryTextDelta:
+      case RESPONSE_EVENT_TYPE.reasoningTextDelta: {
         const delta = stringValue(event.delta)
         if (delta === null)
           throw new SemanticResponseError("OpenAI returned an invalid reasoning delta")
         reasoning += delta
         return [{ _tag: "ReasoningDelta", content: delta }]
       }
-      case "response.output_item.added": {
+      case RESPONSE_EVENT_TYPE.outputItemAdded: {
         const item = normalizeOutputItem(event.item, fallbackItemId(event.output_index))
-        upsert(item.type === "function_call" ? { ...item, status: "in_progress" } : item)
-        if (item.type === "function_call") {
+        upsert(
+          item.type === RESPONSE_ITEM_TYPE.functionCall
+            ? { ...item, status: ITEM_STATUS.inProgress }
+            : item
+        )
+        if (item.type === RESPONSE_ITEM_TYPE.functionCall) {
           functionCallsByIndex.set(outputIndex(event.output_index), item.call_id)
           return [
             {
@@ -348,10 +372,10 @@ export const makeEventMapper = ({
             }
           ]
         }
-        if (item.type === "tool_search_call") {
+        if (item.type === RESPONSE_ITEM_TYPE.toolSearchCall) {
           return [{ _tag: "ProviderToolCall", call: pendingToolSearchCall(item) }]
         }
-        if (item.type === "web_search_call") {
+        if (item.type === RESPONSE_ITEM_TYPE.webSearchCall) {
           return [
             {
               _tag: "ProviderToolCall",
@@ -369,24 +393,21 @@ export const makeEventMapper = ({
         }
         return []
       }
-      case "response.output_item.done": {
+      case RESPONSE_EVENT_TYPE.outputItemDone: {
         const item = normalizeOutputItem(event.item, fallbackItemId(event.output_index))
         upsert(item)
-        if (item.type === "function_call") {
+        if (item.type === RESPONSE_ITEM_TYPE.functionCall) {
           functionCallsByIndex.set(outputIndex(event.output_index), item.call_id)
         }
         return readyItems([item])
       }
-      case "response.function_call_arguments.delta": {
+      case RESPONSE_EVENT_TYPE.functionCallArgumentsDelta: {
         const delta = stringValue(event.delta)
         if (delta === null)
           throw new SemanticResponseError("OpenAI returned invalid function arguments")
-        const callId = functionCallsByIndex.get(outputIndex(event.output_index))
-        const index = items.findIndex(
-          (item) => item.type === "function_call" && item.call_id === callId
-        )
+        const index = functionCallIndex(event.output_index)
         const item = items[index]
-        if (item?.type === "function_call") {
+        if (item?.type === RESPONSE_ITEM_TYPE.functionCall) {
           items[index] = { ...item, arguments: item.arguments + delta }
         }
         return [
@@ -398,17 +419,14 @@ export const makeEventMapper = ({
           }
         ]
       }
-      case "response.function_call_arguments.done": {
-        const callId = functionCallsByIndex.get(outputIndex(event.output_index))
-        const index = items.findIndex(
-          (item) => item.type === "function_call" && item.call_id === callId
-        )
+      case RESPONSE_EVENT_TYPE.functionCallArgumentsDone: {
+        const index = functionCallIndex(event.output_index)
         const item = items[index]
-        if (item?.type === "function_call") {
+        if (item?.type === RESPONSE_ITEM_TYPE.functionCall) {
           items[index] = {
             ...item,
             arguments: stringValue(event.arguments) ?? item.arguments,
-            status: "completed"
+            status: ITEM_STATUS.completed
           }
         }
         return [
@@ -421,7 +439,7 @@ export const makeEventMapper = ({
           }
         ]
       }
-      case "response.completed": {
+      case RESPONSE_EVENT_TYPE.completed: {
         citationFilter.finish()
         const response = terminal(event.response, { requireCompletedCalls: true })
         return [
@@ -432,17 +450,17 @@ export const makeEventMapper = ({
           }
         ]
       }
-      case "response.incomplete": {
+      case RESPONSE_EVENT_TYPE.incomplete: {
         const response = asRecord(event.response)
-        const details = asRecord(response?.incomplete_details)
-        const reason = details === null ? null : stringValue(details.reason)
-        if (reason === "max_output_tokens") {
+        const reason = incompleteReason(event)
+        if (reason === INCOMPLETE_REASON.maxOutputTokens) {
           citationFilter.finish()
           const snapshot = terminal(response)
           const completed = {
             ...snapshot,
             output: snapshot.output.filter(
-              (item) => item.type !== "function_call" || emittedItems.has(item.call_id)
+              (item) =>
+                item.type !== RESPONSE_ITEM_TYPE.functionCall || emittedItems.has(item.call_id)
             )
           }
           return [
@@ -450,7 +468,7 @@ export const makeEventMapper = ({
             completion(completed, requestedModel, "length", toolSearch, origin())
           ]
         }
-        if (reason === "content_filter") {
+        if (reason === INCOMPLETE_REASON.contentFilter) {
           citationFilter.finish()
           return [
             completion(terminal(response), requestedModel, "content_filter", toolSearch, origin())
@@ -458,14 +476,19 @@ export const makeEventMapper = ({
         }
         throw new SemanticResponseError("OpenAI returned an incomplete response")
       }
-      case "response.failed":
-      case "error": {
+      case RESPONSE_EVENT_TYPE.failed:
+      case RESPONSE_EVENT_TYPE.error: {
         const message = responseFailureMessage(event)
         const declared = TERMINAL_RESPONSE_CODES[responseCode(event) ?? ""]
         if (declared !== undefined) throw new SemanticResponseError(message, declared)
         throw new RetryableProviderError(message)
       }
-      default:
+      case RESPONSE_EVENT_TYPE.created:
+      case RESPONSE_EVENT_TYPE.done:
+      case RESPONSE_EVENT_TYPE.steerAccepted:
+      case RESPONSE_EVENT_TYPE.steerFailed:
+      case RESPONSE_EVENT_TYPE.steerPending:
+      case undefined:
         return []
     }
   }

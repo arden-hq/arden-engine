@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import {
   AcknowledgeTaskResultInputSchema,
   CreateSpaceTaskAttachmentInputSchema,
@@ -17,7 +17,7 @@ import {
 type EncodedText = Effect.Effect<string, Schema.SchemaError>
 type Decoded<S extends Schema.Decoder<unknown>> = Effect.Effect<S["Type"], Schema.SchemaError>
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 
 export const encodeMoveTaskToChatEffect = (value: unknown): EncodedText =>
   Schema.decodeUnknownEffect(MoveTaskToChatInputSchema)(value, strict).pipe(

@@ -1,4 +1,10 @@
-import type { WordsRuleReplaces } from "@arden-hq/protocol/permissions"
+import {
+  PERMISSION_PATH_ACCESS,
+  PERMISSION_RULE_DECISION,
+  PERMISSION_RULE_LIST,
+  PERMISSION_RULE_SUBJECT,
+  type WordsRuleReplaces
+} from "@arden-hq/protocol/permissions"
 import type { ToolApprovalOverride } from "@arden-hq/protocol/tools"
 import { Context, Effect, Schema } from "effect"
 import { storeErrorFields } from "../errors.js"
@@ -7,35 +13,37 @@ const Name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
 
 export const wordsRuleText = (text: string): string => text.replace(/\s+/gu, " ").trim()
 
+export const RULE_REMOVAL = "remove"
+
 export const RuleSubjectSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("tool"), tool: Name, server: Schema.NullOr(Name) }),
   Schema.Struct({
-    kind: Schema.Literal("site"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.tool),
+    tool: Name,
+    server: Schema.NullOr(Name)
+  }),
+  Schema.Struct({
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.site),
     tool: Name,
     origin: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
   }),
-  Schema.Struct({ kind: Schema.Literal("connector"), server: Name }),
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_SUBJECT.connector), server: Name }),
   Schema.Struct({
-    kind: Schema.Literal("command"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.command),
     executable: Schema.NonEmptyString,
     argumentPrefix: Schema.Array(Schema.NonEmptyString).check(Schema.isMaxLength(8))
   }),
-  Schema.Struct({ kind: Schema.Literal("host_commands") }),
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_SUBJECT.hostCommands) }),
   Schema.Struct({
-    kind: Schema.Literal("path"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.path),
     path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
-    access: Schema.Literals(["read", "change"])
+    access: Schema.Literals(Object.values(PERMISSION_PATH_ACCESS))
   }),
   Schema.Struct({
-    kind: Schema.Literal("words"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.words),
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000))
   }),
-  /**
-   * One saved key: "Always allow" on its card, in the run's Space. Matched by the key's id in
-   * the Vault, which a deleted key takes with it; the name is what the rule shows.
-   */
   Schema.Struct({
-    kind: Schema.Literal("vault_key"),
+    kind: Schema.Literal(PERMISSION_RULE_SUBJECT.vaultKey),
     name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
     keyId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
   })
@@ -43,14 +51,20 @@ export const RuleSubjectSchema = Schema.Union([
 export type RuleSubject = typeof RuleSubjectSchema.Type
 
 const RuleListSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("global") }),
-  Schema.Struct({ kind: Schema.Literal("space"), spaceId: Schema.NonEmptyString }),
-  Schema.Struct({ kind: Schema.Literal("system") })
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_LIST.global) }),
+  Schema.Struct({
+    kind: Schema.Literal(PERMISSION_RULE_LIST.space),
+    spaceId: Schema.NonEmptyString
+  }),
+  Schema.Struct({ kind: Schema.Literal(PERMISSION_RULE_LIST.system) })
 ])
 export type RuleList = typeof RuleListSchema.Type
 
-const RuleDecisionSchema = Schema.Literals(["allow", "ask", "never"])
+const RuleDecisionSchema = Schema.Literals(Object.values(PERMISSION_RULE_DECISION))
 export type RuleDecision = typeof RuleDecisionSchema.Type
+
+export const RULE_CHANGE = { ...PERMISSION_RULE_DECISION, remove: "remove" } as const
+export type RuleChange = (typeof RULE_CHANGE)[keyof typeof RULE_CHANGE]
 
 export const settingOfRule = (decision: RuleDecision): ToolApprovalOverride => {
   switch (decision) {
@@ -63,26 +77,31 @@ export const settingOfRule = (decision: RuleDecision): ToolApprovalOverride => {
   }
 }
 
-export const ruleOfSetting = (setting: ToolApprovalOverride): RuleDecision => {
-  switch (setting) {
-    case "approve":
-      return "allow"
-    case "ask":
-      return "ask"
-    case "deny":
-      return "never"
-  }
+const RULE_OF_SETTING: Readonly<Record<ToolApprovalOverride, RuleDecision>> = {
+  approve: PERMISSION_RULE_DECISION.allow,
+  ask: PERMISSION_RULE_DECISION.ask,
+  deny: PERMISSION_RULE_DECISION.never
 }
+
+export const ruleOfSetting = (setting: ToolApprovalOverride): RuleDecision =>
+  RULE_OF_SETTING[setting]
+
+export const RULE_SOURCE = {
+  card: "card",
+  offer: "offer",
+  settings: "settings",
+  migrated: "migrated"
+} as const
 
 const RuleSourceSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("card"),
+    kind: Schema.Literal(RULE_SOURCE.card),
     runId: Schema.NonEmptyString,
     toolCallId: Schema.NonEmptyString
   }),
-  Schema.Struct({ kind: Schema.Literal("offer"), questionId: Schema.NonEmptyString }),
-  Schema.Struct({ kind: Schema.Literal("settings") }),
-  Schema.Struct({ kind: Schema.Literal("migrated") })
+  Schema.Struct({ kind: Schema.Literal(RULE_SOURCE.offer), questionId: Schema.NonEmptyString }),
+  Schema.Struct({ kind: Schema.Literal(RULE_SOURCE.settings) }),
+  Schema.Struct({ kind: Schema.Literal(RULE_SOURCE.migrated) })
 ])
 export type RuleSource = typeof RuleSourceSchema.Type
 
@@ -137,7 +156,7 @@ export class PermissionRules extends Context.Service<
     readonly saveWords: (input: WordsInput) => Effect.Effect<PermissionRule, PermissionRulesError>
     readonly change: (input: {
       readonly ruleId: string
-      readonly decision: RuleDecision | "remove"
+      readonly decision: RuleChange
       readonly source: RuleSource
     }) => Effect.Effect<PermissionRule, PermissionRulesError>
   }

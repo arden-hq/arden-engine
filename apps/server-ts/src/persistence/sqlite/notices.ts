@@ -1,12 +1,23 @@
-import type { RecordToldStatus } from "@arden-hq/protocol"
+import { RECORD_TOLD_STATUS, type RecordToldStatus, type SessionType } from "@arden-hq/protocol"
+import { SESSION_TYPE } from "@arden-hq/protocol/effect/common"
 import { linkedAutomation, linkedChat, linkedTask } from "./event-links.js"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { failureNeedsOwner } from "./run-attention.js"
-import type { EndingStatus, PlaceKind, Purpose } from "../runs/ending.js"
+import {
+  ENDING_PURPOSE,
+  PLACE_KIND,
+  type EndingStatus,
+  type PlaceKind,
+  type EndingPurpose
+} from "../runs/ending.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
 import type { EntityEventName } from "./entity-events.js"
+
+export const ENTITY_KIND = { task: "task", automation: "automation" } as const
+
+export type EntityKind = (typeof ENTITY_KIND)[keyof typeof ENTITY_KIND]
 
 export interface Notice {
   readonly key: string
@@ -20,11 +31,11 @@ export interface Notice {
   readonly itemId: string | null
   readonly unread: boolean
   readonly occurredAt: string
-  readonly purpose: Purpose | null
+  readonly purpose: EndingPurpose | null
 }
 
 interface EndingFacts {
-  readonly purpose: Purpose
+  readonly purpose: EndingPurpose
   readonly status: EndingStatus
   readonly placeKind: PlaceKind
   readonly drawn: boolean
@@ -34,21 +45,21 @@ interface EndingFacts {
 }
 
 const endingShown = (facts: EndingFacts): boolean => {
-  if (facts.entityTold || facts.placeKind === "parent") return false
+  if (facts.entityTold || facts.placeKind === PLACE_KIND.parent) return false
   switch (facts.status) {
-    case "cancelled":
-    case "silent":
-    case "waiting":
+    case RECORD_TOLD_STATUS.cancelled:
+    case RECORD_TOLD_STATUS.silent:
+    case RECORD_TOLD_STATUS.waiting:
       return false
-    case "failed":
+    case RECORD_TOLD_STATUS.failed:
       return facts.drawn || facts.listed
-    case "blocked":
+    case RECORD_TOLD_STATUS.blocked:
       return facts.drawn
-    case "finished":
+    case RECORD_TOLD_STATUS.finished:
       return (
         facts.drawn ||
-        (facts.placeKind === "own" &&
-          ((facts.purpose === "chat" && facts.primaryChat) ||
+        (facts.placeKind === PLACE_KIND.own &&
+          ((facts.purpose === ENDING_PURPOSE.chat && facts.primaryChat) ||
             isUserAutomationPurpose(facts.purpose)))
       )
   }
@@ -56,7 +67,7 @@ const endingShown = (facts: EndingFacts): boolean => {
 
 interface EndingRow {
   readonly run_id: string
-  readonly purpose: Purpose
+  readonly purpose: EndingPurpose
   readonly status: EndingStatus
   readonly text: string
   readonly place: string | null
@@ -65,7 +76,7 @@ interface EndingRow {
   readonly shown: number
   readonly own_session: string
   readonly own_name: string | null
-  readonly own_type: string | null
+  readonly own_type: SessionType | null
   readonly own_parent: string | null
   readonly own_unread: number
   readonly place_unread: number | null
@@ -106,11 +117,11 @@ const noticeOfEnding = (row: EndingRow): Notice => {
     status: row.status,
     placeKind: row.place_kind,
     drawn: row.shown === 1,
-    primaryChat: row.own_type === "chat" && row.own_parent === null,
+    primaryChat: row.own_type === SESSION_TYPE.chat && row.own_parent === null,
     listed: row.listed === 1,
     entityTold: row.entity_told === 1
   })
-  const placed = row.place_kind === "chat" && row.place !== null
+  const placed = row.place_kind === PLACE_KIND.chat && row.place !== null
   return {
     key: `ending:${row.run_id}`,
     record: "ending",
@@ -129,7 +140,7 @@ const noticeOfEnding = (row: EndingRow): Notice => {
 
 interface EntityRow {
   readonly key: string
-  readonly entity: "task" | "automation"
+  readonly entity: EntityKind
   readonly entity_id: string
   readonly event: EntityEventName
   readonly text: string
@@ -153,8 +164,8 @@ const entityRows = (sql: SqlClient.SqlClient, filter: Statement.Fragment) =>
     WHERE ${filter}`
 
 const entityTitle = (row: EntityRow): string => {
-  if (row.event === "posted") return row.place_space_name ?? ""
-  return (row.entity === "task" ? row.task_name : row.automation_name) ?? ""
+  if (row.event === RECORD_TOLD_STATUS.posted) return row.place_space_name ?? ""
+  return (row.entity === ENTITY_KIND.task ? row.task_name : row.automation_name) ?? ""
 }
 
 const noticeOfEntity = (row: EntityRow): Notice => ({
@@ -165,8 +176,8 @@ const noticeOfEntity = (row: EntityRow): Notice => ({
   title: entityTitle(row),
   text: row.text,
   chatSessionId: row.place,
-  automationId: row.entity === "automation" ? row.entity_id : null,
-  itemId: row.entity === "task" ? row.entity_id : null,
+  automationId: row.entity === ENTITY_KIND.automation ? row.entity_id : null,
+  itemId: row.entity === ENTITY_KIND.task ? row.entity_id : null,
   unread: row.place_unread === null || row.place_unread === 1,
   occurredAt: row.occurred_at,
   purpose: null

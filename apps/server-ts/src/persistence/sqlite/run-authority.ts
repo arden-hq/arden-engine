@@ -6,14 +6,16 @@ import type { SqlClient } from "effect/unstable/sql"
 import {
   RunAuthoritySchema,
   deriveAuthority,
-  handedAuthority,
-  narrow,
-  orphanAgentAuthority,
   unrecordedAuthority,
-  type AgentRequest,
   type ExecutionOwner,
   type RunAuthority
 } from "../../execution/authority.js"
+import {
+  handedAuthority,
+  narrow,
+  orphanAgentAuthority,
+  type AgentRequest
+} from "../../execution/delegation.js"
 import { RunPolicySchema, meetCapabilities, type RunPolicy } from "../../execution/policy.js"
 import type { AgentSessionMetadata } from "../../sessions/agent-mode.js"
 import { runPolicyRevoked } from "./run-policy.js"
@@ -22,6 +24,9 @@ import { decodeJson } from "./json.js"
 import { writeError } from "./chat-write-errors.js"
 import { readWorkOwner } from "./automation-rows.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
+
+export const HANDOFF_SENDER = { continuation: "continuation", delegation: "delegation" } as const
+type HandoffSender = (typeof HANDOFF_SENDER)[keyof typeof HANDOFF_SENDER]
 
 export const readRunAuthority = Effect.fn("RunAuthority.read")(function* (
   sql: SqlClient.SqlClient,
@@ -78,10 +83,10 @@ export const admissionAuthority = Effect.fn("RunAuthority.admission")(function* 
     readonly context: RunContext
     readonly policy: RunPolicy
     readonly agent: AgentSessionMetadata | null
-    readonly source?: { readonly kind: "continuation" | "delegation"; readonly runId: string }
+    readonly source?: { readonly kind: HandoffSender; readonly runId: string }
   }
 ) {
-  if (input.source?.kind === "continuation") {
+  if (input.source?.kind === HANDOFF_SENDER.continuation) {
     const authority = yield* readRunAuthority(sql, input.source.runId)
     if (authority === undefined)
       return yield* writeError("start", "invalid", "The parent task's authority is unavailable")
@@ -196,14 +201,14 @@ export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
       : undefined
   if (row.parent_run_id !== null && parent !== undefined && !parent.ended) {
     return {
-      kind: "continuation" as const,
+      kind: HANDOFF_SENDER.continuation,
       runId: row.parent_run_id,
       policy: yield* decodeJson(RunPolicySchema, parent.policy),
       context: yield* decodeJson(RunContextSchema, parent.context)
     }
   }
   return {
-    kind: "delegation" as const,
+    kind: HANDOFF_SENDER.delegation,
     runId: row.run_id,
     tool: row.tool_name,
     policy: yield* decodeJson(RunPolicySchema, row.policy)

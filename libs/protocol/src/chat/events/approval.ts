@@ -1,3 +1,4 @@
+import { SERVER_EVENT_TYPE } from "../../common/event-types.js"
 import { Schema } from "effect"
 import {
   ConnectionActionSchema,
@@ -29,9 +30,12 @@ import type {
 } from "../runtime.js"
 import { RuleSavedInSchema, type RuleSavedIn } from "../../runs/questions.js"
 
-/** Persisted with each delivery so historical routing survives later moves. */
+export const DECISION_ROUTE_SOURCE = { run: "run", deferred: "deferred" } as const
+
+export type DecisionRouteSource = (typeof DECISION_ROUTE_SOURCE)[keyof typeof DECISION_ROUTE_SOURCE]
+
 export interface DecisionRoute extends JsonRecord {
-  readonly source_kind: "run" | "deferred"
+  readonly source_kind: DecisionRouteSource
   readonly source_session_id: string
   readonly basis:
     | "source_v1"
@@ -42,7 +46,7 @@ export interface DecisionRoute extends JsonRecord {
 }
 
 const DecisionRouteSchema = Schema.Struct({
-  source_kind: Schema.Literals(["run", "deferred"] as const),
+  source_kind: Schema.Literals(Object.values(DECISION_ROUTE_SOURCE)),
   source_session_id: Schema.String,
   basis: Schema.Literals([
     "source_v1",
@@ -54,7 +58,7 @@ const DecisionRouteSchema = Schema.Struct({
 })
 
 export interface ApprovalNeededEvent extends JsonRecord {
-  readonly type: "approval_needed"
+  readonly type: typeof SERVER_EVENT_TYPE.approvalNeeded
   readonly tool_id: string
   readonly asked: ApprovalAsked
   readonly name: string
@@ -72,7 +76,7 @@ export interface ApprovalNeededEvent extends JsonRecord {
 }
 
 export interface ApprovalResolvedEvent extends JsonRecord {
-  readonly type: "approval_resolved"
+  readonly type: typeof SERVER_EVENT_TYPE.approvalResolved
   readonly run_id: string
   readonly tool_id: string
   readonly approved: boolean
@@ -80,7 +84,7 @@ export interface ApprovalResolvedEvent extends JsonRecord {
 }
 
 export interface ConnectionNeededEvent extends JsonRecord {
-  readonly type: "connection_needed"
+  readonly type: typeof SERVER_EVENT_TYPE.connectionNeeded
   readonly run_id: string
   readonly session_id: string
   readonly tool_id: string
@@ -99,7 +103,7 @@ export interface ConnectionNeededEvent extends JsonRecord {
 }
 
 export interface ConnectionResolvedEvent extends JsonRecord {
-  readonly type: "connection_resolved"
+  readonly type: typeof SERVER_EVENT_TYPE.connectionResolved
   readonly run_id: string
   readonly tool_id: string
   readonly connection_id: string
@@ -107,54 +111,61 @@ export interface ConnectionResolvedEvent extends JsonRecord {
   readonly decision_route: DecisionRoute
 }
 
-/** Decisions the run waits on: tool approvals and connection requests, asked and resolved. */
 export type ApprovalEvent =
   | ApprovalNeededEvent
   | ApprovalResolvedEvent
   | ConnectionNeededEvent
   | ConnectionResolvedEvent
 
-export const ApprovalNeededEventSchema = sessionEvent("approval_needed", Schema.String, {
-  tool_id: Schema.String,
-  asked: ApprovalAskedSchema,
-  name: Schema.String,
-  preview: ApprovalPreviewSchema,
-  diff: ApprovalDiffSchema,
-  run_id: Schema.String,
-  action: Schema.String,
-  rule_places: Schema.Array(RuleSavedInSchema),
-  can_attach_folder_to_space: Schema.Boolean,
-  grant_folder: ApprovalGrantFolderSchema,
-  card: ApprovalCardSchema,
-  decision_route: DecisionRouteSchema,
-  asker: ApprovalAskerSchema
-})
+export const ApprovalNeededEventSchema = sessionEvent(
+  SERVER_EVENT_TYPE.approvalNeeded,
+  Schema.String,
+  {
+    tool_id: Schema.String,
+    asked: ApprovalAskedSchema,
+    name: Schema.String,
+    preview: ApprovalPreviewSchema,
+    diff: ApprovalDiffSchema,
+    run_id: Schema.String,
+    action: Schema.String,
+    rule_places: Schema.Array(RuleSavedInSchema),
+    can_attach_folder_to_space: Schema.Boolean,
+    grant_folder: ApprovalGrantFolderSchema,
+    card: ApprovalCardSchema,
+    decision_route: DecisionRouteSchema,
+    asker: ApprovalAskerSchema
+  }
+)
 
-export const ApprovalResolvedEventSchema = event("approval_resolved", {
+export const ApprovalResolvedEventSchema = event(SERVER_EVENT_TYPE.approvalResolved, {
   run_id: Schema.String,
   tool_id: Schema.String,
   approved: Schema.Boolean,
   decision_route: DecisionRouteSchema
 })
 
-export const ConnectionNeededEventSchema = sessionEvent("connection_needed", Schema.String, {
-  run_id: Schema.String,
-  tool_id: Schema.String,
-  integration_id: Schema.String,
-  connection_id: Schema.String,
-  label: Schema.String,
-  reason: ConnectionStateSchema,
-  detail: Schema.String,
-  capability: Schema.String,
-  action: ConnectionActionSchema,
-  settings_tab: Schema.String,
-  required_scopes: Schema.Array(Schema.String),
-  source: Schema.Literals(["recovery", "suggestion"] as const),
-  account: ConnectionAccountSchema,
-  decision_route: DecisionRouteSchema
-})
+export const ConnectionNeededEventSchema = sessionEvent(
+  SERVER_EVENT_TYPE.connectionNeeded,
+  Schema.String,
+  {
+    run_id: Schema.String,
+    tool_id: Schema.String,
+    integration_id: Schema.String,
+    connection_id: Schema.String,
+    label: Schema.String,
+    reason: ConnectionStateSchema,
+    detail: Schema.String,
+    capability: Schema.String,
+    action: ConnectionActionSchema,
+    settings_tab: Schema.String,
+    required_scopes: Schema.Array(Schema.String),
+    source: Schema.Literals(["recovery", "suggestion"] as const),
+    account: ConnectionAccountSchema,
+    decision_route: DecisionRouteSchema
+  }
+)
 
-export const ConnectionResolvedEventSchema = event("connection_resolved", {
+export const ConnectionResolvedEventSchema = event(SERVER_EVENT_TYPE.connectionResolved, {
   run_id: Schema.String,
   tool_id: Schema.String,
   connection_id: Schema.String,
@@ -169,7 +180,6 @@ export const approvalEventSchemas = [
   ConnectionResolvedEventSchema
 ] as const
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type ApprovalEventAgrees = Assert<
   Agrees<(typeof approvalEventSchemas)[number]["Type"], ApprovalEvent>
 >

@@ -1,6 +1,6 @@
 import type { ProviderToolCall, ToolCall } from "../contracts/messages.js"
 import type { PendingToolCall, ToolDisplayTitle, Toolset } from "../contracts/tools.js"
-import { gateUnavailableCalls, parseToolCalls } from "../tools/dispatch.js"
+import { gateUnavailableCalls, parseToolCalls } from "../tools/tool-calls.js"
 import type { StepView } from "./run-state.js"
 
 export const admitToolCalls = ({

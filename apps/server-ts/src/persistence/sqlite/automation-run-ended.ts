@@ -3,7 +3,7 @@ import type { SqlClient } from "effect/unstable/sql"
 
 import type { AutomationRules } from "../automations/model.js"
 import type { DispatchInTransaction } from "./automation-event-dispatch.js"
-import type { ToldOutcome } from "./run-ending.js"
+import type { ToldOutcome } from "./run-ending-said.js"
 import type { QueueContext } from "./automation-queue-context.js"
 
 export const raiseRunEnded = Effect.fn("AutomationSettlement.raiseRunEnded")(function* (input: {

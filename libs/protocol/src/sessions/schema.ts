@@ -1,6 +1,5 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import type {
-  SessionExportFormat,
   SessionListResponse,
   CreateSessionResponse,
   BranchSessionResponse,
@@ -18,7 +17,16 @@ import type {
   ChatFindResponse,
   ChatSearchResponse
 } from "./contracts.js"
-import { SESSION_LIST_FILTER, SESSION_LIST_NEXT, SESSION_LIST_PAGE } from "./contracts.js"
+import {
+  CHAT_SEARCH_MATCH,
+  HAND_CAPTURE,
+  SESSION_EXPORT_FORMAT,
+  SESSION_EXPORT_MEDIA_TYPE,
+  SESSION_LIST_FILTER,
+  SESSION_LIST_NEXT,
+  SESSION_LIST_PAGE
+} from "./contracts.js"
+import { QueryBooleanTextSchema } from "../common/routes.js"
 import { FIND_QUERY_MAX_LENGTH } from "../views/find-text.js"
 import { ContextBudgetSnapshotSchema } from "../chat/schema.js"
 import { ImageDataSchema, ImageMediaTypeSchema } from "../chat/schema-fields.js"
@@ -30,6 +38,7 @@ import {
   PositiveIntSchema
 } from "../common/schema.js"
 import {
+  SESSION_LIST_SORT,
   BRANCH_REQUEST,
   CAPTURE_LINE,
   CLEARED,
@@ -53,12 +62,9 @@ import {
   SessionSpaceInputSchema
 } from "./state-schema.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 const TrimmedTextSchema = Schema.Trimmed.check(Schema.isMinLength(1))
-const QueryBooleanSchema = Schema.Union([
-  Schema.Boolean,
-  Schema.Literals(["true", "false"] as const)
-])
+const QueryBooleanSchema = Schema.Union([Schema.Boolean, QueryBooleanTextSchema])
 const QueryNonNegativeIntSchema = Schema.Union([Schema.Number, Schema.NumberFromString]).check(
   Schema.isInt(),
   Schema.isGreaterThanOrEqualTo(0)
@@ -66,7 +72,7 @@ const QueryNonNegativeIntSchema = Schema.Union([Schema.Number, Schema.NumberFrom
 const QueryLimitSchema = QueryNonNegativeIntSchema.check(
   Schema.isBetween({ minimum: 1, maximum: 500 })
 )
-const SessionListSortSchema = Schema.Literals(["activity", "accessed"] as const)
+const SessionListSortSchema = Schema.Literals(Object.values(SESSION_LIST_SORT))
 const SessionListScopeSchema = Schema.Literals(["primary", "agent", "all"] as const)
 const SessionListCursorSchema = Schema.Struct({
   at: IsoDateTimeStringSchema,
@@ -132,14 +138,14 @@ export const HandCaptureRequestSchema = Schema.Struct({
 
 export const HandCaptureResponseSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("moved"),
+    kind: Schema.Literal(HAND_CAPTURE.moved),
     session_id: Schema.NonEmptyString,
     name: Schema.String,
     line: Schema.String,
     client_id: Schema.NonEmptyString
   }),
   Schema.Struct({
-    kind: Schema.Literal("kept"),
+    kind: Schema.Literal(HAND_CAPTURE.kept),
     session_id: Schema.NonEmptyString,
     line: Schema.Union([
       Schema.Struct({ kind: Schema.Literal(CAPTURE_LINE.none) }),
@@ -251,7 +257,6 @@ export const SessionEndConflictSchema: Schema.Codec<SessionEndConflict> = withEx
   ])
 })
 
-/** `stop=true` on an archive or a permanent delete: stop the chat's running work first. */
 export const SessionEndQuerySchema = Schema.Struct({
   stop: QueryBooleanSchema
 })
@@ -304,44 +309,26 @@ export const MoveSessionToSpaceResponseSchema: Schema.Codec<MoveSessionToSpaceRe
     space: SessionSpaceSchema
   })
 
-export const SessionExportFormatSchema = Schema.Literals([
-  "archive",
-  "markdown",
-  "json",
-  "jsonl"
-] as const)
+export const SessionExportFormatSchema = Schema.Literals(Object.values(SESSION_EXPORT_FORMAT))
 
 export const SessionExportQuerySchema = withExtras({
   format: SessionExportFormatSchema
 })
 
-const exportMediaType = {
-  archive: "application/vnd.arden.session+json",
-  json: "application/json",
-  jsonl: "application/x-ndjson",
-  markdown: "text/markdown"
-} as const satisfies Record<SessionExportFormat, string>
-
 export const SessionExportResponseSchema: Schema.Codec<SessionExportResponse> = withExtras({
   format: SessionExportFormatSchema,
   filename: Schema.NonEmptyString,
-  media_type: Schema.Literals([
-    "application/vnd.arden.session+json",
-    "application/json",
-    "application/x-ndjson",
-    "text/markdown"
-  ] as const),
+  media_type: Schema.Literals(Object.values(SESSION_EXPORT_MEDIA_TYPE)),
   content: Schema.String,
   warnings: Schema.Array(Schema.String)
 }).check(
   Schema.makeFilter((response) => {
-    return response.media_type === exportMediaType[response.format]
+    return response.media_type === SESSION_EXPORT_MEDIA_TYPE[response.format]
       ? undefined
       : "session export format and media type must match"
   })
 )
 
-/** A find box's query: a few words, trimmed, never blank. */
 export const FindQueryTextSchema = Schema.Trimmed.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(FIND_QUERY_MAX_LENGTH)
@@ -385,10 +372,14 @@ const chatSearchBase = {
 export const ChatSearchResponseSchema: Schema.Codec<ChatSearchResponse> = withExtras({
   chats: Schema.Array(
     Schema.Union([
-      withExtras({ ...chatSearchBase, match: Schema.Literal("message"), hit: ChatSearchHitSchema }),
       withExtras({
         ...chatSearchBase,
-        match: Schema.Literal("name"),
+        match: Schema.Literal(CHAT_SEARCH_MATCH.message),
+        hit: ChatSearchHitSchema
+      }),
+      withExtras({
+        ...chatSearchBase,
+        match: Schema.Literal(CHAT_SEARCH_MATCH.name),
         preview: Schema.Union([
           Schema.Struct({ kind: Schema.Literal(SEARCH_PREVIEW.none) }),
           Schema.Struct({ kind: Schema.Literal(SEARCH_PREVIEW.message), hit: ChatSearchHitSchema })

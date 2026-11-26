@@ -1,19 +1,21 @@
 import { type RunContext } from "../src/persistence/runs/stored-context.js"
 import { describe, expect, it } from "vitest"
+import { approvalSources } from "../src/execution/approval-source.js"
 import {
   deriveAuthority,
-  approvalSources,
-  handedAuthority,
-  narrow,
-  orphanAgentAuthority,
   rootOf,
   unrecordedAuthority,
-  widerAxes,
   type AdmissionFacts,
-  type AgentRequest,
   type ExecutionOwner,
   type RunAuthority
 } from "../src/execution/authority.js"
+import {
+  handedAuthority,
+  narrow,
+  orphanAgentAuthority,
+  widerAxes,
+  type AgentRequest
+} from "../src/execution/delegation.js"
 import type { RunCapability, RunPolicy, SessionResourceReach } from "../src/execution/policy.js"
 
 const policy = (overrides: Partial<RunPolicy> = {}): RunPolicy => ({

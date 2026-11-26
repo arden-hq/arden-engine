@@ -1,5 +1,5 @@
 import {
-  DEFAULT_TOOL_KIND,
+  toolKindOf,
   GMAIL_SEND,
   TOOL_CALL_RESULT,
   TOOL_CALL_STARTED,
@@ -53,7 +53,7 @@ const storedFace = (call: StoredCall, name: string, execution: ToolExecution): T
       title === undefined
         ? { kind: TOOL_TITLE.untitled }
         : { kind: TOOL_TITLE.titled, text: title },
-    kind: text(call.kind) ?? DEFAULT_TOOL_KIND,
+    kind: toolKindOf(call.kind),
     icon: icon === undefined ? { kind: TOOL_ICON.plain } : { kind: TOOL_ICON.icon, name: icon },
     noun: noun === undefined ? { kind: TOOL_NOUN.unnamed } : { kind: TOOL_NOUN.noun, text: noun },
     source:

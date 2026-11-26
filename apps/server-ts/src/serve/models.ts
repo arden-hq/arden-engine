@@ -6,6 +6,7 @@ import {
   discoverOpenRouter,
   DiscoveryError,
   UnreachableError,
+  CHAT_COMPLETIONS_SERVER,
   type ChatCompletionsServer,
   type DiscoveredModel,
   type DiscoveryInput
@@ -26,13 +27,8 @@ import {
   type OpenAiCredentialSnapshot,
   type OpenAiCredentialSource
 } from "../providers/openai-responses/provider.js"
-import { requireServerFields, SettingsError, type Settings } from "./settings.js"
+import { requireServerFields, SERVE_PROVIDER, SettingsError, type Settings } from "./settings.js"
 
-/**
- * The model server named by `provider.baseUrl` did not answer at start: it is
- * not running, or not at that address. Not a `SettingsError`: the file may be
- * right. A configured server exits with `CONFIGURED_SERVER_EXIT.providerUnreachable`.
- */
 export class ProviderUnreachableError extends Error {
   constructor(message: string) {
     super(message)
@@ -40,7 +36,6 @@ export class ProviderUnreachableError extends Error {
   }
 }
 
-/** Discovery's failures in the settings' words: which field to fix, or which server to start. */
 const discoveryFailure = (baseUrl: string, cause: unknown): unknown => {
   if (cause instanceof UnreachableError)
     return new ProviderUnreachableError(
@@ -50,7 +45,6 @@ const discoveryFailure = (baseUrl: string, cause: unknown): unknown => {
   return cause
 }
 
-/** How long start may wait for a Chat Completions server to describe its models. */
 const DISCOVERY_TIMEOUT_MS = 15_000
 
 const inherit = { modelId: null, reasoningEffort: null }
@@ -58,10 +52,8 @@ const inherit = { modelId: null, reasoningEffort: null }
 type Provider = NonNullable<Settings["provider"]>
 type ChatCompletionsProvider = Extract<Provider, { readonly kind: "chat-completions" }>
 
-/** The settings fields that name an environment variable. */
 type EnvField = "apiKeyEnv" | "accessTokenEnv" | "accountIdEnv"
 
-/** The variable `provider[field]` names; its absence names the field, which is what to fix. */
 const fromEnv = (env: NodeJS.ProcessEnv, field: EnvField, name: string): string => {
   const value = env[name]
   if (value === undefined || value.length === 0)
@@ -69,7 +61,6 @@ const fromEnv = (env: NodeJS.ProcessEnv, field: EnvField, name: string): string 
   return value
 }
 
-/** The models a configured server lists: `model` first, then `extraModels`. */
 const hostOf = (
   settings: Settings,
   chat: ModelDefinition,
@@ -97,10 +88,6 @@ const hostOf = (
   }
 }
 
-/**
- * The chat model's window: the provider's own, lowered by `contextLimit`.
- * Raising it would only move the overflow from the settings to a request.
- */
 const loweredLimit = (settings: Settings, own: number): number => {
   const limit = settings.contextLimit
   if (limit !== undefined && limit > own)
@@ -108,12 +95,10 @@ const loweredLimit = (settings: Settings, own: number): number => {
   return limit ?? own
 }
 
-/** What the settings say a model without a catalog can do: the effort they name, if any. */
 const declaredEfforts = (settings: Settings): ReadonlyArray<string> =>
   settings.reasoningEffort === undefined ? [] : [settings.reasoningEffort]
 
 const responsesModels = (settings: Settings): ModelHost => {
-  // parseSettings requires both for this provider.
   const limit = settings.contextLimit as number
   const entry = (id: string): ModelDefinition => ({
     id,
@@ -125,7 +110,6 @@ const responsesModels = (settings: Settings): ModelHost => {
   return hostOf(settings, entry(settings.model as string), (settings.extraModels ?? []).map(entry))
 }
 
-/** A Codex catalog cut down to the settings' models, with the context limit lowered if asked. */
 const codexModels = (settings: Settings, live: ModelHost): ModelHost => {
   if (settings.model === undefined) return live
   const find = (id: string): ModelDefinition => {
@@ -142,10 +126,6 @@ const codexModels = (settings: Settings, live: ModelHost): ModelHost => {
   )
 }
 
-/**
- * The settings' models as their server reports them, `model` first. A generic
- * server reports nothing, so its models are what the settings say.
- */
 const discoverModels = async (
   settings: Settings,
   server: ChatCompletionsServer,
@@ -155,12 +135,11 @@ const discoverModels = async (
     settings.model === undefined ? undefined : [settings.model, ...(settings.extraModels ?? [])]
   try {
     switch (server) {
-      case "llama.cpp":
+      case CHAT_COMPLETIONS_SERVER.llamaCpp:
         return await discoverLlamaCpp(input, wanted)
-      case "openrouter":
-        // requireServerFields: OpenRouter needs `model`.
+      case CHAT_COMPLETIONS_SERVER.openrouter:
         return await discoverOpenRouter(input, wanted ?? [])
-      case "generic":
+      case CHAT_COMPLETIONS_SERVER.generic:
         return (wanted ?? []).map((id) =>
           declaredModel({
             id,
@@ -181,8 +160,6 @@ const definitionFor = (
   isChat: boolean
 ): ModelDefinition => {
   const host = CHAT_COMPLETIONS_HOSTS[server]
-  // `contextLimit` is the chat model's, as for Codex: it lowers what the
-  // server reports, or stands alone where the server reports nothing.
   const window = (own: number | undefined): number | undefined => {
     if (!isChat) return own
     if (own === undefined) return settings.contextLimit
@@ -235,21 +212,19 @@ const detected = async (input: DiscoveryInput): Promise<ChatCompletionsServer> =
 }
 
 export interface ModelsForOptions {
-  /** Where the provider's `apiKeyEnv` and Codex variables are read. */
   readonly env: NodeJS.ProcessEnv
-  /** Transport for discovery and model requests of a `chat-completions` provider. */
   readonly fetch: typeof globalThis.fetch
 }
 
-/** The provider and model list a configured server starts with. */
 export const modelsFor = async (
   settings: Settings,
   options: ModelsForOptions
 ): Promise<ModelProviderOptions> => {
-  const provider = settings.provider ?? { kind: "codex-login" as const }
-  if (provider.kind === "chat-completions") return chatCompletionsRoute(settings, provider, options)
+  const provider = settings.provider ?? { kind: SERVE_PROVIDER.codexLogin }
+  if (provider.kind === SERVE_PROVIDER.chatCompletions)
+    return chatCompletionsRoute(settings, provider, options)
   const env = options.env
-  if (provider.kind === "responses") {
+  if (provider.kind === SERVE_PROVIDER.responses) {
     const credential = { accessToken: fromEnv(env, "apiKeyEnv", provider.apiKeyEnv) }
     return {
       provider: makeOpenAiResponsesProvider({
@@ -261,7 +236,7 @@ export const modelsFor = async (
   }
   let credentials: OpenAiCredentialSource
   let initialCredential: OpenAiCredentialSnapshot
-  if (provider.kind === "codex") {
+  if (provider.kind === SERVE_PROVIDER.codex) {
     const account =
       provider.accountIdEnv === undefined
         ? undefined
@@ -284,7 +259,6 @@ export const modelsFor = async (
       throw cause
     }
   }
-  // No base URL: Codex credentials go only to the runtime's own official endpoint.
   const runtime = await makeOpenAiCodexRuntime({ credentials, initialCredential })
   if (runtime === null) throw new SettingsError("Codex account authentication failed")
   return {
@@ -293,7 +267,6 @@ export const modelsFor = async (
     approvalReview: runtime.approvalReview,
     planLimits: runtime.planLimits,
     transcription: runtime.transcription,
-    // A cut-down list stays as cut; the full one follows the account.
     ...(settings.model === undefined ? { refreshModelHost: runtime.refreshModelHost } : {})
   }
 }

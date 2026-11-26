@@ -1,5 +1,5 @@
 import { listWords } from "@arden-hq/std/count"
-import type { DenyRule, Path } from "./decide.js"
+import { PATH, type DenyRule, type Path } from "./decide.js"
 
 export interface Refusal {
   readonly what: string
@@ -11,11 +11,11 @@ const BREAKER_AFTER = 2
 
 const pathText = (path: Path): string => {
   switch (path.kind) {
-    case "tool":
+    case PATH.tool:
       return `use ${path.name}`
-    case "ask_user":
+    case PATH.askUser:
       return "ask the user with ask_user"
-    case "report":
+    case PATH.report:
       return "say it in your final reply or report"
   }
 }

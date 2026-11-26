@@ -116,14 +116,9 @@ const snapshot = (database: DatabaseSync) => ({
   sessions: database.prepare("SELECT session_id, name FROM sessions").all()
 })
 
-/** The table each `DROP TABLE` in a statement names, with its schema when it gives one. */
 const DROPPED_TABLE = /\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:"?(\w+)"?\.)?"?(\w+)"?/giu
 
-/**
- * Runs `list` from the baseline and returns each `enforced` migration's drop of a table another
- * table references when the statement runs, as "version table". With foreign keys on, that drop runs each child table's
- * ON DELETE action, so it belongs in a migration that declares `rebuilds`.
- */
+// https://www.sqlite.org/foreignkeys.html#fk_schemacommands
 const enforcedParentDrops = (list: ReadonlyArray<Migration>): ReadonlyArray<string> => {
   const database = new DatabaseSync(":memory:")
   const referenced = () =>

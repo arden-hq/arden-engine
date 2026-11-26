@@ -63,7 +63,6 @@ const change = (name: string, extra: Partial<Parameters<typeof defineServerTool>
     ...extra
   })
 
-/** What the gate did with one call: ran it, or paused on a card and which rule the card may save. */
 const outcome = async (attempt: Promise<{ readonly content: string }>) => {
   const settled = await attempt.then(
     (result) => ({ ran: result.content }),
@@ -100,7 +99,6 @@ describe("Always allow on a built-in tool's card", () => {
       outcome(toolset("ask", overrides).execute({ name, args, toolCallId: name }))
     const tool = (name: string) => ({ subject: { kind: "tool", tool: name, server: null } })
     expect(await ask("plain")).toEqual({ asked: tool("plain") })
-    // The owner's own Ask rule can be replaced where it does not hold; the store decides where.
     expect(await ask("plain", {}, { plain: "ask" })).toEqual({ asked: tool("plain") })
     expect(await ask("removes")).toEqual({ asked: null })
     expect(await ask("always")).toEqual({ asked: null })
@@ -162,7 +160,6 @@ describe("Always allow on a built-in tool's card", () => {
               }
             })
           })(serverRunContext({ runId, sessionId, authority }))
-          /** One call through the gate; a card is stored as the server stores it. */
           const call = (toolName: string, args: Record<string, unknown>, toolCallId: string) =>
             Effect.gen(function* () {
               const identity = {
@@ -196,7 +193,6 @@ describe("Always allow on a built-in tool's card", () => {
               )
               return { places: present(pending, "pending approval").rule_places }
             })
-          /** The owner's answer; an approved call then runs to its end, as the server runs it. */
           const answer = (
             toolName: string,
             args: Record<string, unknown>,

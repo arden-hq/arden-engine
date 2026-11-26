@@ -67,7 +67,6 @@ it("a chat-completions provider needs only what its server does not report", () 
     ...base,
     provider: { kind: "chat-completions", baseUrl: "http://127.0.0.1:9931/v1", ...fields }
   })
-  // llama.cpp lists its models and windows; an absent server is detected at start.
   expect(parseSettings(provider({ server: "llama.cpp" }))).toEqual(
     provider({ server: "llama.cpp" })
   )
@@ -85,14 +84,11 @@ it("plain HTTP goes to any host only when no key is sent: a key never crosses th
     dataDirectory: "/tmp/arden-settings",
     provider: { kind: "chat-completions", baseUrl, ...fields }
   })
-  // No key: a llama.cpp on the Docker host or on the LAN, with no setting.
   for (const url of ["http://host.docker.internal:8080/v1", "http://192.168.1.20:8080/v1"])
     expect(parseSettings(settings(url))).toEqual(settings(url))
-  // A key goes only over HTTPS or to this machine.
   expect(() =>
     parseSettings(settings("http://192.168.1.20:8080/v1", { apiKeyEnv: "LLAMA_KEY" }))
   ).toThrow(SettingsError)
-  // A `responses` provider always sends a key.
   expect(() =>
     parseSettings({
       dataDirectory: "/tmp/arden-settings",
@@ -101,12 +97,10 @@ it("plain HTTP goes to any host only when no key is sent: a key never crosses th
       provider: { kind: "responses", baseUrl: "http://192.168.1.20:8080/v1", apiKeyEnv: "KEY" }
     })
   ).toThrow(SettingsError)
-  // Loopback HTTP and HTTPS take a key as before.
   for (const url of ["http://127.0.0.1:8080/v1", "https://llama.example/v1"])
     expect(parseSettings(settings(url, { apiKeyEnv: "KEY" }))).toEqual(
       settings(url, { apiKeyEnv: "KEY" })
     )
-  // Another scheme is neither.
   expect(() => parseSettings(settings("ftp://10.0.0.2/v1"))).toThrow(SettingsError)
   expect(() => parseSettings(settings("ftp://10.0.0.2/v1", { apiKeyEnv: "KEY" }))).toThrow(
     SettingsError
@@ -163,7 +157,6 @@ it("a configured server starts with its settings in place and publishes its acce
   )
   try {
     expect(configured.applied.offeredTools).toEqual(["exec_command"])
-    // The ready line says what a new chat runs on, in the shape its readers decode.
     expect(daemonDecoders.configuredServerReady(readyLine(configured))).toEqual({
       type: "ready",
       url: configured.server.url.href,
@@ -189,28 +182,23 @@ it("a configured server starts with its settings in place and publishes its acce
       expect(response.status).toBe(200)
       return response.json()
     }
-    // The published secret is the owner's: whoever started the server reaches
-    // every route with it. Without a secret nothing answers.
     const published = { [LOCAL_CAPABILITY_HEADER]: access.capability }
     expect(
       (await configured.server.fetch("/settings/intelligence", { headers: published })).status
     ).toBe(200)
     expect((await configured.server.fetch("/sessions")).status).toBe(403)
 
-    // Sub-agents are off because `spawn_agent` is not offered.
     expect(await get("/settings/intelligence")).toMatchObject({
       max_agent_depth: 1,
       max_concurrent_agents: 1,
       compaction_threshold: 0.6,
       summary_max_tokens: 2000
     })
-    // Every Automation is off.
     const { automations } = Schema.decodeUnknownSync(
       Schema.Struct({ automations: Schema.Array(Schema.Struct({ enabled: Schema.Boolean })) })
     )(await get("/automations"))
     expect(automations.length).toBeGreaterThan(0)
     expect(automations.every((automation) => !automation.enabled)).toBe(true)
-    // A new chat takes no Memory into its prompt.
     const created = await configured.request("/sessions", {
       method: "POST",
       headers,
@@ -227,8 +215,6 @@ it("a configured server starts with its settings in place and publishes its acce
     await configured.stop()
     await expect(readFile(configured.accessFile, "utf8")).rejects.toThrow()
   }
-  // A second start on the same data folder applies the file again: what
-  // changed is changed, and nothing is added twice.
   const again = await startConfigured(
     parseSettings({
       dataDirectory,
@@ -250,7 +236,6 @@ it("a configured server starts with its settings in place and publishes its acce
       rules.filter((entry) => entry.subject.kind === "tool" && entry.subject.tool === tool)
     expect(forTool("spawn_agent").map((entry) => entry.decision)).toEqual(["allow"])
     expect(forTool("exec_command").map((entry) => entry.decision)).toEqual(["allow"])
-    // Sub-agents are back on, with the file's limit and the default depth.
     const settings = await again.request("/settings/intelligence")
     expect(await settings.json()).toMatchObject({ max_agent_depth: 3, max_concurrent_agents: 2 })
   } finally {

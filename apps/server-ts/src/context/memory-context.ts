@@ -15,7 +15,6 @@ import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
 
-/** Only the owner's own turns are sent Memory. */
 export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined =>
   actor.kind === "person" ? "owner" : undefined
 
@@ -33,7 +32,6 @@ const MEMORY_BUDGET = {
   kind: MEMORY_BUDGET_STATE.recorded,
   standing_page:
     standingPageLimitChars * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
-  /** The standing-facts note and section heading. */
   standing_frame: 1_000,
   space: 10_000,
   space_page_list: 2_000,
@@ -61,14 +59,9 @@ export interface MemoryContext {
   readonly core: ReadonlyArray<RuntimeSection>
   readonly space: ReadonlyArray<RuntimeSection>
   readonly recall: ReadonlyArray<RuntimeSection>
-  /** What the sections hold, source by source: one composition of the record. */
   readonly record: RunMemoryComposition
 }
 
-/**
- * The one place a run's Memory block is composed: every source renders itself into its own
- * allowance with its own notices, and is recorded from what it rendered.
- */
 export const assembleMemoryContext = ({
   reader,
   sources,
@@ -77,12 +70,9 @@ export const assembleMemoryContext = ({
   query
 }: {
   readonly reader: RunMemoryReader
-  /** Undefined when Memory could not be read. */
   readonly sources: MemorySources | undefined
   readonly space: PreparedSpaceMemory | undefined
-  /** The Memory revision every source was read at. */
   readonly revision: string | null
-  /** The text the recall searched with. */
   readonly query: string
 }): MemoryContext => {
   const standing = sources?.standing(MEMORY_BUDGET.standing_page) ?? none

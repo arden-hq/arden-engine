@@ -287,7 +287,8 @@ it("a post with a task starts it in the post's Space, under the message; a secon
       }>`SELECT space_id, text, origin_message_id FROM space_tasks`
       const posted = yield* sql<{ readonly message_id: string; readonly session_id: string }>`
         SELECT message_id, session_id FROM session_messages
-        WHERE message_id LIKE 'post:%' ORDER BY message_rowid`
+        WHERE session_id IN (SELECT session_id FROM sessions WHERE space_id = ${home.space_id})
+        ORDER BY message_rowid`
       expect(tasks).toEqual([
         { space_id: home.space_id, text: "Send the form", origin_message_id: posted[0]?.message_id }
       ])

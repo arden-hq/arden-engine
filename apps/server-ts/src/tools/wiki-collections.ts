@@ -5,7 +5,7 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { renderCollection, wikiCollections } from "../wiki/collections.js"
 import { Wiki } from "../wiki/service.js"
 import { observedKey } from "./run-context.js"
-import { loadSnapshot } from "./wiki.js"
+import { loadSnapshot } from "./wiki-access.js"
 
 const NO_MEMORY = "empty"
 
@@ -45,7 +45,6 @@ const makeWikiCollectionsTool = ({ wiki }: { readonly wiki: Wiki["Service"] }): 
     },
     execute: async (input, ctx) => {
       const snapshot = await loadSnapshot(wiki, ctx.signal)
-      // Later pages must come from the Memory the first page listed.
       const listed = ctx.run.observations.observed(observedKey.collections)
       if (input.offset > 0 && listed !== (snapshot.head ?? NO_MEMORY)) {
         throw new ToolExecutionError(

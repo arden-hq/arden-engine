@@ -2,7 +2,8 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { after, type Timer } from "@arden-hq/std/timer"
 import { AgentInvariantError } from "../errors.js"
 import { raceAbort } from "../abort.js"
-import { launchReceipt, parseToolCalls } from "../tools/dispatch.js"
+import { launchReceipt } from "../tools/dispatch.js"
+import { parseToolCalls } from "../tools/tool-calls.js"
 import type { BackgroundedCall, CallSettlement, DispatchOutput } from "../tools/dispatch.js"
 import type { ChatMessage } from "../contracts/messages.js"
 import type {
@@ -14,10 +15,12 @@ import type {
 } from "../contracts/tools.js"
 import { normalizeToolResult } from "../internal/validate.js"
 
+const JOB_STATE = { running: "running", settled: "settled", failed: "failed" } as const
+
 type JobState =
-  | { readonly kind: "running" }
-  | { readonly kind: "settled"; readonly outcome: CallSettlement }
-  | { readonly kind: "failed"; readonly cause: unknown }
+  | { readonly kind: typeof JOB_STATE.running }
+  | { readonly kind: typeof JOB_STATE.settled; readonly outcome: CallSettlement }
+  | { readonly kind: typeof JOB_STATE.failed; readonly cause: unknown }
 interface BackgroundJob {
   readonly settled: Promise<void>
   readonly graceUntil: number
@@ -69,7 +72,7 @@ export class BackgroundTools {
 
   running(): ReadonlyArray<HeldToolCall> {
     return [...this.jobs.values()].flatMap((job) =>
-      job.state.kind === "running" ? [job.held] : []
+      job.state.kind === JOB_STATE.running ? [job.held] : []
     )
   }
 
@@ -203,7 +206,7 @@ export class BackgroundTools {
     if (
       options.wait === true &&
       this.jobs.size > 0 &&
-      ![...this.jobs.values()].some((job) => job.state.kind !== "running")
+      ![...this.jobs.values()].some((job) => job.state.kind !== JOB_STATE.running)
     ) {
       const completion = Promise.race([
         ...[...this.jobs.values()].map((job) => job.settled),
@@ -230,8 +233,8 @@ export class BackgroundTools {
     const completions: DispatchOutput["completions"][number][] = []
     const paused: DispatchOutput["paused"][number][] = []
     for (const [id, job] of this.jobs) {
-      if (job.state.kind === "failed") throw job.state.cause
-      if (job.state.kind === "running") continue
+      if (job.state.kind === JOB_STATE.failed) throw job.state.cause
+      if (job.state.kind === JOB_STATE.running) continue
       changed = true
       this.options.messages.push(...job.state.outcome.messages)
       completions.push(...job.state.outcome.output.completions)
@@ -246,7 +249,7 @@ export class BackgroundTools {
   private async awaitGrace(): Promise<void> {
     const now = this.options.clock()
     const fresh = [...this.jobs.values()].filter(
-      (job) => job.state.kind === "running" && job.graceUntil > now
+      (job) => job.state.kind === JOB_STATE.running && job.graceUntil > now
     )
     if (fresh.length === 0) return
     const closesInMs = Math.max(...fresh.map((job) => job.graceUntil)) - now

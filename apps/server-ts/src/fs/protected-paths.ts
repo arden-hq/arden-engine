@@ -3,6 +3,8 @@ import { realpath } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
 
+const MAC_LIBRARY_FOLDER = "Library"
+
 const SECRET_HOME_PATHS = [
   ".ssh",
   ".gnupg",
@@ -68,11 +70,6 @@ export const PERSISTENCE_HOME_PATHS = [
   ".config/systemd/user"
 ] as const
 
-/**
- * The secret folders, absolute: the list above, and the profile folder of the desktop that
- * started this engine, whichever it is (installed, development build or a throwaway one); the
- * desktop names it in ARDEN_DESKTOP_PROFILE.
- */
 export const secretPaths = (
   home: string,
   env: Readonly<Record<string, string | undefined>> = process.env
@@ -96,7 +93,9 @@ export const tooWide = (
   const guarded = [...stateRoots, ...sensitiveHomePaths(home)]
   const [top] = path.relative(home, folder).split(path.sep)
   const inHomeConfig =
-    isWithin(home, folder) && top !== undefined && (top.startsWith(".") || top === "Library")
+    isWithin(home, folder) &&
+    top !== undefined &&
+    (top.startsWith(".") || top === MAC_LIBRARY_FOLDER)
   return (
     inHomeConfig ||
     [home, ...guarded].some((inner) => isWithin(folder, inner)) ||

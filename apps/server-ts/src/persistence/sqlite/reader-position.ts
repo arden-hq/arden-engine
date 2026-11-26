@@ -52,7 +52,6 @@ interface ReaderPositionStore<R extends Reader> {
   readonly on: (writer: Writer) => ReaderPosition<PositionOf<R>>
 }
 
-/** One reader's position: a `monitor_state` row holding `{ [field]: position }`. */
 export const readerPosition = <R extends Reader>(reader: R): ReaderPositionStore<R> => {
   const { name, namespace, field } = READERS[reader]
   const Position = READERS[reader].value as Schema.Codec<PositionOf<R>>

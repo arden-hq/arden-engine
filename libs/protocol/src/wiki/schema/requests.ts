@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
+import { strict } from "../../common/boundary.js"
 
 import {
-  strict,
   WikiPageIdSchema,
   WikiPathSchema,
   WikiRestoreSideSchema,
@@ -60,7 +60,6 @@ export const WikiRenameRequestSchema = Schema.Struct({
   expected_head: WikiRevisionIdSchema
 })
 
-/** Encode a page edit while deriving both optimistic-concurrency guards. */
 export const encodeUpdateWikiRequestEffect = (
   value: unknown
 ): Effect.Effect<string, Schema.SchemaError, never> =>

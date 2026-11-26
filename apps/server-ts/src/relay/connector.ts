@@ -1,8 +1,15 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
+import { RELAY_CONNECTION } from "@arden-hq/protocol/relay"
 import { after, every, type Timer } from "@arden-hq/std/timer"
 import { ladderDelayMs } from "@arden-hq/std/retry"
 import {
-  addDeviceMessage,
+  APNS_REASON,
+  APP_MESSAGE_TAG,
+  HEADER_TAG,
+  PRESENCE_STATE,
+  PUSH_STATUS,
+  RELAY_ERROR_CODE,
+  ROLE,
   authMessage,
   bodyAad,
   BodyKind,
@@ -17,8 +24,6 @@ import {
   leaveDeviceMessage,
   macSessionKeys,
   openQueued,
-  pairCode,
-  pairTokenHash,
   parseRelayHeader,
   PartAssembler,
   removeDeviceMessage,
@@ -28,16 +33,18 @@ import {
   utf8,
   uuidv7,
   verifyB64,
+  type ApnsReason,
+  type AwakeState,
   type ClientHeader,
   type MacMessage,
   type Peer,
   type RelayHeader
 } from "@arden-hq/relay-protocol"
-import { randomBytes } from "node:crypto"
 import { WebSocket, type RawData } from "ws"
 import type { PairedDevice, PushTarget } from "../persistence/relay/store.js"
 import type { MacIdentity } from "./identity.js"
 import { PhoneSession } from "./phone.js"
+import { RelayPairing, type PairRequest } from "./pairing.js"
 import type { CommandLog, DeviceRegistry, Loopback, RelayLog } from "./ports.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { currentMillis } from "../runtime/clock.js"
@@ -45,25 +52,20 @@ import { currentMillis } from "../runtime/clock.js"
 const ConnectorLimits = {
   pingMs: 20_000,
   silentMs: 60_000,
-  backoffMs: [1_000, 2_000, 5_000, 10_000, 30_000],
-  pairOfferTtlMs: 10 * 60_000,
-  pairOfferWaitMs: 5_000,
-  pairOfferReuseMs: 60_000,
-  pairRequestTtlMs: 5 * 60_000
+  backoffMs: [1_000, 2_000, 5_000, 10_000, 30_000]
 } as const
 
-/** APNs reasons that mean the token is gone for good. */
-const DEAD_TOKEN: ReadonlySet<string> = new Set(["Unregistered", "BadDeviceToken"])
+const APNS_DEAD_TOKEN_REASONS: ReadonlySet<string> = new Set<ApnsReason>([
+  APNS_REASON.Unregistered,
+  APNS_REASON.BadDeviceToken
+])
 
-export type ConnectorState = "connecting" | "connected"
+export const CONNECTOR_STATE = {
+  connecting: RELAY_CONNECTION.connecting,
+  connected: RELAY_CONNECTION.connected
+} as const
 
-export interface PairRequest {
-  readonly dev: string
-  readonly name: string
-  readonly edPub: string
-  readonly xPub: string
-  readonly code: string
-}
+export type ConnectorState = (typeof CONNECTOR_STATE)[keyof typeof CONNECTOR_STATE]
 
 interface Link {
   readonly cipher: SessionCipher
@@ -91,20 +93,24 @@ export class RelayConnector {
   readonly #phones = new Map<string, PhoneSession>()
   readonly #pushes = new Map<string, string>()
   #socket: WebSocket | undefined
-  #state: ConnectorState = "connecting"
+  #state: ConnectorState = CONNECTOR_STATE.connecting
   #stopped = false
   #attempt = 0
   #heard = 0
   #heartbeat: Timer | undefined
   #retry: Timer | undefined
-  #offer:
-    | { readonly token: Uint8Array; readonly expires: number; readonly link: string }
-    | undefined
-  #offerWaiter: { readonly hash: string; readonly settle: (ok: boolean) => void } | undefined
-  #pairRequest: { readonly request: PairRequest; readonly at: number } | undefined
+  readonly #pairing: RelayPairing
 
   constructor(options: RelayConnectorOptions) {
     this.#options = options
+    this.#pairing = new RelayPairing({
+      identity: options.identity,
+      phoneRelayUrl: options.phoneRelayUrl,
+      macName: options.macName,
+      devices: options.devices,
+      send: (header) => this.#send(header),
+      added: (device) => this.#devices.set(device.dev, device)
+    })
   }
 
   get state(): ConnectorState {
@@ -112,12 +118,7 @@ export class RelayConnector {
   }
 
   get pairRequest(): PairRequest | undefined {
-    if (
-      this.#pairRequest !== undefined &&
-      currentMillis() - this.#pairRequest.at > ConnectorLimits.pairRequestTtlMs
-    )
-      this.#pairRequest = undefined
-    return this.#pairRequest?.request
+    return this.#pairing.request
   }
 
   isOnline(dev: string): boolean {
@@ -133,7 +134,7 @@ export class RelayConnector {
     this.#stopped = true
     this.#retry?.cancel()
     this.#heartbeat?.cancel()
-    this.#offerWaiter?.settle(false)
+    this.#pairing.refused()
     for (const phone of this.#phones.values()) phone.close()
     this.#phones.clear()
     this.#links.clear()
@@ -142,69 +143,12 @@ export class RelayConnector {
   }
 
   async offer(): Promise<{ readonly link: string; readonly expires: number }> {
-    if (this.#state !== "connected") throw new Error("The relay is not connected")
-    const live = this.#offer
-    if (live !== undefined && live.expires - currentMillis() > ConnectorLimits.pairOfferReuseMs)
-      return { link: live.link, expires: live.expires }
-    const token = new Uint8Array(randomBytes(32))
-    const expires = currentMillis() + ConnectorLimits.pairOfferTtlMs
-    const hash = pairTokenHash(token)
-    this.#offerWaiter?.settle(false)
-    const accepted = new Promise<boolean>((resolve) => {
-      const timer = after(ConnectorLimits.pairOfferWaitMs, () => resolve(false))
-      this.#offerWaiter = {
-        hash,
-        settle: (ok) => {
-          timer.cancel()
-          this.#offerWaiter = undefined
-          resolve(ok)
-        }
-      }
-    })
-    this.#send({ t: "pair_offer", token_hash: hash, expires })
-    if (!(await accepted)) throw new Error("The relay did not take the pairing code")
-    const { identity } = this.#options
-    const params = new URLSearchParams({
-      v: "1",
-      relay: this.#options.phoneRelayUrl,
-      mac: identity.macId,
-      name: this.#options.macName,
-      ek: toB64url(identity.x.publicKey),
-      sk: toB64url(identity.ed.publicKey),
-      t: toB64url(token)
-    })
-    const link = `arden://pair?${params.toString()}`
-    this.#offer = { token, expires, link }
-    return { link, expires }
+    if (this.#state !== CONNECTOR_STATE.connected) throw new Error("The relay is not connected")
+    return this.#pairing.offer()
   }
 
-  async decide(dev: string, allow: boolean): Promise<boolean> {
-    const request = this.pairRequest
-    if (request === undefined || request.dev !== dev) return false
-    this.#pairRequest = undefined
-    if (!allow) {
-      this.#send({ t: "pair_deny", dev })
-      return true
-    }
-    const device = await this.#options.devices.add({
-      dev: request.dev,
-      name: request.name,
-      edPub: request.edPub,
-      xPub: request.xPub
-    })
-    this.#devices.set(dev, device)
-    const signature = sign(
-      addDeviceMessage({ dev, edPublicKey: fromB64url(request.edPub) }),
-      this.#options.identity.ed.secretKey
-    )
-    this.#send({
-      t: "add_device",
-      dev,
-      ed_pub: request.edPub,
-      name: request.name,
-      sig_mac: toB64url(signature)
-    })
-    return true
+  decide(dev: string, allow: boolean): Promise<boolean> {
+    return this.#pairing.decide(dev, allow)
   }
 
   async remove(dev: string): Promise<void> {
@@ -251,7 +195,8 @@ export class RelayConnector {
     readonly category: string | undefined
     readonly payload: Uint8Array
   }): boolean {
-    if (this.#state !== "connected" || this.#socket?.readyState !== WebSocket.OPEN) return false
+    if (this.#state !== CONNECTOR_STATE.connected || this.#socket?.readyState !== WebSocket.OPEN)
+      return false
     const id = uuidv7()
     if (this.#pushes.size > 256) this.#pushes.clear()
     this.#pushes.set(id, input.device.dev)
@@ -272,7 +217,7 @@ export class RelayConnector {
     return true
   }
 
-  presence(state: "online" | "asleep"): void {
+  presence(state: AwakeState): void {
     this.#send({ t: "presence", state })
   }
 
@@ -281,7 +226,7 @@ export class RelayConnector {
     const { relayUrl, identity } = this.#options
     const socket = new WebSocket(`${relayUrl.replace(/\/+$/, "")}/v1/connect?mac=${identity.macId}`)
     this.#socket = socket
-    this.#setState("connecting")
+    this.#setState(CONNECTOR_STATE.connecting)
     this.#heard = currentMillis()
     socket.on("message", (data: RawData, isBinary: boolean) => {
       if (this.#socket !== socket) return
@@ -303,7 +248,7 @@ export class RelayConnector {
       this.#heartbeat?.cancel()
       this.#dropAllLinks()
       this.#online.clear()
-      this.#setState("connecting")
+      this.#setState(CONNECTOR_STATE.connecting)
       if (this.#stopped) return
       this.#attempt += 1
       const delay = ladderDelayMs(ConnectorLimits.backoffMs, this.#attempt)
@@ -330,7 +275,7 @@ export class RelayConnector {
 
   async #dispatch(header: RelayHeader, body: Uint8Array): Promise<void> {
     switch (header.t) {
-      case "challenge": {
+      case HEADER_TAG.challenge: {
         const { identity } = this.#options
         const signature = sign(
           authMessage({
@@ -350,17 +295,17 @@ export class RelayConnector {
         })
         return
       }
-      case "ready":
+      case HEADER_TAG.ready:
         this.#attempt = 0
-        this.#setState("connected")
+        this.#setState(CONNECTOR_STATE.connected)
         return this.#reconcile(header.peers)
-      case "msg":
+      case HEADER_TAG.msg:
         return this.#onMessage(header.from, body)
-      case "queued":
+      case HEADER_TAG.queued:
         return this.#onQueued(header.id, header.from, body)
-      case "presence": {
+      case HEADER_TAG.presence: {
         if (!this.#devices.has(header.dev)) return
-        if (header.state === "online") this.#online.add(header.dev)
+        if (header.state === PRESENCE_STATE.online) this.#online.add(header.dev)
         else {
           this.#online.delete(header.dev)
           this.#dropLink(header.dev)
@@ -368,55 +313,34 @@ export class RelayConnector {
         const at = header.last_seen > 0 ? header.last_seen : currentMillis()
         return this.#options.devices.seen(header.dev, new Date(at))
       }
-      case "pair_request": {
-        const offer = this.#offer
-        if (offer === undefined || offer.expires < currentMillis()) return
-        this.#offer = undefined
-        this.#pairRequest = {
-          at: currentMillis(),
-          request: {
-            dev: header.dev,
-            name: header.name,
-            edPub: header.ed_pub,
-            xPub: header.x_pub,
-            code: pairCode({
-              token: offer.token,
-              phoneEdPublicKey: fromB64url(header.ed_pub),
-              phoneXPublicKey: fromB64url(header.x_pub)
-            })
-          }
-        }
-        return
-      }
-      case "pair_gone":
-        if (this.#pairRequest?.request.dev !== header.dev) return
-        this.#pairRequest = undefined
-        return
-      case "pair_offered":
-        if (this.#offerWaiter?.hash === header.token_hash) this.#offerWaiter.settle(true)
-        return
-      case "error":
-        if (header.code === "limit") this.#offerWaiter?.settle(false)
+      case HEADER_TAG.pair_request:
+        return this.#pairing.requested(header)
+      case HEADER_TAG.pair_gone:
+        return this.#pairing.gone(header.dev)
+      case HEADER_TAG.pair_offered:
+        return this.#pairing.offered(header.token_hash)
+      case HEADER_TAG.error:
+        if (header.code === RELAY_ERROR_CODE.limit) this.#pairing.refused()
         this.#options.log("warning", "The relay refused a frame", { code: header.code })
         return
-      case "device_left":
+      case HEADER_TAG.device_left:
         return this.#onDeviceLeft(header.dev, header.sig)
-      case "pair_pending":
-      case "stored":
-      case "undeliverable":
-      case "device_added":
-      case "device_removed":
-      case "left":
+      case HEADER_TAG.pair_pending:
+      case HEADER_TAG.stored:
+      case HEADER_TAG.undeliverable:
+      case HEADER_TAG.device_added:
+      case HEADER_TAG.device_removed:
+      case HEADER_TAG.left:
         return
-      case "pushed": {
+      case HEADER_TAG.pushed: {
         const dev = this.#pushes.get(header.id)
         this.#pushes.delete(header.id)
-        if (header.status === "accepted" || dev === undefined) return
+        if (header.status === PUSH_STATUS.accepted || dev === undefined) return
         this.#options.log("warning", "A notification did not reach the phone", {
           status: header.status,
           reason: header.reason
         })
-        if (header.status === "rejected" && DEAD_TOKEN.has(header.reason))
+        if (header.status === PUSH_STATUS.rejected && APNS_DEAD_TOKEN_REASONS.has(header.reason))
           await this.#setPush(dev, undefined)
         return
       }
@@ -426,7 +350,7 @@ export class RelayConnector {
   async #reconcile(peers: ReadonlyArray<Peer>): Promise<void> {
     this.#online.clear()
     for (const peer of peers) {
-      if (peer.role !== "phone") continue
+      if (peer.role !== ROLE.phone) continue
       if (!this.#devices.has(peer.dev)) {
         this.#sendRemove(peer.dev)
         continue
@@ -467,7 +391,7 @@ export class RelayConnector {
 
   #handshake(device: PairedDevice, body: Uint8Array): void {
     const hello = decodeHandshake(parseJson(body))
-    if (hello?.t !== "hs1") return
+    if (hello?.t !== APP_MESSAGE_TAG.hs1) return
     const ephemeral = generateX25519()
     let cipher: SessionCipher
     try {
@@ -512,7 +436,7 @@ export class RelayConnector {
         aad: bodyAad({ sender: from, receiver: this.#options.identity.macId })
       })
       const message = decodePhoneMessage(parseJson(plaintext))
-      if (message?.t === "cmd") await this.#phone(from).command(message)
+      if (message?.t === APP_MESSAGE_TAG.cmd) await this.#phone(from).command(message)
     } catch (cause) {
       this.#options.log("warning", "Queued phone command dropped", {
         cause: errorMessage(cause)

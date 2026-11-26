@@ -2,42 +2,31 @@ import type { CommitResult, ManagedFileRepositoryShape } from "@arden-hq/revisio
 import type { WikiPage } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 
-import {
-  commitWiki,
-  requireCommitRules,
-  type WikiCommitIdentity,
-  type WikiCommitPoint,
-  type WikiWrite,
-  type WikiWriter
-} from "./commit.js"
+import { commitWiki } from "./commit.js"
+import { requireCommitRules } from "./commit-rules.js"
+import { type WikiCommitPoint, type WikiWrite, type WikiWriter } from "./commit-write-types.js"
+import { type WikiCommitIdentity } from "./origin.js"
 import { mapRevisionError, WikiError, wikiError, type WikiOperation } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
 import { loadSnapshot, notFound, type PageRecord, type Snapshot } from "./snapshot.js"
 
-/** Who changes Memory, as which operation, and what they read first. */
 export interface WikiChangeWriter extends WikiCommitIdentity, WikiWriter {
   readonly operation: WikiOperation
-  /** The head and page versions the writer read. A change to any of them refuses the change, and
-   *  the commit is guarded by that head. Without it, the change is planned from and guarded by the
-   *  head it loads. */
   readonly read?: {
     readonly head: string
     readonly versions: ReadonlyArray<readonly [pageId: string, version: string]>
   }
 }
 
-/** The page writes a change makes, and what it answers with. */
 export interface WikiPlan<A> {
   readonly writes: ReadonlyArray<WikiWrite>
   readonly value: A
-  /** Why, when this plan's writes are saved for another reason than the writer gave. */
   readonly reason?: string
 }
 
 type WikiPlanner<A, E = never> = (snapshot: Snapshot) => Effect.Effect<WikiPlan<A>, WikiError | E>
 
 export interface WikiChanges {
-  /** Plans from the current pages and saves the plan's writes as one commit; no writes, no commit. */
   readonly change: <A, E = never>(
     writer: WikiChangeWriter,
     planner: WikiPlanner<A, E>
@@ -45,21 +34,17 @@ export interface WikiChanges {
     { readonly value: A; readonly commit: CommitResult | undefined },
     WikiError | E
   >
-  /** Plans from the current pages and refuses the plan by every rule its commit would meet, saving nothing. */
   readonly preview: <A>(
     writer: WikiChangeWriter,
     planner: WikiPlanner<A>
   ) => Effect.Effect<A, WikiError>
-  /** Refuses `writes` by every commit rule, saving nothing. */
   readonly check: (
     writer: WikiChangeWriter,
     writes: ReadonlyArray<WikiWrite>
   ) => Effect.Effect<void, WikiError>
-  /** A page a change saved, as it reads now. */
   readonly saved: (operation: WikiOperation, pageId: string) => Effect.Effect<WikiPage, WikiError>
 }
 
-/** The writer behind a service verb's input; it read `head` and each of `pages` first when given. */
 export const writerOf = (
   operation: WikiOperation,
   input: { readonly authority: WikiWriter["authority"]; readonly commit: WikiCommitIdentity },
@@ -110,7 +95,6 @@ const requireRead = Effect.fn("Wiki.requireRead")(function* (
 const withCurrent = (repository: ManagedFileRepositoryShape, cause: WikiError) => {
   const pageId = cause.pageId
   if (cause.reason !== "conflict" || pageId === undefined) return Effect.succeed(cause)
-  // An Error's message is not an own enumerable field, so a spread of `cause` drops it.
   const told = { ...cause, message: cause.message }
   return Effect.gen(function* () {
     const currentHead = yield* repository.currentRevision

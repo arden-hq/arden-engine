@@ -14,8 +14,6 @@ export interface ScanFileSystem {
 
 const nodeFileSystem: ScanFileSystem = { lstat, readdir }
 
-/** A file or folder below the root can be removed while the scan runs (a temp file, a finished
- *  download). It is then no longer part of the storage, so the scan leaves it out. */
 const ifThere = async <A>(read: Promise<A>): Promise<A | null> => {
   try {
     return await read

@@ -1,274 +1,41 @@
-import { ToolExecutionError, type ToolApprovalContext, type ToolContext } from "@arden-hq/loop"
+import { ToolExecutionError } from "@arden-hq/loop"
 import type { NavigationRequestedEvent } from "@arden-hq/protocol"
 import { NAVIGATION_ASKED_BY } from "@arden-hq/protocol/common"
-import type { ApprovalPresentationDraft } from "../persistence/tools/approval-draft.js"
 import { Effect, Schema } from "effect"
 
-import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
-import type { SentReceipt, ServerRunContext } from "./run-context.js"
+import { defineServerTool, type ServerTool } from "./define.js"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
-import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
-import {
-  SessionLifecycleEvents,
-  type SessionLifecycleEventError
-} from "../persistence/sessions/events.js"
-import {
-  SessionStore,
-  type SessionListEntry,
-  type SessionListQuery,
-  type SessionStoreError
-} from "../persistence/sessions/store.js"
+import { SessionQueries } from "../persistence/sessions/queries.js"
+import { SessionLifecycleEvents } from "../persistence/sessions/events.js"
+import { SessionStore } from "../persistence/sessions/store.js"
 import { ToolExecutionStore } from "../persistence/tools/store.js"
 import { WorkStore } from "../persistence/work/store.js"
-import { toolFailure } from "./tool-failure.js"
-import {
-  otherSpaceReach,
-  sessionMiss,
-  unreachableSession,
-  type ChatVerb
-} from "./session-visibility.js"
 import { Wiki } from "../wiki/service.js"
-import { errorMessage } from "@arden-hq/std/errors"
-import { handedCapture, readCapture, type StoredCapture } from "../persistence/sessions/capture.js"
+import { handedCapture, readCapture } from "../persistence/sessions/capture.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
 import { chatHandoff } from "./chat-handoff.js"
-import { placeResource, SessionRefSchema, ToolDestinationSchema } from "./app-destination.js"
+import { placeResource } from "./app-destination.js"
 import { resolveDestination } from "./app-open-destination.js"
-
-const RenameParametersSchema = Schema.Struct({
-  session_ref: SessionRefSchema,
-  name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(120)).pipe(
-    Schema.annotateEncoded({
-      description: "New short human-readable Session name."
-    })
-  )
-})
-
-const ArchiveParametersSchema = Schema.Struct({
-  session_refs: Schema.Array(SessionRefSchema)
-    .check(Schema.isMinLength(1), Schema.isMaxLength(50))
-    .annotate({
-      description: "One to 50 exact session_ref values from session_list."
-    })
-})
-
-const SendMessageParametersSchema = Schema.Struct({
-  session_ref: SessionRefSchema,
-  message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).pipe(
-    Schema.annotateEncoded({
-      description: "Self-contained message to deliver to the target Session."
-    })
-  )
-})
-
-const ForwardMessageParametersSchema = Schema.Struct({
-  session_ref: SessionRefSchema.annotate({
-    description: "Exact session_ref of the chat this capture belongs to, from session_list."
-  })
-})
-
-const AppOpenParametersSchema = Schema.Struct({
-  destination: ToolDestinationSchema,
-  label: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(160)).pipe(
-    Schema.annotateEncoded({
-      description: "Short imperative label shown to the user, such as 'Open the Ops Space'."
-    })
-  ),
-  mode: Schema.optionalKey(
-    Schema.Literals(["offer", "open"] as const).pipe(
-      Schema.annotateEncoded({
-        description:
-          "offer (default): a card in chat the user may open. open: move the user there now; only when they asked to be taken there."
-      })
-    )
-  )
-})
-
-interface SessionActionToolServices {
-  readonly store: SessionStore["Service"]
-  readonly queries: SessionQueries["Service"]
-  readonly automations: AutomationCatalog["Service"]
-  readonly spaces: SpaceStore["Service"]
-  readonly work: WorkStore["Service"]
-  readonly wiki: Wiki["Service"]
-  readonly events: SessionLifecycleEvents["Service"]
-  readonly executions: ToolExecutionStore["Service"]
-}
-
-interface SourceRef {
-  readonly provider: "arden"
-  readonly kind: "session"
-  readonly ref: string
-  readonly title: string
-}
-
-const sessionFailure = (error: SessionStoreError): ToolExecutionError =>
-  toolFailure(error, error.reason === "conflict" ? "Session changed" : "Session unavailable")
-
-const sessionQueryFailure = (error: SessionQueryFailure): ToolExecutionError =>
-  toolFailure(error, "Session unavailable")
-
-const eventFailure = (error: SessionLifecycleEventError): ToolExecutionError =>
-  toolFailure(error, "App request unavailable")
-
-const currentScope = async (
-  queries: SessionQueries["Service"],
-  sessionId: string,
-  signal: AbortSignal
-): Promise<SessionListQuery> => {
-  const header = await Effect.runPromise(
-    queries.loadHistoryHeader(sessionId).pipe(Effect.mapError(sessionQueryFailure)),
-    { signal }
-  )
-  if (header === null) {
-    throw new ToolExecutionError("The current Session no longer exists", {
-      preview: "Session not found",
-      retryable: false
-    })
-  }
-  return {
-    scope: "all",
-    ...(header.spaceId === null ? {} : { spaceId: header.spaceId })
-  }
-}
-
-const findSession = async (
-  services: SessionActionToolServices,
-  requestingSessionId: string,
-  sessionRef: string,
-  signal: AbortSignal
-): Promise<SessionListEntry | undefined> => {
-  const scope = await currentScope(services.queries, requestingSessionId, signal)
-  return listOne(services, { ...scope, sessionRef }, signal)
-}
-
-const listOne = async (
-  services: SessionActionToolServices,
-  query: SessionListQuery,
-  signal: AbortSignal
-): Promise<SessionListEntry | undefined> => {
-  const matches = await Effect.runPromise(
-    services.store.list({ ...query, limit: 1 }).pipe(Effect.mapError(sessionFailure)),
-    { signal }
-  )
-  return matches[0]
-}
-
-interface ChatAccess {
-  readonly run: ServerRunContext
-  readonly tool: string
-  readonly verb: ChatVerb
-  readonly handed: boolean
-}
-
-const reachSession = async (
-  services: SessionActionToolServices,
-  access: ChatAccess,
-  sessionRef: string,
-  signal: AbortSignal
-): Promise<{ readonly session: SessionListEntry; readonly otherSpace: boolean }> => {
-  const here = await findSession(services, access.run.sessionId, sessionRef, signal)
-  if (here !== undefined) return { session: here, otherSpace: false }
-  const elsewhere = await listOne(services, { scope: "all", sessionRef }, signal)
-  if (elsewhere !== undefined) return { session: elsewhere, otherSpace: true }
-  const miss = await sessionMiss(services.queries, sessionRef, signal)
-  throw unreachableSession(sessionRef, miss, access.run.authority.actor)
-}
-
-const crossSpace = (access: ChatAccess, approved: boolean): "allow" | "ask" | "deny" =>
-  otherSpaceReach({
-    authority: access.run.authority,
-    verb: access.verb,
-    handed: access.handed,
-    mode: access.run.approvalMode,
-    approved
-  })
-
-const resolveSession = async (
-  services: SessionActionToolServices,
-  access: ChatAccess & {
-    readonly approval?: ToolApprovalContext | undefined
-  },
-  sessionRef: string,
-  signal: AbortSignal
-): Promise<SessionListEntry> => {
-  const { session, otherSpace } = await reachSession(services, access, sessionRef, signal)
-  if (!otherSpace) return session
-  const approved = access.approval?.data?.["session_id"] === session.sessionId
-  if (crossSpace(access, approved) === "allow") return session
-  throw unreachableSession(sessionRef, "other_space", access.run.authority.actor)
-}
-
-const otherSpaceCard = async (
-  services: SessionActionToolServices,
-  ctx: ToolContext<ServerRunContext>,
-  tool: "session_send_message" | "forward_message",
-  sessionRef: string,
-  handed: boolean,
-  card: (target: { readonly name: string; readonly space: string }) => {
-    readonly preview: string
-    readonly presentation: Omit<ApprovalPresentationDraft, "fields">
-  }
-): Promise<ServerApprovalPrompt | undefined> => {
-  const access = { run: ctx.run, tool, verb: "message", handed } as const
-  const { session, otherSpace } = await reachSession(services, access, sessionRef, ctx.signal)
-  if (!otherSpace) return undefined
-  const reach = crossSpace(access, false)
-  if (reach === "deny") throw unreachableSession(sessionRef, "other_space", ctx.run.authority.actor)
-  if (reach === "allow") return undefined
-  const name = session.name?.trim() || sessionRef
-  const space = session.spaceName ?? "No Space"
-  const { preview, presentation } = card({ name, space })
-  return {
-    preview,
-    presentation: {
-      ...presentation,
-      fields: [
-        { label: "To", value: name },
-        { label: "Space", value: space }
-      ]
-    },
-    data: { reviewer: "user", session_id: session.sessionId }
-  }
-}
-
-const handedOver = (capture: StoredCapture | undefined): boolean =>
-  capture !== undefined && capture.forwarded === undefined
-
-type DeliveryRequest = Omit<Parameters<ServerRunContext["sendMessage"]>[0], "sessionId">
-
-const deliverToSession = async (
-  services: SessionActionToolServices,
-  ctx: ToolContext<ServerRunContext>,
-  tool: "session_send_message" | "forward_message",
-  sessionRef: string,
-  handed: boolean,
-  request: (target: SessionListEntry) => DeliveryRequest
-): Promise<{ readonly target: SessionListEntry; readonly receipt: SentReceipt }> => {
-  const target = await resolveSession(
-    services,
-    { run: ctx.run, tool, verb: "message", handed, approval: ctx.approval },
-    sessionRef,
-    ctx.signal
-  )
-  if (target.sessionId === ctx.run.sessionId) {
-    throw new ToolExecutionError("A message cannot be delivered to the chat it comes from", {
-      preview: "Same chat",
-      retryable: false
-    })
-  }
-  const receipt = await ctx.run
-    .sendMessage({ sessionId: target.sessionId, ...request(target), announce: true })
-    .catch((cause: unknown) => {
-      throw new ToolExecutionError(errorMessage(cause, "The message could not be delivered"), {
-        preview: "Message not delivered",
-        retryable: true
-      })
-    })
-  return { target, receipt }
-}
+import {
+  AppOpenParametersSchema,
+  ArchiveParametersSchema,
+  ForwardMessageParametersSchema,
+  RenameParametersSchema,
+  SendMessageParametersSchema
+} from "./session-action-parameters.js"
+import {
+  type SessionActionToolServices,
+  type SourceRef,
+  eventFailure,
+  findSession,
+  otherSpaceCard,
+  resolveSession,
+  sessionFailure,
+  sessionQueryFailure
+} from "./session-action-access.js"
+import { deliverToSession, handedOver } from "./session-action-delivery.js"
 
 const archivePreview = (archived: number, summary: string, current: boolean): string => {
   if (!current) return archived === 0 ? "Nothing archived" : summary

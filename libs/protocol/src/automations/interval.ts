@@ -1,4 +1,3 @@
-/** Current time-trigger grammar: integer days, hours and minutes, in that order. */
 export function parseIntervalMinutes(value: string): number | undefined {
   const match = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/i.exec(value.trim())
   if (!match) return undefined

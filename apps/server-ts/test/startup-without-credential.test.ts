@@ -6,8 +6,6 @@ import { expect, it } from "vitest"
 import { startServer, type ServerHandle } from "../src/index.js"
 import { brokeredProviderRoute, type BrokerCredential } from "../src/providers/registry.js"
 
-// Reading chats needs no model credential. The desktop host can take seconds
-// to fetch one, so the server must open and serve reads while it is pending.
 it(
   "opens and serves reads while the model credential is still pending",
   { timeout: 20_000 },

@@ -24,6 +24,14 @@ import type { JobLeaseRef } from "@arden-hq/jobs"
 import type { AutomationId } from "../automations/model.js"
 import type { PlanReading, QuotaPauseReason } from "../../models/plan-limits.js"
 
+export const CHAT_WRITE_STORED = { stored: "Stored" } as const
+
+export const CHAT_AGENT_SPAWN_REASON = {
+  invalidParent: "invalid_parent",
+  maxDepth: "max_depth",
+  workingDirectory: "working_directory"
+} as const
+
 export interface ChatAutomationOrigin {
   readonly automationId: AutomationId
   readonly name: string
@@ -161,8 +169,6 @@ interface ChatWriteSpawnAgentInputBase {
   readonly outputSchema?: JsonObject
   readonly model?: string
   readonly reasoningEffort?: string
-  /** The model the child runs on when the call names none; without it the
-   *  child takes the parent's. Not part of the call's arguments. */
   readonly defaultModel?: { readonly model: string; readonly reasoningEffort: string | null }
   readonly forkHistory?: ReadonlyArray<Readonly<Record<string, unknown>>>
 }
@@ -183,7 +189,7 @@ export interface ChatWriteSpawnAgentResult {
 export class ChatAgentSpawnError extends Schema.TaggedError<ChatAgentSpawnError>()(
   "ChatAgentSpawnError",
   {
-    reason: Schema.Literals(["invalid_parent", "max_depth", "working_directory"] as const),
+    reason: Schema.Literals(Object.values(CHAT_AGENT_SPAWN_REASON)),
     retryable: Schema.Boolean,
     message: Schema.String,
     runId: Schema.optionalKey(Schema.NonEmptyString),
@@ -191,6 +197,14 @@ export class ChatAgentSpawnError extends Schema.TaggedError<ChatAgentSpawnError>
     cause: Schema.optionalKey(Schema.Defect())
   }
 ) {}
+
+export const CHAT_WRITE_FAILURE = {
+  invalid: "invalid",
+  not_found: "not_found",
+  corrupt: "corrupt",
+  storage: "storage",
+  terminal: "terminal"
+} as const
 
 export class ChatWriteError extends Schema.TaggedError<ChatWriteError>()("ChatWriteError", {
   operation: Schema.Literals([
@@ -213,7 +227,7 @@ export class ChatWriteError extends Schema.TaggedError<ChatWriteError>()("ChatWr
     "fail_queued",
     "post"
   ] as const),
-  reason: Schema.Literals(["invalid", "not_found", "corrupt", "storage", "terminal"] as const),
+  reason: Schema.Literals(Object.values(CHAT_WRITE_FAILURE)),
   message: Schema.String,
   sessionId: Schema.optionalKey(Schema.NonEmptyString),
   runId: Schema.optionalKey(Schema.NonEmptyString),
@@ -235,8 +249,14 @@ export type ChatWriteSpawnAgentFailure = ChatWriteFailure | ChatAgentSpawnError
 
 type ChatWriteCommit = CommittedEventBatch
 
+export const CHAT_WRITE_START = {
+  started: "Started",
+  existing: "Existing",
+  queued: "Queued"
+} as const
+
 interface ChatWriteStarted {
-  readonly _tag: "Started"
+  readonly _tag: typeof CHAT_WRITE_START.started
   readonly runId: string
   readonly model: string | null
   readonly reasoningEffort: string | null
@@ -251,19 +271,21 @@ interface ChatWriteStarted {
 }
 
 interface ChatWriteExisting {
-  readonly _tag: "Existing"
+  readonly _tag: typeof CHAT_WRITE_START.existing
   readonly runId: string
   readonly status: ChatReceiptStatus
 }
 
 interface ChatWriteQueued {
-  readonly _tag: "Queued"
+  readonly _tag: typeof CHAT_WRITE_START.queued
   readonly runId: string
 }
 
 export type ChatWriteStartResult = ChatWriteStarted | ChatWriteExisting | ChatWriteQueued
 
-export type ChatWriteReceiveResult = ChatWriteStartResult | { readonly _tag: "Stored" }
+export type ChatWriteReceiveResult =
+  | ChatWriteStartResult
+  | { readonly _tag: typeof CHAT_WRITE_STORED.stored }
 
 export interface ChatQueueEnqueueInput {
   readonly sessionId: string
@@ -314,10 +336,6 @@ export class ChatWriteStore extends Context.Service<
       readonly runId: string
       readonly sources: ReadonlyArray<LocalInstructionManifestEntry>
     }) => Effect.Effect<void, ChatWriteFailure>
-    /**
-     * Adds a composition of the run's Memory context to its record, unless it repeats the last
-     * one or is the first and holds nothing.
-     */
     readonly recordMemoryContext: (input: {
       readonly runId: string
       readonly sessionId: string

@@ -1,18 +1,10 @@
-// The "answered" half of the memory test, planned and priced but not run: each question asked
-// in three fresh chats on the replay copy with a model, each reply judged against the dated
-// expected answer. This prints the plan and the cost of one pass, from first turns measured on
-// the copy, and sends nothing to a model. The paid run itself is not built: given the paid
-// flag, it says so and fails; given any other flag, it refuses.
-//
-// Run it with `just memory-test-answered <question file> <replay folder> [--paid-run]`. It runs
-// under vitest and opens the copy only through test/fixtures/replay-copy.ts.
-
 import { existsSync } from "node:fs"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { it } from "vitest"
 import { runOnReplayCopy } from "../test/fixtures/replay-copy.js"
 import {
+  ANSWERED_MODE,
   answeredMode,
   estimatePass,
   measureFirstTurns,
@@ -43,7 +35,6 @@ it("plans and prices one answered pass, and sends nothing to a model", async () 
   )
   const estimate = estimatePass(files.questions, usage)
   const round = (value: number) => Math.round(value).toLocaleString("en-US")
-  // Vitest swallows console output here; a direct write reaches the terminal.
   process.stdout.write(
     [
       "",
@@ -53,11 +44,11 @@ it("plans and prices one answered pass, and sends nothing to a model", async () 
       `Judge: ${round(estimate.judgeRequests)} requests, about ${round(estimate.judgeFreshInputTokens)} fresh input tokens.`,
       `Per pass: ${round(estimate.requests)} model requests, ${round(estimate.freshInputTokens)} fresh input tokens.`,
       "Nothing was sent to a model.",
-      mode === "plan" ? `A paid run needs ${PAID_RUN_FLAG}.` : "",
+      mode === ANSWERED_MODE.plan ? `A paid run needs ${PAID_RUN_FLAG}.` : "",
       ""
     ].join("\n")
   )
-  if (mode === "paid")
+  if (mode === ANSWERED_MODE.paid)
     throw new Error(
       "The paid answered runner is not built yet. Nothing was run; it needs the owner's approval of this estimate first."
     )

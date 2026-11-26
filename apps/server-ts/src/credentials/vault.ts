@@ -1,16 +1,16 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
+
+export const VAULT_ERROR_REASON = {
+  unavailable: "unavailable",
+  invalid: "invalid",
+  operation: "operation"
+} as const
 
 export interface SecureDocumentTarget {
   readonly documentKey: string
   readonly binding: string
 }
 
-/**
- * Main-process-owned encrypted storage shared by credential-bearing
- * integrations. A new integration stores its secrets as documents; an
- * integration that needs typed main-process checks extends this interface
- * (`McpOAuthVault`).
- */
 export interface CredentialVault {
   readonly readDocument: (target: SecureDocumentTarget) => Promise<unknown | null>
   readonly writeDocument: (target: SecureDocumentTarget, value: unknown) => Promise<void>
@@ -18,7 +18,7 @@ export interface CredentialVault {
 }
 
 export class VaultError extends Error {
-  readonly reason: "unavailable" | "invalid" | "operation"
+  readonly reason: (typeof VAULT_ERROR_REASON)[keyof typeof VAULT_ERROR_REASON]
 
   constructor(reason: VaultError["reason"], message: string, cause?: unknown) {
     super(message, cause === undefined ? undefined : { cause })
@@ -46,7 +46,7 @@ export const vaultOperation = async <A>(message: string, run: () => Promise<A>):
   }
 }
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 
 export const decodeVaultValue = async <S extends Schema.Decoder<unknown>>(
   schema: S,

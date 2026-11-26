@@ -1,8 +1,9 @@
-import { Context, Effect, Exit, Layer, Schema, Scope } from "effect"
+import { Context, Effect, Exit, Layer, Predicate, Schema, Scope } from "effect"
 import { HttpServer } from "effect/unstable/http"
 import type { HostedServerOptions } from "../config/options.js"
 import { ServerConfig, layer } from "../config/service.js"
 import { serverLayer } from "../http/server.js"
+import { LOCAL_ACCESS_HOST } from "../http/middleware/local-only.js"
 import { ChatMessage } from "../chat/message.js"
 import { ServerLifecycle } from "./lifecycle.js"
 import type { ModelProviderSwitch } from "../models/provider-switch.js"
@@ -18,7 +19,7 @@ export interface OpenServer {
 const decodeLocalAccess = Schema.decodeUnknownEffect(
   Schema.UndefinedOr(
     Schema.Struct({
-      host: Schema.Literals(["app", "configured"]),
+      host: Schema.Literals(Object.values(LOCAL_ACCESS_HOST)),
       capability: Schema.String.check(Schema.isMinLength(32)),
       rendererOrigin: Schema.String.check(Schema.isMinLength(1)),
       cliCapability: Schema.String.check(Schema.isMinLength(32)),
@@ -42,7 +43,7 @@ export const openServer = (
     )
     const server = Context.get(context, HttpServer.HttpServer)
 
-    if (server.address._tag !== "TcpAddress") {
+    if (!Predicate.isTagged(server.address, "TcpAddress")) {
       return yield* Effect.fail(new Error("Arden server requires a TCP listener"))
     }
 

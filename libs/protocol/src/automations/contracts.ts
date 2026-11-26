@@ -1,8 +1,10 @@
 import type { JsonRecord, JsonValue } from "../common/json.js"
-export type {
-  AutomationCountThrough,
-  AutomationEventProducer,
-  AutomationTriggerContext
+export {
+  AUTOMATION_OCCURRENCE,
+  type AutomationCountThrough,
+  type AutomationEventProducer,
+  type AutomationOccurrence,
+  type AutomationTriggerContext
 } from "./occurrence.js"
 import type { AutomationEventType } from "./triggers.js"
 import type {
@@ -12,29 +14,33 @@ import type {
 } from "./trigger-contracts.js"
 export * from "./trigger-contracts.js"
 
-/** A run's outcome as the wire reports it. `blocked`: the run ended with the
- *  agent's own report that it could not finish (`report` blocked), so it is
- *  never a success; stored runs say `completed`, and reads derive `blocked`.
- *  `interrupted`: a restart (or a lost owner) stopped the run before it
- *  finished — routine, not a failure. */
-export type AutomationRunStatus =
-  | "running"
-  | "completed"
-  | "blocked"
-  | "failed"
-  | "cancelled"
-  | "interrupted"
-/** `fork`: the run starts from another chat's history in its own hidden chat. */
-export type AutomationContextMode = "fresh" | "continue" | "fork"
-/** What each run of a user's Automation knows: "fresh" starts with no history,
- *  "chat" reads its chat's history. */
-export type AutomationHistory = "fresh" | "chat"
-/** Where a user's Automation lives and reports: its own chat, or one of the user's
- *  chats. A Space comes only from the chat. */
+export const AUTOMATION_RUN_STATUS = {
+  running: "running",
+  completed: "completed",
+  blocked: "blocked",
+  failed: "failed",
+  cancelled: "cancelled",
+  interrupted: "interrupted"
+} as const
+export type AutomationRunStatus = (typeof AUTOMATION_RUN_STATUS)[keyof typeof AUTOMATION_RUN_STATUS]
+export const AUTOMATION_CONTEXT_MODE = {
+  fresh: "fresh",
+  continue: "continue",
+  fork: "fork"
+} as const
+export type AutomationContextMode =
+  (typeof AUTOMATION_CONTEXT_MODE)[keyof typeof AUTOMATION_CONTEXT_MODE]
+
+export const AUTOMATION_HISTORY = { fresh: "fresh", chat: "chat" } as const
+export type AutomationHistory = (typeof AUTOMATION_HISTORY)[keyof typeof AUTOMATION_HISTORY]
+
+export const AUTOMATION_CHAT_CHOICE = { own: "own", yours: "yours" } as const
 export type AutomationChatChoice =
-  | { readonly kind: "own" }
-  | { readonly kind: "yours"; readonly session_id: string }
-export type AutomationWaitingOn = "approval" | "connection"
+  | { readonly kind: typeof AUTOMATION_CHAT_CHOICE.own }
+  | { readonly kind: typeof AUTOMATION_CHAT_CHOICE.yours; readonly session_id: string }
+
+export const AUTOMATION_WAITING_ON = { approval: "approval", connection: "connection" } as const
+export type AutomationWaitingOn = (typeof AUTOMATION_WAITING_ON)[keyof typeof AUTOMATION_WAITING_ON]
 
 export interface AutomationPendingCard extends JsonRecord {
   readonly run_id: string
@@ -47,64 +53,91 @@ export type AutomationPendingApprovals =
   | { readonly kind: "none" }
   | { readonly kind: "pending"; readonly count: number; readonly first: AutomationPendingCard }
 
-export type AutomationValueOperator =
-  | "eq"
-  | "ne"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "contains"
-  | "starts_with"
-  | "ends_with"
+export const CONDITION_OPERATOR = {
+  eq: "eq",
+  ne: "ne",
+  gt: "gt",
+  gte: "gte",
+  lt: "lt",
+  lte: "lte",
+  contains: "contains",
+  starts_with: "starts_with",
+  ends_with: "ends_with",
+  in: "in",
+  exists: "exists"
+} as const
 
-export type AutomationConditionOperator = AutomationValueOperator | "in" | "exists"
+export type AutomationConditionOperator =
+  (typeof CONDITION_OPERATOR)[keyof typeof CONDITION_OPERATOR]
+
+export type AutomationValueOperator = Exclude<
+  AutomationConditionOperator,
+  typeof CONDITION_OPERATOR.in | typeof CONDITION_OPERATOR.exists
+>
+
+export const AUTOMATION_CONDITION = {
+  compare: "compare",
+  and: "and",
+  or: "or",
+  not: "not"
+} as const
 
 export type AutomationComparisonCondition =
   | {
-      readonly kind: "compare"
+      readonly kind: typeof AUTOMATION_CONDITION.compare
       readonly field: string
       readonly op: AutomationValueOperator
       readonly value: JsonValue
     }
   | {
-      readonly kind: "compare"
+      readonly kind: typeof AUTOMATION_CONDITION.compare
       readonly field: string
-      readonly op: "in"
+      readonly op: typeof CONDITION_OPERATOR.in
       readonly value: ReadonlyArray<JsonValue>
     }
-  | { readonly kind: "compare"; readonly field: string; readonly op: "exists" }
+  | {
+      readonly kind: typeof AUTOMATION_CONDITION.compare
+      readonly field: string
+      readonly op: typeof CONDITION_OPERATOR.exists
+    }
 
 export type AutomationCondition =
   | AutomationComparisonCondition
-  | { readonly kind: "and"; readonly conditions: ReadonlyArray<AutomationCondition> }
-  | { readonly kind: "or"; readonly conditions: ReadonlyArray<AutomationCondition> }
-  | { readonly kind: "not"; readonly condition: AutomationCondition }
+  | {
+      readonly kind: typeof AUTOMATION_CONDITION.and
+      readonly conditions: ReadonlyArray<AutomationCondition>
+    }
+  | {
+      readonly kind: typeof AUTOMATION_CONDITION.or
+      readonly conditions: ReadonlyArray<AutomationCondition>
+    }
+  | { readonly kind: typeof AUTOMATION_CONDITION.not; readonly condition: AutomationCondition }
 
 export type SettableAutomationToolScope = "read_only" | "reports" | "browser" | "all"
 
-/** Stored scopes are server-owned keys, never client-maintained tool lists. */
 export type AutomationToolScope =
   | SettableAutomationToolScope
   | "space"
   | "memory_capture"
   | "chat_summary"
 
-/** A system Automation setting the user may change; each one resets to its handler's default. */
-export type SystemAutomationSetting = "triggers" | "model" | "prompt" | "enabled"
+export const SYSTEM_AUTOMATION_SETTING = {
+  triggers: "triggers",
+  model: "model",
+  prompt: "prompt",
+  enabled: "enabled"
+} as const
+export type SystemAutomationSetting =
+  (typeof SYSTEM_AUTOMATION_SETTING)[keyof typeof SYSTEM_AUTOMATION_SETTING]
 
-/** What a system Automation lets the user change, and what they changed. */
 export interface SystemAutomationSettings extends JsonRecord {
-  /** The handler's triggers, which `triggers` equals unless "triggers" is changed. */
   readonly default_triggers: ReadonlyArray<AutomationTriggerSpec>
-  /** No "model" for a fork: it runs on each source chat's model. No "prompt" for a job that runs no model. */
   readonly settable: ReadonlyArray<SystemAutomationSetting>
-  /** Settings that differ from the default: another trigger list, a model, its own instructions, or a pause. */
   readonly changed: ReadonlyArray<SystemAutomationSetting>
 }
 
 interface OwnAutomationChat extends JsonRecord {
-  readonly kind: "own"
+  readonly kind: typeof AUTOMATION_CHAT_CHOICE.own
   readonly session_id: string
 }
 
@@ -113,7 +146,7 @@ export type AutomationOwnChat =
   | { readonly kind: "chat"; readonly session_id: string }
 
 interface YourAutomationChat extends JsonRecord {
-  readonly kind: "yours"
+  readonly kind: typeof AUTOMATION_CHAT_CHOICE.yours
   readonly session_id: string
   readonly own_chat: AutomationOwnChat
 }
@@ -146,7 +179,11 @@ export type AutomationNextRun =
 export type AutomationActivity =
   | { readonly kind: "idle" }
   | { readonly kind: "running"; readonly since: string }
-  | { readonly kind: "waiting"; readonly since: string; readonly on: AutomationWaitingOn }
+  | {
+      readonly kind: "waiting"
+      readonly since: string
+      readonly on: AutomationWaitingOn
+    }
 
 export type AutomationCooldown =
   | { readonly kind: "none" }
@@ -225,7 +262,6 @@ export interface UpdateAutomationInput {
   readonly changes: ReadonlyArray<AutomationChange>
 }
 
-/** Puts one changed system setting back to its handler's default. */
 export interface ResetAutomationSettingInput {
   readonly setting: SystemAutomationSetting
 }
@@ -261,13 +297,13 @@ interface AutomationRunFields extends JsonRecord {
 }
 
 export interface RunningAutomationRun extends AutomationRunFields {
-  readonly status: "running"
+  readonly status: typeof AUTOMATION_RUN_STATUS.running
   readonly chat: AutomationRunChat
   readonly output: AutomationRunOutput
 }
 
 export interface EndedAutomationRun extends AutomationRunFields {
-  readonly status: Exclude<AutomationRunStatus, "running">
+  readonly status: Exclude<AutomationRunStatus, typeof AUTOMATION_RUN_STATUS.running>
   readonly ended_at: string
   readonly chat: AutomationRunChat
   readonly output: AutomationRunOutput
@@ -296,13 +332,30 @@ export interface AutomationSkippedEvent extends JsonRecord {
   readonly link: AutomationEventLink
 }
 
+export const AUTOMATION_EVENT_LINK = {
+  none: "none",
+  chat: "chat",
+  memory_page: "memory_page",
+  task: "task",
+  connection_item: "connection_item",
+  connection_item_with_page: "connection_item_with_page"
+} as const
+
 export type AutomationEventLink =
-  | { readonly kind: "none" }
-  | { readonly kind: "chat"; readonly session_id: string; readonly session_ref: string }
-  | { readonly kind: "memory_page"; readonly path: string }
-  | { readonly kind: "task"; readonly item_id: string }
-  | { readonly kind: "connection_item"; readonly item_id: string }
-  | { readonly kind: "connection_item_with_page"; readonly item_id: string; readonly url: string }
+  | { readonly kind: typeof AUTOMATION_EVENT_LINK.none }
+  | {
+      readonly kind: typeof AUTOMATION_EVENT_LINK.chat
+      readonly session_id: string
+      readonly session_ref: string
+    }
+  | { readonly kind: typeof AUTOMATION_EVENT_LINK.memory_page; readonly path: string }
+  | { readonly kind: typeof AUTOMATION_EVENT_LINK.task; readonly item_id: string }
+  | { readonly kind: typeof AUTOMATION_EVENT_LINK.connection_item; readonly item_id: string }
+  | {
+      readonly kind: typeof AUTOMATION_EVENT_LINK.connection_item_with_page
+      readonly item_id: string
+      readonly url: string
+    }
 
 export type AutomationSkipRunWithEvent =
   | { readonly kind: "not_asked" }
@@ -310,9 +363,6 @@ export type AutomationSkipRunWithEvent =
   | { readonly kind: "started"; readonly at: string; readonly run_id: number }
   | { readonly kind: "cancelled"; readonly at: string }
 
-/** An event trigger's old field condition in words, by the trigger's id.
- *  `readable`: every field it reads has words, so the sentence can stand as the
- *  trigger's "Run only if"; otherwise it is shown but never kept as one. */
 export interface AutomationOldCondition extends JsonRecord {
   readonly trigger_id: string
   readonly words: string
@@ -323,7 +373,15 @@ export interface AutomationRunsResponse extends JsonRecord {
   readonly runs: ReadonlyArray<AutomationRun>
 }
 
-export type AutomationCatalogFieldType = "int" | "float" | "str" | "bool" | "list"
+export const AUTOMATION_CATALOG_FIELD_TYPE = {
+  int: "int",
+  float: "float",
+  str: "str",
+  bool: "bool",
+  list: "list"
+} as const
+export type AutomationCatalogFieldType =
+  (typeof AUTOMATION_CATALOG_FIELD_TYPE)[keyof typeof AUTOMATION_CATALOG_FIELD_TYPE]
 
 export interface AutomationEventCatalogField extends JsonRecord {
   readonly field: string
@@ -355,6 +413,4 @@ export interface DeleteAutomationResponse extends JsonRecord {
   readonly status: "deleted"
 }
 
-/** The built-in Automation that writes the Home letter. Home's "Write now"
- *  runs it; the server seeds it under this id. */
 export const HOME_LETTER_AUTOMATION_REF = "builtin-home-letter"

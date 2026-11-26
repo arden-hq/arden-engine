@@ -1,10 +1,12 @@
+import { SYSTEM_HANDLER } from "../automations/model.js"
 import { openRunSince } from "./automation-running.js"
-import { isAutomationEventType } from "@arden-hq/protocol/automations"
+import { AUTOMATION_OCCURRENCE, isAutomationEventType } from "@arden-hq/protocol/automations"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
   mergeEventBatches,
+  RUN_EVENTS_SOURCE,
   RUNS_ALONE,
   runsAlone,
   type BatchedEvent,
@@ -48,14 +50,14 @@ export const batchAtClaim = Effect.fn("AutomationEventBatch.batchAtClaim")(funct
 }) {
   const { row } = options
   if (
-    options.context.trigger_context_snapshot?.source === "event" &&
+    options.context.trigger_context_snapshot?.source === AUTOMATION_OCCURRENCE.event &&
     runsAlone(options.context.trigger_context_snapshot.event_type)
   )
     return options.context
-  if (row.handler === "wiki_maintenance") return yield* absorbMemoryChanges(options)
+  if (row.handler === SYSTEM_HANDLER.wikiMaintenance) return yield* absorbMemoryChanges(options)
   if (batchWindow(row) !== undefined) return yield* absorbBatch(options)
   if (
-    (row.source === "event" || row.source === "manual") &&
+    (row.source === AUTOMATION_OCCURRENCE.event || row.source === AUTOMATION_OCCURRENCE.manual) &&
     isUserAutomationPurpose(row.purpose) &&
     row.attempt_count === 0
   )
@@ -75,7 +77,10 @@ const absorbBatch = Effect.fn("AutomationEventBatch.absorbBatch")(function* (opt
   readonly now: string
 }) {
   const { sql, row } = options
-  const run = { depth: contextDepth(options.context), asked: row.source === "manual" }
+  const run = {
+    depth: contextDepth(options.context),
+    asked: row.source === AUTOMATION_OCCURRENCE.manual
+  }
   const rows = yield* sql<{
     readonly id: number
     readonly source: AutomationQueueSource
@@ -119,7 +124,7 @@ const absorbBatch = Effect.fn("AutomationEventBatch.absorbBatch")(function* (opt
   })
   const causes = [own, ...others].flatMap((trigger) => {
     if (trigger === undefined) return []
-    return trigger.source === "coalesced" ? trigger.causes : [trigger]
+    return trigger.source === AUTOMATION_OCCURRENCE.coalesced ? trigger.causes : [trigger]
   })
   const [first, ...rest] = [
     ...new Map(causes.map((cause) => [JSON.stringify(cause), cause])).values()
@@ -148,7 +153,10 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
   }) {
     const { sql, row } = options
     const own = eventBatchOf(options.context)
-    const run = { depth: contextDepth(options.context), asked: row.source === "manual" }
+    const run = {
+      depth: contextDepth(options.context),
+      asked: row.source === AUTOMATION_OCCURRENCE.manual
+    }
     const waiting = yield* sql<{
       readonly id: number
       readonly context: string
@@ -191,7 +199,7 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
           })
         : undefined
     const ownCauses = (trigger === undefined ? [] : [trigger]).flatMap((cause) =>
-      cause.source === "coalesced" ? cause.causes : [cause]
+      cause.source === AUTOMATION_OCCURRENCE.coalesced ? cause.causes : [cause]
     )
     const [first, ...more] = merged.events
     const [head, ...tail] = [
@@ -211,9 +219,6 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
   }
 )
 
-/** A Memory change waits while the Automation that made it still runs, so the
- * run it wakes reads the producer's finished work. The claim and both fold
- * paths read this one fragment. */
 export const heldBehindProducer = (sql: SqlClient.SqlClient, queue: string): Statement<Row> => {
   const alias = sql.literal(queue)
   return sql`(${alias}.source = 'event'
@@ -225,11 +230,6 @@ const foldFacts = (sql: SqlClient.SqlClient, now: string) =>
   sql`(queue.next_attempt_at IS NULL OR queue.next_attempt_at <= ${now}) AS due,
     ${heldBehindProducer(sql, "queue")} AS held`
 
-/** The one rule for which waiting row a claim takes into its run, on all three
- * fold paths: one that could start a run of its own now (due, or the run was
- * asked for by hand, and not held behind its producer) at the run's own chain
- * depth. A deeper event would lift the run's depth, and what the run writes
- * would then wake no one. */
 const foldsInto = (
   run: { readonly depth: number; readonly asked: boolean },
   waiting: { readonly depth: number; readonly due: boolean; readonly held: boolean }
@@ -256,7 +256,8 @@ export const textOptions = (
 ): { now: number; afterCooldown: boolean } => {
   const snapshot = context.trigger_context_snapshot
   const manual =
-    snapshot?.source === "coalesced" && snapshot.causes.some((c) => c.source === "manual")
+    snapshot?.source === AUTOMATION_OCCURRENCE.coalesced &&
+    snapshot.causes.some((c) => c.source === AUTOMATION_OCCURRENCE.manual)
   return { now, afterCooldown: (cooldownMinutes ?? 0) > 0 && !manual }
 }
 
@@ -300,7 +301,7 @@ const absorbWaitingEvents = Effect.fn("AutomationEventBatch.absorbWaitingEvents"
   }) {
     const { sql, row } = options
     if (options.context.from_skipped_run !== undefined) return options.context
-    const claimedManual = row.source === "manual"
+    const claimedManual = row.source === AUTOMATION_OCCURRENCE.manual
     const own = claimedManual ? undefined : eventBatchOf(options.context)
     if (own === undefined && !claimedManual) return options.context
     const waiting = yield* sql<{
@@ -326,18 +327,18 @@ const absorbWaitingEvents = Effect.fn("AutomationEventBatch.absorbWaitingEvents"
           due: other.due === 1,
           held: other.held === 1,
           context,
-          batch: other.source === "event" ? eventBatchOf(context) : undefined
+          batch: other.source === AUTOMATION_OCCURRENCE.event ? eventBatchOf(context) : undefined
         }))
       )
     )
     const manualRows = decoded.filter(
       ({ source, due, context }) =>
-        source === "manual" && due && context.from_skipped_run === undefined
+        source === AUTOMATION_OCCURRENCE.manual && due && context.from_skipped_run === undefined
     )
     const manual = claimedManual || manualRows.length > 0
     const run = { depth: own === undefined ? 0 : batchChainDepth(own), asked: manual }
     const folded = decoded.flatMap(({ id, source, due, held, batch }) =>
-      source === "event" &&
+      source === AUTOMATION_OCCURRENCE.event &&
       batch !== undefined &&
       foldsInto(run, { depth: batchChainDepth(batch), due, held })
         ? [{ id, batch: manual ? unasked(batch) : batch }]
@@ -383,7 +384,6 @@ const stripAsked = ({ run_only_if: _asked, ...event }: BatchedEvent): BatchedEve
 const batchChainDepth = (batch: EventBatch): number =>
   Math.max(0, ...[...batch.events, ...batch.overflow].map((event) => event.chain_depth ?? 0))
 
-/** A row that carries no event, a timer or a request by hand, is at depth 0. */
 const contextDepth = (context: QueueContext): number => {
   const batch = eventBatchOf(context)
   return batch === undefined ? 0 : batchChainDepth(batch)
@@ -421,12 +421,14 @@ export const makeRunEvents = ({
           : []
       const attempt = own[0] ?? latest[0]
       if (attempt === undefined) return undefined
-      const run: RunEvents["run"] = own[0] === undefined ? "latest_in_chat" : "this_run"
+      const run: RunEvents["run"] =
+        own[0] === undefined ? RUN_EVENTS_SOURCE.latestInChat : RUN_EVENTS_SOURCE.thisRun
       if (attempt.trigger_json === null) return { run, startedAt: attempt.started_at, events: [] }
       const trigger = yield* decodeJson(AutomationTriggerContextSchema, attempt.trigger_json)
-      const causes = trigger.source === "coalesced" ? trigger.causes : ([trigger] as const)
+      const causes =
+        trigger.source === AUTOMATION_OCCURRENCE.coalesced ? trigger.causes : ([trigger] as const)
       const events = causes.flatMap((cause): ReadonlyArray<BatchedEvent> =>
-        cause.source === "event" ? [batchedEventOf(cause)] : []
+        cause.source === AUTOMATION_OCCURRENCE.event ? [batchedEventOf(cause)] : []
       )
       if (attempt.occurrence === null) return { run, startedAt: attempt.started_at, events }
       const prefix = `${attempt.occurrence}#`

@@ -50,7 +50,6 @@ const pageGuard = (page: WikiPageGuard) => ({
   repositoryHead: page.repositoryHead
 })
 
-/** Plain decoders for the live managed-Wiki HTTP surface. */
 export const wikiDecoders = {
   pages: projectedDecoderFor(WikiPagePageSchema, toWikiPagePage, "Invalid Wiki page list"),
   page: projectedDecoderFor(WikiPageSchema, toWikiPage, "Invalid Wiki page"),
@@ -79,7 +78,6 @@ export const wikiDecoders = {
   )
 } as const
 
-/** Mutation bodies derive revision guards from decoded pages and snapshots. */
 export const wikiRequests = {
   update(page: WikiPageGuard, content: string): string {
     return runBoundary(
@@ -95,7 +93,6 @@ export const wikiRequests = {
       "encode"
     )
   },
-  /** The guard is the archived version: the archive response itself. */
   restoreArchived(page: WikiPageGuard): string {
     return runBoundary(
       encodeWikiVersionRequestEffect(pageGuard(page)),
@@ -119,7 +116,6 @@ export const wikiRequests = {
   }
 } as const
 
-/** Validated paths for the complete consumer-facing Wiki HTTP surface. */
 export const wikiRoutes = {
   pages(options: WikiPageListOptions): string {
     return runBoundary(encodeWikiPagesPathEffect(options), "Invalid Wiki pages route", "encode")

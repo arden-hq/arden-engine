@@ -32,6 +32,13 @@ export type RunMemoryPlacement =
 
 export const MEMORY_SPACE_PAGE = { none: "none", page: "page" } as const
 
+export const MEMORY_SOURCE = {
+  space: "space",
+  core: "core",
+  recalled: "recalled",
+  index: "index"
+} as const
+
 export type RunMemorySpacePage =
   | { readonly kind: typeof MEMORY_SPACE_PAGE.none }
   | {
@@ -41,13 +48,13 @@ export type RunMemorySpacePage =
     }
 
 export type RunMemorySpaceSource = JsonRecord & {
-  readonly kind: "space"
+  readonly kind: typeof MEMORY_SOURCE.space
   readonly space_id: string
   readonly page: RunMemorySpacePage
 } & RunMemoryPlacement
 
 export type RunMemoryCoreSource = JsonRecord & {
-  readonly kind: "core"
+  readonly kind: typeof MEMORY_SOURCE.core
   readonly page_id: string
   readonly version: string
 } & RunMemoryPlacement
@@ -55,14 +62,14 @@ export type RunMemoryCoreSource = JsonRecord & {
 export type RunMemoryRecallRole = "knowledge" | "record" | "contract" | "unrecorded"
 
 export type RunMemoryRecalledSource = JsonRecord & {
-  readonly kind: "recalled"
+  readonly kind: typeof MEMORY_SOURCE.recalled
   readonly role: RunMemoryRecallRole
   readonly page_id: string
   readonly version: string
 } & RunMemoryPlacement
 
 export type RunMemoryIndexSource = JsonRecord & {
-  readonly kind: "index"
+  readonly kind: typeof MEMORY_SOURCE.index
   readonly root: string
   readonly listed: number
   readonly folded: ReadonlyArray<{ readonly folder: string; readonly pages: number }>
@@ -137,21 +144,21 @@ const pageFields = { page_id: IdentifierSchema, version: IdentifierSchema }
 
 const sourceKinds = [
   {
-    kind: Schema.Literal("space"),
+    kind: Schema.Literal(MEMORY_SOURCE.space),
     space_id: IdentifierSchema,
     page: Schema.Union([
       Schema.Struct({ kind: Schema.Literal(MEMORY_SPACE_PAGE.none) }),
       Schema.Struct({ kind: Schema.Literal(MEMORY_SPACE_PAGE.page), ...pageFields })
     ])
   },
-  { kind: Schema.Literal("core"), ...pageFields },
+  { kind: Schema.Literal(MEMORY_SOURCE.core), ...pageFields },
   {
-    kind: Schema.Literal("recalled"),
+    kind: Schema.Literal(MEMORY_SOURCE.recalled),
     role: Schema.Literals(["knowledge", "record", "contract", "unrecorded"] as const),
     ...pageFields
   },
   {
-    kind: Schema.Literal("index"),
+    kind: Schema.Literal(MEMORY_SOURCE.index),
     root: Schema.String,
     listed: NonNegativeIntSchema,
     folded: Schema.Array(withExtras({ folder: Schema.String, pages: PositiveIntSchema }))

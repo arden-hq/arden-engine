@@ -45,10 +45,6 @@ export interface McpTransportSecretTarget {
   readonly binding: string
 }
 
-/**
- * The host vault: generic documents plus the MCP OAuth and transport-secret
- * operations, whose shapes the Electron main process checks itself.
- */
 export interface McpOAuthVault extends CredentialVault {
   readonly read: (target: McpOAuthVaultTarget) => Promise<unknown | null>
   readonly write: (target: McpOAuthVaultTarget, credentials: McpOAuthCredentials) => Promise<void>

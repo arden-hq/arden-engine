@@ -1,11 +1,6 @@
-import type { CommandKind } from "@arden-hq/relay-protocol"
+import type { CommandAckState, CommandKind } from "@arden-hq/relay-protocol"
 import type { Schema } from "effect"
-import type {
-  PairedDevice,
-  PushTarget,
-  RelayCommandRecord,
-  RelayCommandState
-} from "../persistence/relay/store.js"
+import type { PairedDevice, PushTarget, RelayCommandRecord } from "../persistence/relay/store.js"
 import type { SseFrame, SseFrameId } from "@arden-hq/protocol"
 
 export interface LoopbackResponse {
@@ -35,7 +30,7 @@ export interface CommandLog {
   }) => Promise<RelayCommandRecord | undefined>
   readonly finish: (input: {
     readonly cid: string
-    readonly state: Exclude<RelayCommandState, "running">
+    readonly state: CommandAckState
     readonly result: Schema.Json | undefined
   }) => Promise<void>
 }
@@ -50,8 +45,12 @@ export interface DeviceRegistry {
   readonly setPush: (dev: string, push: PushTarget | undefined) => Promise<void>
 }
 
+const RELAY_LOG_LEVEL = { info: "info", warning: "warning" } as const
+
+export type RelayLogLevel = (typeof RELAY_LOG_LEVEL)[keyof typeof RELAY_LOG_LEVEL]
+
 export type RelayLog = (
-  level: "info" | "warning",
+  level: RelayLogLevel,
   message: string,
   fields?: Readonly<Record<string, string | number | boolean>>
 ) => void

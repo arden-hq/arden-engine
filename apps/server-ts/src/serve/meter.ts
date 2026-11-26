@@ -1,6 +1,7 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
 import {
   addCost,
+  PROVIDER_ERROR_CODE,
   providerErrorCode,
   type ModelProvider,
   type ProviderErrorCode,
@@ -9,21 +10,13 @@ import {
 import { writeAtomicSync } from "@arden-hq/std/atomic-file"
 import { readFileSync } from "node:fs"
 
-/** Every model request of the data folder so far, sub-agents and side jobs included. */
 interface Usage {
   modelRequests: number
   promptTokens: number
   completionTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
-  /**
-   * US dollars the providers reported for these requests (`Usage.cost`), or
-   * null once any request's provider reported none (llama.cpp, Codex) or a
-   * request ended before its usage arrived: a total with an unknown part is
-   * never shown as the spend.
-   */
   costUsd: number | null
-  /** True once a request was refused because `maxModelRequests` was reached. */
   budgetExhausted: boolean
 }
 
@@ -43,7 +36,6 @@ const count = (value: unknown): number =>
 const dollars = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
 
-/** The counts an earlier start left in `file`, so a restart goes on counting. */
 const readUsage = (file: string): Usage => {
   try {
     const value = parseJsonText(readFileSync(file, "utf8")) as Partial<Record<keyof Usage, unknown>>
@@ -53,7 +45,6 @@ const readUsage = (file: string): Usage => {
       completionTokens: count(value.completionTokens),
       cacheReadTokens: count(value.cacheReadTokens),
       cacheWriteTokens: count(value.cacheWriteTokens),
-      // A file from before costs were kept has none: its requests' cost is unknown.
       costUsd: dollars(value.costUsd) ?? null,
       budgetExhausted: value.budgetExhausted === true
     }
@@ -65,19 +56,11 @@ const readUsage = (file: string): Usage => {
 export const REQUEST_LIMIT_REACHED = "The settings file's model-request limit is reached"
 
 export interface MeterOptions {
-  /** Where the counts are kept, rewritten after every model request. */
   readonly file: string
-  /** Most model requests the data folder may make; the next one fails. */
   readonly maxModelRequests: number | undefined
-  /** False declares every allowed tool up front instead of the route's tool search. */
   readonly toolSearch: boolean | undefined
 }
 
-/**
- * The provider a configured server runs on: the route's own, with every model
- * request counted into the usage file and refused past the limit. It counts
- * what the provider is asked, so sub-agents, compaction and chat names are in.
- */
 export const meteredProvider = (provider: ModelProvider, options: MeterOptions): ModelProvider => {
   const usage = readUsage(options.file)
   const save = (): void => {
@@ -95,7 +78,6 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
         throw new Error(REQUEST_LIMIT_REACHED)
       }
       usage.modelRequests += 1
-      // Whether this request's cost is known: reported, or nothing to bill.
       let accounted = false
       try {
         for await (const item of await stream(request)) {
@@ -114,10 +96,6 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
         accounted = refusedBeforeRunning(providerErrorCode(error))
         throw error
       } finally {
-        // A request cut off before its usage arrived (a cancel, a side job the
-        // stopping server drops, a dropped connection) may still be billed:
-        // behind a logging proxy, OpenRouter finished and priced four GPT-6.1
-        // Sol side calls an `exec` stop had abandoned (2026-11-16).
         if (!accounted) usage.costUsd = null
         save()
       }
@@ -148,21 +126,16 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
   }
 }
 
-/**
- * Whether a failure is the provider refusing the request before the model
- * ran, which nothing bills. An outage or a failed answer may have run the
- * model on the prompt, so its cost is unknown.
- */
 const refusedBeforeRunning = (code: ProviderErrorCode | undefined): boolean => {
   switch (code) {
-    case "context_length_exceeded":
-    case "rate_limited":
-    case "provider_auth":
-    case "request_invalid":
-    case "model_unavailable":
+    case PROVIDER_ERROR_CODE.contextLengthExceeded:
+    case PROVIDER_ERROR_CODE.rateLimited:
+    case PROVIDER_ERROR_CODE.providerAuth:
+    case PROVIDER_ERROR_CODE.requestInvalid:
+    case PROVIDER_ERROR_CODE.modelUnavailable:
       return true
-    case "provider_unavailable":
-    case "provider_error":
+    case PROVIDER_ERROR_CODE.providerUnavailable:
+    case PROVIDER_ERROR_CODE.providerError:
     case undefined:
       return false
   }

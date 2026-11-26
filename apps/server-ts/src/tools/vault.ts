@@ -64,11 +64,6 @@ type KeyUse =
   | { readonly kind: "ask" }
   | { readonly kind: "refuse"; readonly reason: "never" | "read_only" }
 
-/**
- * Whether the run may use a key now, must ask on its card, or may not use it. Only the owner
- * allows a key: on its card, or by a saved rule for this key in this Space. No approval mode
- * allows one by itself; with nobody there, the card waits in the chat.
- */
 export const keyUseDecision = (input: {
   readonly answered: boolean
   readonly rule: RuleDecision | undefined
@@ -147,11 +142,9 @@ const askCard = (input: {
   data: { reviewer: "user", vault_key: input.name }
 })
 
-/** An address as a URL in an example: plain http for this machine, where a local service listens. */
 const exampleUrl = (address: string): string =>
   /^(?:localhost|127\.|\[::1\])/.test(address) ? `http://${address}/...` : `https://${address}/...`
 
-/** What the agent is told once a key is allowed: the variable, where it goes, how to send it. */
 const usable = (key: {
   readonly name: string
   readonly variable: string
@@ -163,10 +156,6 @@ const usable = (key: {
     "Run the command with access network or host; a sandboxed command has no network. Never print the variable or write it to a file: it is useless anywhere else, and the real key never reaches you."
   ].join(" ")
 
-/**
- * What `vault_list` tells the agent: keys and passwords without values, contact details in full,
- * cards by their safe fields.
- */
 const vaultListText = (list: VaultList): { result: string; preview: string } => {
   const keys = list.keys.map(
     (key) => `- ${key.name}: $${key.variable}, sent only to ${key.addresses.join(", ")}`
@@ -272,8 +261,6 @@ const makeVaultUseKeyTool = (
       changes_state: false,
       concurrency_group: null,
       destructive: null,
-      // No approval_bypass: the card is this call's own requirement, so Never ask does not waive
-      // it, and its reviewer is the owner, so Auto's helper does not answer it either.
       policy_scope: "external",
       code_mode: false
     },
@@ -297,7 +284,6 @@ const makeVaultUseKeyTool = (
           "No such key"
         )
       const decision = keyUseDecision({
-        // The card answered must be this key's: one replaced since is another key.
         answered: ctx.approval?.data?.["vault_key_id"] === key.id,
         rule: await ruleFor(ctx.run.authority, key.id),
         mode: ctx.run.approvalMode
@@ -402,17 +388,11 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
 const UNCHECKED_OUTPUT =
   "[Arden could not check this output for saved keys and passwords, so it is not shown.]"
 
-/**
- * The one scrub of what the model reads: every tool result in a run's toolset passes through it
- * (`createToolset`'s `scrub`). A saved key or password in it becomes "[saved secret]"; text the
- * Vault cannot check is withheld.
- */
 export const vaultResultScrub = Effect.gen(function* () {
   const vault = yield* VaultKeys
   return (text: string): Promise<string> => vault.redact(text).catch(() => UNCHECKED_OUTPUT)
 })
 
-/** The Vault's tools, with the sign-in password card that shares their limit on asks. */
 export const vaultTools = Effect.gen(function* () {
   const vault = yield* VaultKeys
   const rules = yield* PermissionRules

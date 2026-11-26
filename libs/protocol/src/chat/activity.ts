@@ -1,7 +1,8 @@
+import { SERVER_EVENT_TYPE } from "../common/event-types.js"
 import { isPublicActivityTool } from "../views/tool-words.js"
 import type { ChatProjectionEvent } from "./events/stream.js"
 import { RUN_ACTIVITY_TARGET } from "./events/run.js"
-import { TOOL_PARENT } from "./tool-face.js"
+import { TOOL_PARENT, TOOL_PRESENTATION } from "./tool-face.js"
 import type { JsonRecord } from "../common/json.js"
 
 export interface RunActivity extends JsonRecord {
@@ -36,12 +37,12 @@ export const reduceRunActivity = (
 ): RunActivityProjection | undefined => {
   const event = record.event
   if (current !== undefined && record.sequence <= current.sequence) return current
-  if (event.type === "RUN_STARTED") {
+  if (event.type === SERVER_EVENT_TYPE.runStarted) {
     return { runId: event.run_id, sequence: record.sequence, purpose: null, operations: [] }
   }
   if (current === undefined || record.sequence <= current.sequence || record.fromOtherRun)
     return current
-  if (event.type === "run_activity") {
+  if (event.type === SERVER_EVENT_TYPE.runActivity) {
     const target = event.target
     return event.run_id === current.runId
       ? {
@@ -60,9 +61,9 @@ export const reduceRunActivity = (
       : current
   }
   if (
-    event.type === "TOOL_CALL_START" &&
+    event.type === SERVER_EVENT_TYPE.toolCallStart &&
     event.parent.kind === TOOL_PARENT.root &&
-    event.presentation !== "conversation" &&
+    event.presentation !== TOOL_PRESENTATION.conversation &&
     isPublicActivityTool(event.tool_call_name, event.presentation)
   ) {
     return {
@@ -74,14 +75,14 @@ export const reduceRunActivity = (
       ]
     }
   }
-  if (event.type === "TOOL_CALL_RESULT") {
+  if (event.type === SERVER_EVENT_TYPE.toolCallResult) {
     return {
       ...current,
       sequence: record.sequence,
       operations: current.operations.filter((operation) => operation.id !== event.tool_call_id)
     }
   }
-  if (event.type === "model_response_reset") {
+  if (event.type === SERVER_EVENT_TYPE.modelResponseReset) {
     return {
       ...current,
       sequence: record.sequence,

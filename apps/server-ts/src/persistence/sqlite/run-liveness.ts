@@ -7,8 +7,7 @@ import { RUN_LIVENESS, runMayAct, type RunLiveness } from "../runs/liveness.js"
 import { activeRunStatusList, openDeferredCallStatusList } from "./status-sets.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
-const [TURN, BACKGROUND, ENDED, REVOKED] = RUN_LIVENESS
-const ACTING = RUN_LIVENESS.filter(runMayAct)
+const ACTING = Object.values(RUN_LIVENESS).filter(runMayAct)
 
 export const runOwnsLiveWork = (
   sql: SqlClient.SqlClient,
@@ -28,10 +27,10 @@ const runLivenessSql = (sql: SqlClient.SqlClient, alias: string): Statement.Frag
   const run = runColumns(sql, alias)
   return sql`(CASE
     WHEN ${runAuthorityState(sql, run.metadata, run.runId, run.sessionId)} != 'active'
-      OR ${runPolicyRevoked(sql, run.metadata, run.sessionId, false)} THEN ${REVOKED}
-    WHEN ${run.status} IN ${activeRunStatusList} THEN ${TURN}
-    WHEN ${runOwnsLiveWork(sql, run.runId)} THEN ${BACKGROUND}
-    ELSE ${ENDED}
+      OR ${runPolicyRevoked(sql, run.metadata, run.sessionId, false)} THEN ${RUN_LIVENESS.revoked}
+    WHEN ${run.status} IN ${activeRunStatusList} THEN ${RUN_LIVENESS.turn}
+    WHEN ${runOwnsLiveWork(sql, run.runId)} THEN ${RUN_LIVENESS.background}
+    ELSE ${RUN_LIVENESS.ended}
   END)`
 }
 
@@ -46,5 +45,7 @@ export const readRunLiveness = Effect.fn("RunLiveness.read")(function* (
     SELECT ${runLivenessSql(sql, "run")} AS liveness FROM chat_runs AS run
     WHERE run.run_id = ${runId}`
   if (rows[0] === undefined) return undefined
-  return yield* Schema.decodeUnknownEffect(Schema.Literals(RUN_LIVENESS))(rows[0].liveness)
+  return yield* Schema.decodeUnknownEffect(Schema.Literals(Object.values(RUN_LIVENESS)))(
+    rows[0].liveness
+  )
 })

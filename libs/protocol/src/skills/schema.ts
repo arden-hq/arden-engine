@@ -1,5 +1,7 @@
+import { strict } from "../common/boundary.js"
 import { Effect, Schema } from "effect"
 import {
+  SKILL_ORIGIN,
   SKILL_PLACE,
   SKILL_VERSION,
   type MarketplaceSkillListResponse,
@@ -13,13 +15,8 @@ import {
 import { NonNegativeIntSchema } from "../common/schema.js"
 import { splitMarketplaceSkillId, type MarketplaceSkillAddress } from "./marketplace-id.js"
 
-const strict = { onExcessProperty: "error" } as const
 const skillsCollectionPath = "/skills"
 
-/** One spelling for a Skill name: lowercase letters, digits, hyphens and
- *  underscores, not starting with a hyphen, up to 64 characters. It is a folder
- *  name and a URL segment, so no dot, slash or space. Wider than Arden's own
- *  Skills need, so that Skills written for other harnesses load too. */
 export const SKILL_NAME_PATTERN = "[a-z0-9_][a-z0-9_-]{0,63}"
 
 export const SkillNameSchema = Schema.String.check(
@@ -106,7 +103,7 @@ export const SkillSchema: Schema.Codec<Skill> = Schema.Struct({
     Schema.Struct({ kind: Schema.Literal(SKILL_PLACE.builtin), invocable: Schema.Boolean }),
     Schema.Struct({
       kind: Schema.Literal(SKILL_PLACE.local),
-      origin: Schema.Literals(["arden", "shared"] as const),
+      origin: Schema.Literals(Object.values(SKILL_ORIGIN)),
       path: Schema.String
     })
   ])

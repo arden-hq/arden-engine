@@ -51,8 +51,6 @@ const uploadFolder = (root: string): UploadFolder => ({
 const UNSENT_UPLOAD_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 const DRAIN_EVERY = "6 hours"
-// Launch is when the user opens a chat, and cleanup shares the write queue
-// with that. Deleting a chat still drains at once (`drainAfterDelete`).
 const FIRST_DRAIN_DELAY = "2 minutes"
 
 const makeSessionFileCleanup = Effect.fn("SessionFileCleanup.make")(function* (

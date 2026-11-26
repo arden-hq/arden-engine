@@ -1,9 +1,13 @@
-import { type StoredResolveAnswer } from "../runs/stored-question.js"
-import { WORDS_RULE_REPLACES } from "@arden-hq/protocol/permissions"
+import { STORE_REASON } from "../errors.js"
+import { RUN_QUESTION_ANSWER } from "@arden-hq/protocol/runs"
+import type { StoredResolveAnswer } from "../runs/stored-question.js"
+import { PERMISSION_RULE_DECISION, WORDS_RULE_REPLACES } from "@arden-hq/protocol/permissions"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import {
+  PERMISSION_CHANGE,
+  OFFER_SOURCE,
   OfferChoiceSchema,
   PermissionChangeSchema,
   allowSubjects,
@@ -88,14 +92,18 @@ export const recordPermissionOfferInTransaction = Effect.fn("PermissionOffer.rec
     const sessionId = runs[0]?.session_id
     if (sessionId === undefined) return yield* workError("not_found", "The asking Run is gone")
     const messageId =
-      offer.source.kind === "message" ? yield* ownMessageThisTurn(sql, options.runId) : undefined
-    if (offer.source.kind === "message" && messageId === undefined)
+      offer.source.kind === OFFER_SOURCE.message
+        ? yield* ownMessageThisTurn(sql, options.runId)
+        : undefined
+    if (offer.source.kind === OFFER_SOURCE.message && messageId === undefined)
       return yield* workError(
         "invalid",
         "A permission is offered only after the person's own message in this turn"
       )
     const toolName =
-      offer.change.kind === "tool" || offer.change.kind === "site" ? offer.change.tool : null
+      offer.change.kind === PERMISSION_CHANGE.tool || offer.change.kind === PERMISSION_CHANGE.site
+        ? offer.change.tool
+        : null
     yield* sql`INSERT INTO permission_offers (
         question_id, session_id, tool_name, server_name, change_json, source_kind,
         source_message_id, choices_json, decision, created_at, settled_at
@@ -108,7 +116,7 @@ export const recordPermissionOfferInTransaction = Effect.fn("PermissionOffer.rec
 )
 
 export const offerAnswerMisfit = (answer: StoredResolveAnswer): string | undefined =>
-  answer.kind === "choice" || answer.kind === "dismiss"
+  answer.kind === RUN_QUESTION_ANSWER.choice || answer.kind === RUN_QUESTION_ANSWER.dismiss
     ? undefined
     : "A permission offer takes one of its choices, or Not now"
 
@@ -140,10 +148,10 @@ export const settlePermissionOfferInTransaction = Effect.fn("PermissionOffer.set
     ]).pipe(Effect.mapError((cause) => workError("storage", "Stored offer is corrupt", cause)))
     const answer = options.answer
     const chosen =
-      answer.kind === "choice"
+      answer.kind === RUN_QUESTION_ANSWER.choice
         ? choices.find((choice) => choice.id === answer.choice_id)
         : undefined
-    if (answer.kind === "choice" && chosen === undefined)
+    if (answer.kind === RUN_QUESTION_ANSWER.choice && chosen === undefined)
       return yield* workError("invalid", "That scope was not offered")
     if (chosen !== undefined)
       yield* saveChange({
@@ -169,7 +177,7 @@ const saveChange = Effect.fn("PermissionOffer.saveChange")(function* (input: {
 }) {
   const { sql, change, chosen } = input
   const source = { kind: "offer", questionId: input.questionId } as const
-  if (change.kind === "mode") {
+  if (change.kind === PERMISSION_CHANGE.mode) {
     if (chosen.principal?.startsWith("chat:") !== true) return
     const sessionId = chosen.principal.slice("chat:".length)
     yield* sql`UPDATE sessions
@@ -181,7 +189,7 @@ const saveChange = Effect.fn("PermissionOffer.saveChange")(function* (input: {
   }
   const list = offerChoiceList(chosen)
   if (list === undefined) return
-  if (change.kind === "rule") {
+  if (change.kind === PERMISSION_CHANGE.rule) {
     yield* changeRuleInTransaction(sql, {
       ruleId: change.ruleId,
       decision: change.decision,
@@ -189,14 +197,17 @@ const saveChange = Effect.fn("PermissionOffer.saveChange")(function* (input: {
       list
     }).pipe(
       Effect.mapError((cause) =>
-        cause.reason === "not_found"
+        cause.reason === STORE_REASON.not_found
           ? workError("not_found", "That rule is gone. Nothing changed.", cause)
           : workError("storage", "Could not change the permission", cause)
       )
     )
     return
   }
-  if (change.kind === "path" && change.decision === "never") {
+  if (
+    change.kind === PERMISSION_CHANGE.path &&
+    change.decision === PERMISSION_RULE_DECISION.never
+  ) {
     yield* settleGone(
       saveRuleInTransaction(sql, {
         subject: { kind: "path", path: change.path, access: change.access },
@@ -207,7 +218,7 @@ const saveChange = Effect.fn("PermissionOffer.saveChange")(function* (input: {
     )
     return
   }
-  if (change.kind === "words") {
+  if (change.kind === PERMISSION_CHANGE.words) {
     yield* settleGone(
       saveWordsInTransaction(sql, {
         text: change.text,
@@ -225,7 +236,7 @@ const saveChange = Effect.fn("PermissionOffer.saveChange")(function* (input: {
     yield* settleGone(saveAllowsInTransaction(sql, { subjects, list, source }))
     return
   }
-  if (change.kind !== "tool") return
+  if (change.kind !== PERMISSION_CHANGE.tool) return
   yield* settleGone(
     saveRuleInTransaction(sql, {
       subject: { kind: "tool", tool: change.tool, server: input.serverName },
@@ -239,7 +250,7 @@ const saveChange = Effect.fn("PermissionOffer.saveChange")(function* (input: {
 const settleGone = <A, R>(save: Effect.Effect<A, PermissionRulesError, R>) =>
   save.pipe(
     Effect.catchIf(
-      (cause) => cause.reason === "not_found",
+      (cause) => cause.reason === STORE_REASON.not_found,
       () => Effect.void
     ),
     Effect.mapError(fail("Could not save the permission"))

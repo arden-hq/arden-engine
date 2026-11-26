@@ -1,16 +1,22 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
+import { JOB_SUBJECT_KIND } from "../space-job-id.js"
 import { DateTime, Effect, Schema } from "effect"
 import { disposableForkSql } from "../schema/fork-disposition.js"
 import { REVIEW_BREAKER, reviewEnding, type ReviewEnding } from "../../execution/review.js"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import { narrowerApprovalMode, type ApprovalMode } from "@arden-hq/protocol/permissions"
+import {
+  SESSION_PERMISSION,
+  narrowerApprovalMode,
+  type ApprovalMode
+} from "@arden-hq/protocol/permissions"
 import { RunCapabilitySchema } from "../../execution/policy.js"
 import {
+  APPROVAL_SOURCE,
   approvalSources,
-  rootOf,
   type ApprovalSource,
-  type RunAuthority,
   type SingleApprovalSource
-} from "../../execution/authority.js"
+} from "../../execution/approval-source.js"
+import { rootOf, type RunAuthority } from "../../execution/authority.js"
 import {
   ApprovalModeSchema,
   ApprovalPolicyError,
@@ -20,7 +26,7 @@ import {
   type SessionPermission
 } from "../permissions/approval-policy.js"
 import { readRunAuthority } from "./run-authority.js"
-import { runAuthorityState, type RunAuthorityState } from "./run-context.js"
+import { RUN_AUTHORITY_STATE, runAuthorityState, type RunAuthorityState } from "./run-context.js"
 import {
   AUTOMATION_APPROVAL,
   DEFAULT_APPROVAL_MODE,
@@ -41,7 +47,7 @@ const noApprovalForAuthority = Effect.fn("ApprovalPolicy.noApprovalForAuthority"
   authority: RunAuthority
 ) {
   for (const source of approvalSources(authority.approval.follows)) {
-    if (source.kind !== "chat") continue
+    if (source.kind !== APPROVAL_SOURCE.chat) continue
     const rows = yield* sql<{ readonly disposable: number }>`SELECT EXISTS(
         SELECT 1 FROM session_fork_requests fork
         WHERE fork.child_session_id = ${source.session_id}
@@ -74,7 +80,7 @@ export const noApprovalForRun = Effect.fn("ApprovalPolicy.noApprovalForRun")(fun
   const run = runs[0]
   if (run === undefined) return false
   if (run.disposable === 1) return true
-  if (run.session_type !== "agent") return false
+  if (run.session_type !== SESSION_TYPE.agent) return false
   const lineage = yield* sql.unsafe<{
     readonly session_id: string
     readonly session_type: string
@@ -82,7 +88,7 @@ export const noApprovalForRun = Effect.fn("ApprovalPolicy.noApprovalForRun")(fun
   }>(decisionLineageSql("?"), [run.session_id])
   const invalidDelegation =
     lineage.length === 0 ||
-    lineage.every((node) => node.session_type === "agent") ||
+    lineage.every((node) => node.session_type === SESSION_TYPE.agent) ||
     lineage.some((node) => node.edge_valid !== 1)
   if (invalidDelegation) return false
   const sessionIds = lineage.map((node) => node.session_id)
@@ -142,7 +148,7 @@ export const makeApprovalPolicyStore = ({
       row.origin_automation_id === null
         ? undefined
         : yield* readWorkOwner(sql, row.origin_automation_id)
-    if (owner?.kind === "automation" && isUserAutomationPurpose(owner.purpose)) {
+    if (owner?.kind === JOB_SUBJECT_KIND.automation && isUserAutomationPurpose(owner.purpose)) {
       const mode = yield* Schema.decodeUnknownEffect(ApprovalModeSchema)(
         row.mode ?? DEFAULT_APPROVAL_MODE
       )
@@ -158,13 +164,13 @@ export const makeApprovalPolicyStore = ({
         automation_id: row.origin_automation_id,
         tool_scope: job.toolScope,
         approval:
-          job.approval.kind === "space"
+          job.approval.kind === AUTOMATION_APPROVAL.space
             ? { kind: AUTOMATION_APPROVAL.space, approval_mode: yield* spaceDefaultMode() }
             : { kind: AUTOMATION_APPROVAL.own, auto_approve: job.approval.autoApprove }
       }
     }
-    if (row.session_type !== "chat") {
-      if (row.session_type !== "agent") return MODE_UNSET
+    if (row.session_type !== SESSION_TYPE.chat) {
+      if (row.session_type !== SESSION_TYPE.agent) return MODE_UNSET
       const [latest] = yield* sql<{ readonly run_id: string }>`
         SELECT run_id FROM chat_runs WHERE session_id = ${sessionId}
         ORDER BY started_at DESC, run_id DESC LIMIT 1
@@ -173,7 +179,7 @@ export const makeApprovalPolicyStore = ({
       const authority = yield* readRunAuthority(sql, latest.run_id)
       if (authority === undefined) return MODE_UNSET
       const current = yield* live({ runId: latest.run_id, authority })
-      return current.state === "active" ? inheritedMode(current.mode) : MODE_UNSET
+      return current.state === RUN_AUTHORITY_STATE.active ? inheritedMode(current.mode) : MODE_UNSET
     }
     const mode = yield* Schema.decodeUnknownEffect(ApprovalModeSchema)(
       row.mode ?? DEFAULT_APPROVAL_MODE
@@ -191,7 +197,7 @@ export const makeApprovalPolicyStore = ({
     return yield* writer.transact(
       Effect.gen(function* () {
         const current = yield* session(input.sessionId)
-        if (current.kind !== "chat")
+        if (current.kind !== SESSION_PERMISSION.chat)
           return yield* invalid("Permissions are managed by this Chat's owner")
         yield* sql`UPDATE sessions SET metadata = json_set(COALESCE(metadata, '{}'), '$.approval_mode', ${mode})
           WHERE session_id = ${input.sessionId}`
@@ -220,7 +226,8 @@ export const makeApprovalPolicyStore = ({
     const mode = yield* currentMode(follows)
     const noApproval = yield* noApprovalForRun(sql, input.runId, input.authority)
     const currentScope =
-      owner === undefined || (owner.kind === "automation" && isUserAutomationPurpose(owner.purpose))
+      owner === undefined ||
+      (owner.kind === JOB_SUBJECT_KIND.automation && isUserAutomationPurpose(owner.purpose))
         ? undefined
         : yield* Schema.decodeUnknownEffect(RunCapabilitySchema)(ownerPolicy(owner).toolScope)
     return { state: row.state, mode, noApproval, currentScope }
@@ -239,19 +246,19 @@ export const makeApprovalPolicyStore = ({
     source: SingleApprovalSource
   ) {
     switch (source.kind) {
-      case "chat":
+      case APPROVAL_SOURCE.chat:
         return yield* storedMode(
           sql`COALESCE((SELECT json_extract(metadata, '$.approval_mode') FROM sessions
             WHERE session_id = ${source.session_id}), ${defaultModeSql(sql)})`,
           defaultMode(source)
         )
-      case "space_thread":
+      case APPROVAL_SOURCE.space_thread:
         return yield* spaceDefaultMode()
-      case "automation": {
+      case APPROVAL_SOURCE.automation: {
         const owner = yield* readWorkOwner(sql, source.automation_id)
         if (owner === undefined) return yield* storedMode(sql`NULL`, defaultMode(source))
         const { approval } = ownerPolicy(owner)
-        if (approval.kind === "space") return yield* spaceDefaultMode()
+        if (approval.kind === AUTOMATION_APPROVAL.space) return yield* spaceDefaultMode()
         return approval.autoApprove ? ("allow" as const) : ("ask" as const)
       }
     }
@@ -342,10 +349,10 @@ export const makeApprovalPolicyStore = ({
 
 const defaultMode = (follows: SingleApprovalSource): string => {
   switch (follows.kind) {
-    case "chat":
-    case "space_thread":
+    case APPROVAL_SOURCE.chat:
+    case APPROVAL_SOURCE.space_thread:
       return DEFAULT_APPROVAL_MODE
-    case "automation":
+    case APPROVAL_SOURCE.automation:
       return "ask"
   }
 }

@@ -11,7 +11,6 @@ export const GmailSendReceiptSchema: Schema.Codec<GmailSendReceipt> = withExtras
   confirmed_at: IsoDateTimeStringSchema
 })
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type GmailSendReceiptAgrees = Assert<
   Agrees<typeof GmailSendReceiptSchema.Type, GmailSendReceipt>
 >

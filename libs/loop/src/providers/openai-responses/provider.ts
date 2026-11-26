@@ -1,15 +1,10 @@
 import { MODEL_PROVIDER_PROTOCOL } from "../../contracts/provider.js"
-import { openResponsesSession, type ConnectResponsesWebSocket } from "./websocket.js"
+import {
+  openResponsesSession,
+  type ConnectResponsesWebSocket,
+  type ResponsesTransport
+} from "./websocket.js"
 export type { ConnectResponsesWebSocket, ResponsesWebSocket } from "./websocket.js"
-/**
- * OpenAI Responses streaming provider over plain fetch. The host owns
- * credentials: the factory only receives an `auth.headers()` broker (called
- * once per connection attempt, with `forceRefresh` on the single pre-emission
- * 401 retry), so tokens never enter the lib. The connection loop, the
- * transport retry (D-123) and the error-body read are the provider kit's
- * `streamSse`; event mapping and response-item history semantics are ported
- * byte-for-byte from the previous Effect-based server provider.
- */
 import type {
   ModelCapabilities,
   ModelProvider,
@@ -23,12 +18,13 @@ import {
   type ProviderAuthHeadersOptions,
   providerAuthHeaders,
   SemanticResponseError,
+  SSE_DONE,
   type SseEvent,
   type SseEventMapper,
   streamSse
 } from "../kit/index.js"
 import { OpenAiResponsesProviderError, statusFailureCode } from "./errors.js"
-import { asRecord, type RawResponseEvent } from "./items.js"
+import { asRecord, RESPONSE_EVENT_TYPE, type RawResponseEvent } from "./items.js"
 import { makePayload, responsesRoute } from "./request.js"
 import { makeEventMapper } from "./response.js"
 import { parseJsonText } from "@arden-hq/std/json-text"
@@ -38,39 +34,21 @@ export { makePayload, type ResponsesPayload } from "./request.js"
 
 export type OpenAiResponsesAuthHeadersOptions = ProviderAuthHeadersOptions
 
-/** Host-owned credential broker: returns the full auth header set per attempt. */
 export type OpenAiResponsesAuth = ProviderAuth
 
 export interface OpenAiResponsesProviderOptions {
   readonly connectWebSocket?: ConnectResponsesWebSocket
-  /** Adapter-local route policy, independent of async tools and steering. Defaults to SSE. */
-  readonly transport?: (model: string) => "sse" | "websocket"
-  /**
-   * The host's capability table for its routes. Without one, every model gets
-   * hosted web search, native structured output, portable async tools, and
-   * boundary steering; native async and steering are opt-in per verified route.
-   */
+  readonly transport?: (model: string) => ResponsesTransport
   readonly capabilities?: ModelProvider["capabilities"]
   readonly auth: OpenAiResponsesAuth
   readonly fetch?: typeof globalThis.fetch
   readonly baseUrl?: string
-  /** Who serves this wire, stamped as the `provider` of every answer's origin (default `"openai"`). */
   readonly providerId?: string
-  /** Maximum silence between SSE reads before the idle transport retry. */
   readonly idleTimeoutMs?: number
-  /** Total connection attempts per request, including the first (default 5). */
   readonly maxAttempts?: number
-  /** Optional host-owned catalog prefix that the upstream API does not accept. */
   readonly modelPrefix?: string
-  /** Instructions used only when the request history has no system message. */
   readonly defaultInstructions?: string
-  /** Omit the Responses API token-limit field for endpoints that reject it. */
   readonly omitMaxOutputTokens?: boolean
-  /**
-   * Request header that also carries the request's `cacheScope`, for routes
-   * that pick the cache by header rather than by `prompt_cache_key`. The
-   * ChatGPT Codex backend reads `session-id`.
-   */
   readonly cacheScopeHeader?: string
 }
 
@@ -86,7 +64,7 @@ const DEFAULT_CAPABILITIES: ModelCapabilities = Object.freeze({
 const DEFAULT_IDLE_TIMEOUT_MS = 120_000
 
 const rawEvent = (event: SseEvent): RawResponseEvent => {
-  if (event.data.trim() === "[DONE]") return { type: "response.done" }
+  if (event.data.trim() === SSE_DONE) return { type: RESPONSE_EVENT_TYPE.done }
   if (event.data.trim().length === 0) return { type: event.event }
   let decoded: unknown
   try {
@@ -163,8 +141,6 @@ export const makeOpenAiResponsesProvider = (
   const connectWebSocket = options.connectWebSocket
   const declared: NonNullable<ModelProvider["capabilities"]> =
     options.capabilities ?? (() => DEFAULT_CAPABILITIES)
-  // Whether the limit is sent is this provider's own option, so it is
-  // reported from that option rather than declared a second time.
   const capabilities: NonNullable<ModelProvider["capabilities"]> =
     options.omitMaxOutputTokens === true
       ? async (model) => ({ ...(await declared(model)), outputLimit: "omitted" })

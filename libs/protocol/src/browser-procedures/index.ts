@@ -13,6 +13,8 @@ export type BrowserProcedureSummary = typeof BrowserProcedureSummarySchema.Type
 export type BrowserProcedureDetail = typeof BrowserProcedureDetailSchema.Type
 export type BrowserProcedureList = typeof BrowserProcedureListSchema.Type
 export { BrowserProcedureJobSchema }
+export { BROWSER_PROCEDURE_JOB_STATUS, BROWSER_PROCEDURE_STATUS } from "./schema.js"
+export type { BrowserProcedureJobStatus, BrowserProcedureStatus } from "./schema.js"
 export const browserProcedureDecoders = {
   list: decoderFor(BrowserProcedureListSchema, "Invalid browser procedures"),
   detail: decoderFor(BrowserProcedureDetailSchema, "Invalid browser procedure"),

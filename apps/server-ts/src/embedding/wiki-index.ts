@@ -20,7 +20,7 @@ import {
 import { EmbeddingSettingsStore } from "../persistence/settings/store.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { Wiki } from "../wiki/service.js"
-import { activeRunPages, type PageRecord, type Snapshot } from "../wiki/snapshot.js"
+import { type Snapshot } from "../wiki/snapshot.js"
 import {
   applyControl,
   coveredPages,
@@ -29,11 +29,11 @@ import {
   planIndex,
   searchSource,
   type EmbeddingControl,
-  type IndexPlan,
   type RunSample
 } from "./index-plan.js"
 import type { EmbeddingModel } from "./model.js"
-import { EmbeddingModels, type EmbeddingModelEntry } from "./models.js"
+import { EmbeddingModels } from "./models.js"
+import { indexedPages, modelsInUse, pageVersions } from "./wiki-index-plan.js"
 
 const MIN_QUERY_LENGTH = 12
 const SEARCH_LIMIT = 8
@@ -61,10 +61,7 @@ export class EmbeddingControlRejected extends Schema.TaggedError<EmbeddingContro
 export class WikiEmbeddingIndex extends Context.Service<
   WikiEmbeddingIndex,
   {
-    /** Queue a refresh when the snapshot's head differs from the one last queued. The Memory
-     *  poll calls it; a search never does. */
     readonly schedule: (snapshot: Snapshot) => Effect.Effect<void>
-    /** Waits until no refresh is queued or running. */
     readonly drained: () => Effect.Effect<void>
     readonly status: () => Effect.Effect<EmbeddingIndexStatus, WikiEmbeddingIndexError>
     readonly control: (
@@ -83,14 +80,6 @@ const indexError = (
   message: string,
   cause: unknown
 ) => new WikiEmbeddingIndexError({ operation, message, cause })
-
-const indexedPages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
-  activeRunPages(snapshot.pages).filter((record) => record.page.body.trim() !== "")
-
-const pageVersions = (snapshot: Snapshot): ReadonlyMap<string, string> =>
-  new Map(
-    indexedPages(snapshot).map((record) => [record.page.pageId, record.resource.versionId] as const)
-  )
 
 const bytes = (embedding: Float32Array): Uint8Array =>
   Uint8Array.from(new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength))
@@ -117,29 +106,6 @@ const rankSemanticMatches = (
     .filter((match) => !excludedPageIds.has(match.pageId))
     .sort((left, right) => right.score - left.score || left.pageId.localeCompare(right.pageId))
     .slice(0, SEARCH_LIMIT)
-
-const modelsInUse = (
-  plan: IndexPlan,
-  catalog: ReadonlyArray<EmbeddingModelEntry>
-): ReadonlySet<string> => {
-  switch (plan.kind) {
-    case "off":
-    case "unavailable":
-      return new Set()
-    case "steady":
-      return new Set([plan.target.modelId])
-    case "build": {
-      const serving = plan.serving
-      const servingUsable =
-        serving !== undefined &&
-        catalog.some(
-          (entry) =>
-            entry.modelId === serving.modelId && entry.indexVersion === serving.indexVersion
-        )
-      return new Set(servingUsable ? [plan.target.modelId, serving.modelId] : [plan.target.modelId])
-    }
-  }
-}
 
 const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
   const models = yield* EmbeddingModels

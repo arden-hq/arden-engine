@@ -23,8 +23,8 @@ export const inboxRequests = {
   )
 } as const
 
-export const inboxRoutes = {
+export const inboxRoutes = Object.freeze({
   view: "/inbox",
   markRead: "/inbox/read",
   dismiss: "/inbox/dismiss"
-} as const
+})

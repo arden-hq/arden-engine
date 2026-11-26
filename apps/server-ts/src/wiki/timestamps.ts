@@ -2,7 +2,8 @@ import {
   CorruptRepositoryError,
   type Commit,
   type ManagedFileRepositoryShape,
-  type RevisionError
+  type RevisionError,
+  CHANGE_ACTION
 } from "@arden-hq/revisions/effect"
 import { Deferred, Effect, Exit } from "effect"
 
@@ -41,7 +42,7 @@ const deriveTimestamps = Effect.fn("Wiki.deriveTimestamps")(function* (
       if (version === null) continue
       const times = mutable.get(version.resourceId) ?? { createdAt: null, updatedAt: null }
       times.updatedAt ??= commit.timestamp
-      if (change.action === "create") times.createdAt = commit.timestamp
+      if (change.action === CHANGE_ACTION.create) times.createdAt = commit.timestamp
       mutable.set(version.resourceId, times)
     }
     cursor = commit.parentId
@@ -97,7 +98,6 @@ export class WikiPageTimestampCache {
     )
   }
 
-  /** Times of every page that ever existed at this head. */
   forHead(head: string): Effect.Effect<ReadonlyMap<string, PageTimes>, RevisionError> {
     return Effect.suspend(() => {
       const cached = this.byHead.get(head)

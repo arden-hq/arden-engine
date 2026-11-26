@@ -12,23 +12,6 @@ import path from "node:path"
 
 import { type PresetModel, renderModelsPreset } from "./models-preset.js"
 import { currentMillis } from "../runtime/clock.js"
-/**
- * The one `llama-server` process that runs every installed local model.
- *
- * Router mode (llama.cpp b11541): the router has no model of
- * its own; it reads `models.ini` (one section per installed model, see
- * `models-preset.ts`) and starts one child process per model on its first
- * request, routing by the `model` field (POST) or `?model=` (GET). Arden
- * supervises only the router; a child that crashes is marked unloaded by the
- * router and reloads on the next request, and the decision model's child
- * sleeps after five idle minutes, giving its memory back.
- *
- * The router starts lazily on the first request, never on the start-up path,
- * and listens on 127.0.0.1 behind a random API key. A router that exits is
- * started again by the next request after a backoff; three fast failures in a
- * row stop it (`failed`) until the installed set changes. Closing the layer's
- * scope stops it (SIGTERM, then SIGKILL after 10 s), which ends its children.
- */
 
 export class LlamaServerError extends Schema.TaggedError<LlamaServerError>()("LlamaServerError", {
   reason: Schema.Literals(["missing", "start", "request"]),

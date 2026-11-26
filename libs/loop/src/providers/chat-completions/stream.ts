@@ -1,17 +1,21 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isRecord } from "@arden-hq/std/json"
 
-import type {
-  AssistantOutputPart,
-  JsonValue,
-  MessageOrigin,
-  ToolCall
+import {
+  ASSISTANT_OUTPUT_PART_TYPE,
+  TOOL_EXECUTION,
+  toolCallPart,
+  type AssistantOutputPart,
+  type JsonValue,
+  type MessageOrigin,
+  type ReadablePartType,
+  type ToolCall
 } from "../../contracts/messages.js"
-import type {
-  CompletionResponse,
+import {
   FinishReason,
-  ModelStreamItem,
-  Usage
+  type CompletionResponse,
+  type ModelStreamItem,
+  type Usage
 } from "../../contracts/provider.js"
 import type { ToolSearch } from "../../contracts/tools.js"
 import {
@@ -19,6 +23,7 @@ import {
   pendingToolSearch,
   reportedCost,
   SemanticResponseError,
+  SSE_DONE,
   TOOL_SEARCH_TOOL_NAME,
   type SseEvent,
   type SseEventMapper
@@ -27,53 +32,31 @@ import { errorFrameFailure } from "./errors.js"
 import { API } from "./request.js"
 import { parseJsonText } from "@arden-hq/std/json-text"
 
-/**
- * The fields servers stream reasoning text in: llama.cpp `reasoning_content`,
- * OpenRouter `reasoning`, some gateways `reasoning_text`. A chunk may repeat
- * the same text in several; the first non-empty one is the delta.
- */
 const REASONING_FIELDS = ["reasoning_content", "reasoning", "reasoning_text"] as const
 
+const ANSWER_TEXT_FIELDS = ["content", "refusal"] as const
+
+const CONCATENATED_DETAIL_FIELDS: ReadonlySet<string> = new Set(["text", "summary"])
+
+const LEGACY_FUNCTION_CALL_FINISH = "function_call"
+
 interface StreamedCall {
-  /** The server's id, or one generated here for a server that streams none. */
   readonly id: string
-  /** Whether `id` came from the server; only a server id can tell two calls apart. */
   readonly serverId: boolean
   name: string | undefined
   arguments: string
-  /** Shown to the loop: a call is announced once its name is known. */
   announced: boolean
-  /** A call to the request's tool search, which this adapter answers. */
   search: boolean
 }
 
-/** A part of the answer, by first appearance: the reasoning, the text, or call slot `index`. */
-type Part = "reasoning" | "text" | number
+type Part = ReadablePartType | number
 
-/**
- * Maps one Chat Completions SSE response onto stream items. The stream ends
- * at `[DONE]`, or when the body closes after a `finish_reason` (the usage
- * chunk follows the finish chunk, so the finish alone is not the end).
- * Only `Completed` carries the answer: no `OutputItemReady`, so the loop
- * runs the calls as one batch after the response (the documented behaviour
- * for a provider that emits only `Completed`).
- *
- * With a `toolSearch`, a call to the search tool is the adapter's own: it
- * streams as a pending `ProviderToolCall`, is answered with the kit's
- * `answerToolSearch` when the response ends, and is recorded in
- * `provider_tool_calls` with an `execution: "provider"` part, exactly as the
- * Responses adapter records its native search. The model wrote a tool call
- * and waits for its result, so the response is never a final answer:
- * `continuation` asks the loop for another model step, as Responses does
- * with `end_turn: false`.
- */
 export const makeChunkMapper = (options: {
   readonly requestedModel: string
   readonly providerId: string
   readonly label: string
   readonly generateId: () => string
   readonly toolSearch: ToolSearch | undefined
-  /** False for a `toolChoice: "none"` request: any call the model makes is refused. */
   readonly callsAllowed: boolean
 }): SseEventMapper => {
   let text = ""
@@ -82,13 +65,7 @@ export const makeChunkMapper = (options: {
   let usage: Usage | undefined
   let answeredBy: string | undefined
   const parts: Array<Part> = []
-  /**
-   * Calls by slot, numbered here in order of first appearance. A slot is what
-   * the loop sees as `ToolCallDelta.index`, so it is unique per call even when
-   * the server's own `index` is not.
-   */
   const calls = new Map<number, StreamedCall>()
-  /** The slot of the call currently open at each server `index`. */
   const slotAtIndex = new Map<number, number>()
   const details = new Map<number, Record<string, JsonValue>>()
   let nextDetailIndex = 0
@@ -105,7 +82,6 @@ export const makeChunkMapper = (options: {
     if (typeof value.model === "string" && value.model.length > 0) answeredBy = value.model
     const first: unknown = Array.isArray(value.choices) ? value.choices[0] : undefined
     const choice = isRecord(first) ? first : undefined
-    // Usage rides on its own chunk after the finish; a few servers put it on the choice.
     const reported = isRecord(value.usage) ? value.usage : choice?.usage
     if (isRecord(reported)) usage = usageOf(reported)
     if (choice === undefined) return []
@@ -118,16 +94,14 @@ export const makeChunkMapper = (options: {
     )
     if (reasoningDelta !== undefined) {
       reasoning += reasoningDelta
-      see("reasoning")
+      see(ASSISTANT_OUTPUT_PART_TYPE.reasoning)
       items.push({ _tag: "ReasoningDelta", content: reasoningDelta })
     }
-    // OpenAI streams a refusal in its own field; it is the answer's text, as
-    // the Responses adapter treats `response.refusal.delta`.
-    for (const field of ["content", "refusal"] as const) {
+    for (const field of ANSWER_TEXT_FIELDS) {
       const piece = delta[field]
       if (typeof piece !== "string" || piece.length === 0) continue
       text += piece
-      see("text")
+      see(ASSISTANT_OUTPUT_PART_TYPE.text)
       items.push({ _tag: "TextDelta", content: piece })
     }
     if (Array.isArray(delta.tool_calls)) items.push(...delta.tool_calls.flatMap(callDelta))
@@ -162,9 +136,6 @@ export const makeChunkMapper = (options: {
         ? []
         : [{ _tag: "ToolCallDelta", index, arguments_delta: argumentsDelta, done: false }]
     }
-    // Whether a call is the search is known only from its name, so a call
-    // stays unannounced until the name arrives (the loop starts no call
-    // without one either), then announces everything streamed so far.
     if (call.name === undefined) return []
     call.announced = true
     call.search = options.toolSearch !== undefined && call.name === TOOL_SEARCH_TOOL_NAME
@@ -182,14 +153,6 @@ export const makeChunkMapper = (options: {
     ]
   }
 
-  /**
-   * The slot a delta belongs to. A server `index` keys a call, except that a
-   * new server id at an index already in use starts another call: Ollama and
-   * some gateways send every call of a parallel batch at index 0 and tell them
-   * apart only by id (hermes `_ToolCallAccumulator`). Without an index, an id
-   * keys the call and a fragment with neither continues the call open last,
-   * so a server that sends neither streams one call.
-   */
   const callSlot = (raw: unknown, id: string | undefined): number => {
     const serverIndex =
       typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : undefined
@@ -206,9 +169,6 @@ export const makeChunkMapper = (options: {
 
   const lastSlot = (): number | undefined => (calls.size === 0 ? undefined : calls.size - 1)
 
-  // OpenRouter streams `reasoning_details` in fragments keyed by `index`:
-  // `text` and `summary` fragments append, every other key overwrites (prime
-  // `handle_chunk`). The merged entries are opaque replay state.
   const mergeDetail = (value: unknown): void => {
     if (!isRecord(value))
       throw new SemanticResponseError(`${options.label} returned an invalid reasoning detail`)
@@ -222,7 +182,7 @@ export const makeChunkMapper = (options: {
       if (!isJsonValue(fragment)) continue
       const previous = merged[key]
       merged[key] =
-        (key === "text" || key === "summary") &&
+        CONCATENATED_DETAIL_FIELDS.has(key) &&
         typeof previous === "string" &&
         typeof fragment === "string"
           ? previous + fragment
@@ -232,14 +192,12 @@ export const makeChunkMapper = (options: {
   }
 
   const terminal = (): ReadonlyArray<ModelStreamItem> => {
-    const reason = finishReason(finish ?? "stop", options.label)
+    const reason = finishReason(finish ?? FinishReason.STOP, options.label)
     const kept = [...calls].flatMap(([index, call]) => {
-      // A call the output limit cut off (before its name, or with arguments
-      // that are not JSON yet) never runs; the loop retracts it if it was
-      // announced. Every other finish hands the arguments on as written: the
-      // loop answers malformed ones with a correction the model can act on.
-      if (reason === "length" && (call.name === undefined || !isCompleteJson(call.arguments)))
-        return []
+      const cutOffByOutputLimit =
+        reason === FinishReason.LENGTH &&
+        (call.name === undefined || !isCompleteJson(call.arguments))
+      if (cutOffByOutputLimit) return []
       if (call.name === undefined)
         throw new SemanticResponseError(`${options.label} returned a tool call without a name`)
       return [
@@ -263,11 +221,7 @@ export const makeChunkMapper = (options: {
     const keptParts = new Map(
       kept.map((call): [number, AssistantOutputPart] => [
         call.index,
-        {
-          type: "tool_call",
-          tool_call_id: call.id,
-          execution: call.search ? "provider" : "runtime"
-        }
+        toolCallPart(call.id, call.search ? TOOL_EXECUTION.provider : TOOL_EXECUTION.runtime)
       ])
     )
     const origin: MessageOrigin = {
@@ -285,8 +239,10 @@ export const makeChunkMapper = (options: {
         tool_calls: toolCalls.length === 0 ? null : toolCalls,
         reasoning_content: reasoning.length === 0 ? null : reasoning,
         output_parts: parts.flatMap((part): ReadonlyArray<AssistantOutputPart> => {
-          if (part === "reasoning") return [{ type: "reasoning", text: reasoning }]
-          if (part === "text") return [{ type: "text", text }]
+          if (part === ASSISTANT_OUTPUT_PART_TYPE.reasoning)
+            return [{ type: ASSISTANT_OUTPUT_PART_TYPE.reasoning, text: reasoning }]
+          if (part === ASSISTANT_OUTPUT_PART_TYPE.text)
+            return [{ type: ASSISTANT_OUTPUT_PART_TYPE.text, text }]
           const kept = keptParts.get(part)
           return kept === undefined ? [] : [kept]
         }),
@@ -321,7 +277,7 @@ export const makeChunkMapper = (options: {
   return {
     event: (event: SseEvent) => {
       const data = event.data.trim()
-      if (data === "[DONE]") return terminal()
+      if (data === SSE_DONE) return terminal()
       if (data.length === 0) return []
       let decoded: unknown
       try {
@@ -335,26 +291,21 @@ export const makeChunkMapper = (options: {
   }
 }
 
-/**
- * `tool_calls` names the runtime calls the loop runs; a response whose only
- * call was a search this adapter answered finished as `stop`, as the
- * Responses adapter reports it.
- */
 const runtimeFinish = (reason: FinishReason, hasRuntimeCalls: boolean): FinishReason => {
-  if (reason === "stop" && hasRuntimeCalls) return "tool_calls"
-  if (reason === "tool_calls" && !hasRuntimeCalls) return "stop"
+  if (reason === FinishReason.STOP && hasRuntimeCalls) return FinishReason.TOOL_CALLS
+  if (reason === FinishReason.TOOL_CALLS && !hasRuntimeCalls) return FinishReason.STOP
   return reason
 }
 
 const finishReason = (raw: string, label: string): FinishReason => {
   switch (raw) {
-    case "stop":
-    case "length":
-    case "tool_calls":
-    case "content_filter":
+    case FinishReason.STOP:
+    case FinishReason.LENGTH:
+    case FinishReason.TOOL_CALLS:
+    case FinishReason.CONTENT_FILTER:
       return raw
-    case "function_call":
-      return "tool_calls"
+    case LEGACY_FUNCTION_CALL_FINISH:
+      return FinishReason.TOOL_CALLS
     default:
       throw new SemanticResponseError(
         `${label} finished with an unknown reason: ${raw.slice(0, 128)}`
@@ -362,17 +313,6 @@ const finishReason = (raw: string, label: string): FinishReason => {
   }
 }
 
-/**
- * Usage without double counting: `prompt_tokens` counts every input token,
- * cached and cache-written ones included, so both come off it.
- * `cached_tokens` is what was read from the cache and `cache_write_tokens`
- * what this request wrote; the two never overlap (OpenRouter's usage
- * accounting docs, and live on 2026-11-16 for Claude, OpenAI and Alibaba:
- * a Claude request that read 23,949 tokens and wrote 14,979 more reported
- * exactly those two counts, and was billed for exactly them). prime's
- * `parse_chunk_usage` takes writes off the cached count as well; OpenRouter
- * no longer reports that way.
- */
 const usageOf = (raw: Readonly<Record<string, unknown>>): Usage => {
   const details = isRecord(raw.prompt_tokens_details) ? raw.prompt_tokens_details : {}
   const cacheRead = tokens(details.cached_tokens)

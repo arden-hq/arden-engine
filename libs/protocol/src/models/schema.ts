@@ -1,6 +1,9 @@
+import { strict } from "../common/boundary.js"
 import { Effect, Schema, SchemaTransformation } from "effect"
 import { withExtras } from "../common/schema.js"
 import {
+  MODEL_RESET_SCOPE,
+  MODEL_ROLE,
   MODEL_SETTINGS_CHANGE,
   MODEL_TARGET,
   REASONING_TARGET,
@@ -15,7 +18,6 @@ import {
   type ReasoningTarget
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
 const ModelIdSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const LabelSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const ReasoningEffortSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(128))
@@ -145,7 +147,7 @@ export const ModelSettingsResponseSchema = withExtras(modelSettingsResponseField
   modelSettingsConsistency
 )
 
-const RoleSchema = Schema.Literals(["background", "helper"] as const)
+const RoleSchema = Schema.Literals(Object.values(MODEL_ROLE))
 
 const ModelSettingsChangeRequestSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal(MODEL_SETTINGS_CHANGE.chatModel), model: ModelSlotSchema }),
@@ -314,7 +316,7 @@ export const toModelSettingsPatch = (patch: ModelSettingsPatchRequestWire): Mode
   patch.changes.map(changeFromWire)
 
 export const ModelResetRequestSchema = Schema.Struct({
-  scope: Schema.Literals(["chat", "roles"])
+  scope: Schema.Literals(Object.values(MODEL_RESET_SCOPE))
 })
 
 export const encodeModelResetEffect = (
@@ -332,9 +334,9 @@ export const encodeModelSettingsPatchEffect = (
     strict
   ).pipe(Effect.map(JSON.stringify))
 
-/** The ChatGPT transcription endpoint's own cap on one recording. */
+// https://developers.openai.com/api/docs/guides/speech-to-text
 export const TRANSCRIBE_MAX_BYTES = 25 * 1024 * 1024
-/** What a renderer's MediaRecorder or a saved clip can hold. */
+
 const AudioMediaTypeSchema = Schema.Literals([
   "audio/webm",
   "audio/ogg",
@@ -343,7 +345,6 @@ const AudioMediaTypeSchema = Schema.Literals([
   "audio/wav"
 ])
 
-/** One dictated clip. `data` is base64 on the wire and bytes once decoded. */
 export const TranscribeInputSchema = Schema.Struct({
   media_type: AudioMediaTypeSchema,
   data: Schema.toEncoded(Schema.Uint8ArrayFromBase64)

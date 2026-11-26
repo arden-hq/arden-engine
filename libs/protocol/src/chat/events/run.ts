@@ -1,8 +1,8 @@
+import { SERVER_EVENT_TYPE, eventTypeLiterals } from "../../common/event-types.js"
 import { QuestionAnswerSchema } from "../schema-fields.js"
 import { Schema } from "effect"
 import { event, eventUsage, sessionEvent } from "../../common/schema.js"
 import { InteractionSchema, AgentResultSchema } from "../interaction.js"
-import { eventTypeLiterals } from "../../common/event-types.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { AgentResult, Interaction } from "../history.js"
 import type { ChatUpdate } from "../communication.js"
@@ -40,7 +40,7 @@ export type RunCause =
     }
 
 export interface RunStartedEvent extends JsonRecord {
-  readonly type: "RUN_STARTED"
+  readonly type: typeof SERVER_EVENT_TYPE.runStarted
   readonly run_id: string
   readonly session_id: string
   readonly causes: ReadonlyArray<RunCause>
@@ -54,7 +54,7 @@ export type SessionName =
   | { readonly kind: typeof SESSION_NAME.named; readonly name: string }
 
 export interface SessionUpdatedEvent extends JsonRecord {
-  readonly type: "session_updated"
+  readonly type: typeof SERVER_EVENT_TYPE.sessionUpdated
   readonly session_id: string
   readonly name: SessionName
 }
@@ -88,7 +88,7 @@ export const contextUsage = (counts: {
 })
 
 export interface RunFinishedEvent extends JsonRecord {
-  readonly type: "RUN_FINISHED"
+  readonly type: typeof SERVER_EVENT_TYPE.runFinished
   readonly run_id: string
   readonly turn_id: string
   readonly usage: RunUsage
@@ -97,30 +97,41 @@ export interface RunFinishedEvent extends JsonRecord {
 }
 
 export interface RunCancelledEvent extends JsonRecord {
-  readonly type: "run_cancelled"
+  readonly type: typeof SERVER_EVENT_TYPE.runCancelled
   readonly run_id: string
   readonly turn_id: string
 }
 
 export interface RunErrorEvent extends JsonRecord {
-  readonly type: "RUN_ERROR"
+  readonly type: typeof SERVER_EVENT_TYPE.runError
   readonly run_id: string
   readonly turn_id: string
   readonly message: string
   readonly code: ChatRunErrorCode
 }
 
+export const TOKEN_USAGE_SCOPE = { run: "run", tool: "tool" } as const
+
+export type TokenUsageScope = (typeof TOKEN_USAGE_SCOPE)[keyof typeof TOKEN_USAGE_SCOPE]
+
+const tokenUsageScopes: ReadonlySet<unknown> = new Set<TokenUsageScope>(
+  Object.values(TOKEN_USAGE_SCOPE)
+)
+
+export const isTokenUsageScope = (value: unknown): value is TokenUsageScope =>
+  tokenUsageScopes.has(value)
+
 export interface TokenUsageEvent extends JsonRecord {
-  readonly type: "token_usage"
+  readonly type: typeof SERVER_EVENT_TYPE.tokenUsage
   readonly run_id: string
   readonly usage: EventUsage
   readonly context: ContextSize
   readonly message_count: number
-  readonly scope: "run" | "tool" | string
+  readonly scope: TokenUsageScope
 }
 
 export interface RunActivityEvent extends JsonRecord {
-  readonly type: "run_activity"
+  readonly type: typeof SERVER_EVENT_TYPE.runActivity
   readonly run_id: string
   readonly target: RunActivityTarget
   readonly description: string
@@ -136,45 +147,36 @@ export type RunActivityTarget =
     }
 
 export interface ThinkingEvent extends JsonRecord {
-  readonly type: "thinking"
+  readonly type: typeof SERVER_EVENT_TYPE.thinking
   readonly status: string
   readonly run_id: string
 }
 
-/** Live-only: the run took an owner message into its history. The row reads it until the model acts. */
 export interface InputTakenEvent extends JsonRecord {
-  readonly type: "input_taken"
+  readonly type: typeof SERVER_EVENT_TYPE.inputTaken
   readonly run_id: string
 }
 
-/** Live-only reconnect status; never persisted, never a run failure. */
 export interface StreamRetryEvent extends JsonRecord {
-  readonly type: "stream_retry"
+  readonly type: typeof SERVER_EVENT_TYPE.streamRetry
   readonly run_id: string
   readonly attempt: number
   readonly max_attempts: number
 }
 
 export interface ModelResponseResetEvent extends JsonRecord {
-  readonly type: "model_response_reset"
+  readonly type: typeof SERVER_EVENT_TYPE.modelResponseReset
   readonly message_ids: ReadonlyArray<string>
   readonly tool_call_ids: ReadonlyArray<string>
 }
 
-/**
- * The end-of-answer check sent the run's final answer back for a fix.
- * `retrying`: the model writes the answer again; the old answer stays on
- * screen until the new one completes. `replaced`: the new answer completed
- * and the old one (`message_ids`) left the transcript for good.
- */
 export interface FinalTextSupersededEvent extends JsonRecord {
-  readonly type: "final_text_superseded"
+  readonly type: typeof SERVER_EVENT_TYPE.finalTextSuperseded
   readonly run_id: string
   readonly message_ids: ReadonlyArray<string>
   readonly state: "retrying" | "replaced"
 }
 
-/** Run lifecycle: start, end, cancellation, failure, usage, status lines, and the response reset. */
 export type RunLifecycleEvent =
   | RunStartedEvent
   | SessionUpdatedEvent
@@ -214,20 +216,24 @@ const RunCauseSchema = Schema.Union([
   })
 ])
 
-export const RunStartedEventSchema = sessionEvent("RUN_STARTED", Schema.String, {
+export const RunStartedEventSchema = sessionEvent(SERVER_EVENT_TYPE.runStarted, Schema.String, {
   run_id: Schema.String,
   causes: Schema.Array(RunCauseSchema),
   turn_id: Schema.NonEmptyString
 })
 
-export const SessionUpdatedEventSchema = sessionEvent("session_updated", Schema.String, {
-  name: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal(SESSION_NAME.unnamed) }),
-    Schema.Struct({ kind: Schema.Literal(SESSION_NAME.named), name: Schema.String })
-  ])
-})
+export const SessionUpdatedEventSchema = sessionEvent(
+  SERVER_EVENT_TYPE.sessionUpdated,
+  Schema.String,
+  {
+    name: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(SESSION_NAME.unnamed) }),
+      Schema.Struct({ kind: Schema.Literal(SESSION_NAME.named), name: Schema.String })
+    ])
+  }
+)
 
-export const RunFinishedEventSchema = event("RUN_FINISHED", {
+export const RunFinishedEventSchema = event(SERVER_EVENT_TYPE.runFinished, {
   run_id: Schema.String,
   turn_id: Schema.NonEmptyString,
   usage: Schema.Union([
@@ -238,85 +244,61 @@ export const RunFinishedEventSchema = event("RUN_FINISHED", {
   message_count: Schema.Number
 })
 
-export const RunCancelledEventSchema = event("run_cancelled", {
+export const RunCancelledEventSchema = event(SERVER_EVENT_TYPE.runCancelled, {
   run_id: Schema.String,
   turn_id: Schema.NonEmptyString
 })
 
-/**
- * Closed classification of a failed run. Producers attach it where the failure
- * is thrown — the provider taxonomy in `@arden-hq/loop` supplies the first six —
- * and `RUN_ERROR.code` plus `chat_runs.error_code` carry nothing else. Clients
- * branch on the code; the message is display text, never a classifier.
- */
-export type ChatRunErrorCode =
-  | "context_length_exceeded"
-  | "rate_limited"
-  | "provider_auth"
-  | "provider_unavailable"
-  | "provider_error"
-  | "request_invalid"
-  | "model_unavailable"
-  | "tool_persistence_failed"
-  | "run_interrupted"
-  | "runner_error"
+export const CHAT_RUN_ERROR_CODE = {
+  contextLengthExceeded: "context_length_exceeded",
+  rateLimited: "rate_limited",
+  providerAuth: "provider_auth",
+  providerUnavailable: "provider_unavailable",
+  providerError: "provider_error",
+  requestInvalid: "request_invalid",
+  modelUnavailable: "model_unavailable",
+  toolPersistenceFailed: "tool_persistence_failed",
+  runInterrupted: "run_interrupted",
+  runnerError: "runner_error"
+} as const
 
-export const ChatRunErrorCodeSchema = Schema.Literals([
-  "context_length_exceeded",
-  "rate_limited",
-  "provider_auth",
-  "provider_unavailable",
-  "provider_error",
-  "request_invalid",
-  "model_unavailable",
-  "tool_persistence_failed",
-  "run_interrupted",
-  "runner_error"
-] as const)
+export type ChatRunErrorCode = (typeof CHAT_RUN_ERROR_CODE)[keyof typeof CHAT_RUN_ERROR_CODE]
 
-/** A provider that could not be reached, asked to slow down, or a restart
- *  that cut the run off: weather, not a verdict on the work. Unattended work
- *  tries such a run again before it reports a failure. */
+export const ChatRunErrorCodeSchema = Schema.Literals(Object.values(CHAT_RUN_ERROR_CODE))
+
 export const TRANSIENT_RUN_ERROR_CODES = [
-  "provider_unavailable",
-  "rate_limited",
-  "run_interrupted"
+  CHAT_RUN_ERROR_CODE.providerUnavailable,
+  CHAT_RUN_ERROR_CODE.rateLimited,
+  CHAT_RUN_ERROR_CODE.runInterrupted
 ] as const satisfies ReadonlyArray<ChatRunErrorCode>
 export type TransientRunErrorCode = (typeof TRANSIENT_RUN_ERROR_CODES)[number]
 
-/** A refusal that comes back the same until the person changes something: a
- *  model this account may not use, a sign-in the provider refuses, a request
- *  the provider will not take. Unattended work does not try it again; it
- *  stops where the person sees it, and their change (another model, a new
- *  sign-in, Retry) is what moves it on. `provider_error` is not one: it is
- *  also the loop's word for a failure nobody classified (a broken stream, a
- *  malformed call), which the next run may well not meet. */
 const LASTING_RUN_ERROR_CODES = [
-  "model_unavailable",
-  "provider_auth",
-  "request_invalid"
+  CHAT_RUN_ERROR_CODE.modelUnavailable,
+  CHAT_RUN_ERROR_CODE.providerAuth,
+  CHAT_RUN_ERROR_CODE.requestInvalid
 ] as const satisfies ReadonlyArray<ChatRunErrorCode>
 type LastingRunErrorCode = (typeof LASTING_RUN_ERROR_CODES)[number]
 
 export const isLastingRunError = (code: string | null | undefined): code is LastingRunErrorCode =>
   LASTING_RUN_ERROR_CODES.some((lasting) => lasting === code)
 
-export const RunErrorEventSchema = event("RUN_ERROR", {
+export const RunErrorEventSchema = event(SERVER_EVENT_TYPE.runError, {
   run_id: Schema.String,
   turn_id: Schema.NonEmptyString,
   message: Schema.String,
   code: ChatRunErrorCodeSchema
 })
 
-export const TokenUsageEventSchema = event("token_usage", {
+export const TokenUsageEventSchema = event(SERVER_EVENT_TYPE.tokenUsage, {
   run_id: Schema.String,
   usage: eventUsage,
   context: ContextSizeSchema,
   message_count: Schema.Number,
-  scope: Schema.String
+  scope: Schema.Literals(Object.values(TOKEN_USAGE_SCOPE))
 })
 
-export const RunActivityEventSchema = event("run_activity", {
+export const RunActivityEventSchema = event(SERVER_EVENT_TYPE.runActivity, {
   run_id: Schema.NonEmptyString,
   target: Schema.Union([
     Schema.Struct({ kind: Schema.Literal(RUN_ACTIVITY_TARGET.run) }),
@@ -328,32 +310,25 @@ export const RunActivityEventSchema = event("run_activity", {
   description: Schema.String.check(Schema.isMaxLength(160))
 })
 
-export const ThinkingEventSchema = event("thinking", {
+export const ThinkingEventSchema = event(SERVER_EVENT_TYPE.thinking, {
   status: Schema.String,
   run_id: Schema.String
 })
 
-/**
- * Live-only reconnect status: a retryable provider-stream failure that the
- * transport is retrying under its bounded budget. The turn stays open, so this
- * is never a run failure and never enters the durable journal — a reader who
- * resumes mid-retry learns the state from the stream that follows, not history.
- */
-/** Live-only: a reader that joins after it learns nothing and shows the run's ordinary status. */
-export const InputTakenEventSchema = event("input_taken", { run_id: Schema.String })
+export const InputTakenEventSchema = event(SERVER_EVENT_TYPE.inputTaken, { run_id: Schema.String })
 
-export const StreamRetryEventSchema = event("stream_retry", {
+export const StreamRetryEventSchema = event(SERVER_EVENT_TYPE.streamRetry, {
   run_id: Schema.String,
   attempt: Schema.Int,
   max_attempts: Schema.Int
 })
 
-export const ModelResponseResetEventSchema = event("model_response_reset", {
+export const ModelResponseResetEventSchema = event(SERVER_EVENT_TYPE.modelResponseReset, {
   message_ids: Schema.Array(Schema.String),
   tool_call_ids: Schema.Array(Schema.String)
 })
 
-export const FinalTextSupersededEventSchema = event("final_text_superseded", {
+export const FinalTextSupersededEventSchema = event(SERVER_EVENT_TYPE.finalTextSuperseded, {
   run_id: Schema.String,
   message_ids: Schema.Array(Schema.String),
   state: Schema.Literals(["retrying", "replaced"] as const)
@@ -374,22 +349,18 @@ export const runLifecycleEventSchemas = [
   FinalTextSupersededEventSchema
 ] as const
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type RunLifecycleEventAgrees = Assert<
   Agrees<(typeof runLifecycleEventSchemas)[number]["Type"], RunLifecycleEvent>
 >
 
-/** The events that end a Run: it finished, failed, or was cancelled. */
 export type RunTerminalEvent = RunFinishedEvent | RunErrorEvent | RunCancelledEvent
 
-/** The schemas of `RunTerminalEvent`, for sets that must hold every terminal event. */
 export const runTerminalEventSchemas = [
   RunFinishedEventSchema,
   RunErrorEventSchema,
   RunCancelledEventSchema
 ] as const
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type RunTerminalEventAgrees = Assert<
   Agrees<(typeof runTerminalEventSchemas)[number]["Type"], RunTerminalEvent>
 >
@@ -401,20 +372,12 @@ export const isRunTerminalEvent = <Event extends { readonly type: string }>(
 ): event is Extract<Event, { readonly type: RunTerminalEvent["type"] }> =>
   runTerminalEventTypes.has(event.type)
 
-/**
- * The model acted on the owner's message: reasoning produced content, a tool
- * call began, answer text began or streamed, or the run ended. Empty reasoning
- * carriers do not count. Text counts as it streams too: the reply row a run
- * opens before it takes the message in starts no new message when its text
- * comes. This is the only rule that
- * ends "Reading your message", for the main chat and the agent peek alike.
- */
 export const endsReadingMessage = (event: ChatServerEvent): boolean =>
   isRunTerminalEvent(event) ||
-  event.type === "TOOL_CALL_START" ||
-  event.type === "TEXT_MESSAGE_START" ||
-  event.type === "TEXT_MESSAGE_CONTENT" ||
-  (event.type === "REASONING_MESSAGE_CONTENT" && event.delta.trim().length > 0) ||
-  (event.type === "REASONING_MESSAGE_END" &&
+  event.type === SERVER_EVENT_TYPE.toolCallStart ||
+  event.type === SERVER_EVENT_TYPE.textMessageStart ||
+  event.type === SERVER_EVENT_TYPE.textMessageContent ||
+  (event.type === SERVER_EVENT_TYPE.reasoningMessageContent && event.delta.trim().length > 0) ||
+  (event.type === SERVER_EVENT_TYPE.reasoningMessageEnd &&
     event.closure.kind === MESSAGE_CLOSURE.complete &&
     event.closure.content.trim().length > 0)

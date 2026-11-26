@@ -1,10 +1,16 @@
-import { TASK_BLOCK, TASK_STOP, type SpaceTask, type SpaceTaskStatus } from "./contracts.js"
+import {
+  SPACE_TASK_WAITING_ON,
+  TASK_ACTIVITY,
+  TASK_BLOCK,
+  TASK_STATUS,
+  TASK_STOP,
+  type SpaceTask,
+  type SpaceTaskStatus,
+  type UnfinishedTaskStatus
+} from "./contracts.js"
 
-/** The Task is not finished: being worked (`open`) or postponed (`deferred`).
- *  The SQL twin is `taskUnfinishedSql`; "being worked now" is `open` alone
- *  (`taskOpenSql`). */
-export const isTaskUnfinished = (status: SpaceTaskStatus): boolean =>
-  status === "open" || status === "deferred"
+export const isTaskUnfinished = (status: SpaceTaskStatus): status is UnfinishedTaskStatus =>
+  status === TASK_STATUS.open || status === TASK_STATUS.deferred
 
 type ActivityFacts = Pick<SpaceTask, "activity" | "block">
 
@@ -13,23 +19,24 @@ export const taskActivityWords = (
   clipReason: (reason: string) => string = (reason) => reason
 ): string | undefined => {
   switch (task.activity.kind) {
-    case "needs_you":
+    case TASK_ACTIVITY.needs_you:
       return "asking you"
-    case "on_hold":
+    case TASK_ACTIVITY.on_hold:
       return "on hold until you resume it"
-    case "working":
+    case TASK_ACTIVITY.working:
       return "running now"
-    case "waiting":
-      return task.block.kind === TASK_BLOCK.blocked && task.block.waiting_on === "external"
+    case TASK_ACTIVITY.waiting:
+      return task.block.kind === TASK_BLOCK.blocked &&
+        task.block.waiting_on === SPACE_TASK_WAITING_ON.external
         ? "waiting on someone else"
         : "waiting for the user to act"
-    case "stopped":
+    case TASK_ACTIVITY.stopped:
       return `stopped: ${clipReason(
         task.activity.stop.kind === TASK_STOP.recorded
           ? task.activity.stop.reason
           : "no reason was recorded"
       )}`
-    case "idle":
+    case TASK_ACTIVITY.idle:
       return undefined
   }
 }

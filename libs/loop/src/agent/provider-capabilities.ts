@@ -2,11 +2,18 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { UnsupportedStructuredOutputError } from "../errors.js"
 import { projectReplies } from "./replies.js"
 import { canRunInBackground, type ToolDeclaration, type ToolEntry } from "../contracts/tools.js"
-import type { ModelCapabilities, ModelProvider, ModelRequest } from "../contracts/provider.js"
+import {
+  DELIVERY_MODE,
+  STRUCTURED_OUTPUT_SUPPORT,
+  TOOL_SEARCH_MODE,
+  type ModelCapabilities,
+  type ModelProvider,
+  type ModelRequest
+} from "../contracts/provider.js"
 
 const PORTABLE_CAPABILITIES: ModelCapabilities = Object.freeze({
   hostedTools: Object.freeze([]),
-  structuredOutput: "none"
+  structuredOutput: STRUCTURED_OUTPUT_SUPPORT.none
 })
 
 export const resolveModelCapabilities = async (options: {
@@ -39,21 +46,21 @@ export const prepareProviderRequest = async (options: {
   )
   const nativeAsync = (tool: ToolDeclaration): ToolDeclaration => {
     const { async: _, ...ordinary } = tool
-    return capabilities.asyncTools === "native" && background.has(tool.name)
+    return capabilities.asyncTools === DELIVERY_MODE.native && background.has(tool.name)
       ? { ...ordinary, async: true }
       : ordinary
   }
   const prepared = {
     ...request,
     messages: projectReplies(request.messages),
-    tools: (capabilities.toolSearch === "client"
+    tools: (capabilities.toolSearch === TOOL_SEARCH_MODE.client
       ? request.tools
       : [...request.tools, ...request.deferredTools]
     )
       .filter(available)
       .map(nativeAsync),
     deferredTools:
-      capabilities.toolSearch === "client"
+      capabilities.toolSearch === TOOL_SEARCH_MODE.client
         ? request.deferredTools.filter(available).map(nativeAsync)
         : []
   }
@@ -85,7 +92,10 @@ export const prepareProviderRequest = async (options: {
           ...prepared.messages
         ]
       }
-  if (capabilities.structuredOutput === "none" && informed.responseFormat !== undefined) {
+  if (
+    capabilities.structuredOutput === STRUCTURED_OUTPUT_SUPPORT.none &&
+    informed.responseFormat !== undefined
+  ) {
     throw new UnsupportedStructuredOutputError(informed.model)
   }
   return informed

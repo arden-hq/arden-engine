@@ -2,22 +2,12 @@ import { isRecord } from "@arden-hq/std/json"
 import { retryableStatus } from "@arden-hq/std/retry"
 import { clipLine } from "@arden-hq/std/text"
 
-import type { ProviderErrorCode } from "../../errors.js"
+import { PROVIDER_ERROR_CODE, type ProviderErrorCode } from "../../errors.js"
 import { HttpStatusError } from "./errors.js"
 import { parseJsonText } from "@arden-hq/std/json-text"
 
-/** How much of a rejection body is worth carrying into the error message. */
 export const MAX_STATUS_DETAIL_CHARS = 600
 
-/**
- * What a provider said when it refused a request: the HTTP status (absent for
- * an error frame inside a stream that carries none), the `error.code` and
- * `error.type` of an OpenAI-style body, OpenRouter's typed class
- * (`error.metadata.error_type`), `message`, the server's own sentence, and
- * `upstream`, the error a router relayed from the model's own provider.
- * Nothing else of the body is kept: prose is read only from a message field,
- * never from the text around it.
- */
 export interface Rejection {
   readonly status: number | undefined
   readonly code: string | undefined
@@ -55,69 +45,49 @@ export interface UpstreamRejection {
  * https://openrouter.ai/docs/api-reference/errors), and the 413 body wordings,
  * which the 413 status already decides.
  */
+const LLAMA_CPP_OVERFLOW_PROSE = /exceeds the available context size/i
+
+const ANTHROPIC_OVERFLOW_PROSE_RELAYED_BY_OPENROUTER = /prompt is too long/i
+
 const CONTEXT_OVERFLOW_PROSE: ReadonlyArray<RegExp> = [
-  // OpenAI says "maximum context length is N tokens" and, without the code on
-  // some rejections, "exceeds the context window"; OpenRouter says "maximum
-  // context length is N tokens" for every backend; LM Studio "greater than the
-  // context length"; Ollama "prompt too long; exceeded max context length".
   /context (?:length|window)/i,
   /context[_ ]length[_ ]exceeded/i,
-  /exceeds the available context size/i, // llama.cpp `llama-server`
-  /prompt is too long/i // Anthropic, as OpenRouter relays it in its own message
+  LLAMA_CPP_OVERFLOW_PROSE,
+  ANTHROPIC_OVERFLOW_PROSE_RELAYED_BY_OPENROUTER
 ]
 
-/** A throttle or quota that happens to mention its window is never an overflow. */
-const NOT_OVERFLOW_PROSE: ReadonlyArray<RegExp> = [
+const THROTTLE_OR_QUOTA_PROSE: ReadonlyArray<RegExp> = [
   /rate limit/i,
   /too many requests/i,
   /quota/i,
   /per (?:minute|min|hour|day)\b/i
 ]
 
-/**
- * The statuses a server reports an overflow with, so the only ones whose prose
- * is read: OpenAI, OpenRouter (`context_length_exceeded`, "HTTP 400") and
- * llama.cpp answer 400, and a body over a byte limit is 413. Every other
- * status names its own class (401/403 auth, 408 and 5xx unavailable, 429
- * throttle) and is never an overflow by prose. 422 is not here: none of the
- * servers above uses it for an overflow (OpenRouter's 422 is `unprocessable`).
- */
 const OVERFLOW_STATUSES: ReadonlySet<number> = new Set([400, 413])
 
-/**
- * A refusal of the model itself, in prose. The Codex backend answers a model
- * the ChatGPT sign-in may not use with a bare `{"detail": "The '<model>'
- * model is not supported when using Codex with a ChatGPT account."}`, the
- * Platform API says "The model `<model>` does not exist or you do not have
- * access to it.", llama.cpp says "model '<model>' not found", and OpenRouter
- * "<model> is not a valid model ID" (live, 2026-11-16). Only the
- * provider's own sentence is read, never the request echo around it, and only
- * on the statuses a refused model comes with (400, 403, 404).
- */
 const MODEL_UNAVAILABLE_PROSE =
   /\bmodel\b.{0,80}?\b(?:is not supported|does not exist|is not available|not found)\b|\bis not a valid model id\b/i
 
-/**
- * Whether a rejection is a context overflow, decided by the strongest evidence
- * present, in order: a structured class the server sets (OpenAI's and
- * OpenRouter's `context_length_exceeded`, llama.cpp's
- * `exceed_context_size_error`) or the relayed upstream's code, HTTP 413, then
- * a message on a status an overflow comes with: the server's own, else the
- * upstream's. OpenRouter relays an Anthropic overflow only as the upstream's
- * message, "prompt is too long: 600023 tokens > 200000 maximum" (live,
- * 2026-11-16).
- */
+const UPSTREAM_ERROR_NAME = {
+  contextLengthExceeded: "context_length_exceeded",
+  exceedContextSizeError: "exceed_context_size_error",
+  invalidRequestError: "invalid_request_error"
+} as const
+type UpstreamErrorName = (typeof UPSTREAM_ERROR_NAME)[keyof typeof UPSTREAM_ERROR_NAME]
+
+const names = (value: string | undefined, name: UpstreamErrorName): boolean => value === name
+
 export const isContextOverflow = (rejection: Rejection): boolean => {
-  if (rejection.code === "context_length_exceeded") return true
-  if (rejection.type === "exceed_context_size_error") return true
-  if (rejection.errorType === "context_length_exceeded") return true
-  if (rejection.upstream?.code === "context_length_exceeded") return true
+  if (names(rejection.code, UPSTREAM_ERROR_NAME.contextLengthExceeded)) return true
+  if (names(rejection.type, UPSTREAM_ERROR_NAME.exceedContextSizeError)) return true
+  if (names(rejection.errorType, UPSTREAM_ERROR_NAME.contextLengthExceeded)) return true
+  if (names(rejection.upstream?.code, UPSTREAM_ERROR_NAME.contextLengthExceeded)) return true
   if (rejection.status === 413) return true
   if (rejection.status === undefined || !OVERFLOW_STATUSES.has(rejection.status)) return false
   return [rejection.message, rejection.upstream?.message].some(
     (message) =>
       message !== undefined &&
-      !NOT_OVERFLOW_PROSE.some((pattern) => pattern.test(message)) &&
+      !THROTTLE_OR_QUOTA_PROSE.some((pattern) => pattern.test(message)) &&
       CONTEXT_OVERFLOW_PROSE.some((pattern) => pattern.test(message))
   )
 }
@@ -125,12 +95,6 @@ export const isContextOverflow = (rejection: Rejection): boolean => {
 const stringOf = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined
 
-/**
- * The fields of a decoded rejection body: `error.code`, `error.type`,
- * OpenRouter's `error.metadata.error_type`, the message — `error.message`,
- * Ollama's bare `error` string, or FastAPI-style `detail` — and the relayed
- * upstream error.
- */
 export const rejectionFields = (body: unknown): Omit<Rejection, "status"> => {
   const record = isRecord(body) ? body : undefined
   const error = isRecord(record?.error) ? record.error : undefined
@@ -161,7 +125,6 @@ const upstreamRejection = (
   return Object.values(upstream).every((value) => value === undefined) ? undefined : upstream
 }
 
-/** A rejection read from an HTTP status and the body text, JSON or not. */
 export const httpRejection = (status: number, detail: string | undefined): Rejection => ({
   status,
   ...rejectionFields(parseJson(detail))
@@ -176,47 +139,37 @@ const parseJson = (text: string | undefined): unknown => {
   }
 }
 
-/**
- * The one ladder from a rejection to the host taxonomy. `declared` maps the
- * error codes a provider documents as terminal; they win over everything else.
- */
 export const classifyRejection = (
   rejection: Rejection,
   declared: Readonly<Record<string, ProviderErrorCode>>
 ): ProviderErrorCode => {
   const known = rejection.code === undefined ? undefined : declared[rejection.code]
   if (known !== undefined) return known
-  if (isContextOverflow(rejection)) return "context_length_exceeded"
+  if (isContextOverflow(rejection)) return PROVIDER_ERROR_CODE.contextLengthExceeded
   const status = rejection.status
   if (
     (status === 400 || status === 403 || status === 404) &&
     rejection.message !== undefined &&
     MODEL_UNAVAILABLE_PROSE.test(rejection.message)
   )
-    return "model_unavailable"
+    return PROVIDER_ERROR_CODE.modelUnavailable
   if (
     status === 400 &&
-    (rejection.type === "invalid_request_error" ||
-      rejection.upstream?.type === "invalid_request_error")
+    (names(rejection.type, UPSTREAM_ERROR_NAME.invalidRequestError) ||
+      names(rejection.upstream?.type, UPSTREAM_ERROR_NAME.invalidRequestError))
   )
-    return "request_invalid"
-  if (status === 401 || status === 403) return "provider_auth"
-  if (status === 429) return "rate_limited"
-  if (status !== undefined && retryableStatus(status)) return "provider_unavailable"
-  return "provider_error"
+    return PROVIDER_ERROR_CODE.requestInvalid
+  if (status === 401 || status === 403) return PROVIDER_ERROR_CODE.providerAuth
+  if (status === 429) return PROVIDER_ERROR_CODE.rateLimited
+  if (status !== undefined && retryableStatus(status))
+    return PROVIDER_ERROR_CODE.providerUnavailable
+  return PROVIDER_ERROR_CODE.providerError
 }
 
-/**
- * A non-OK HTTP status, carrying the retry-after headers and — when the caller
- * could read one — what the provider actually said, clipped. A bare status is
- * nearly useless for a 400: the reason a request was rejected lives only in
- * its body.
- */
 export class ProviderStatusError extends HttpStatusError {
   readonly detail: string | undefined
 
   constructor(options: {
-    /** Names the provider: "<label> request failed with status 400: …". */
     readonly label: string
     readonly status: number
     readonly retryAfter: string | null
@@ -233,8 +186,6 @@ export class ProviderStatusError extends HttpStatusError {
       status: options.status,
       retryAfter: options.retryAfter,
       retryAfterMs: options.retryAfterMs,
-      // Classified on the whole body read, not the clipped text: clipping can
-      // cut a JSON body, and then its fields could not be read.
       code: options.classify(options.status, options.detail)
     })
     this.detail = clipped

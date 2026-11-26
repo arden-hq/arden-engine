@@ -3,7 +3,8 @@ import { RunQueries } from "../persistence/runs/queries.js"
 import type { Wiki } from "../wiki/service.js"
 import { pageLifecycle } from "../wiki/snapshot.js"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { changePages, writtenPageData } from "./wiki.js"
+import { changePages } from "./wiki-page-writes.js"
+import { writtenPageData } from "./wiki-render.js"
 import { requireObserved } from "./wiki-records.js"
 import { WikiPathSchema } from "./wiki-schemas.js"
 const ActiveWikiPathSchema = WikiPathSchema.annotate({
@@ -24,10 +25,6 @@ const MergeParametersSchema = Schema.Struct({
   })
 })
 
-/**
- * The two ways a page leaves the Wiki. Merging keeps its path opening the page that replaced
- * it; archiving is for a page nothing replaces.
- */
 export const makeWikiRetireTools = ({
   wiki,
   runs

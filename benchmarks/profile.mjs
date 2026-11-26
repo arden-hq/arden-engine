@@ -1,57 +1,37 @@
 import { Schema } from "effect"
 import { readFile } from "node:fs/promises"
 import { CHAT_COMPLETIONS_SERVERS } from "../apps/server-ts/dist/providers/chat-completions/discovery.js"
-import { parseSettings } from "../apps/server-ts/dist/serve/settings.js"
+import { parseSettings, SERVE_PROVIDER } from "../apps/server-ts/dist/serve/settings.js"
+import { parseJsonText } from "../libs/std/dist/json-text.js"
+
+const PLACEHOLDER_MODEL = "REPLACE_WITH_MODEL_ID"
 
 const positive = Schema.Int.check(Schema.isGreaterThan(0))
 const names = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique())
 export const ProfileSchema = Schema.Struct({
   name: Schema.NonEmptyString,
-  /** Arden's provider kind; absent is `responses`. */
-  provider: Schema.optionalKey(Schema.Literals(["responses", "codex", "chat-completions"])),
+  provider: Schema.optionalKey(
+    Schema.Literals([
+      SERVE_PROVIDER.responses,
+      SERVE_PROVIDER.codex,
+      SERVE_PROVIDER.chatCompletions
+    ])
+  ),
   accountIdEnv: Schema.optionalKey(Schema.NonEmptyString),
-  /** A `chat-completions` provider's server, when detection should not decide (see the server README). */
   server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS)),
   baseUrl: Schema.NonEmptyString,
-  /**
-   * The variable that holds the key; a trial forwards only the variables a
-   * profile names. A `chat-completions` provider on a local server (llama.cpp)
-   * has no key and leaves it out; every other provider needs it.
-   */
   apiKeyEnv: Schema.optionalKey(Schema.NonEmptyString),
   model: Schema.NonEmptyString,
   reasoningEffort: Schema.NullOr(Schema.NonEmptyString),
   contextLimit: positive,
   timeoutMs: positive,
   maxModelRequests: positive,
-  /**
-   * More models the trial lists beside `model`, so the main model can give one
-   * to a sub-agent. Absent: the trial lists `model` only and every sub-agent
-   * runs on it.
-   */
   extraModels: Schema.optionalKey(names),
-  /** Allow-list: the model is offered only these tools. Give this or `blockedTools`. */
   tools: Schema.optionalKey(names),
-  /**
-   * Block-list: the model is offered every tool in the server's catalog except
-   * these. `sources` hides a whole group by the catalog's `source` (for
-   * example `gmail`, `_browser`); `tools` hides single tools by name.
-   */
   blockedTools: Schema.optionalKey(Schema.Struct({ sources: names, tools: names })),
   memory: Schema.Boolean,
-  /**
-   * `true` keeps the route's client-side tool search, as in the app, so the
-   * model searches for deferred tools. Absent or `false`: every allowed tool is
-   * declared up front, as other harnesses present a benchmark's tools.
-   */
   toolSearch: Schema.optionalKey(Schema.Boolean),
-  /**
-   * `false` runs every shell command without Arden's own sandbox, for a trial
-   * that already sits in a throwaway container. Other harnesses run these
-   * benchmarks the same way. Absent or `true`: the sandbox stays on.
-   */
   commandSandbox: Schema.optionalKey(Schema.Boolean),
-  /** Benchmark-owned stdio MCP servers; `environment` maps a server variable to a host variable name. */
   mcpServers: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
@@ -65,29 +45,21 @@ export const ProfileSchema = Schema.Struct({
   )
 })
 export async function readProfile(filename) {
-  const raw = JSON.parse(await readFile(filename, "utf8"))
+  const raw = parseJsonText(await readFile(filename, "utf8"))
   const profile = Schema.decodeUnknownSync(ProfileSchema)(raw, { onExcessProperty: "error" })
-  if (profile.server !== undefined && profile.provider !== "chat-completions")
+  if (profile.server !== undefined && profile.provider !== SERVE_PROVIDER.chatCompletions)
     throw new Error("`server` belongs to a chat-completions provider")
-  // The server's own rules, before a trial starts it: HTTPS or loopback HTTP
-  // for a `baseUrl` that gets a key, the fields each provider needs (a key variable for all but
-  // `chat-completions`). The data folder is a placeholder; the trial names its own.
   try {
     parseSettings({ dataDirectory: "/profile-check", ...modelSettings(profile) })
   } catch (error) {
     throw new Error(`Profile ${filename}: ${error.message}`, { cause: error })
   }
-  // Every route is appended to the base URL, so a query would end up mid-path.
   if (new URL(profile.baseUrl).search) throw new Error("Provider URL must not contain a query")
   if ((profile.tools === undefined) === (profile.blockedTools === undefined))
     throw new Error("Profile needs exactly one of `tools` and `blockedTools`")
-  if (profile.model === "REPLACE_WITH_MODEL_ID") throw new Error("Choose a model before running")
+  if (profile.model === PLACEHOLDER_MODEL) throw new Error("Choose a model before running")
   return profile
 }
-/**
- * The profile's provider and model as Arden's settings file names them. The
- * key is not in it: the settings name the variable that holds it.
- */
 export function modelSettings(profile) {
   return {
     provider: providerSettings(profile),
@@ -98,33 +70,38 @@ export function modelSettings(profile) {
   }
 }
 function providerSettings(profile) {
-  switch (profile.provider ?? "responses") {
-    case "codex":
+  switch (profile.provider ?? SERVE_PROVIDER.responses) {
+    case SERVE_PROVIDER.codex:
       return {
-        kind: "codex",
+        kind: SERVE_PROVIDER.codex,
         accessTokenEnv: profile.apiKeyEnv,
         ...(profile.accountIdEnv ? { accountIdEnv: profile.accountIdEnv } : {})
       }
-    case "chat-completions":
+    case SERVE_PROVIDER.chatCompletions:
       return {
-        kind: "chat-completions",
+        kind: SERVE_PROVIDER.chatCompletions,
         baseUrl: profile.baseUrl,
         ...(profile.apiKeyEnv ? { apiKeyEnv: profile.apiKeyEnv } : {}),
         ...(profile.server ? { server: profile.server } : {})
       }
-    case "responses":
-      return { kind: "responses", baseUrl: profile.baseUrl, apiKeyEnv: profile.apiKeyEnv }
+    case SERVE_PROVIDER.responses:
+      return {
+        kind: SERVE_PROVIDER.responses,
+        baseUrl: profile.baseUrl,
+        apiKeyEnv: profile.apiKeyEnv
+      }
   }
 }
 
-/** How the model list names each provider kind before the server starts. */
 const HOSTS = {
-  responses: { id: "benchmark-responses", name: "Benchmark Responses" },
-  codex: { id: "openai-codex", name: "OpenAI Codex" },
-  "chat-completions": { id: "benchmark-chat-completions", name: "Benchmark Chat Completions" }
+  [SERVE_PROVIDER.responses]: { id: "benchmark-responses", name: "Benchmark Responses" },
+  [SERVE_PROVIDER.codex]: { id: "openai-codex", name: "OpenAI Codex" },
+  [SERVE_PROVIDER.chatCompletions]: {
+    id: "benchmark-chat-completions",
+    name: "Benchmark Chat Completions"
+  }
 }
 
-/** The model list history import writes its chats under, before the server starts. */
 export function modelHost(profile) {
   const inherit = { modelId: null, reasoningEffort: null }
   return {
@@ -132,7 +109,7 @@ export function modelHost(profile) {
       {
         id: profile.model,
         name: profile.model,
-        provider: HOSTS[profile.provider ?? "responses"],
+        provider: HOSTS[profile.provider ?? SERVE_PROVIDER.responses],
         reasoningEfforts: profile.reasoningEffort === null ? [] : [profile.reasoningEffort],
         context: {
           hardLimit: profile.contextLimit,

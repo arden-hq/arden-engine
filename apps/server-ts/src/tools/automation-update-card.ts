@@ -21,7 +21,10 @@ const change = (label: string, from: string, to: string): ApprovalFieldDraft =>
   from === to ? { label, value: to } : { label, value: to, from }
 
 const modelWords = (model: string | null): string => model ?? "Background model"
-const HISTORY_WORDS = { chat: "Reads the chat", fresh: "Starts fresh" } as const
+const HISTORY_WORDS: Record<AutomationHistory, string> = {
+  chat: "Reads the chat",
+  fresh: "Starts fresh"
+}
 const historyWords = (history: AutomationHistory | null): string =>
   history === null ? "Set by the system" : HISTORY_WORDS[history]
 const cooldownWords = (minutes: number | null): string =>

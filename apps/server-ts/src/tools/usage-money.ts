@@ -5,11 +5,6 @@ export type UsageMoney =
   | { readonly state: "reported"; readonly usd: number; readonly reason: string }
   | { readonly state: "unavailable"; readonly reason: string }
 
-/**
- * The money a usage window cost, for `usage_report`: the dollars providers
- * reported (`RunUsage.cost`) when every recorded call has them, and
- * unavailable otherwise, since a partial sum would read as the whole spend.
- */
 export const usageMoney = (daily: ReadonlyArray<Pick<UsageDailyCell, "cost">>): UsageMoney => {
   if (daily.length === 0)
     return { state: "unavailable", reason: "No recorded calls in this window." }

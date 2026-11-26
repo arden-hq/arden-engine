@@ -41,11 +41,6 @@ export type StoredEndpoint = typeof StoredEndpointSchema.Type
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 
-/**
- * How a model's requests are shaped, as discovery reported it. Keyed by every
- * `ChatCompletionsCompat` field, so a field the adapter gains fails to compile
- * here instead of being left out of what is saved.
- */
 const COMPAT_FIELDS = {
   maxTokensField: Schema.Literals(["max_completion_tokens", "max_tokens"] as const),
   systemRole: Schema.Literals(["system", "developer"] as const),
@@ -70,10 +65,8 @@ const StoredCompatSchema = Schema.Struct({
   toolChoiceNone: Schema.optionalKey(COMPAT_FIELDS.toolChoiceNone)
 } satisfies Record<keyof ChatCompletionsCompat, Schema.Top>)
 
-/** One model the saved server offers, as its last successful discovery reported it. */
 const StoredChatModelSchema = Schema.Struct({
   id: Text(512),
-  /** The window Arden uses: the server's own, or `CHAT_ENDPOINT_MIN_WINDOW` for a custom server. */
   window: PositiveInt,
   outputCap: Schema.NullOr(PositiveInt),
   reasoningEfforts: Schema.Array(Text(128)),
@@ -95,11 +88,6 @@ const ChatSkipSchema = Schema.Union([
   Schema.Struct({ id: Text(512), reason: Schema.Literal("window_too_small"), window: PositiveInt })
 ])
 
-/**
- * A saved model server. Its models are kept while it does not answer, so
- * chats and defaults that name them keep them; its key is in the vault,
- * under its id.
- */
 const StoredChatEndpointSchema = Schema.Struct({
   id: Text(64),
   service: Schema.Literals(["llama.cpp", "openrouter", "custom"] as const),
@@ -115,11 +103,6 @@ const StoredChatEndpointSchema = Schema.Struct({
 
 export type StoredChatEndpoint = typeof StoredChatEndpointSchema.Type
 
-/**
- * The saved model servers, in the order added. A chat's stored model id must
- * name one server, so no model id is on two of them; the Check refuses a
- * taken id, and this refuses a write that would break that anyway.
- */
 const StoredChatEndpointsSchema = Schema.Array(StoredChatEndpointSchema).check(
   Schema.makeFilter((servers) => {
     if (new Set(servers.map((server) => server.id)).size !== servers.length)

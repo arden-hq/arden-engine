@@ -1,5 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { parseToolCalls } from "../tools/dispatch.js"
+import { parseToolCalls } from "../tools/tool-calls.js"
 import type { ChatMessage, ToolCall } from "../contracts/messages.js"
 import type { PendingToolCall, ToolDisplayTitle } from "../contracts/tools.js"
 

@@ -1,11 +1,18 @@
 import type { ToolDeclaration, ToolSearch } from "../../contracts/tools.js"
 import { OpenAiResponsesProviderError } from "./errors.js"
-import { asRecord } from "./items.js"
+import { asRecord, TOOL_SEARCH_EXECUTION } from "./items.js"
 import { projectFunctionParameters } from "./parameter-schema.js"
+
+export const RESPONSES_TOOL_TYPE = {
+  function: "function",
+  namespace: "namespace",
+  toolSearch: "tool_search",
+  webSearch: "web_search"
+} as const
 
 export interface FunctionTool {
   readonly async?: boolean
-  readonly type: "function"
+  readonly type: typeof RESPONSES_TOOL_TYPE.function
   readonly name: string
   readonly description: string
   readonly parameters: Readonly<Record<string, unknown>>
@@ -14,14 +21,14 @@ export interface FunctionTool {
 }
 
 export interface ClientToolSearchTool {
-  readonly type: "tool_search"
-  readonly execution: "client"
+  readonly type: typeof RESPONSES_TOOL_TYPE.toolSearch
+  readonly execution: typeof TOOL_SEARCH_EXECUTION.client
   readonly description: string
   readonly parameters: Readonly<Record<string, unknown>>
 }
 
 export interface NamespaceTool {
-  readonly type: "namespace"
+  readonly type: typeof RESPONSES_TOOL_TYPE.namespace
   readonly name: string
   readonly description: string
   readonly tools: ReadonlyArray<FunctionTool>
@@ -29,15 +36,8 @@ export interface NamespaceTool {
 
 const DEFAULT_NAMESPACE = "tools"
 
-/**
- * Namespaces OpenAI keeps for its own tools. A request that declares or
- * replays a function inside one is refused with HTTP 400 ("Function
- * 'browser.browser_screenshot' is not allowed in reserved namespace
- * 'browser'", seen 2026-09-27).
- */
 const RESERVED_NAMESPACES: ReadonlySet<string> = new Set(["browser"])
 
-/** The namespace a group travels under on this wire: its own name, unless OpenAI reserves it. */
 export const providerNamespace = (group: string): string =>
   RESERVED_NAMESPACES.has(group) ? `${group}_tools` : group
 
@@ -64,11 +64,6 @@ export const clientToolSearchTool = (search: ToolSearch): ClientToolSearchTool =
   parameters: search.parameters
 })
 
-/**
- * Found tools grouped into namespaces, in order of first appearance. OpenAI's
- * models were trained to search namespaces, and a namespaced call comes back
- * with its `namespace` beside the tool's own name.
- */
 export const namespacedTools = (
   declarations: ReadonlyArray<ToolDeclaration>
 ): ReadonlyArray<NamespaceTool> => {

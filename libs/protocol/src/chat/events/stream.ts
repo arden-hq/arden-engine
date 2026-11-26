@@ -1,3 +1,4 @@
+import { SERVER_EVENT_TYPE } from "../../common/event-types.js"
 import type { ApprovalEvent } from "./approval.js"
 import type { ChatEventFrame, Framed } from "../../common/event-fields.js"
 import type { JsonRecord } from "../../common/json.js"
@@ -9,7 +10,7 @@ import type { TextStreamEvent } from "./text.js"
 import type { ToolCallEvent } from "./tool.js"
 
 export interface StreamKeepaliveEvent extends JsonRecord {
-  readonly type: "stream_keepalive"
+  readonly type: typeof SERVER_EVENT_TYPE.streamKeepalive
   readonly session_id: string
   readonly seq: number
   readonly latest_seq: number
@@ -19,39 +20,36 @@ export interface SessionResumeSnapshot extends JsonRecord {
   readonly version: 1
   readonly applied_seq: number
   readonly history: HistoryResponse
-  /** Ordered semantic events not represented by the durable history checkpoint. */
   readonly active_events: ReadonlyArray<SnapshotProjectionEvent>
 }
 
-/** A replay-safe event included exactly once in a resume snapshot. */
 export type SnapshotProjectionEvent = Framed<
   ChatProjectionEvent,
   ChatEventFrame & { readonly replay: true }
 >
 
 export interface StreamSnapshotEvent extends JsonRecord {
-  readonly type: "stream_snapshot"
+  readonly type: typeof SERVER_EVENT_TYPE.streamSnapshot
   readonly session_id: string
   readonly seq: number
   readonly snapshot: SessionResumeSnapshot
 }
 
 export interface StreamLiveEvent extends JsonRecord {
-  readonly type: "stream_live"
+  readonly type: typeof SERVER_EVENT_TYPE.streamLive
   readonly session_id: string
   readonly seq: number
   readonly caught_up_through: number
 }
 
 export interface StreamOverflowEvent extends JsonRecord {
-  readonly type: "stream_overflow"
+  readonly type: typeof SERVER_EVENT_TYPE.streamOverflow
   readonly session_id: string
   readonly seq: number
   readonly cursor: number
   readonly reason: "follower_buffer" | "active_projection"
 }
 
-/** Every event a chat session's projection stream can carry, by family. */
 export type ChatProjectionEvent =
   | RunLifecycleEvent
   | TextStreamEvent

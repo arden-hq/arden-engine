@@ -13,32 +13,19 @@ import { AutomationTriggerSchema } from "./trigger-schema.js"
 
 const decodeStoredTriggers = Schema.decodeUnknownOption(Schema.Array(AutomationTriggerSchema))
 
-/** A 24-hour wall-clock time; the zone is the one the schedule is evaluated in. */
 export interface WallTime {
   readonly hour: number
   readonly minute: number
 }
 
-/** A calendar date; `month` is one-based. */
 export interface CalendarDate {
   readonly year: number
   readonly month: number
   readonly day: number
 }
 
-/** Days of the week, numbered like `Date#getDay`: 0 is Sunday. */
 export type Weekdays = ReadonlySet<number>
 
-/**
- * A time trigger decoded once from its stored JSON.
- *
- * - `once`: fires at `at` on the date `on`, then never again.
- * - `next`: fires at the next `at` (a stored `at` without `days`), once.
- * - `daily`: fires at `at` on each of `days`.
- * - `interval`: fires `minutes` after the previous fire, inside the
- *   `[start, end)` window of each allowed day (minutes of the day; an unset
- *   bound is 0 or 1440), moving to the next day's `start` past `end`.
- */
 export type TimeSchedule =
   | { readonly kind: "once"; readonly on: CalendarDate; readonly at: WallTime }
   | { readonly kind: "next"; readonly at: WallTime }
@@ -50,7 +37,6 @@ export type TimeSchedule =
       readonly days: Weekdays
     }
 
-/** Where and when to compute the next fire: an instant and the zone whose wall clock the schedule keeps. */
 export interface ScheduleClock {
   readonly afterMs: number
   readonly zone: DateTime.TimeZone
@@ -180,10 +166,6 @@ const decodeInterval = (
   }
 }
 
-/**
- * One time trigger's schedule as the schedule it fires on and the normalized
- * form the store keeps; `undefined` for any invalid field.
- */
 export const decodeTimeTrigger = (schedule: TimeTriggerSchedule): DecodedTime | undefined => {
   switch (schedule.kind) {
     case TRIGGER_STATE.interval:
@@ -221,7 +203,6 @@ export const decodeTimeTrigger = (schedule: TimeTriggerSchedule): DecodedTime | 
   }
 }
 
-/** The earliest next fire across time schedules; null without one. */
 export const nextScheduleRunAt = (
   times: ReadonlyArray<TimeSchedule>,
   clock: ScheduleClock
@@ -234,13 +215,6 @@ export const nextScheduleRunAt = (
   return earliest
 }
 
-/**
- * When a new Automation with these triggers would first run, before it
- * exists: the earliest fire of its time triggers, as the server will set
- * `next_run_at` at creation. `undefined` when it cannot be known: a trigger
- * that waits on something else (an event, inactivity, chat turns) may fire
- * first, a time trigger is invalid, or no time trigger would ever fire.
- */
 export const firstRunAt = (
   triggers: ReadonlyArray<AutomationTriggerSpec>,
   clock: ScheduleClock
@@ -256,11 +230,6 @@ export const firstRunAt = (
   return nextScheduleRunAt(times, clock) ?? undefined
 }
 
-/**
- * The next fire of one time trigger, on the wall clock of `clock.zone`. A wall
- * time that a DST gap skips resolves forward; one a DST overlap repeats
- * resolves to its first occurrence.
- */
 export const nextAutomationRunAt = (
   time: TimeSchedule,
   { afterMs, zone }: ScheduleClock
@@ -349,11 +318,6 @@ const allowedDate = (date: CalendarDate, days: Weekdays): CalendarDate => {
   return candidate
 }
 
-/**
- * Whether an Automation with these stored triggers fires more than once: an
- * event, idle or count trigger, or a time trigger that is not a one-off
- * (`once`, `next`). Triggers that do not decode count as a one-off.
- */
 export const automationRepeats = (triggers: unknown): boolean =>
   Option.getOrElse(decodeStoredTriggers(triggers), () => []).some((trigger) => {
     if (trigger.type !== TRIGGER_TYPE.time) return true

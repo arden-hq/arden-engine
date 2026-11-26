@@ -1,12 +1,6 @@
-/**
- * A plain object read from outside the type system (a parsed body, an IPC
- * payload): not null, not an array. It proves nothing about fields. Effect code
- * asks `Predicate.isObject` (same test); this is for the libraries without Effect.
- */
 export const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-/** Orders text by code point, the order a byte-wise UTF-8 sort gives; UTF-16 order differs for astral characters. */
 export const compareCodePoints = (left: string, right: string): number => {
   let leftIndex = 0
   let rightIndex = 0
@@ -21,7 +15,6 @@ export const compareCodePoints = (left: string, right: string): number => {
   }
 }
 
-/** A record made by an object literal or `Object.create(null)`: not a class instance, `Map` or `Date`. */
 export const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> => {
   if (!isRecord(value)) return false
   const prototype: unknown = Object.getPrototypeOf(value)
@@ -92,17 +85,6 @@ const lenientJson = (value: unknown, key: string): string | undefined => {
   return `{${members.join(",")}}`
 }
 
-/**
- * JSON with every object's keys in code-point order, so equal values read the
- * same: the text identities, digests and checkpoints are made from.
- *
- * Strict (the default) refuses what JSON cannot say: `undefined`, a function, a
- * non-finite number, a class instance. `lenient` follows `JSON.stringify`'s
- * rules for values (drops `undefined` properties, `NaN` becomes `null`,
- * `toJSON` applies) and still orders every key by code point, integer-like
- * keys included. The bytes of a digest that was stored before this module
- * existed come from `engineOrderedJson`, not from here.
- */
 export const canonicalJson = (
   value: unknown,
   options: { readonly lenient?: boolean } = {}
@@ -113,13 +95,6 @@ export const canonicalJson = (
   return encoded
 }
 
-/**
- * What the server's first canonical JSON wrote, byte for byte: `JSON.stringify`
- * over objects rebuilt from their UTF-16-sorted keys, which the engine then
- * reorders (integer-like keys first, in numeric order). Persisted identities
- * (an Automation event source, a model-held revision) were made this way and
- * keep being made this way. New code asks `canonicalJson`.
- */
 export const engineOrderedJson = (value: unknown): string => {
   const encoded: string | undefined = JSON.stringify(value, (_key, item: unknown) =>
     isRecord(item)
@@ -134,7 +109,6 @@ export const engineOrderedJson = (value: unknown): string => {
   return encoded
 }
 
-/** Equal as JSON, whatever the key order; `undefined` equals only `undefined`. */
 export const sameJson = (left: unknown, right: unknown): boolean => {
   if (left === right) return true
   if (Array.isArray(left)) {

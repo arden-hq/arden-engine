@@ -22,7 +22,6 @@ const entries = [
     kind: "embedding",
     id: GRANITE_GGUF_ID,
     name: "Granite 97M",
-    // The repositories carry no LICENSE file; the model card states Apache-2.0.
     license: {
       name: "Apache-2.0",
       url: huggingFacePage(GRANITE_SOURCE_REPOSITORY, GRANITE_SOURCE_REVISION, "README.md")
@@ -51,7 +50,6 @@ const entries = [
     kind: "decision",
     id: D1_ID,
     name: "Liquid d1 3B",
-    // Free, commercial use included, while the user's company earns under USD 10 M a year (§5).
     license: {
       name: "LFM Open License",
       url: huggingFacePage(D1_GGUF_REPOSITORY, D1_GGUF_REVISION, "LICENSE")

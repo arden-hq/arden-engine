@@ -8,7 +8,6 @@ export interface RgbaImage {
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
-/** Samples per pixel by PNG color type: gray, RGB, palette, gray+alpha, RGBA. */
 const CHANNELS: Readonly<Record<number, number>> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
 
 export const pngSize = (bytes: Uint8Array): { width: number; height: number } | undefined => {
@@ -167,7 +166,6 @@ const paeth = (left: number, up: number, upLeft: number): number => {
   return toUp <= toUpLeft ? up : upLeft
 }
 
-/** The usual minimum-sum-of-absolute-differences choice among the five PNG filters. */
 const bestFilter = (
   current: Uint8Array,
   previous: Uint8Array,

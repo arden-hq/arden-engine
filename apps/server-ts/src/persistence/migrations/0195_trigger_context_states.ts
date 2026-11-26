@@ -2,7 +2,10 @@ import { parseJsonText } from "@arden-hq/protocol/common"
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-const SOURCE = { count: "count", event: "event", coalesced: "coalesced" } as const
+const CAUSE_SOURCE = { count: "count", event: "event", coalesced: "coalesced" } as const
+type CauseSource = (typeof CAUSE_SOURCE)[keyof typeof CAUSE_SOURCE]
+const isCauseSource = (value: unknown): value is CauseSource =>
+  Object.values<unknown>(CAUSE_SOURCE).includes(value)
 const IMMUTABLE_RUN = "automation_runs_immutable_context"
 
 type Json = Record<string, unknown>
@@ -36,13 +39,21 @@ const eventCause = (cause: Json): Json => {
 
 const directCause = (cause: unknown): unknown => {
   if (!isObject(cause)) return cause
-  if (cause["source"] === SOURCE.count) return countCause(cause)
-  if (cause["source"] === SOURCE.event) return eventCause(cause)
-  return cause
+  const source = cause["source"]
+  if (!isCauseSource(source)) return cause
+  switch (source) {
+    case CAUSE_SOURCE.count:
+      return countCause(cause)
+    case CAUSE_SOURCE.event:
+      return eventCause(cause)
+    case CAUSE_SOURCE.coalesced:
+      return cause
+  }
 }
 
 export const todayTriggerContext = (context: unknown): unknown => {
-  if (!isObject(context) || context["source"] !== SOURCE.coalesced) return directCause(context)
+  if (!isObject(context) || context["source"] !== CAUSE_SOURCE.coalesced)
+    return directCause(context)
   const causes = context["causes"]
   return { ...context, causes: Array.isArray(causes) ? causes.map(directCause) : causes }
 }

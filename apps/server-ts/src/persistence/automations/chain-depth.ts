@@ -23,8 +23,6 @@ export const wakeChainDepth = (wokenBy: AutomationTriggerContext | undefined): n
 export const originChainDepth = (origin: RunOrigin): number =>
   origin.kind === "unrecorded" ? 0 : (origin.chain_depth ?? 0)
 
-/** Automation runs behind a change: those behind the wake of the run that made it, plus that run
- *  when it is an Automation's. A change by the owner or the outside world has none. */
 export const causedChainDepth = (
   producedBy: string | null,
   producerWakeDepth: number | undefined

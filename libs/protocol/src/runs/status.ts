@@ -1,8 +1,8 @@
 import type { RuntimeRunStatus } from "../chat/runtime.js"
+export { RUN_STATUS } from "../chat/runtime.js"
 import type { EndedRunDetail, RunDetail } from "./contracts.js"
 import { RuntimeRunStatusSchema } from "../common/schema.js"
 
-/** Whether a Run in this status has ended. A new status fails compilation here until it is placed. */
 const runStatusIsTerminal = {
   pending: false,
   running: false,
@@ -12,7 +12,6 @@ const runStatusIsTerminal = {
   completed: true
 } as const satisfies Record<RuntimeRunStatus, boolean>
 
-/** Whether the owner is still waiting on the Run in the chat (not handed to the background). */
 const runStatusIsForeground = {
   pending: true,
   running: true,
@@ -22,7 +21,6 @@ const runStatusIsForeground = {
   completed: false
 } as const satisfies Record<RuntimeRunStatus, boolean>
 
-/** Whether the Run has started and has not ended; a `pending` Run has not started. */
 const runStatusIsExecuting = {
   pending: false,
   running: true,
@@ -46,21 +44,17 @@ const isTerminalMember = (status: RuntimeRunStatus): status is TerminalRunStatus
 const isActiveMember = (status: RuntimeRunStatus): status is ActiveRunStatus =>
   !runStatusIsTerminal[status]
 
-/** Runs that have ended: `completed`, `interrupted`, `error`, `cancelled`. */
 export const TERMINAL_RUN_STATUSES: ReadonlyArray<TerminalRunStatus> =
   RuntimeRunStatusSchema.literals.filter(isTerminalMember)
 
-/** Runs that still own their Session: `pending`, `running`. */
 export const ACTIVE_RUN_STATUSES: ReadonlyArray<ActiveRunStatus> =
   RuntimeRunStatusSchema.literals.filter(isActiveMember)
 
-/** Runs the chat still shows as in progress: `pending`, `running`. */
 export const FOREGROUND_RUN_STATUSES: ReadonlyArray<ForegroundRunStatus> =
   RuntimeRunStatusSchema.literals.filter(
     (status): status is ForegroundRunStatus => runStatusIsForeground[status]
   )
 
-/** Runs that have started and not ended: `running`. */
 export const EXECUTING_RUN_STATUSES: ReadonlyArray<ExecutingRunStatus> =
   RuntimeRunStatusSchema.literals.filter(
     (status): status is ExecutingRunStatus => runStatusIsExecuting[status]
@@ -71,33 +65,20 @@ const activeRunStatuses: ReadonlySet<string> = new Set(ACTIVE_RUN_STATUSES)
 const foregroundRunStatuses: ReadonlySet<string> = new Set(FOREGROUND_RUN_STATUSES)
 const executingRunStatuses: ReadonlySet<string> = new Set(EXECUTING_RUN_STATUSES)
 
-/** True only for a known terminal status; unknown text is neither terminal nor active. */
 export const isTerminalRunStatus = (
   status: string | null | undefined
 ): status is TerminalRunStatus => status != null && terminalRunStatuses.has(status)
 
-/** True only for a known active status; unknown text is neither terminal nor active. */
 export const isActiveRunStatus = (status: string | null | undefined): status is ActiveRunStatus =>
   status != null && activeRunStatuses.has(status)
 
-/** True only for a known foreground status; unknown text is not foreground. */
 export const isForegroundRunStatus = (
   status: string | null | undefined
 ): status is ForegroundRunStatus => status != null && foregroundRunStatuses.has(status)
 
-/** True only for a known executing status; unknown text is not executing. */
 export const isExecutingRunStatus = (
   status: string | null | undefined
 ): status is ExecutingRunStatus => status != null && executingRunStatuses.has(status)
 
 export const runHasEnded = (detail: RunDetail): detail is EndedRunDetail =>
   isTerminalRunStatus(detail.status)
-
-export const RUN_STATUS = {
-  pending: "pending",
-  running: "running",
-  interrupted: "interrupted",
-  error: "error",
-  cancelled: "cancelled",
-  completed: "completed"
-} as const satisfies { readonly [Status in RuntimeRunStatus]: Status }

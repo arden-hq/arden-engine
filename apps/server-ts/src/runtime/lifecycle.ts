@@ -1,6 +1,14 @@
 import { Cause, Context, Deferred, Effect, FiberSet, Layer, type Scope } from "effect"
 
-type Phase = "starting" | "ready" | "quiescing" | "closing" | "stopped"
+const PHASE = {
+  starting: "starting",
+  ready: "ready",
+  quiescing: "quiescing",
+  closing: "closing",
+  stopped: "stopped"
+} as const
+
+type Phase = (typeof PHASE)[keyof typeof PHASE]
 
 export interface ServerLifecycleShape {
   readonly awaitReady: Effect.Effect<void>
@@ -69,7 +77,7 @@ export const serverLifecycleLayer = Layer.effect(
     const quiescing = yield* Deferred.make<void>()
     const fibers = yield* FiberSet.make()
     const acceptedFibers = yield* FiberSet.make()
-    let phase: Phase = "starting"
+    let phase: Phase = PHASE.starting
     const change = (next: Phase) =>
       Effect.sync(() => {
         phase = next
@@ -79,23 +87,23 @@ export const serverLifecycleLayer = Layer.effect(
       quiescing: Deferred.await(quiescing),
       settled: FiberSet.awaitEmpty(fibers),
       acceptedSettled: FiberSet.awaitEmpty(acceptedFibers),
-      isAccepting: () => phase === "ready",
+      isAccepting: () => phase === PHASE.ready,
       ready: Effect.gen(function* () {
-        if (phase !== "starting") return
-        yield* change("ready")
+        if (phase !== PHASE.starting) return
+        yield* change(PHASE.ready)
         yield* Deferred.succeed(ready, undefined)
       }),
       quiesce: Effect.gen(function* () {
-        if (phase !== "starting" && phase !== "ready") return
-        yield* change("quiescing")
+        if (phase !== PHASE.starting && phase !== PHASE.ready) return
+        yield* change(PHASE.quiescing)
         yield* Deferred.succeed(quiescing, undefined)
       }),
-      close: change("closing"),
-      stopped: change("stopped"),
+      close: change(PHASE.closing),
+      stopped: change(PHASE.stopped),
       accepted: (effect, { scope }) =>
         Effect.uninterruptible(
           Effect.gen(function* () {
-            if (phase !== "ready") return
+            if (phase !== PHASE.ready) return
             const fiber = yield* Effect.forkIn(
               effect.pipe(
                 Effect.catchCause((cause) =>
@@ -114,7 +122,7 @@ export const serverLifecycleLayer = Layer.effect(
           Effect.raceFirst(
             Deferred.await(ready).pipe(
               Effect.andThen(
-                Effect.suspend(() => (phase === "ready" ? Effect.scoped(effect) : Effect.void))
+                Effect.suspend(() => (phase === PHASE.ready ? Effect.scoped(effect) : Effect.void))
               )
             ),
             Deferred.await(quiescing)

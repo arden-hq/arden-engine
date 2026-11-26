@@ -1,14 +1,10 @@
-/** The helper is pure — text in, text out. */
-
 import { utf8Prefix, utf8Suffix } from "@arden-hq/std/text"
 
 export const DEFAULT_TRUNCATE_MAX_BYTES = 50 * 1024
 export const DEFAULT_TRUNCATE_MAX_LINES = 2_000
 
 export interface TruncateToolResultOptions {
-  /** UTF-8 byte cap for the kept text (default 51200). */
   readonly maxBytes?: number
-  /** Line cap for the kept text (default 2000). */
   readonly maxLines?: number
 }
 
@@ -18,13 +14,6 @@ const bytesOf = (text: string): number => encoder.encode(text).length
 
 const positiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value >= 1
 
-/**
- * Truncate one tool result's model-facing text to the byte/line caps. Text
- * within both caps returns unchanged. Oversized text keeps its head and tail
- * (half the budget each) around an elision notice naming how many lines and
- * bytes were cut — both ends usually matter (the command echo and the final
- * error), which is why this keeps head+tail where opencode keeps one end.
- */
 export const truncateToolResult = (
   text: string,
   options: TruncateToolResultOptions = {}

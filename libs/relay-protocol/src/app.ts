@@ -3,57 +3,97 @@ import { concat, fromB64url, fromUtf8, toB64url, toHex, utf8 } from "./encoding.
 import { isRecord } from "@arden-hq/std/json"
 import { parseJsonText } from "@arden-hq/std/json-text"
 
-export type HandshakeMessage =
-  | { readonly t: "hs1"; readonly e: string }
-  | { readonly t: "hs2"; readonly e: string }
+export const APP_MESSAGE_TAG = {
+  hs1: "hs1",
+  hs2: "hs2",
+  resume: "resume",
+  req: "req",
+  cancel: "cancel",
+  sub: "sub",
+  unsub: "unsub",
+  ack: "ack",
+  cmd: "cmd",
+  res: "res",
+  ev: "ev",
+  reset: "reset",
+  cmd_ack: "cmd_ack",
+  part: "part"
+} as const
+export type AppMessageTag = (typeof APP_MESSAGE_TAG)[keyof typeof APP_MESSAGE_TAG]
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
-export type CommandKind =
-  | "send"
-  | "answer"
-  | "decide"
-  | "stop"
-  | "capture"
-  | "register_push"
-  | "set_keep_awake"
+export type HandshakeMessage =
+  | { readonly t: typeof APP_MESSAGE_TAG.hs1; readonly e: string }
+  | { readonly t: typeof APP_MESSAGE_TAG.hs2; readonly e: string }
+
+export const HTTP_METHOD = {
+  GET: "GET",
+  POST: "POST",
+  PUT: "PUT",
+  PATCH: "PATCH",
+  DELETE: "DELETE"
+} as const
+export type HttpMethod = (typeof HTTP_METHOD)[keyof typeof HTTP_METHOD]
+
+export const COMMAND_KIND = {
+  send: "send",
+  answer: "answer",
+  decide: "decide",
+  stop: "stop",
+  capture: "capture",
+  register_push: "register_push",
+  set_keep_awake: "set_keep_awake"
+} as const
+export type CommandKind = (typeof COMMAND_KIND)[keyof typeof COMMAND_KIND]
+
+export const COMMAND_ACK_STATE = {
+  done: "done",
+  stopping: "stopping",
+  rejected: "rejected"
+} as const
+export type CommandAckState = (typeof COMMAND_ACK_STATE)[keyof typeof COMMAND_ACK_STATE]
+
+export const RESET_REASON = {
+  gap: "gap",
+  overflow: "overflow",
+  forbidden: "forbidden",
+  limit: "limit"
+} as const
+export type ResetReason = (typeof RESET_REASON)[keyof typeof RESET_REASON]
 
 export interface ResumeMessage {
-  readonly t: "resume"
-  /** sid → last applied seq. */
+  readonly t: typeof APP_MESSAGE_TAG.resume
   readonly streams: Readonly<Record<string, number>>
-  /** cids still in the phone's outbox; the Mac re-acks or runs them. */
   readonly pending: readonly string[]
 }
 export interface RequestMessage {
-  readonly t: "req"
+  readonly t: typeof APP_MESSAGE_TAG.req
   readonly rid: string
   readonly method: HttpMethod
   readonly path: string
   readonly body?: unknown
 }
 export interface CancelMessage {
-  readonly t: "cancel"
+  readonly t: typeof APP_MESSAGE_TAG.cancel
   readonly rid: string
 }
 export interface SubscribeMessage {
-  readonly t: "sub"
+  readonly t: typeof APP_MESSAGE_TAG.sub
   readonly sid: string
   readonly path: string
   readonly from_seq?: number
 }
 export interface UnsubscribeMessage {
-  readonly t: "unsub"
+  readonly t: typeof APP_MESSAGE_TAG.unsub
   readonly sid: string
 }
 export interface AckMessage {
-  readonly t: "ack"
+  readonly t: typeof APP_MESSAGE_TAG.ack
   readonly sid: string
   readonly seq: number
 }
 export interface CommandMessage {
-  readonly t: "cmd"
+  readonly t: typeof APP_MESSAGE_TAG.cmd
   readonly cid: string
-  /** Epoch ms when the phone created the command; the Mac rejects anything older than 24 h. */
   readonly ts: number
   readonly kind: CommandKind
   readonly args: unknown
@@ -69,26 +109,26 @@ export type PhoneMessage =
   | CommandMessage
 
 export interface ResponseMessage {
-  readonly t: "res"
+  readonly t: typeof APP_MESSAGE_TAG.res
   readonly rid: string
   readonly status: number
   readonly body: unknown
 }
 export interface EventMessage {
-  readonly t: "ev"
+  readonly t: typeof APP_MESSAGE_TAG.ev
   readonly sid: string
   readonly seq: number
   readonly data: unknown
 }
 export interface ResetMessage {
-  readonly t: "reset"
+  readonly t: typeof APP_MESSAGE_TAG.reset
   readonly sid: string
-  readonly reason: string
+  readonly reason: ResetReason
 }
 export interface CommandAckMessage {
-  readonly t: "cmd_ack"
+  readonly t: typeof APP_MESSAGE_TAG.cmd_ack
   readonly cid: string
-  readonly state: "done" | "stopping" | "rejected"
+  readonly state: CommandAckState
   readonly result?: unknown
 }
 
@@ -97,67 +137,66 @@ export type MacMessage = ResponseMessage | EventMessage | ResetMessage | Command
 const string = (value: unknown): value is string => typeof value === "string" && value.length > 0
 const integer = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-const methods: readonly HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"]
-const kinds: readonly CommandKind[] = [
-  "send",
-  "answer",
-  "decide",
-  "stop",
-  "capture",
-  "register_push",
-  "set_keep_awake"
-]
+const oneOf = <V extends string>(
+  table: Readonly<Record<string, V>>,
+  value: unknown
+): V | undefined => Object.values(table).find((candidate) => candidate === value)
 
 export const decodeHandshake = (value: unknown): HandshakeMessage | undefined => {
   if (!isRecord(value) || !string(value["e"])) return undefined
-  if (value["t"] === "hs1") return { t: "hs1", e: value["e"] }
-  if (value["t"] === "hs2") return { t: "hs2", e: value["e"] }
-  return undefined
+  switch (value["t"]) {
+    case APP_MESSAGE_TAG.hs1:
+      return { t: APP_MESSAGE_TAG.hs1, e: value["e"] }
+    case APP_MESSAGE_TAG.hs2:
+      return { t: APP_MESSAGE_TAG.hs2, e: value["e"] }
+    default:
+      return undefined
+  }
 }
 
 export const decodePhoneMessage = (value: unknown): PhoneMessage | undefined => {
   if (!isRecord(value)) return undefined
   switch (value["t"]) {
-    case "resume": {
+    case APP_MESSAGE_TAG.resume: {
       const streams = value["streams"]
       const pending = value["pending"]
       if (!isRecord(streams) || !Object.values(streams).every(integer)) return undefined
       if (!Array.isArray(pending) || !pending.every(string)) return undefined
       return {
-        t: "resume",
+        t: APP_MESSAGE_TAG.resume,
         streams: Object.fromEntries(
           Object.entries(streams).filter((e): e is [string, number] => integer(e[1]))
         ),
         pending
       }
     }
-    case "req": {
+    case APP_MESSAGE_TAG.req: {
       const { rid, method, path } = value
-      const knownMethod = methods.find((candidate) => candidate === method)
+      const knownMethod = oneOf(HTTP_METHOD, method)
       if (!string(rid) || knownMethod === undefined || !string(path)) return undefined
       return "body" in value
-        ? { t: "req", rid, method: knownMethod, path, body: value["body"] }
-        : { t: "req", rid, method: knownMethod, path }
+        ? { t: APP_MESSAGE_TAG.req, rid, method: knownMethod, path, body: value["body"] }
+        : { t: APP_MESSAGE_TAG.req, rid, method: knownMethod, path }
     }
-    case "cancel":
-      return string(value["rid"]) ? { t: "cancel", rid: value["rid"] } : undefined
-    case "sub": {
+    case APP_MESSAGE_TAG.cancel:
+      return string(value["rid"]) ? { t: APP_MESSAGE_TAG.cancel, rid: value["rid"] } : undefined
+    case APP_MESSAGE_TAG.sub: {
       const { sid, path, from_seq } = value
       if (!string(sid) || !string(path)) return undefined
-      if (from_seq === undefined) return { t: "sub", sid, path }
-      return integer(from_seq) ? { t: "sub", sid, path, from_seq } : undefined
+      if (from_seq === undefined) return { t: APP_MESSAGE_TAG.sub, sid, path }
+      return integer(from_seq) ? { t: APP_MESSAGE_TAG.sub, sid, path, from_seq } : undefined
     }
-    case "unsub":
-      return string(value["sid"]) ? { t: "unsub", sid: value["sid"] } : undefined
-    case "ack": {
+    case APP_MESSAGE_TAG.unsub:
+      return string(value["sid"]) ? { t: APP_MESSAGE_TAG.unsub, sid: value["sid"] } : undefined
+    case APP_MESSAGE_TAG.ack: {
       const { sid, seq } = value
-      return string(sid) && integer(seq) ? { t: "ack", sid, seq } : undefined
+      return string(sid) && integer(seq) ? { t: APP_MESSAGE_TAG.ack, sid, seq } : undefined
     }
-    case "cmd": {
+    case APP_MESSAGE_TAG.cmd: {
       const { cid, ts, kind } = value
-      const knownKind = kinds.find((candidate) => candidate === kind)
+      const knownKind = oneOf(COMMAND_KIND, kind)
       if (!string(cid) || !integer(ts) || knownKind === undefined) return undefined
-      return { t: "cmd", cid, ts, kind: knownKind, args: value["args"] }
+      return { t: APP_MESSAGE_TAG.cmd, cid, ts, kind: knownKind, args: value["args"] }
     }
     default:
       return undefined
@@ -167,27 +206,32 @@ export const decodePhoneMessage = (value: unknown): PhoneMessage | undefined => 
 export const decodeMacMessage = (value: unknown): MacMessage | undefined => {
   if (!isRecord(value)) return undefined
   switch (value["t"]) {
-    case "res": {
+    case APP_MESSAGE_TAG.res: {
       const { rid, status } = value
       return string(rid) && integer(status)
-        ? { t: "res", rid, status, body: value["body"] }
+        ? { t: APP_MESSAGE_TAG.res, rid, status, body: value["body"] }
         : undefined
     }
-    case "ev": {
+    case APP_MESSAGE_TAG.ev: {
       const { sid, seq } = value
-      return string(sid) && integer(seq) ? { t: "ev", sid, seq, data: value["data"] } : undefined
+      return string(sid) && integer(seq)
+        ? { t: APP_MESSAGE_TAG.ev, sid, seq, data: value["data"] }
+        : undefined
     }
-    case "reset": {
-      const { sid, reason } = value
-      return string(sid) && typeof reason === "string" ? { t: "reset", sid, reason } : undefined
+    case APP_MESSAGE_TAG.reset: {
+      const { sid } = value
+      const reason = oneOf(RESET_REASON, value["reason"])
+      return string(sid) && reason !== undefined
+        ? { t: APP_MESSAGE_TAG.reset, sid, reason }
+        : undefined
     }
-    case "cmd_ack": {
-      const { cid, state } = value
-      if (!string(cid) || (state !== "done" && state !== "stopping" && state !== "rejected"))
-        return undefined
+    case APP_MESSAGE_TAG.cmd_ack: {
+      const { cid } = value
+      const state = oneOf(COMMAND_ACK_STATE, value["state"])
+      if (!string(cid) || state === undefined) return undefined
       return "result" in value
-        ? { t: "cmd_ack", cid, state, result: value["result"] }
-        : { t: "cmd_ack", cid, state }
+        ? { t: APP_MESSAGE_TAG.cmd_ack, cid, state, result: value["result"] }
+        : { t: APP_MESSAGE_TAG.cmd_ack, cid, state }
     }
     default:
       return undefined
@@ -208,28 +252,18 @@ export const uuidv7 = ({ now = Date.now(), random = randomBytes(10) } = {}): str
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** Messages whose UTF-8 JSON is larger than this travel as `part`s. */
 export const PART_THRESHOLD = 64 * 1024
-/** Raw bytes per part; base64url makes the `data` field 64 KiB. */
-export const PART_BYTES = 48 * 1024
-/** A reassembled message may not exceed this. */
+export const PART_BYTES = (PART_THRESHOLD / 4) * 3
 export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 
 export interface PartMessage {
-  readonly t: "part"
-  /** Message id shared by every part (UUIDv7). */
+  readonly t: typeof APP_MESSAGE_TAG.part
   readonly mid: string
-  /** 0-based index. */
   readonly i: number
   readonly n: number
-  /** base64url of this slice of the whole message's UTF-8 JSON. */
   readonly data: string
 }
 
-/**
- * One app message → the plaintexts to seal, in order: the JSON itself when it
- * fits, else `part`s over its UTF-8 bytes.
- */
 export const encodeAppMessage = (
   message: PhoneMessage | MacMessage,
   { newId = () => uuidv7() }: { newId?: () => string } = {}
@@ -242,7 +276,7 @@ export const encodeAppMessage = (
   const n = Math.ceil(json.length / PART_BYTES)
   return Array.from({ length: n }, (_, i) => {
     const part: PartMessage = {
-      t: "part",
+      t: APP_MESSAGE_TAG.part,
       mid,
       i,
       n,
@@ -252,18 +286,12 @@ export const encodeAppMessage = (
   })
 }
 
-/**
- * Receive side of encodeAppMessage, one per session direction. Parts arrive
- * in order on one session, so a part that does not continue the current
- * message is a protocol error (throws). Returns the parsed JSON of a complete
- * message, or undefined while a split message is still arriving.
- */
 export class PartAssembler {
   #current: { mid: string; n: number; chunks: Uint8Array[]; bytes: number } | undefined
 
   receive(plaintext: Uint8Array): unknown {
     const value: unknown = parseJsonText(fromUtf8(plaintext))
-    if (!isRecord(value) || value["t"] !== "part") {
+    if (!isRecord(value) || value["t"] !== APP_MESSAGE_TAG.part) {
       if (this.#current !== undefined)
         throw new Error("message interleaved with an unfinished part sequence")
       return value

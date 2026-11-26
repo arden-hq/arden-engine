@@ -9,6 +9,8 @@ import {
   QUESTION_PART,
   QUESTION_RESOLUTION,
   QUESTION_TEXT,
+  RUN_QUESTION_ANSWER,
+  RUN_QUESTION_CONTINUATION,
   RUN_QUESTION_STATUS,
   type QuestionText,
   type ResolveRunQuestionInput,
@@ -18,9 +20,6 @@ import {
 } from "@arden-hq/protocol/runs"
 import { Schema } from "effect"
 import { RunContextSchema, wireRunContext } from "./stored-context.js"
-
-const ANSWER_KIND = { choices: "choices" } as const
-const CONTINUATION_NONE = "none"
 
 const identity = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1024))
 const text = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8000))
@@ -196,14 +195,14 @@ const part = <T extends object>(value: T | null | undefined) =>
     : { kind: QUESTION_PART.present, ...value }
 
 const wireRunQuestionAnswer = (answer: StoredRunQuestionAnswer): RunQuestionAnswerValue => {
-  if (answer.kind !== ANSWER_KIND.choices) return answer
+  if (answer.kind !== RUN_QUESTION_ANSWER.choices) return answer
   return { kind: answer.kind, choice_ids: answer.choice_ids, typed: given(answer.text) }
 }
 
 export const storedResolveAnswer = (
   answer: ResolveRunQuestionInput["answer"]
 ): StoredResolveAnswer => {
-  if (answer.kind !== ANSWER_KIND.choices) return answer
+  if (answer.kind !== RUN_QUESTION_ANSWER.choices) return answer
   return {
     kind: answer.kind,
     choice_ids: answer.choice_ids,
@@ -243,7 +242,7 @@ export const wireRunQuestion = (question: StoredRunQuestion): RunQuestion => ({
           answer: wireRunQuestionAnswer(question.resolution.answer),
           resolved_at: question.resolution.resolved_at
         },
-  continuation: question.continuation ?? { kind: CONTINUATION_NONE },
+  continuation: question.continuation ?? { kind: RUN_QUESTION_CONTINUATION.none },
   focus_choice: part(question.focus_choice),
   permission_offer:
     question.permission_offer === null

@@ -194,21 +194,12 @@ export const decodeRunTerminalResultEffect = (
 ): Effect.Effect<Schema.Schema.Type<typeof RunTerminalResultSchema>, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(RunTerminalResultSchema)(value)
 
-/**
- * `GET /chat/runs`: a page of the server's Runs, oldest first, sub-agent Runs
- * included. `next` is present when more Runs follow; pass it as `after` to
- * read on. `idle` is true when no Run is going, no script runs in the
- * background and no Automation delivery waits, so nothing more will happen
- * until the next message. It speaks for the whole server, whatever the page
- * or filter.
- */
 export const RunListSchema = withExtras({
   runs: Schema.Array(
     withExtras({
       run_id: IdentifierSchema,
       session_id: IdentifierSchema,
       status: Schema.NonEmptyString,
-      /** True while the Run still owns its chat: not yet ended. */
       active: Schema.Boolean,
       started_at: Schema.NonEmptyString
     })

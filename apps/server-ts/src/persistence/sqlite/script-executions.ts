@@ -90,7 +90,6 @@ export const readScriptExecutions = Effect.fn("ScriptJournal.executions")(functi
   const decoded = yield* Effect.forEach(
     rows,
     Effect.fn("ScriptJournal.executionData")(function* (row) {
-      // A slim row that left fields out is read whole, as before it was slimmed.
       const full =
         row.omitting_json === null
           ? undefined

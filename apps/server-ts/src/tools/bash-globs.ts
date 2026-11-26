@@ -1,11 +1,6 @@
 import { readdirSync } from "node:fs"
-import { unquotedGlobWords } from "./bash-permissions.js"
-
-/**
- * Whether the shell could turn a word of a parsed segment into a flag: an
- * unquoted glob expands against the folder the command runs in, and a file
- * named `-delete` or `--pre=x` there becomes that flag.
- */
+import { unquotedGlobWords } from "./shell-parse.js"
+import { COMMAND, SHELL_FRAME, type Command } from "./shell-words.js"
 
 const mayStartWithDash = (word: string): boolean => /^[-*?[\\]/.test(word)
 
@@ -23,11 +18,15 @@ export const globsIntoFlag = (segment: ReadonlyArray<string>, cwd: string): bool
   return false
 }
 
-const FRAME = new Set(["do", "then", "else", "elif", "if", "while", "until", "!"])
+const FOLDER_CHANGERS: ReadonlySet<string> = new Set<Command>([
+  COMMAND.cd,
+  COMMAND.pushd,
+  COMMAND.popd
+])
 
 export const changesFolder = (segment: ReadonlyArray<string>): boolean => {
-  const command = segment.find((word) => !FRAME.has(word))
-  return command === "cd" || command === "pushd" || command === "popd"
+  const command = segment.find((word) => !SHELL_FRAME.has(word))
+  return command !== undefined && FOLDER_CHANGERS.has(command)
 }
 
 export const hasGlob = (segment: ReadonlyArray<string>): boolean =>

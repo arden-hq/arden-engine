@@ -1,3 +1,4 @@
+import { SERVER_EVENT_TYPE, type ServerEventType } from "@arden-hq/protocol"
 import { isEphemeralChatEvent } from "@arden-hq/protocol/chat"
 import { ChatProjectionEventSchema } from "@arden-hq/protocol/effect/chat"
 import { Schema } from "effect"
@@ -16,19 +17,24 @@ const SessionEventRecordSchema = Schema.Struct({
 
 export type SessionEventRecord = (typeof SessionEventRecordSchema)["Type"]
 
+export const EVENT_ADMISSION = { detached: "detached" } as const
+
+const detachableEventTypes: ReadonlySet<ServerEventType> = new Set([
+  SERVER_EVENT_TYPE.toolCallProgress,
+  SERVER_EVENT_TYPE.compactionFinished,
+  SERVER_EVENT_TYPE.approvalNeeded,
+  SERVER_EVENT_TYPE.approvalResolved,
+  SERVER_EVENT_TYPE.connectionNeeded,
+  SERVER_EVENT_TYPE.connectionResolved
+])
+
 const EventDraftSchema = Schema.Struct({
   event: ChatProjectionEventSchema,
   runId: Schema.optionalKey(Schema.NullOr(Schema.NonEmptyString)),
-  admission: Schema.optionalKey(Schema.Literal("detached"))
+  admission: Schema.optionalKey(Schema.Literal(EVENT_ADMISSION.detached))
 }).check(
   Schema.makeFilter((draft) =>
-    draft.admission === undefined ||
-    draft.event.type === "TOOL_CALL_PROGRESS" ||
-    draft.event.type === "compaction_finished" ||
-    draft.event.type === "approval_needed" ||
-    draft.event.type === "approval_resolved" ||
-    draft.event.type === "connection_needed" ||
-    draft.event.type === "connection_resolved"
+    draft.admission === undefined || detachableEventTypes.has(draft.event.type)
       ? []
       : [
           {
@@ -45,7 +51,7 @@ export type EventDraft = (typeof EventDraftSchema)["Type"]
 export { isEphemeralChatEvent }
 
 export const isDurableDraft = (draft: EventDraft): boolean =>
-  !isEphemeralChatEvent(draft.event) || draft.admission === "detached"
+  !isEphemeralChatEvent(draft.event) || draft.admission === EVENT_ADMISSION.detached
 
 export const CommitEventBatchSchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,

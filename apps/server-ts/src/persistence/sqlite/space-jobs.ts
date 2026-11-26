@@ -1,16 +1,11 @@
 import { writtenByPersonSql } from "./person-written-sql.js"
 import { outcomeSql } from "./automation-run-outcome.js"
 import { countsAsRun } from "./automation-skip-record.js"
-import type { SpaceReviewSnapshot } from "../automations/job-prompt.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { SqlError } from "effect/unstable/sql/SqlError"
-import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
-import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sessions/events.js"
-import type { UnitOfWork } from "../unit-of-work.js"
+import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { enqueue, type QueueWriter } from "./automation-enqueue.js"
-import type { JsonColumnError } from "./json.js"
-import { attemptWakeDepth, readRunCause, taskWakeDepth } from "./run-cause.js"
+import { attemptWakeDepth } from "./run-cause.js"
 
 import { spaceJobId, taskJobId } from "../space-job-id.js"
 import { hasPendingTaskApproval, hasPendingTaskQuestion } from "./task-question-state.js"
@@ -21,126 +16,32 @@ import { readJobSpace, readJobTask } from "./space-job-rows.js"
 import { recordReviewChat } from "./owner-chat.js"
 import { readSpaceReviewContext } from "./space-job-context.js"
 import { endExternalWaitAtCheck, failTaskItem, keepTaskMoving } from "./task-next-move.js"
-import {
-  automationRecoveryAuthority,
-  makeSpaceJobRecovery,
-  type SpaceJobRecoveryCursor
-} from "./space-job-recovery.js"
+import { automationRecoveryAuthority, makeSpaceJobRecovery } from "./space-job-recovery.js"
 import { taskIsLive, taskMayWake, taskMayWakeSql, taskStands, taskStandsSql } from "./task-wake.js"
 import { restartCutRunSql } from "./status-sets.js"
 import { SPACE_REVIEW_LADDER_MS, ladderStepMs } from "../automations/retry-ladders.js"
 import { userChatSql } from "./chat-ownership.js"
 import { delegatedLinkSql, sessionAncestors } from "./tree-walk.js"
-import { sha256Hex } from "@arden-hq/std/hash"
 import { keyMessageJson } from "./chat-key-message.js"
-import { wakeCause } from "../automations/event-cause.js"
-
-type EventWake = Extract<AutomationTriggerContext, { readonly source: "event" }>
-
-type WakeCause = Pick<EventWake, "produced_by" | "chain_depth">
-
-const woken: (producedBy: string | null, chainDepth: number) => WakeCause = wakeCause
-
-const NO_RUN = woken(null, 0)
-
-export type TaskWaker =
-  | { readonly kind: "run"; readonly runId: string }
-  | { readonly kind: "owner" }
-  | { readonly kind: "continuation" }
-
-export const taskWaker = (runId: string | undefined): TaskWaker =>
-  runId === undefined ? { kind: "owner" } : { kind: "run", runId }
-
-interface JobState {
-  readonly automationId: string
-  readonly enabled: boolean
-  readonly purpose: "space_review" | "task_execution"
-}
-
-type ReviewJob = { readonly key: string; readonly spaceId: string }
-
-type SpaceJobWrite<A> = Effect.Effect<
-  A,
-  SqlError | JsonColumnError | SessionLifecycleEventError,
-  UnitOfWork
->
-
-export interface SpaceJobSql {
-  readonly reconcile: (
-    now: string,
-    cursor: SpaceJobRecoveryCursor | undefined
-  ) => SpaceJobWrite<SpaceJobRecoveryCursor | undefined>
-  readonly materializeDue: (now: string) => SpaceJobWrite<void>
-  readonly syncSpace: (spaceId: string, now: string) => SpaceJobWrite<JobState | null>
-  readonly queueOwnerSpaceChangeWake: (
-    spaceId: string,
-    now: string,
-    runId: string | undefined
-  ) => SpaceJobWrite<void>
-  readonly queueTaskChangedByHand: (itemId: string, now: string) => SpaceJobWrite<boolean>
-  readonly retryReview: (review: ReviewJob, now: string) => SpaceJobWrite<void>
-  readonly queueInferenceChat: (sessionId: string, now: string) => SpaceJobWrite<boolean>
-  readonly linkChat: (
-    spaceId: string,
-    sessionId: string,
-    throughSequence: number,
-    now: string
-  ) => SpaceJobWrite<boolean>
-  readonly unlinkedSpaces: (
-    sessionId: string,
-    throughSequence: number,
-    spaceIds: ReadonlyArray<string>
-  ) => SpaceJobWrite<ReadonlyArray<string>>
-  readonly queueTaskWake: (
-    itemId: string,
-    now: string,
-    by: TaskWaker,
-    fromPerson?: boolean
-  ) => SpaceJobWrite<void>
-  readonly stopTask: (itemId: string, settlingRunId?: string) => SpaceJobWrite<void>
-  readonly spaceReviewContext: (
-    spaceId: string
-  ) => Effect.Effect<SpaceReviewSnapshot | undefined, SqlError>
-  readonly keepMoving: (itemId: string, chatRunId: string, now: string) => SpaceJobWrite<void>
-  readonly failTask: (
-    itemId: string,
-    error: string | null,
-    now: string,
-    chatRunId: string | null
-  ) => SpaceJobWrite<void>
-}
-
-export const internalRef = (automationId: string): string => {
-  const digest = sha256Hex(automationId).slice(0, 12)
-  return `internal-job~${digest}`
-}
+import {
+  type EventWake,
+  type JobState,
+  type ReviewJob,
+  type SpaceJobSql,
+  type TaskWaker,
+  type WakeCause,
+  NO_RUN,
+  internalRef,
+  woken
+} from "./space-job-types.js"
+import { makeWakeCauses } from "./space-job-wake.js"
 
 export const makeSpaceJobSql = (
   sql: SqlClient.SqlClient,
   sessionEvents: SessionLifecycleEvents["Service"]
 ): SpaceJobSql => {
   const writer: QueueWriter = { sql, sessionEvents }
-  const wakeCause = Effect.fn("SpaceJobSql.wakeCause")(function* (runId: string | undefined) {
-    if (runId === undefined) return NO_RUN
-    const cause = yield* readRunCause(sql, runId)
-    return woken(cause.produced_by, cause.chain_depth)
-  })
-  const taskWakeCause = Effect.fn("SpaceJobSql.taskWakeCause")(function* (
-    itemId: string,
-    by: TaskWaker
-  ) {
-    switch (by.kind) {
-      case "run":
-        return yield* wakeCause(by.runId)
-      case "owner":
-        return NO_RUN
-      case "continuation": {
-        const [task] = yield* sql<{ readonly chain_depth: number }>`
-          SELECT ${taskWakeDepth(sql, sql`${itemId}`)} AS chain_depth`
-        return woken(null, task?.chain_depth ?? 0)
-      }
-    }
-  })
+  const { wakeCause, taskWakeCause } = makeWakeCauses(sql)
   const stopWork = Effect.fn("SpaceJobSql.stopWork")(function* (
     automationId: string,
     settlingRunId?: string
@@ -276,7 +177,6 @@ export const makeSpaceJobSql = (
     })
   })
 
-  /** Queues a review wake only when the review can run; touches no Task worker job. */
   const queueReviewWake = Effect.fn("SpaceJobSql.queueReviewWake")(function* (
     spaceId: string,
     now: string,
@@ -303,7 +203,6 @@ export const makeSpaceJobSql = (
     yield* queueReviewWake(spaceId, now, yield* wakeCause(runId))
   })
 
-  /** A change to a Task's reviewed fields made by hand, with no run behind it. */
   const queueTaskChangedByHand = Effect.fn("SpaceJobSql.queueTaskChangedByHand")(function* (
     itemId: string,
     now: string

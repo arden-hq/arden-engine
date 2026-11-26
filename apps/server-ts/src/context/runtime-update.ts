@@ -13,6 +13,11 @@ import {
   type SpaceView
 } from "./space-render.js"
 
+const RUNTIME_CONTEXT_SOURCE = { runtime: "runtime" } as const
+export const isRuntimeContextSource = (
+  source: unknown
+): source is typeof RUNTIME_CONTEXT_SOURCE.runtime => source === RUNTIME_CONTEXT_SOURCE.runtime
+
 export type RuntimeSection =
   | {
       readonly kind: "text"
@@ -33,10 +38,6 @@ export type RuntimeSection =
       readonly receipt: TaskDirectionReceipt
     }
 
-/**
- * A text section, or none when `value` is blank. A value that opens with its own `## `
- * heading is keyed by that heading, else by `name`.
- */
 export const textSection = (
   name: string,
   value: string | undefined,

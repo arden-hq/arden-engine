@@ -3,25 +3,22 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { makeTurnInputs } from "./transcript-turn-inputs.js"
 import { makeResolveReference } from "./transcript-reference.js"
 import { makeOwnerMessagesAfter, makeOwnerWordsIn } from "./transcript-owner-messages.js"
-import { agentResultPresentation } from "./agent-result-presentation.js"
 import { TRANSCRIPT_RESULT_PREVIEW_CHARS } from "../transcript/model.js"
 import { Effect, Schema } from "effect"
 import { makeTranscriptSearches } from "./transcript-search.js"
 import { makeToolResultInSession, type TranscriptRow } from "./transcript-tool-result.js"
 import { makeToolCallCounts } from "./transcript-tool-calls.js"
 import {
+  TRANSCRIPT_RESULT_VIEW,
   TranscriptDataCorruptionError,
   TranscriptQueries,
-  TranscriptQueryError
+  TranscriptQueryError,
+  type TranscriptResultView
 } from "../transcript/queries.js"
 import {
-  TranscriptMessageRecordSchema,
   TranscriptPageSchema,
   TranscriptPageQuerySchema,
-  TranscriptTurnWorkPageQuerySchema,
-  StoredMessageEnvelopeSchema,
-  type TranscriptPageQuery,
-  type TranscriptTurnWorkPageQuery
+  type TranscriptPageQuery
 } from "../transcript/model.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
@@ -32,47 +29,17 @@ import {
   toolWorkCarrierMessagePredicate,
   conversationMessagePredicate
 } from "./transcript-predicates.js"
-
-interface CountRow {
-  readonly count: number
-}
-
-interface SequenceRow {
-  readonly seq: number
-}
-
-interface TurnIdRow {
-  readonly turn_id: string
-}
-
-interface TurnOriginRow {
-  readonly turn_id: string
-  readonly origin_json: string
-}
-
-const queryError = (
-  operation: "resolve" | "page",
-  sessionId: string,
-  message: string,
-  cause?: unknown
-): TranscriptQueryError =>
-  new TranscriptQueryError({
-    operation,
-    sessionId,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
-
-const corruption = (
-  sessionId: string,
-  message: string,
-  cause?: unknown
-): TranscriptDataCorruptionError =>
-  new TranscriptDataCorruptionError({
-    sessionId,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
+import { makeDecodeRow } from "./transcript-rows.js"
+import { makePage } from "./transcript-page.js"
+import { makeTurnWorkReads } from "./transcript-turn-work.js"
+import {
+  type CountRow,
+  type SequenceRow,
+  type TurnIdRow,
+  type TurnOriginRow,
+  corruption,
+  queryError
+} from "./transcript-rows.js"
 
 export const makeTranscriptQueries = ({
   reader,
@@ -83,42 +50,7 @@ export const makeTranscriptQueries = ({
   const workCarrierPredicate = workCarrierMessagePredicate(sql)
   const toolWorkCarrierPredicate = toolWorkCarrierMessagePredicate(sql)
 
-  const decodeRow = Effect.fn("SqliteTranscriptQueries.decodeRow")(function* (row: TranscriptRow) {
-    const envelope = yield* decodeJson(StoredMessageEnvelopeSchema, row.message_json).pipe(
-      Effect.mapError((cause) =>
-        corruption(row.session_id, "Transcript message JSON is corrupt", cause)
-      )
-    )
-    const agentResult =
-      row.role === ROLE.interaction
-        ? yield* agentResultPresentation(sql, row.session_id, row.message_id).pipe(
-            Effect.mapError((cause) =>
-              corruption(row.session_id, "Could not read agent result", cause)
-            )
-          )
-        : undefined
-    const createdAt = yield* Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString)(
-      row.created_at
-    ).pipe(
-      Effect.mapError((cause) =>
-        corruption(row.session_id, "Transcript message timestamp is corrupt", cause)
-      )
-    )
-    return yield* Schema.decodeUnknownEffect(TranscriptMessageRecordSchema)({
-      sessionId: row.session_id,
-      messageId: row.message_id,
-      sequence: row.seq,
-      role: row.role,
-      clientId: row.client_id,
-      createdAt,
-      envelope: agentResult === undefined ? envelope : { ...envelope, agent_result: agentResult }
-    }).pipe(
-      Effect.mapError((cause) =>
-        corruption(row.session_id, "Transcript message row is corrupt", cause)
-      )
-    )
-  })
-
+  const decodeRow = makeDecodeRow(sql)
   const resolveReference = makeResolveReference(sql)
 
   const resolveConversationReference = Effect.fn(
@@ -140,95 +72,35 @@ export const makeTranscriptQueries = ({
     return rows[0]?.seq ?? null
   })
 
-  const pageRaw = Effect.fn("SqliteTranscriptQueries.page")(function* (input: TranscriptPageQuery) {
-    const query = yield* Schema.decodeUnknownEffect(TranscriptPageQuerySchema)(input).pipe(
-      Effect.mapError((cause) =>
-        queryError("page", input.sessionId, "Invalid transcript page query", cause)
-      )
-    )
-    let rows: ReadonlyArray<TranscriptRow>
-    switch (query._tag) {
-      case "Latest":
-        rows = yield* sql<TranscriptRow>`
-          SELECT session_id, message_id, seq, role, message_json, client_id, created_at
-          FROM session_messages
-          WHERE session_id = ${query.sessionId}
-          ORDER BY seq DESC
-          LIMIT ${query.limit}
-        `.pipe(Effect.map((items) => Array.from(items).reverse()))
-        break
-      case "Before": {
-        const items = yield* sql<TranscriptRow>`
-          SELECT session_id, message_id, seq, role, message_json, client_id, created_at
-          FROM session_messages
-          WHERE session_id = ${query.sessionId} AND seq < ${query.sequence}
-          ORDER BY seq DESC
-          LIMIT ${query.limit}
-        `
-        rows = Array.from(items).reverse()
-        break
-      }
-      case "After":
-        rows = yield* sql<TranscriptRow>`
-          SELECT session_id, message_id, seq, role, message_json, client_id, created_at
-          FROM session_messages
-          WHERE session_id = ${query.sessionId} AND seq > ${query.sequence}
-          ORDER BY seq ASC
-          LIMIT ${query.limit}
-        `
-        break
-      case "Around": {
-        const start = Math.max(0, query.sequence - Math.floor(query.limit / 2))
-        rows = yield* sql<TranscriptRow>`
-          SELECT session_id, message_id, seq, role, message_json, client_id, created_at
-          FROM session_messages
-          WHERE session_id = ${query.sessionId} AND seq >= ${start}
-          ORDER BY seq ASC
-          LIMIT ${query.limit}
-        `
-        break
-      }
-    }
-
-    const records = yield* Effect.forEach(rows, decodeRow)
-    const firstSequence = records[0]?.sequence ?? null
-    const lastSequence = records[records.length - 1]?.sequence ?? null
-    const hasMoreBefore =
-      firstSequence === null
-        ? false
-        : (yield* sql<{ readonly present: number }>`
-        SELECT 1 AS present FROM session_messages
-        WHERE session_id = ${query.sessionId} AND seq < ${firstSequence}
-        LIMIT 1
-      `).length > 0
-    const hasMoreAfter =
-      lastSequence === null
-        ? false
-        : (yield* sql<{ readonly present: number }>`
-        SELECT 1 AS present FROM session_messages
-        WHERE session_id = ${query.sessionId} AND seq > ${lastSequence}
-        LIMIT 1
-      `).length > 0
-
-    return yield* Schema.decodeUnknownEffect(TranscriptPageSchema)({
-      records,
-      hasMoreBefore,
-      hasMoreAfter,
-      firstSequence,
-      lastSequence
-    }).pipe(
-      Effect.mapError((cause) => corruption(query.sessionId, "Transcript page is corrupt", cause))
-    )
+  const page = makePage({ sql, decodeRow })
+  const conversationAround = Effect.fn("SqliteTranscriptQueries.conversationAround")(function* (
+    query: Extract<TranscriptPageQuery, { readonly _tag: "Around" }>
+  ) {
+    const counts = yield* sql<CountRow>`
+      SELECT COUNT(*) AS count
+      FROM session_messages AS m
+      WHERE m.session_id = ${query.sessionId} AND ${conversationPredicate}
+    `
+    const beforeCounts = yield* sql<CountRow>`
+      SELECT COUNT(*) AS count
+      FROM session_messages AS m
+      WHERE m.session_id = ${query.sessionId}
+        AND m.seq <= ${query.sequence}
+        AND ${conversationPredicate}
+    `
+    const total = counts[0]?.count ?? 0
+    const beforeCount = beforeCounts[0]?.count ?? 0
+    const centered = Math.max(0, beforeCount - Math.floor(query.limit / 2) - 1)
+    const offset = Math.min(centered, Math.max(0, total - query.limit))
+    return yield* sql<TranscriptRow>`
+      SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
+             m.client_id, m.created_at
+      FROM session_messages AS m
+      WHERE m.session_id = ${query.sessionId} AND ${conversationPredicate}
+      ORDER BY m.seq ASC
+      LIMIT ${query.limit} OFFSET ${offset}
+    `
   })
-
-  const page = (input: TranscriptPageQuery) =>
-    pageRaw(input).pipe(
-      Effect.mapError((cause) =>
-        cause instanceof TranscriptQueryError || cause instanceof TranscriptDataCorruptionError
-          ? cause
-          : queryError("page", input.sessionId, "Could not read transcript page", cause)
-      )
-    )
 
   const conversationPageRaw = Effect.fn("SqliteTranscriptQueries.conversationPage")(function* (
     input: TranscriptPageQuery
@@ -238,20 +110,18 @@ export const makeTranscriptQueries = ({
         queryError("page", input.sessionId, "Invalid conversation page query", cause)
       )
     )
-    let rows: ReadonlyArray<TranscriptRow>
-    switch (query._tag) {
-      case "Latest":
-        rows = yield* sql<TranscriptRow>`
+    const rows: ReadonlyArray<TranscriptRow> = yield* TranscriptPageQuerySchema.match(query, {
+      Latest: (query) =>
+        sql<TranscriptRow>`
             SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
                    m.client_id, m.created_at
             FROM session_messages AS m
             WHERE m.session_id = ${query.sessionId} AND ${conversationPredicate}
             ORDER BY m.seq DESC
             LIMIT ${query.limit}
-          `.pipe(Effect.map((items) => Array.from(items).reverse()))
-        break
-      case "Before": {
-        const items = yield* sql<TranscriptRow>`
+          `.pipe(Effect.map((items) => Array.from(items).reverse())),
+      Before: (query) =>
+        sql<TranscriptRow>`
             SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
                    m.client_id, m.created_at
             FROM session_messages AS m
@@ -260,12 +130,9 @@ export const makeTranscriptQueries = ({
               AND ${conversationPredicate}
             ORDER BY m.seq DESC
             LIMIT ${query.limit}
-          `
-        rows = Array.from(items).reverse()
-        break
-      }
-      case "After":
-        rows = yield* sql<TranscriptRow>`
+          `.pipe(Effect.map((items) => Array.from(items).reverse())),
+      After: (query) =>
+        sql<TranscriptRow>`
             SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
                    m.client_id, m.created_at
             FROM session_messages AS m
@@ -274,36 +141,9 @@ export const makeTranscriptQueries = ({
               AND ${conversationPredicate}
             ORDER BY m.seq ASC
             LIMIT ${query.limit}
-          `
-        break
-      case "Around": {
-        const counts = yield* sql<CountRow>`
-            SELECT COUNT(*) AS count
-            FROM session_messages AS m
-            WHERE m.session_id = ${query.sessionId} AND ${conversationPredicate}
-          `
-        const beforeCounts = yield* sql<CountRow>`
-            SELECT COUNT(*) AS count
-            FROM session_messages AS m
-            WHERE m.session_id = ${query.sessionId}
-              AND m.seq <= ${query.sequence}
-              AND ${conversationPredicate}
-          `
-        const total = counts[0]?.count ?? 0
-        const beforeCount = beforeCounts[0]?.count ?? 0
-        const centered = Math.max(0, beforeCount - Math.floor(query.limit / 2) - 1)
-        const offset = Math.min(centered, Math.max(0, total - query.limit))
-        rows = yield* sql<TranscriptRow>`
-            SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
-                   m.client_id, m.created_at
-            FROM session_messages AS m
-            WHERE m.session_id = ${query.sessionId} AND ${conversationPredicate}
-            ORDER BY m.seq ASC
-            LIMIT ${query.limit} OFFSET ${offset}
-          `
-        break
-      }
-    }
+          `,
+      Around: conversationAround
+    })
 
     const records = yield* Effect.forEach(rows, decodeRow)
     const firstSequence = records[0]?.sequence ?? null
@@ -351,144 +191,11 @@ export const makeTranscriptQueries = ({
       )
     )
 
-  const resolveTurnWorkReference = Effect.fn("SqliteTranscriptQueries.resolveTurnWorkReference")(
-    function* (sessionId: string, turnId: string, messageId: string) {
-      const rows = yield* sql<SequenceRow>`
-      SELECT m.seq
-      FROM session_turns AS t
-      JOIN session_messages AS m
-        ON m.session_id = t.session_id
-        AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-      WHERE t.session_id = ${sessionId}
-        AND t.turn_id = ${turnId}
-        AND m.message_id = ${messageId}
-        AND ${messageTurnIdSql(sql, "m")} = ${turnId}
-        AND ${workCarrierPredicate}
-      LIMIT 1
-    `.pipe(
-        Effect.mapError((cause) =>
-          queryError("resolve", sessionId, "Could not resolve turn-work cursor", cause)
-        )
-      )
-      return rows[0]?.seq ?? null
-    }
-  )
-
-  const turnWorkPageRaw = Effect.fn("SqliteTranscriptQueries.turnWorkPage")(function* (
-    input: TranscriptTurnWorkPageQuery
-  ) {
-    const query = yield* Schema.decodeUnknownEffect(TranscriptTurnWorkPageQuerySchema)(input).pipe(
-      Effect.mapError((cause) =>
-        queryError("page", input.sessionId, "Invalid turn-work page query", cause)
-      )
-    )
-    const pageRows = (): Effect.Effect<ReadonlyArray<TranscriptRow>, unknown> => {
-      if (query._tag === "Latest") {
-        return sql<TranscriptRow>`
-          SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
-                 m.client_id, m.created_at
-          FROM session_turns AS t
-          JOIN session_messages AS m
-            ON m.session_id = t.session_id
-            AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-          WHERE t.session_id = ${query.sessionId}
-            AND t.turn_id = ${query.turnId}
-            AND ${messageTurnIdSql(sql, "m")} = ${query.turnId}
-            AND ${workCarrierPredicate}
-          ORDER BY m.seq DESC
-          LIMIT ${query.limit}
-        `.pipe(Effect.map((items) => Array.from(items).reverse()))
-      }
-      if (query._tag === "After") {
-        return sql<TranscriptRow>`
-          SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
-                 m.client_id, m.created_at
-          FROM session_turns AS t
-          JOIN session_messages AS m
-            ON m.session_id = t.session_id
-            AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-          WHERE t.session_id = ${query.sessionId}
-            AND t.turn_id = ${query.turnId}
-            AND m.seq > ${query.sequence}
-            AND ${messageTurnIdSql(sql, "m")} = ${query.turnId}
-            AND ${workCarrierPredicate}
-          ORDER BY m.seq ASC
-          LIMIT ${query.limit}
-        `
-      }
-      return sql<TranscriptRow>`
-          SELECT m.session_id, m.message_id, m.seq, m.role, m.message_json,
-                 m.client_id, m.created_at
-          FROM session_turns AS t
-          JOIN session_messages AS m
-            ON m.session_id = t.session_id
-            AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-          WHERE t.session_id = ${query.sessionId}
-            AND t.turn_id = ${query.turnId}
-            AND m.seq < ${query.sequence}
-            AND ${messageTurnIdSql(sql, "m")} = ${query.turnId}
-            AND ${workCarrierPredicate}
-          ORDER BY m.seq DESC
-          LIMIT ${query.limit}
-        `.pipe(Effect.map((items) => Array.from(items).reverse()))
-    }
-    const rows = yield* pageRows()
-    const records = yield* Effect.forEach(rows, decodeRow)
-    const firstSequence = records[0]?.sequence ?? null
-    const lastSequence = records[records.length - 1]?.sequence ?? null
-    const hasMoreBefore =
-      firstSequence === null
-        ? false
-        : (yield* sql<SequenceRow>`
-          SELECT m.seq
-          FROM session_turns AS t
-          JOIN session_messages AS m
-            ON m.session_id = t.session_id
-            AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-          WHERE t.session_id = ${query.sessionId}
-            AND t.turn_id = ${query.turnId}
-            AND m.seq < ${firstSequence}
-            AND ${messageTurnIdSql(sql, "m")} = ${query.turnId}
-            AND ${workCarrierPredicate}
-          LIMIT 1
-        `).length > 0
-    const hasMoreAfter =
-      lastSequence === null
-        ? false
-        : (yield* sql<SequenceRow>`
-          SELECT m.seq
-          FROM session_turns AS t
-          JOIN session_messages AS m
-            ON m.session_id = t.session_id
-            AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-          WHERE t.session_id = ${query.sessionId}
-            AND t.turn_id = ${query.turnId}
-            AND m.seq > ${lastSequence}
-            AND ${messageTurnIdSql(sql, "m")} = ${query.turnId}
-            AND ${workCarrierPredicate}
-          LIMIT 1
-        `).length > 0
-
-    return yield* Schema.decodeUnknownEffect(TranscriptPageSchema)({
-      records,
-      hasMoreBefore,
-      hasMoreAfter,
-      firstSequence,
-      lastSequence
-    }).pipe(
-      Effect.mapError((cause) => corruption(query.sessionId, "Turn-work page is corrupt", cause))
-    )
+  const { resolveTurnWorkReference, turnWorkPage } = makeTurnWorkReads({
+    sql,
+    workCarrierPredicate,
+    decodeRow
   })
-
-  const turnWorkPage = (input: TranscriptTurnWorkPageQuery) =>
-    turnWorkPageRaw(input).pipe(
-      Effect.mapError((cause) =>
-        cause instanceof TranscriptQueryError || cause instanceof TranscriptDataCorruptionError
-          ? cause
-          : queryError("page", input.sessionId, "Could not read turn-work page", cause)
-      )
-    )
-
   const toolCallCarrier = Effect.fn("SqliteTranscriptQueries.toolCallCarrier")(function* (
     sessionId: string,
     turnId: string,
@@ -528,12 +235,12 @@ export const makeTranscriptQueries = ({
     sessionId: string,
     turnIds: ReadonlyArray<string>,
     toolCallIds: ReadonlyArray<string>,
-    view: "full" | "compact" = "full"
+    view: TranscriptResultView = TRANSCRIPT_RESULT_VIEW.full
   ) {
     if (turnIds.length === 0 || toolCallIds.length === 0) return []
     const content = sql`json_extract(m.message_json, '$.content')`
     const messageJson =
-      view === "compact"
+      view === TRANSCRIPT_RESULT_VIEW.compact
         ? sql`
         CASE WHEN json_type(m.message_json, '$.content') = 'text' AND length(${content}) > ${TRANSCRIPT_RESULT_PREVIEW_CHARS}
         THEN json_set(m.message_json, '$.content', substr(${content}, 1, ${TRANSCRIPT_RESULT_PREVIEW_CHARS}) || '…', '$.compact', json('true'))

@@ -10,7 +10,9 @@ const recordOf = (delivery: SessionLifecycleDelivery) => {
   return delivery
 }
 
-export const sessionLifecycleEventsContract = (backend: ContractBackend) =>
+export const sessionLifecycleEventsContract = (
+  backend: ContractBackend
+): ReturnType<typeof describe> =>
   describe(`SessionLifecycleEvents contract (${backend.name})`, () => {
     it("wakes followers only after the unit of work commits", () =>
       backend.run(({ sessions, sessionEvents, transact }) =>

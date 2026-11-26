@@ -2,8 +2,7 @@ import type { AskReason, CallFacts, ToolFacts } from "../execution/decide.js"
 import { parseMcpSource } from "../mcp/naming.js"
 import { COMMAND_TOOL } from "../persistence/permissions/command-policy.js"
 import type { RuleSubject } from "../persistence/permissions/rules.js"
-import { parseCommandSegments } from "./bash-permissions.js"
-import { isReadOnlyCommand } from "./bash-safe-commands.js"
+import { commandReadsOnly } from "./bash-safe-commands.js"
 import type { ServerToolMetadataInput, ShellCommand } from "./define.js"
 import { isDestructiveCommand } from "./destructive-commands.js"
 
@@ -39,18 +38,10 @@ export const commandFacts = (
     floor: isDestructiveCommand(shell.command, { home, cwd: shell.cwd })
       ? "destructive_command"
       : undefined,
-    reads_only: isReadOnlyCommand(parseCommandSegments(shell.command), shell.cwd ?? home)
+    reads_only: commandReadsOnly(shell.command, shell.cwd ?? home)
   }
 }
 
-/**
- * The Allow rule a built-in tool's card may offer: the one that would have
- * let this call run without a card. Only an ask from the tool's default, or
- * from the owner's own Ask rule, is answered by a rule; a requirement, a lock,
- * a boundary, an automation's standing change and a tool that always asks
- * come before the rules are read. A delete asks every time. A connector tool
- * and a command have their own subjects.
- */
 export const cardGrantSubject = (input: {
   readonly reason: AskReason
   readonly definition: DecidedTool

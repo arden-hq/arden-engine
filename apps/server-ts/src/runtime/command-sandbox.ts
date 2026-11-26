@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
 
-import { runBounded } from "./login-shell-path.js"
+import { PROBE_RESULT, runBounded } from "./login-shell-path.js"
 
 export const BUBBLEWRAP_PATH = "/usr/bin/bwrap"
 
@@ -19,31 +19,43 @@ const SELF_TEST_ARGS = [
   "true"
 ] as const
 
-export type CommandSandbox = "not_linux" | "ready" | "missing" | "no_namespaces" | "failed"
+const LINUX = "linux" satisfies NodeJS.Platform
 
-export type CommandSandboxGap = Exclude<CommandSandbox, "not_linux" | "ready">
+const COMMAND_SANDBOX = {
+  not_linux: "not_linux",
+  ready: "ready",
+  missing: "missing",
+  no_namespaces: "no_namespaces",
+  failed: "failed"
+} as const
+
+export type CommandSandbox = (typeof COMMAND_SANDBOX)[keyof typeof COMMAND_SANDBOX]
+
+export type CommandSandboxGap = Exclude<
+  CommandSandbox,
+  typeof COMMAND_SANDBOX.not_linux | typeof COMMAND_SANDBOX.ready
+>
 
 export const isCommandSandboxGap = (status: CommandSandbox): status is CommandSandboxGap =>
-  status !== "not_linux" && status !== "ready"
+  status !== COMMAND_SANDBOX.not_linux && status !== COMMAND_SANDBOX.ready
 
-/**
- * Reads bubblewrap's own failure from a command's stderr: bubblewrap prefixes
- * every message with "bwrap: ", so a command's own output is never mistaken
- * for it. undefined when the output is not bubblewrap's.
- */
-export const bubblewrapFailure = (stderr: string): "no_namespaces" | "failed" | undefined => {
+export const bubblewrapFailure = (
+  stderr: string
+): typeof COMMAND_SANDBOX.no_namespaces | typeof COMMAND_SANDBOX.failed | undefined => {
   if (!stderr.startsWith("bwrap: ")) return undefined
   const [first = ""] = stderr.split("\n")
-  return /namespace|uid map|gid map/i.test(first) ? "no_namespaces" : "failed"
+  return /namespace|uid map|gid map/i.test(first)
+    ? COMMAND_SANDBOX.no_namespaces
+    : COMMAND_SANDBOX.failed
 }
 
 const probeCommandSandbox = async (): Promise<CommandSandbox> => {
-  if (process.platform !== "linux") return "not_linux"
-  if (!existsSync(BUBBLEWRAP_PATH)) return "missing"
+  if (process.platform !== LINUX) return COMMAND_SANDBOX.not_linux
+  if (!existsSync(BUBBLEWRAP_PATH)) return COMMAND_SANDBOX.missing
   const result = await runBounded(BUBBLEWRAP_PATH, SELF_TEST_ARGS, process.env, PROBE_TIMEOUT_MS)
-  if (result.kind === "failed") return "failed"
-  if (result.code === 0) return "ready"
-  return bubblewrapFailure(result.output.trimStart()) ?? "failed"
+  if (result.kind === PROBE_RESULT.failed) return COMMAND_SANDBOX.failed
+  if (result.code === 0) return COMMAND_SANDBOX.ready
+  return bubblewrapFailure(result.output.trimStart()) ?? COMMAND_SANDBOX.failed
 }
 
 let resolving: Promise<CommandSandbox> | undefined

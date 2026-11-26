@@ -1,9 +1,3 @@
-// Architecture rules for the engine workspaces. `bun run depcruise` fails on a
-// violation that .dependency-cruiser-known-violations.json does not list;
-// `just ratchet` drops fixed ones from that baseline and never adds any.
-// Layer rules count type-only imports too (direction, not load order);
-// only the cycle rule is limited to runtime edges.
-
 const server = "^apps/server-ts/src/"
 const effectModule = "(^|/)node_modules/(effect|@effect/[^/]+)/"
 
@@ -39,8 +33,6 @@ module.exports = {
       to: {
         path: "^(apps|libs)/",
         pathNot: "^$1/$2/",
-        // Relative specifiers only: a package-name import of a workspace lib
-        // resolves through its `arden-source` condition into that lib's src.
         dependencyTypes: ["local"]
       }
     },
@@ -117,7 +109,6 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: "(^|/)node_modules/" },
-    // Build output only; packages under node_modules keep their dist paths so rules can see them.
     exclude: { path: ["^(apps|libs)/[^/]+/dist/"] },
     tsPreCompilationDeps: true,
     enhancedResolveOptions: {

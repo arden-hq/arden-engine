@@ -14,15 +14,16 @@ const DEFAULT_MAX_RUN_STEPS = 200
 const IN_MEMORY_DATABASE = ":memory:"
 const AGENTS_SKILLS_DIRECTORY = join(homedir(), ".agents", "skills")
 
-/** The owner's own data folder, whatever `ARDEN_DIR` says: `~/.arden`. */
 export const ownerDataDirectory = (): string => resolveArdenDir({})
 
+export const DATA_LOCATION = { disk: "disk", ephemeral: "ephemeral" } as const
+
 export type DataLocation =
-  | { readonly kind: "disk"; readonly databasePath: string }
-  | { readonly kind: "ephemeral"; readonly managedOutputRoot: string }
+  | { readonly kind: typeof DATA_LOCATION.disk; readonly databasePath: string }
+  | { readonly kind: typeof DATA_LOCATION.ephemeral; readonly managedOutputRoot: string }
 
 const defaultSharedSkillRoots = (data: DataLocation): ReadonlyArray<string> =>
-  data.kind === "disk" ? [AGENTS_SKILLS_DIRECTORY] : []
+  data.kind === DATA_LOCATION.disk ? [AGENTS_SKILLS_DIRECTORY] : []
 
 export interface ServerConfigShape {
   readonly hostname: string

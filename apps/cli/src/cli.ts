@@ -1,18 +1,18 @@
 import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 
 import { timeoutMilliseconds, UsageError, valueAfter, type CliDependencies } from "./command.js"
+import { invalidInputReceipt } from "./run-receipt.js"
 import {
-  invalidInputReceipt,
   runCommand,
   sessionsCommand,
   waitCommand,
   type ApprovalHandling,
-  type CliOutputFormat,
   type RunOptions,
   type SessionsOptions,
   type SessionTarget,
   type WaitOptions
 } from "./run.js"
+import { type CliOutputFormat } from "./run-receipt.js"
 import { loginCommand, type LoginAction } from "./login.js"
 import { modelsCommand, type ModelsOptions } from "./models.js"
 import {
@@ -29,7 +29,7 @@ export type {
   CommandReceiptError,
   CommandReceiptV1,
   DeclinedRequest
-} from "./run.js"
+} from "./run-receipt.js"
 
 type ParsedCommand =
   | { readonly kind: "help" }
@@ -466,7 +466,6 @@ const receiptCommand = (first: string | undefined): "run" | "wait" | undefined =
 const machineOutputFromArgs = (
   args: ReadonlyArray<string>
 ): { readonly command: "run" | "wait"; readonly output: "json" | "jsonl" } | undefined => {
-  // An exec receipt is a run receipt: the same Run, on a server of its own.
   const command = receiptCommand(args[0])
   if (command === undefined) return undefined
   let output: string | undefined

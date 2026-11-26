@@ -6,10 +6,6 @@ import type { EvidenceInput, RecordedEvidence } from "../work/contract.js"
 import type { WorkStoreError } from "../work/store.js"
 import { workError } from "./work-records.js"
 
-// The runs of one Task: the ones started for it, found through
-// idx_chat_runs_task_item, and the ones in its own chat. Evidence queries start
-// here and reach tool calls by run id. Asked the other way round, "calls whose
-// run belongs to this Task", SQLite read every tool call ever made.
 const TASK_RUNS_SQL = `SELECT run.run_id FROM chat_runs AS run
       WHERE json_extract(run.metadata_json, '$.run_context.task.item_id') = ?
     UNION

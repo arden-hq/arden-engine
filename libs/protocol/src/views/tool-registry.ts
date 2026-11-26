@@ -5,11 +5,41 @@ export interface ToolMeta {
   readonly icon: StepIconKey
 }
 
+export const VIEWED_TOOL = {
+  ask_user: "ask_user",
+  permission_offer: "permission_offer",
+  file_read: "file_read",
+  web_search: "web_search",
+  artifact_save: "artifact_save",
+  code_mode: "code_mode",
+  code_mode_phase: "code_mode_phase",
+  tool_search: "tool_search",
+  load_tools: "load_tools",
+  session_send_message: "session_send_message"
+} as const
+export type ViewedTool = (typeof VIEWED_TOOL)[keyof typeof VIEWED_TOOL]
+
+export const TOOL_NOUN = {
+  agent: "agent",
+  command: "command",
+  contact: "contact",
+  email: "email",
+  email_thread: "email thread",
+  event: "event",
+  file: "file",
+  page: "page",
+  playbook: "playbook",
+  skill: "skill",
+  visual: "visual",
+  workflow: "workflow"
+} as const
+export type ToolNoun = (typeof TOOL_NOUN)[keyof typeof TOOL_NOUN]
+
 export const TOOL_GROUP = { noun: "noun", many: "many" } as const
 
 export type ToolGroupWords =
-  | { readonly kind: "noun"; readonly noun: string }
-  | { readonly kind: "many"; readonly many: VerbPhrase }
+  | { readonly kind: typeof TOOL_GROUP.noun; readonly noun: ToolNoun }
+  | { readonly kind: typeof TOOL_GROUP.many; readonly many: VerbPhrase }
 
 export const TOOL_META: Record<string, ToolMeta> = {
   file_read: { verb: "Read", icon: "file" },

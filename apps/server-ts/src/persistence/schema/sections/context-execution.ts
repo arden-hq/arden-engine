@@ -169,8 +169,7 @@ export const contextExecutionSchemaSection = {
       CHECK(ended_at IS NULL OR ended_at >= started_at)
     )`,
     "CREATE INDEX idx_tool_calls_session_started ON tool_calls(session_id, started_at)",
-    // Reads for a Session's unsettled calls repeat this WHERE
-    // (`unresolvedToolStatusList`) so SQLite can use the partial index.
+    // Reads repeat this WHERE (`unresolvedToolStatusList`) to use the partial index: https://www.sqlite.org/partialindex.html#queries_using_partial_indexes
     `CREATE INDEX idx_tool_calls_session_unresolved
       ON tool_calls(session_id, status)
       WHERE status IN ('running', 'ready', 'paused', 'uncertain')`,

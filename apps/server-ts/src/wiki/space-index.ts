@@ -18,7 +18,6 @@ const spaceFolder = (pagePath: string): string => {
   return pagePath.toLowerCase().endsWith(".md") ? pagePath.slice(0, -3) : pagePath
 }
 
-/** Whether `path` is the Space page at `pagePath` or lies under the folder it heads. */
 export const spaceOwnsPath = (pagePath: string, path: string): boolean => {
   const boundary = canonicalWikiPath(pagePath)?.toLowerCase()
   const target = canonicalWikiPath(path)?.toLowerCase()
@@ -43,7 +42,6 @@ export const spaceBinding = (row: SpaceBindingRow): SpaceBinding =>
 export const bindingOwnsPath = (binding: SpaceBinding, path: string): boolean =>
   binding.kind === "half_made" || spaceOwnsPath(binding.page_path, path)
 
-/** Whether another active Space's pages and the pages `path` would head overlap. */
 const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boolean =>
   others.some(
     (other) =>
@@ -51,7 +49,6 @@ const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boo
       (other.kind === "bound" && spaceOwnsPath(path, other.page_path))
   )
 
-/** Whether another active Space holds the page, or overlaps the pages it would head. */
 export const heldByAnother = (
   others: ReadonlyArray<SpaceBinding>,
   pageId: string,
@@ -96,7 +93,6 @@ export const spaceOwnsWikiPath = (
     Effect.map((bindings) => bindings.some((binding) => bindingOwnsPath(binding, path)))
   )
 
-/** Whether the page is an active Space's own page. */
 export const isSpacePage = (
   spaces: ActiveBindings,
   pageId: string,
@@ -104,7 +100,6 @@ export const isSpacePage = (
 ): Effect.Effect<boolean, SpaceStoreError, never> =>
   activeSpaceBindings(spaces).pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))
 
-/** `isSpacePage` for many pages, with the bindings read at most once, when first asked for. */
 export const spacePageCheck = (
   spaces: ActiveBindings
 ): Effect.Effect<
@@ -119,14 +114,12 @@ export const spacePageCheck = (
     )
   )
 
-/** The active pages a Space owns: its own page and every page under the folder it heads. */
 const spacePages = (
   pages: ReadonlyArray<RunPage>,
   space: SpacePageBinding
 ): ReadonlyArray<RunPage> =>
   activeRunPages(pages).filter((record) => spaceOwnsPath(space.pagePath, record.resource.path))
 
-/** What a Space's list of its other pages holds: the pages under the folder it heads, but its own. */
 export const spacePageList = (
   pages: ReadonlyArray<RunPage>,
   space: SpacePageBinding

@@ -1,12 +1,17 @@
 import { formatBytes } from "@arden-hq/std/count"
 import type { ASTNode, ParseResult } from "@openuidev/lang-core"
+import { AST_KIND } from "./ast.js"
 import { ANSWER_UI_MAX_BYTES } from "./fence.js"
 import { formulaIssues } from "./formula-check.js"
-import { readBlock, type Statement } from "./read.js"
-import { readToolResult, TOOL_RESULT_QUERY, toolResultMissText } from "./tool-result.js"
+import { BLOCK_READ_KIND, readBlock, ROOT_STATEMENT, type Statement } from "./read.js"
+import {
+  readToolResult,
+  TOOL_RESULT_QUERY,
+  TOOL_RESULT_STATUS,
+  TOOL_RESULT_VALUE_MISS,
+  toolResultMissText
+} from "./tool-result.js"
 
-/** One problem in a block: the line it starts on (1-based, when known) and
- *  what is wrong, worded for the model that wrote it. */
 export interface BlockIssue {
   readonly line: number | undefined
   readonly message: string
@@ -17,18 +22,9 @@ const MAX_PARSE_MS = 1000
 
 export interface CheckOptions {
   readonly now?: () => number
-  /** The result text of a tool call the model saw in this chat, or undefined
-   *  when it saw none with that id. Without it, a `Query("tool_result", …)`
-   *  is checked for its shape only. */
   readonly toolResult?: (callId: string) => string | undefined
 }
 
-/** Check one `arden:ui` block body the way the renderer will read it, plus the
- *  rules the renderer cannot enforce: state starts as a literal and is declared
- *  before the statements that use it; data comes only from a read of this
- *  chat's tool results, and nothing is written; every formula reads and
- *  names only its vars. No issues means the block
- *  draws whole. */
 export function checkAnswerBlock(
   source: string,
   { now = Date.now, toolResult }: CheckOptions = {}
@@ -36,16 +32,16 @@ export function checkAnswerBlock(
   const started = now()
   const read = readBlock(source)
   switch (read.kind) {
-    case "too_large":
+    case BLOCK_READ_KIND.tooLarge:
       return [
         {
           line: undefined,
           message: `The block is over ${formatBytes(ANSWER_UI_MAX_BYTES)} and is shown as code. Split it or show less.`
         }
       ]
-    case "unreadable":
+    case BLOCK_READ_KIND.unreadable:
       return [{ line: undefined, message: "The block could not be read. Rewrite it more simply." }]
-    case "expands":
+    case BLOCK_READ_KIND.expands:
       return [
         {
           line: undefined,
@@ -53,7 +49,7 @@ export function checkAnswerBlock(
             "References expand too far: statements that each reuse another one several times multiply. Compute values once and reuse fewer references."
         }
       ]
-    case "parsed":
+    case BLOCK_READ_KIND.parsed:
       break
   }
   const { parsed, statements } = read
@@ -120,24 +116,29 @@ function queryIssues(
   if (toolResult === undefined) return issues
   const result = toolResult(args.call)
   if (result === undefined)
-    return [...issues, `${toolResultMissText("no_call")} (\`${args.call}\`).`]
+    return [...issues, `${toolResultMissText(TOOL_RESULT_VALUE_MISS.noCall)} (\`${args.call}\`).`]
   const read = readToolResult(result, args.path)
-  return read.status === "value"
+  return read.status === TOOL_RESULT_STATUS.value
     ? issues
     : [...issues, `${toolResultMissText(read.reason)} (\`${args.path}\`).`]
 }
 
 const literalString = (node: ASTNode | null | undefined): string | undefined =>
-  node?.k === "Str" ? node.v : undefined
+  node?.k === AST_KIND.Str ? node.v : undefined
+
+const QUERY_ARG = { call: "call", path: "path" } as const
+type QueryArg = (typeof QUERY_ARG)[keyof typeof QUERY_ARG]
+const QUERY_ARGS: ReadonlySet<string> = new Set<QueryArg>(Object.values(QUERY_ARG))
+const isQueryArg = (key: string): key is QueryArg => QUERY_ARGS.has(key)
 
 function queryArgs(
   node: ASTNode | null
 ): { readonly call: string; readonly path: string } | undefined {
-  if (node?.k !== "Obj") return undefined
+  if (node?.k !== AST_KIND.Obj) return undefined
   const fields = new Map(node.entries)
-  if ([...fields.keys()].some((key) => key !== "call" && key !== "path")) return undefined
-  const call = literalString(fields.get("call"))
-  const path = fields.has("path") ? literalString(fields.get("path")) : ""
+  if (![...fields.keys()].every(isQueryArg)) return undefined
+  const call = literalString(fields.get(QUERY_ARG.call))
+  const path = fields.has(QUERY_ARG.path) ? literalString(fields.get(QUERY_ARG.path)) : ""
   return call === undefined || call.length === 0 || path === undefined ? undefined : { call, path }
 }
 
@@ -145,7 +146,7 @@ function usedBeforeDeclared(
   statements: ReadonlyArray<Statement>
 ): ReadonlyArray<{ readonly statement: Statement; readonly state: string }> {
   return statements.flatMap((statement, index) =>
-    statement.isState || statement.name === "root"
+    statement.isState || statement.name === ROOT_STATEMENT
       ? []
       : [...new Set(statement.states)].flatMap((state) => {
           const declared = statements.findIndex((other) => other.name === state)

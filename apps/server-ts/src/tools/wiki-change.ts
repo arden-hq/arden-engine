@@ -4,17 +4,16 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { toolFailure } from "./tool-failure.js"
-import { loadSnapshot, wikiFailure } from "./wiki.js"
+import { loadSnapshot, wikiFailure } from "./wiki-access.js"
 import { MAX_PAGE_SOURCES, pageSource } from "./wiki-records.js"
 import { memoryPathOf, readChangeCall } from "../lib/memory-link.js"
 import { SpaceReviewStore } from "../persistence/automations/space-review-store.js"
 import type { WikiChangeRead, WikiPageChangesRead } from "../wiki/change.js"
-import type { WikiCommitSource } from "../wiki/commit.js"
+import type { WikiCommitSource } from "../wiki/origin.js"
 import type { WikiError } from "../wiki/errors.js"
 import { Wiki } from "../wiki/service.js"
 import { activeRunPages } from "../wiki/snapshot.js"
 
-/** How a tool input names the time of a saved change. */
 export const ChangeTimeSchema = Schema.NonEmptyString.check(Schema.isMaxLength(64)).annotate({
   description:
     "Time of the change, as a Memory change event, wiki_list_changes or wiki_page_history shows it. Picks the change in effect at that time. Omit for the page's latest change; in a Space review, omit for everything that changed on a listed page since the previous review."
@@ -127,7 +126,6 @@ const renderChangesSince = (read: WikiPageChangesRead): string => {
   return lines.join("\n")
 }
 
-/** A failed lookup of one saved change, with how to list the times that exist. */
 export const changeFailure = (error: WikiError, path: string): ToolExecutionError => {
   switch (error.reason) {
     case "not_found":
@@ -149,7 +147,6 @@ export const changeFailure = (error: WikiError, path: string): ToolExecutionErro
   }
 }
 
-/** A review's diff that cannot be built still leaves the page itself readable. */
 const sinceFailure = (error: WikiError, path: string): ToolExecutionError =>
   error.reason === "invalid" || error.reason === "not_found"
     ? new ToolExecutionError(
@@ -189,8 +186,6 @@ const makeWikiChangeTools = ({
       const snapshot = await loadSnapshot(wiki, ctx.signal).catch(() => undefined)
       const pageId = (snapshot?.pages ?? []).find((record) => record.resource.path === path)?.page
         .pageId
-      // A Space review was told which pages changed since its previous review;
-      // it reads all of that change, not only the page's last save.
       const reads =
         input.at === undefined
           ? await Effect.runPromise(

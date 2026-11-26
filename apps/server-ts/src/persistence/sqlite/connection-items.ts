@@ -27,7 +27,6 @@ interface ItemRow {
 
 const decodeDetail = Schema.decodeUnknownOption(Schema.fromJsonString(JsonObjectSchema))
 
-/** The stored detail document, or undefined when the item has none. */
 export const itemDetailOf = (detail: string | null): ConnectionItem["detail"] =>
   detail === null ? undefined : Option.getOrUndefined(decodeDetail(detail))
 

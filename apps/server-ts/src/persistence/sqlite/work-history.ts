@@ -11,7 +11,6 @@ export const taskRevisionRef = (
 
 export const assertCurrentTaskRevision = Effect.fn("WorkHistory.assertCurrentTaskRevision")(
   function* (sql: SqlClient.SqlClient, itemId: string, revision: string | null) {
-    // A Task with no saved history is at version 0 (unsavedTaskRevision).
     const rows = yield* sql`SELECT 1 FROM space_tasks AS task WHERE task.item_id = ${itemId}
     AND task.item_id || ':' || COALESCE(
       (SELECT MAX(version) FROM space_task_revisions WHERE item_id = task.item_id), 0

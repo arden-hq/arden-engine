@@ -19,7 +19,6 @@ const window = (text: string, at: number): string => {
   return `${start === 0 ? "" : "…"}${text.slice(start, end)}${end === text.length ? "" : "…"}`
 }
 
-/** The part of the page to show: the query as written, else the first query word found. */
 const snippet = (body: string, query: string, terms: ReadonlySet<string>): string => {
   const collapsed = body.trim().split(/\s+/).join(" ")
   const text = normalized(collapsed)
@@ -32,7 +31,6 @@ const snippet = (body: string, query: string, terms: ReadonlySet<string>): strin
   return window(collapsed, Number.isFinite(wordAt) ? wordAt : 0)
 }
 
-/** How directly a page holds the whole query as written: 0 names it, 1 names part, 2 mentions. */
 const phraseTier = (record: RunPage, query: string): number | undefined => {
   const path = normalized(record.resource.path)
   const title = normalized(record.page.title)
@@ -47,10 +45,6 @@ const phraseTier = (record: RunPage, query: string): number | undefined => {
   return normalized(record.page.body).includes(query) ? 2 : undefined
 }
 
-/**
- * Pages that answer a query, best first. A page is found by its words, by its meaning, or by
- * holding the query as an exact phrase; no query needs to be an exact phrase.
- */
 export const searchPages = (
   pages: ReadonlyArray<RunPage>,
   text: string,

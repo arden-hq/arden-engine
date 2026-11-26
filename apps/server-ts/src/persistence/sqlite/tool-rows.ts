@@ -18,12 +18,14 @@ import {
 } from "./tool-result-storage.js"
 import { TOOL_STATUSES, type ToolStatus } from "./status-sets.js"
 
+export const TOOL_APPROVAL_KIND = { approval: "tool_approval", outcome: "tool_outcome" } as const
+
 export type ToolOperation = ToolExecutionStoreError["operation"]
 
 const isToolStatus = (status: string): status is ToolStatus =>
   (TOOL_STATUSES as readonly string[]).includes(status)
 
-export type ToolApprovalKind = "tool_approval" | "tool_outcome"
+export type ToolApprovalKind = (typeof TOOL_APPROVAL_KIND)[keyof typeof TOOL_APPROVAL_KIND]
 
 export interface ValidToolExecutionIdentity extends Omit<ToolExecutionIdentity, "arguments"> {
   readonly arguments: JsonObject
@@ -232,7 +234,6 @@ export const validateRowIdentity = Effect.fn("SqliteToolExecutionStore.validateR
   }
 )
 
-/** The row's whole result; a slim row is resolved through its saved object. */
 export const decodeStoredResult = Effect.fn("SqliteToolExecutionStore.decodeStoredResult")(
   function* (
     row: ToolCallRow,

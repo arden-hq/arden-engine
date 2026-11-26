@@ -1,119 +1,29 @@
 import { countOf } from "@arden-hq/std/count"
-import { ToolExecutionError, type ToolResult } from "@arden-hq/loop"
-import { Effect, Predicate, Schema } from "effect"
+import { ToolExecutionError } from "@arden-hq/loop"
+import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { StructuredCompletion, StructuredCompletionError } from "../models/structured-completion.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { mutationReceiptHost } from "../persistence/tools/mutation-receipt.js"
+import { ResearchWorkspace } from "../research/workspace.js"
 import {
-  ResearchWorkspace,
-  canonicalResearchText,
   type ResearchMutationReceipt,
   type ResearchReviewPage
-} from "../research/workspace.js"
+} from "../research/workspace-model.js"
 import { ResearchWorkspaceError } from "../research/workspace-storage.js"
-import { ResearchClaimStatusSchema } from "../research/model.js"
 import { readAgentSessionMetadata } from "../sessions/agent-mode.js"
 import type { ServerRunContext } from "./run-context.js"
-import type { ServerToolRun } from "../chat/runner-contract.js"
-import type { ToolsetMiddleware } from "../execution/toolset-middleware.js"
-import { workflowOperationId } from "../workflows/identity.js"
-import { readsOnly } from "../execution/impact.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { sha256Hex } from "@arden-hq/std/hash"
-import { toolFailure, toolFault } from "./tool-failure.js"
-
-const ExpectedRevisionSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-const ClaimRefSchema = Schema.String.check(Schema.isPattern(/^claim-[a-f0-9]{32}$/))
-
-const ClaimRecordParametersSchema = Schema.Struct({
-  expected_revision: ExpectedRevisionSchema.annotate({
-    description:
-      "Exact workspace revision: 0 for a fresh workspace, otherwise the revision reported by the latest claim tool result, claim_review, or the workspace revision line on a read result."
-  }),
-  statement: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8_000)).pipe(
-    Schema.annotateEncoded({
-      description: "One atomic, qualified, time-scoped claim. Record it before seeking evidence."
-    })
-  ),
-  qualifiers: Schema.optionalKey(
-    Schema.Array(Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1_000)))
-      .check(Schema.isMaxLength(32))
-      .annotate({
-        description: "Conditions, population, scope, or other qualifiers that must remain attached."
-      })
-  ),
-  as_of: Schema.optionalKey(
-    Schema.String.check(Schema.isMaxLength(128)).annotate({
-      description: "Date, version, or time window to which the claim applies."
-    })
-  )
-})
-
-const EvidenceRecordParametersSchema = Schema.Struct({
-  expected_revision: ExpectedRevisionSchema.annotate({
-    description:
-      "Exact workspace revision: 0 for a fresh workspace, otherwise the revision reported by the latest claim tool result, claim_review, or the workspace revision line on a read result."
-  }),
-  claim_ref: ClaimRefSchema.annotate({
-    description: "Recorded claim to which this source span applies."
-  }),
-  snapshot_ref: Schema.String.check(Schema.isPattern(/^source-[a-f0-9]{32}$/)).annotate({
-    description: "Snapshot reference appended to a successful research read tool result."
-  }),
-  relation: Schema.Literals(["supports", "contradicts", "qualifies"] as const).annotate({
-    description: "Your provisional relation. claim_check independently evaluates it later."
-  }),
-  start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).annotate({
-    description: "Zero-based start character in canonical text (NFC with LF newlines)."
-  }),
-  end: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
-    description: "Exclusive end character in canonical text."
-  }),
-  excerpt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
-    description: "Exact source substring selected by start and end."
-  }),
-  note: Schema.optionalKey(
-    Schema.String.check(Schema.isMaxLength(4_000)).annotate({
-      description: "Optional explanation of relevance or scope."
-    })
-  )
-})
-
-const ClaimCheckParametersSchema = Schema.Struct({
-  expected_revision: ExpectedRevisionSchema.annotate({
-    description:
-      "Exact workspace revision from the latest claim tool result or claim_review. The check fails if the workspace has changed since."
-  }),
-  claim_refs: Schema.optionalKey(
-    Schema.Array(ClaimRefSchema)
-      .check(Schema.isMinLength(1), Schema.isMaxLength(50), Schema.isUnique())
-      .annotate({
-        description: "Claims to check. Omit to check every claim that has recorded evidence."
-      })
-  )
-})
-
-const ClaimReviewParametersSchema = Schema.Struct({
-  statuses: Schema.optionalKey(
-    Schema.Array(ResearchClaimStatusSchema)
-      .check(Schema.isMinLength(1), Schema.isUnique())
-      .annotate({
-        description: "Claim statuses to include. Omit to include every status."
-      })
-  ),
-  cursor: Schema.optionalKey(
-    Schema.String.check(Schema.isMaxLength(2_048)).annotate({
-      description: "Opaque cursor returned by a previous claim_review call."
-    })
-  ),
-  limit: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })).annotate({
-      description: "Maximum claims to return, from 1 through 100. Defaults to 20."
-    })
-  )
-})
+import { toolFailure } from "./tool-failure.js"
+import {
+  ClaimCheckParametersSchema,
+  ClaimRecordParametersSchema,
+  ClaimReviewParametersSchema,
+  EvidenceRecordParametersSchema
+} from "./research-evidence-parameters.js"
+import { operationId } from "./research-capture.js"
 
 const VerifierOutputSchema = Schema.Struct({
   verdict: Schema.Literals(["supports", "contradicts", "qualifies", "irrelevant"] as const),
@@ -135,14 +45,14 @@ interface ResearchToolServices {
   readonly structured: StructuredCompletion["Service"]
 }
 
-const WORKSPACE_PREVIEWS = {
+const WORKSPACE_PREVIEWS: Record<ResearchWorkspaceError["reason"], string> = {
   invalid: "Invalid research record",
   not_found: "Research prerequisite missing",
   conflict: "Research state changed",
   quota: "Research workspace full",
   corrupt: "Research state needs repair",
   storage: "Research state unavailable"
-} as const satisfies Record<ResearchWorkspaceError["reason"], string>
+}
 
 const workspaceError = (failure: ResearchWorkspaceError): ToolExecutionError =>
   toolFailure(failure, WORKSPACE_PREVIEWS[failure.reason])
@@ -187,14 +97,6 @@ const mutationHost = (
       afterVersion: String(receipt.revision)
     }
   })
-
-const operationId = (
-  ctx: {
-    readonly toolCallId: string
-    readonly run: Pick<ServerRunContext, "runId">
-  },
-  name: string
-): string => workflowOperationId(ctx.run.runId, ctx.toolCallId, name)
 
 const verifierInputHash = (user: string): string =>
   sha256Hex(JSON.stringify({ version: 1, system: VERIFIER_SYSTEM, user }))
@@ -541,116 +443,3 @@ export const researchEvidenceTools = Effect.gen(function* () {
     structured: yield* StructuredCompletion
   })
 })
-
-const sourceLocator = (
-  source: Readonly<Record<string, unknown>> | undefined,
-  fallback: string
-): string => {
-  if (source === undefined) return fallback
-  if (typeof source["url"] === "string" && source["url"].length > 0) return source["url"]
-  if (typeof source["ref"] === "string" && source["ref"].length > 0) return source["ref"]
-  return fallback
-}
-
-const sourceIdentity = (
-  tool: ServerTool,
-  args: Readonly<Record<string, unknown>>,
-  result: ToolResult
-): { readonly locator: string; readonly title: string; readonly publishedAt: string | null } => {
-  const sourceRefs =
-    Predicate.isObject(result.host) && Array.isArray(result.host["source_refs"])
-      ? result.host["source_refs"]
-      : []
-  const sources = sourceRefs.filter(Predicate.isObject)
-  const source = sources.length === 1 ? sources[0] : undefined
-  const locator = sourceLocator(source, `${tool.definition.name}:${JSON.stringify(args)}`)
-  const publishedAt =
-    source !== undefined && typeof source["published_at"] === "string"
-      ? source["published_at"].slice(0, 128)
-      : null
-  return {
-    locator: locator.slice(0, 8_000),
-    title: (source !== undefined && typeof source["title"] === "string"
-      ? source["title"]
-      : `${tool.meta.display_name} result`
-    ).slice(0, 2_000),
-    publishedAt
-  }
-}
-
-const researchCaptureFailure = (cause: unknown): ToolExecutionError => {
-  if (cause instanceof ToolExecutionError) return cause
-  return cause instanceof ResearchWorkspaceError
-    ? toolFailure(cause, "Research source capture failed")
-    : toolFault("Research source capture failed", "Research source capture failed")
-}
-
-export const captureResearchSources = (options: {
-  readonly run: Pick<ServerToolRun, "runId" | "sessionId">
-  readonly tools: ReadonlyArray<ServerTool>
-  readonly sessions: SessionQueries["Service"]
-  readonly workspace: ResearchWorkspace["Service"]
-}): ToolsetMiddleware => {
-  const { run, sessions, workspace } = options
-  const toolsByName = new Map(options.tools.map((tool) => [tool.definition.name, tool]))
-  return {
-    execute: async (request, next) => {
-      const tool = toolsByName.get(request.name)
-      if (tool === undefined || !readsOnly(tool.meta) || tool.meta.source === "_research") {
-        return next(request)
-      }
-      const signal = request.signal === undefined ? undefined : { signal: request.signal }
-      const snapshot = await Effect.runPromise(sessions.loadHeaderSnapshot(run.sessionId), signal)
-      const agent =
-        snapshot?.header.sessionType === "agent"
-          ? readAgentSessionMetadata(snapshot.metadata)
-          : null
-      if (agent?.mode !== "research") return next(request)
-      if (agent.researchWorkspaceId === null) {
-        throw new ToolExecutionError(
-          "This research agent has no workspace. Source reads are unavailable for every path; changing files will not repair it. Report the blocker instead of retrying other files.",
-          {
-            preview: "Research source capture failed",
-            retryable: false
-          }
-        )
-      }
-      const result = await next(request)
-      if (result.is_error === true) return result
-      const source = sourceIdentity(tool, request.args, result)
-      const captured = await Effect.runPromise(
-        workspace.captureSource({
-          workspaceId: agent.researchWorkspaceId,
-          operationId: workflowOperationId(
-            run.runId,
-            request.toolCallId,
-            "research_source_capture"
-          ),
-          ...source,
-          text: result.content
-        }),
-        signal
-      ).catch((cause: unknown) => {
-        throw researchCaptureFailure(cause)
-      })
-      const snapshotRef = captured.result["snapshot_ref"]
-      if (typeof snapshotRef !== "string") {
-        throw new ToolExecutionError("Research source capture returned no snapshot reference", {
-          preview: "Research source capture failed",
-          retryable: true
-        })
-      }
-      return {
-        ...result,
-        content: `${canonicalResearchText(result.content)}\n\n[Research snapshot: ${snapshotRef}; workspace revision: ${captured.revision}]`,
-        host: {
-          ...result.host,
-          research_snapshot: {
-            snapshot_ref: snapshotRef,
-            revision: captured.revision
-          }
-        }
-      }
-    }
-  }
-}

@@ -99,7 +99,6 @@ export const ContactSearchSchema = Schema.Struct({
 
 export const DeletedSchema = Schema.Struct({ deleted: Schema.String, title: Schema.String })
 
-/** The helper's answer as the record a tool expects, or a refusal. */
 export const record = <S extends Schema.Top & Schema.ConstraintDecoder<unknown>>(
   schema: S,
   value: unknown
@@ -133,14 +132,12 @@ const DAY_FORMAT = new Intl.DateTimeFormat("en-US", {
 
 export type TimeWords = (value: string) => string
 
-/** What every Mac app tool works with: the helper, and how its cards write a time. */
 export interface MacApps {
   readonly helper: MacAppsHelper
   readonly words: TimeWords
   readonly clock: LocalClock
 }
 
-/** This Mac's wall time, the form the helper reads and writes without an offset. */
 export interface LocalClock {
   readonly instant: (time: string) => number
   readonly localTime: (at: number) => string
@@ -160,11 +157,6 @@ export const makeLocalClock = (
   localTime: (at) => new Date(at + offsetMinutes(new Date(at)) * 60_000).toISOString().slice(0, 16)
 })
 
-/**
- * A day or a time as a card shows it: "Nov 20, 2026", "Nov 20, 2026, 6:00 PM".
- * A time in another zone than this Mac's keeps its zone, as the Google cards
- * write it. Anything else comes back as given.
- */
 export const makeTimeWords =
   (offsetMinutes: OffsetMinutes = machineOffsetMinutes): TimeWords =>
   (value) => {
@@ -186,7 +178,6 @@ export const makeTimeWords =
 
 const withoutZone = (words: string): string => words.replace(/ \(UTC[^)]*\)$/u, "")
 
-/** "When" for an all-day event, "Starts" and "Ends" for a timed one. */
 export const eventTimeFields = (
   item: { readonly start: string; readonly end: string | undefined; readonly all_day: boolean },
   words: TimeWords
@@ -201,7 +192,6 @@ export const eventTimeFields = (
   ]
 }
 
-/** One line for the model: the times as the helper gave them. */
 export const eventTimeLine = (item: MacEventRecord): string =>
   allDayText(item) ?? `${item.start} — ${item.end}`
 
@@ -212,7 +202,6 @@ const REPEAT_WORDS: Readonly<Record<string, string>> = {
   yearly: "Every year"
 }
 
-/** The helper's repeat word for a card; a rule it cannot say in one word is shown as given. */
 export const repeatWords = (rule: string): string =>
   Object.hasOwn(REPEAT_WORDS, rule) ? (REPEAT_WORDS[rule] ?? rule) : rule
 

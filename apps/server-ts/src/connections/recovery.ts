@@ -15,8 +15,11 @@ import { type Effect, Schema } from "effect"
 
 const boundedString = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 
-const ConnectionProviderSchema = Schema.Literals(["google", "mcp"] as const)
-export type ConnectionProvider = typeof ConnectionProviderSchema.Type
+export const CONNECTION_PROVIDER = { google: "google", mcp: "mcp" } as const
+
+export type ConnectionProvider = (typeof CONNECTION_PROVIDER)[keyof typeof CONNECTION_PROVIDER]
+
+const ConnectionProviderSchema = Schema.Literals(Object.values(CONNECTION_PROVIDER))
 
 export const ConnectionRequiredDataSchema = Schema.Struct({
   _tag: Schema.Literal("ConnectionRequired"),
@@ -59,10 +62,19 @@ export interface RequestConnectionInput {
   readonly accountRef?: string
 }
 
+export const CONNECTION_CHECK_FAILURE = {
+  rejected: "rejected",
+  unavailable: "unavailable",
+  storage: "storage"
+} as const
+
+export type ConnectionCheckFailure =
+  (typeof CONNECTION_CHECK_FAILURE)[keyof typeof CONNECTION_CHECK_FAILURE]
+
 export class ConnectionCheckError extends Schema.TaggedError<ConnectionCheckError>()(
   "ConnectionCheckError",
   {
-    reason: Schema.Literals(["rejected", "unavailable", "storage"] as const),
+    reason: Schema.Literals(Object.values(CONNECTION_CHECK_FAILURE)),
     cause: Schema.optionalKey(Schema.Defect())
   }
 ) {}

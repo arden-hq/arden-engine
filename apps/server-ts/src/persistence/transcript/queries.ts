@@ -71,13 +71,11 @@ interface ChatSearchChatBase {
   readonly lastActivity: string
 }
 
-/** A chat with a matching message (its name may match too). */
 interface ChatSearchByMessage extends ChatSearchChatBase {
   readonly match: "message"
   readonly hit: ChatSearchHit
 }
 
-/** A chat whose name matches and no message does: its newest message, if any. */
 interface ChatSearchByName extends ChatSearchChatBase {
   readonly match: "name"
   readonly preview: ChatSearchHit | undefined
@@ -89,6 +87,11 @@ export interface ChatSearchPage {
   readonly chats: ReadonlyArray<ChatSearchChat>
   readonly hasMore: boolean
 }
+
+export const TRANSCRIPT_RESULT_VIEW = { full: "full", compact: "compact" } as const
+
+export type TranscriptResultView =
+  (typeof TRANSCRIPT_RESULT_VIEW)[keyof typeof TRANSCRIPT_RESULT_VIEW]
 
 export class TranscriptQueries extends Context.Service<
   TranscriptQueries,
@@ -102,7 +105,6 @@ export class TranscriptQueries extends Context.Service<
       readonly sequence: number
       readonly limit: number
     }) => Effect.Effect<ReadonlyArray<TranscriptMessageRecord>, TranscriptQueryFailure>
-    /** Which of `messageIds` are the owner's own words; the one test for that. */
     readonly ownerWordsIn: (
       sessionId: string,
       messageIds: ReadonlyArray<string>
@@ -138,7 +140,7 @@ export class TranscriptQueries extends Context.Service<
       sessionId: string,
       turnIds: ReadonlyArray<string>,
       toolCallIds: ReadonlyArray<string>,
-      view?: "full" | "compact"
+      view?: TranscriptResultView
     ) => Effect.Effect<ReadonlyArray<TranscriptMessageRecord>, TranscriptQueryFailure>
     readonly toolResultInSession: (
       sessionId: string,

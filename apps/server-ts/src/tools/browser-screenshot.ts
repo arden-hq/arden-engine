@@ -1,7 +1,8 @@
 import { ToolExecutionError, type ImageInput, type ToolResultOutput } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 
-import { ScreenshotCaptureSchema, type ConversationArtifacts } from "../artifacts/conversation.js"
+import { ScreenshotCaptureSchema } from "../artifacts/conversation-model.js"
+import { type ConversationArtifacts } from "../artifacts/conversation.js"
 import type { BrowserOutput } from "../browser/service.js"
 import { fitPng } from "../lib/prompt-image.js"
 import { toolFailure } from "./tool-failure.js"
@@ -26,8 +27,6 @@ export const preserveBrowserScreenshot = async (input: {
   readonly runId: string
   readonly toolCallId: string
   readonly signal: AbortSignal
-  /** The run's route (`ModelCapabilities.imageInput`): the model's copy is fitted to the limits
-   *  it states, and sent as captured where it states none, as `file_read` sends an image. */
   readonly imageInput: ImageInput | undefined
 }): Promise<ToolResultOutput> => {
   const capture = Schema.decodeUnknownExit(ScreenshotCaptureSchema)(input.output.data)

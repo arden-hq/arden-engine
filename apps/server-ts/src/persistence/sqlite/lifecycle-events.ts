@@ -1,9 +1,6 @@
 import { withCurrentSessionActivity } from "./lifecycle-presentation.js"
-import { linkedItemId, taskSpace } from "./event-links.js"
-import type { AutomationEvent, RuntimeRunStatus, TaskWorkChangedEvent } from "@arden-hq/protocol"
-import type { SpaceTaskStatus } from "@arden-hq/protocol/spaces/work"
+import { linkedItemId } from "./event-links.js"
 import {
-  AutomationEventSchema,
   AutomationFinishedEventSchema,
   AutomationProgressEventSchema,
   ChatInputCommittedEventSchema,
@@ -15,20 +12,15 @@ import {
   RecordToldEventSchema,
   TaskProposalChangedEventSchema,
   TaskVisibilityChangedEventSchema,
-  TaskWorkChangedEventSchema,
   WorkChangedEventSchema
 } from "@arden-hq/protocol/effect/events"
 import {
   appendInTransaction as appendJournalInTransaction,
-  journalHeadSequenceSql,
-  journalRecordsSql,
-  type JournalAppendResult,
   type JournalRecord,
   type JournalRuntime
 } from "@arden-hq/journal/effect"
 import { DateTime, Effect, Schema, Scope, Stream } from "effect"
-import { archivedChatAppend, lifecycleError } from "./lifecycle-archived.js"
-import { SqlClient } from "effect/unstable/sql"
+import { lifecycleError } from "./lifecycle-archived.js"
 import {
   SESSION_LIFECYCLE_STREAM_ID,
   SessionLifecycleEventError,
@@ -36,11 +28,9 @@ import {
   type LifecycleFeedEvent,
   type OpenSessionLifecycleEvents,
   type SessionLifecycleDelivery,
-  type SessionLifecycleEventType,
   type StandaloneFeedEvent
 } from "../sessions/events.js"
 import {
-  InternalLifecycleEventSchema,
   ApprovalWaitingEventSchema,
   DecisionRouteChangedEventSchema,
   AutomationChangedEventSchema,
@@ -49,121 +39,16 @@ import {
   LimitCrossedEventSchema,
   RunSettledEventSchema,
   RunFencedEventSchema,
-  TaskHistoryAddedEventSchema,
-  type InternalLifecycleEvent
+  TaskHistoryAddedEventSchema
 } from "../sessions/internal-events.js"
-import { sessionBlockingWorkPredicate } from "./session-blocking-work.js"
-import { loadSessionSnapshot } from "./session-snapshot.js"
 import type { PersistenceDeps } from "./deps.js"
-import { deleteJournalSequences, scanJournalWindows } from "./journal-windows.js"
-import { toldKey, UnitOfWork } from "../unit-of-work.js"
-import { touchedThrough } from "./tells/capture.js"
-import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-
-interface TaskWorkRow {
-  readonly space_id: string | null
-  readonly item_id: string
-  readonly task_name: string
-  readonly task_status: SpaceTaskStatus
-  readonly session_id: string
-  readonly run_id: string
-  readonly run_status: RuntimeRunStatus
-  readonly started_at: string
-  readonly ended_at: string | null
-}
-
-const loadSessionBlockingWork = Effect.fn("SessionLifecycleEvents.loadSessionBlockingWork")(
-  function* (sql: SqlClient.SqlClient, sessionId: string) {
-    const rows = yield* sql<{ readonly blocking_work: number }>`
-      SELECT ${sessionBlockingWorkPredicate(sql)} AS blocking_work
-      FROM sessions AS s
-      WHERE s.session_id = ${sessionId}
-      LIMIT 1
-    `.pipe(
-      Effect.mapError((cause) =>
-        lifecycleError("append", "Could not read Session blocking-work state", cause)
-      )
-    )
-    const row = rows[0]
-    if (row === undefined) {
-      return yield* lifecycleError("append", "Session does not exist")
-    }
-    return row.blocking_work !== 0
-  }
-)
-
-const loadTaskWork = Effect.fn("SessionLifecycleEvents.loadTaskWork")(function* (
-  sql: SqlClient.SqlClient,
-  target:
-    | { readonly kind: "session"; readonly id: string }
-    | {
-        readonly kind: "item"
-        readonly id: string
-      }
-): Effect.fn.Return<TaskWorkChangedEvent | undefined, SessionLifecycleEventError> {
-  const targetPredicate =
-    target.kind === "session"
-      ? sql`run.session_id = ${target.id}`
-      : // Named on the run as well as on the Task: only then can SQLite reach the
-        // run through idx_chat_runs_task_item instead of reading every run.
-        sql`task.item_id = ${target.id}
-          AND json_extract(run.metadata_json, '$.run_context.task.item_id') = ${target.id}`
-  const rows = yield* sql<TaskWorkRow>`
-    SELECT task.space_id, task.item_id, task.text AS task_name,
-      task.status AS task_status,
-      run.session_id, run.run_id, run.status AS run_status,
-      run.started_at, run.ended_at
-    FROM chat_runs AS run
-    JOIN space_tasks AS task
-      ON task.item_id = json_extract(run.metadata_json, '$.run_context.task.item_id')
-    WHERE ${targetPredicate}
-    ORDER BY run.updated_at DESC, run.started_at DESC, run.run_id DESC
-    LIMIT 1
-  `.pipe(
-    Effect.mapError((cause) => lifecycleError("append", "Could not read Task live work", cause))
-  )
-  const row = rows[0]
-  if (row === undefined) return undefined
-  const common = {
-    type: "task_work_changed" as const,
-    space: taskSpace(row.space_id),
-    item_id: row.item_id,
-    task_name: row.task_name,
-    run_session_id: row.session_id,
-    chat_run_id: row.run_id,
-    started_at: row.started_at
-  }
-  const phase = isActiveRunStatus(row.run_status) ? row.run_status : undefined
-  const candidate =
-    phase !== undefined
-      ? {
-          ...common,
-          state: "running" as const,
-          phase,
-          ended_at: null,
-          outcome: null
-        }
-      : {
-          ...common,
-          state: "ended" as const,
-          phase: "ended" as const,
-          ended_at: row.ended_at,
-          outcome: endedTaskWorkOutcome(row)
-        }
-  return yield* Schema.decodeUnknownEffect(TaskWorkChangedEventSchema)(candidate).pipe(
-    Effect.mapError((cause) => lifecycleError("append", "Stored Task live work is corrupt", cause))
-  )
-})
-
-const endedTaskWorkOutcome = (
-  row: Pick<TaskWorkRow, "task_status" | "run_status">
-): "finished" | "failed" | "stopped" => {
-  if (row.task_status === "done") return "finished"
-  if (row.task_status !== "open" || row.run_status === "cancelled") return "stopped"
-  return row.run_status === "completed" ? "finished" : "failed"
-}
-
-const LifecycleRecordSchema = Schema.Union([AutomationEventSchema, InternalLifecycleEventSchema])
+import { makeSessionPruning } from "./session-history-pruning.js"
+import {
+  LifecycleRecordSchema,
+  journalEvent,
+  loadTaskWork,
+  makeLifecycleAppends
+} from "./lifecycle-appends.js"
 
 const decodeRecord = Effect.fn("SessionLifecycleEvents.decodeRecord")(function* (
   record: JournalRecord
@@ -176,23 +61,6 @@ const decodeRecord = Effect.fn("SessionLifecycleEvents.decodeRecord")(function* 
   }
   return event
 })
-
-const encodeLifecycleEvent = Schema.encodeEffect(Schema.toCodecJson(LifecycleRecordSchema))
-
-const journalEvent = (
-  event: AutomationEvent | InternalLifecycleEvent,
-  options: { readonly live?: true } = {}
-) =>
-  encodeLifecycleEvent(event).pipe(
-    Effect.map((data) => ({
-      type: event.type,
-      data,
-      ...(options.live === true ? { durable: false } : {})
-    })),
-    Effect.mapError((cause) =>
-      lifecycleError("append", "Session lifecycle event cannot be encoded", cause)
-    )
-  )
 
 interface FeedEventMessages {
   readonly invalid: string
@@ -325,37 +193,6 @@ const taskWorkItemId = (event: LifecycleFeedEvent): string | null => {
   }
 }
 
-const SNAPSHOT_DELETE_BATCH = 500
-
-const SNAPSHOT_EVENT_TYPES = "('session_created', 'session_activity')"
-
-const snapshotSessionOf = (sql: SqlClient.SqlClient, table: string) =>
-  sql.literal(`json_extract(${table}.data_json, '$.session.session_id')`)
-
-interface SessionHistoryBoundary {
-  readonly sessionId: string
-  readonly retainedSequence: number
-}
-
-interface SnapshotScanRow {
-  readonly sequence: number
-  readonly session_id: string | null
-}
-
-const foldSnapshotPage = (
-  latest: Map<string, number>,
-  superseded: Array<number>,
-  page: ReadonlyArray<SnapshotScanRow>,
-  readThrough: number
-): void => {
-  for (const row of page) {
-    if (row.session_id === null) continue
-    const previous = latest.get(row.session_id)
-    if (previous !== undefined && previous <= readThrough) superseded.push(previous)
-    latest.set(row.session_id, row.sequence)
-  }
-}
-
 export const makeSessionLifecycleEvents = ({
   writer,
   journal,
@@ -364,74 +201,8 @@ export const makeSessionLifecycleEvents = ({
   readonly journal: JournalRuntime
 }): SessionLifecycleEvents["Service"] => {
   const sql = writer.sql
-  const afterCommit = Effect.fn("SessionLifecycleEvents.afterCommit")(function* (
-    committed: JournalAppendResult
-  ) {
-    const unit = yield* UnitOfWork
-    yield* unit.afterCommit(journal.notify(committed))
-  })
-  const appendInTransaction = Effect.fn("SessionLifecycleEvents.appendInTransaction")(function* (
-    type: SessionLifecycleEventType,
-    sessionId: string
-  ): Effect.fn.Return<JournalAppendResult, SessionLifecycleEventError, UnitOfWork> {
-    const valid = yield* Schema.decodeUnknownEffect(
-      Schema.Struct({
-        type: Schema.Literals(["session_created", "session_activity"] as const),
-        sessionId: Schema.NonEmptyString
-      })
-    )({ type, sessionId }).pipe(
-      Effect.mapError((cause) => lifecycleError("append", "Invalid Session lifecycle event", cause))
-    )
-    const archived = yield* archivedChatAppend(sql, valid.sessionId)
-    if (archived !== null) return archived
-    const session = yield* loadSessionSnapshot(sql, valid.sessionId)
-    const lifecycleEvent = yield* journalEvent({ type: valid.type, session })
-    const taskWork =
-      valid.type === "session_activity"
-        ? yield* loadTaskWork(sql, { kind: "session", id: valid.sessionId })
-        : undefined
-    return yield* appendJournalInTransaction(
-      sql,
-      SESSION_LIFECYCLE_STREAM_ID,
-      taskWork === undefined ? [lifecycleEvent] : [lifecycleEvent, yield* journalEvent(taskWork)]
-    ).pipe(
-      Effect.mapError((cause) =>
-        lifecycleError("append", "Could not append the Session lifecycle event", cause)
-      ),
-      Effect.tap(afterCommit),
-      Effect.tap(() =>
-        Effect.flatMap(Effect.all([touchedThrough(sql), UnitOfWork]), ([through, unit]) =>
-          unit.markTold(toldKey.session(sessionId), through)
-        )
-      )
-    )
-  })
-
-  const appendBlockingWorkInTransaction = Effect.fn(
-    "SessionLifecycleEvents.appendBlockingWorkInTransaction"
-  )(function* (
-    sessionId: string
-  ): Effect.fn.Return<JournalAppendResult, SessionLifecycleEventError, UnitOfWork> {
-    const validSessionId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(sessionId).pipe(
-      Effect.mapError((cause) =>
-        lifecycleError("append", "Invalid Session blocking-work event", cause)
-      )
-    )
-    const blockingWork = yield* loadSessionBlockingWork(sql, validSessionId)
-    return yield* appendJournalInTransaction(sql, SESSION_LIFECYCLE_STREAM_ID, [
-      yield* journalEvent({
-        type: "session_blocking_work",
-        session_id: validSessionId,
-        blocking_work: blockingWork
-      })
-    ]).pipe(
-      Effect.mapError((cause) =>
-        lifecycleError("append", "Could not append the Session blocking-work event", cause)
-      ),
-      Effect.tap(afterCommit)
-    )
-  })
-
+  const { afterCommit, appendInTransaction, appendBlockingWorkInTransaction } =
+    makeLifecycleAppends({ sql, journal })
   const decodeEvent = Effect.fn("SessionLifecycleEvents.decodeEvent")(function* (
     event: LifecycleFeedEvent
   ): Effect.fn.Return<LifecycleFeedEvent, SessionLifecycleEventError> {
@@ -444,7 +215,6 @@ export const makeSessionLifecycleEvents = ({
   const appendValidEventInTransaction = Effect.fn(
     "SessionLifecycleEvents.appendValidEventInTransaction"
   )(function* (valid: LifecycleFeedEvent) {
-    // A live-only event has no task work beside it, so no stored record follows it.
     const feedEvent = yield* journalEvent(valid, feedEventSpecs[valid.type])
     const itemId = taskWorkItemId(valid)
     const taskWork =
@@ -482,129 +252,7 @@ export const makeSessionLifecycleEvents = ({
       )
   })
 
-  const pruneSessionHistory = Effect.fn("SessionLifecycleEvents.pruneSessionHistory")(
-    function* (entries: ReadonlyArray<SessionHistoryBoundary>) {
-      const valid = yield* Schema.decodeUnknownEffect(
-        Schema.Array(
-          Schema.Struct({
-            sessionId: Schema.NonEmptyString,
-            retainedSequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
-          })
-        )
-      )(entries).pipe(
-        Effect.mapError((cause) =>
-          lifecycleError("prune", "Invalid Session lifecycle retention boundary", cause)
-        )
-      )
-      if (valid.length === 0) return 0
-      const boundary = new Map<string, number>()
-      for (const entry of valid) boundary.set(entry.sessionId, entry.retainedSequence)
-      const bounds = yield* writer.run(
-        sql<{ readonly first: number | null; readonly head: number | null }>`
-          SELECT
-            (SELECT MIN(sequence) FROM ${journalRecordsSql(sql)}
-             WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID}) AS first,
-            ${journalHeadSequenceSql(sql, SESSION_LIFECYCLE_STREAM_ID)} AS head
-        `
-      )
-      const first = bounds[0]?.first ?? null
-      const head = bounds[0]?.head ?? null
-      if (first === null || head === null) return 0
-      const types = sql.literal(SNAPSHOT_EVENT_TYPES)
-      const sequences = new Map<string, Array<number>>()
-      yield* scanJournalWindows<SnapshotScanRow, never>({
-        sql,
-        read: writer.run,
-        streamId: SESSION_LIFECYCLE_STREAM_ID,
-        afterSequence: first - 1,
-        throughSequence: head,
-        columns: sql`sequence, ${snapshotSessionOf(sql, "journal_records")} AS session_id`,
-        where: sql`event_type IN ${types}
-          AND ${snapshotSessionOf(sql, "journal_records")} IN ${sql.in([...boundary.keys()])}`,
-        onPage: (page) =>
-          Effect.sync(() => {
-            for (const row of page) {
-              if (row.session_id === null) continue
-              const list = sequences.get(row.session_id)
-              if (list === undefined) sequences.set(row.session_id, [row.sequence])
-              else list.push(row.sequence)
-            }
-          })
-      })
-      const doomed: Array<number> = []
-      for (const [sessionId, list] of sequences) {
-        const newest = list[list.length - 1]
-        const retained = boundary.get(sessionId)
-        if (newest === undefined || retained === undefined) continue
-        const below = Math.min(newest, retained)
-        for (const sequence of list) if (sequence < below) doomed.push(sequence)
-      }
-      return yield* deleteJournalSequences({
-        writer,
-        streamId: SESSION_LIFECYCLE_STREAM_ID,
-        beforeSequence: head + 1,
-        sequences: doomed,
-        batchSize: SNAPSHOT_DELETE_BATCH,
-        where: sql`event_type IN ${types}`
-      })
-    },
-    Effect.mapError((cause) =>
-      cause instanceof SessionLifecycleEventError
-        ? cause
-        : lifecycleError("prune", "Could not prune prior Session lifecycle snapshots", cause)
-    )
-  )
-
-  const pruneSupersededSnapshots = Effect.fn("SessionLifecycleEvents.pruneSupersededSnapshots")(
-    function* () {
-      const cursor = yield* writer.run(
-        sql<{ readonly after_sequence: number }>`
-          SELECT after_sequence FROM automation_trigger_cursor
-          WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
-        `
-      )
-      const readThrough = cursor[0]?.after_sequence
-      if (readThrough === undefined) return 0
-      const types = sql.literal(SNAPSHOT_EVENT_TYPES)
-      const latest = new Map<string, number>()
-      const superseded: Array<number> = []
-      const bounds = yield* writer.run(
-        sql<{ readonly first: number | null; readonly head: number | null }>`
-          SELECT
-            (SELECT MIN(sequence) FROM ${journalRecordsSql(sql)}
-             WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID}) AS first,
-            ${journalHeadSequenceSql(sql, SESSION_LIFECYCLE_STREAM_ID)} AS head
-        `
-      )
-      const first = bounds[0]?.first ?? null
-      const head = bounds[0]?.head ?? null
-      if (first === null || head === null) return 0
-      yield* scanJournalWindows<SnapshotScanRow, never>({
-        sql,
-        read: writer.run,
-        streamId: SESSION_LIFECYCLE_STREAM_ID,
-        afterSequence: first - 1,
-        throughSequence: head,
-        columns: sql`sequence, ${snapshotSessionOf(sql, "journal_records")} AS session_id`,
-        where: sql`event_type IN ${types}`,
-        onPage: (page) => Effect.sync(() => foldSnapshotPage(latest, superseded, page, readThrough))
-      })
-      return yield* deleteJournalSequences({
-        writer,
-        streamId: SESSION_LIFECYCLE_STREAM_ID,
-        beforeSequence: readThrough + 1,
-        sequences: superseded,
-        batchSize: SNAPSHOT_DELETE_BATCH,
-        where: sql`event_type IN ${types}`
-      })
-    },
-    Effect.mapError((cause) =>
-      cause instanceof SessionLifecycleEventError
-        ? cause
-        : lifecycleError("prune", "Could not prune superseded Session snapshots", cause)
-    )
-  )
-
+  const { pruneSessionHistory, pruneSupersededSnapshots } = makeSessionPruning(writer)
   const open = Effect.fn("SessionLifecycleEvents.open")(function* (
     afterSequence?: number
   ): Effect.fn.Return<OpenSessionLifecycleEvents, SessionLifecycleEventError, Scope.Scope> {

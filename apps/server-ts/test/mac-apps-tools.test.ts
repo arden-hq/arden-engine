@@ -111,7 +111,6 @@ const context = () => ({
 const run = (name: string, args: Record<string, unknown>) =>
   tool(name).execute(args, { ...context(), approval: { approved: true, feedback: null } })
 
-/** The card the owner sees before the change runs. */
 const card = async (name: string, args: Record<string, unknown>) => {
   const pause = await tool(name)
     .execute(args, context(), { decision: "ask" })
@@ -287,7 +286,6 @@ describe("Mac app tools: faults and availability", () => {
         end: "2026-11-18T11:00"
       })
     ).rejects.toMatchObject({ message: "end must not be before start.", retryable: false })
-    // A card that cannot name its event is never shown.
     await expect(card("mac_calendar_delete_event", { event_ref: "gone" })).rejects.toMatchObject({
       preview: "Not found"
     })

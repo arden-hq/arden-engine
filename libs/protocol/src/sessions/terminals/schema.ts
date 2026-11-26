@@ -1,6 +1,8 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import { IsoDateTimeStringSchema, withExtras } from "../../common/schema.js"
 import {
+  TERMINAL_ACCESS,
+  TERMINAL_INPUT_STATUS,
   TERMINAL_STATE,
   type SessionTerminal,
   type SessionTerminalsResponse,
@@ -9,14 +11,14 @@ import {
   type TerminalOutputResponse
 } from "./contracts.js"
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 
 const terminalFields = {
   id: Schema.Int,
   tool_call_id: Schema.String,
   command: Schema.String,
   cwd: Schema.String,
-  access: Schema.Literals(["sandbox", "network", "host"] as const),
+  access: Schema.Literals(Object.values(TERMINAL_ACCESS)),
   tty: Schema.Boolean,
   started_at: IsoDateTimeStringSchema,
   cursor: Schema.Int
@@ -50,7 +52,7 @@ export const TerminalInputRequestSchema = Schema.Struct({
 })
 
 export const TerminalInputResponseSchema: Schema.Codec<TerminalInputResponse> = withExtras({
-  status: Schema.Literals(["sent", "stdin_closed", "exited"] as const)
+  status: Schema.Literals(Object.values(TERMINAL_INPUT_STATUS))
 })
 
 export const TerminalActionResponseSchema: Schema.Codec<TerminalActionResponse> = withExtras({

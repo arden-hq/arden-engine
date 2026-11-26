@@ -1,18 +1,18 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
 
-import { MCP_SIGN_IN_PROMPT } from "@arden-hq/protocol/mcp"
+import { MCP_CONNECTION_STATUS, MCP_SIGN_IN_PROMPT } from "@arden-hq/protocol/mcp"
 import type { McpToolBinding } from "./catalog.js"
 import { mcpError } from "./errors.js"
-import type { RuntimeEntry } from "./runtime.js"
+import type { RuntimeEntry } from "./runtime-state.js"
 
 export const resolveMcpCall = (
   current: Pick<RuntimeEntry, "status" | "client" | "tools"> | undefined,
   input: { readonly serverName: string; readonly remoteName: string; readonly contract: string }
 ): { readonly client: Client; readonly binding: McpToolBinding } => {
-  if (current?.status === "needs_auth") {
+  if (current?.status === MCP_CONNECTION_STATUS.needsAuth) {
     throw mcpError("call", "auth_required", MCP_SIGN_IN_PROMPT)
   }
-  if (current?.status !== "connected" || current.client === undefined) {
+  if (current?.status !== MCP_CONNECTION_STATUS.connected || current.client === undefined) {
     throw mcpError("call", "unavailable", `${input.serverName} is not connected.`)
   }
   const binding = current.tools.find((tool) => tool.remoteName === input.remoteName)

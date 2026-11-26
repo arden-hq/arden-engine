@@ -26,11 +26,6 @@ export interface ModelRoute {
   readonly structuredOutputDialect: StructuredOutputDialect
   readonly approvalReview: ApprovalReviewSource | undefined
   readonly planLimits: PlanLimitsSource | undefined
-  /**
-   * Whether `planLimits` counts requests to this model. Every model of a
-   * route is on its plan, except a saved model server's beside ChatGPT's:
-   * the plan neither meters nor pauses them.
-   */
   readonly planMeters: (model: string) => boolean
   readonly transcription: TranscriptionSource | undefined
 }
@@ -44,7 +39,6 @@ export interface ModelRouteInput {
   readonly transcription?: TranscriptionSource | undefined
 }
 
-/** The plan reading that applies to a request to `model`, if any. */
 export const planReadingFor = (
   route: ModelRoute | undefined,
   model: string

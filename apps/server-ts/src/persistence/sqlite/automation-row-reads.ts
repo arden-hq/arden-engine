@@ -34,6 +34,7 @@ import { inArdenWords } from "../restart-notice.js"
 import { oldConditions } from "../automations/event-words.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 import {
+  DESCRIPTION_SOURCE,
   type StoreOperation,
   type AutomationRow,
   storeError,
@@ -44,7 +45,6 @@ import {
 import { JOB_PURPOSE } from "../job-classification.js"
 
 const CONTINUE_CONTEXT: AutomationContextMode = "continue"
-const DESCRIPTION_SOURCE = { manual: "manual" } as const
 
 const automationChat = (row: AutomationRow): SystemAutomationChat => {
   if (row.thread_id === null) return { kind: "none" }

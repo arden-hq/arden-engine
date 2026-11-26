@@ -1,13 +1,8 @@
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
-import {
-  createPage,
-  movePage,
-  ownerInApp,
-  updatePage,
-  type WikiCommitIdentity,
-  type WikiWrite
-} from "./commit.js"
-import type { WikiRenamePlan } from "@arden-hq/protocol/wiki"
+import { PATH_SEGMENT, type ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
+import { createPage, movePage, updatePage } from "./commit.js"
+import { type WikiWrite } from "./commit-write-types.js"
+import { ownerInApp, type WikiCommitIdentity } from "./origin.js"
+import { WIKI_PAGE_LIFECYCLE, type WikiRenamePlan } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
@@ -31,7 +26,6 @@ import {
   type Snapshot
 } from "./snapshot.js"
 
-/** Who renames when the owner renames a page in the app. */
 export const OWNER_RENAME: WikiCommitIdentity = ownerInApp("rename wiki page", "desktop.rename")
 
 interface WikiRenameInput {
@@ -39,18 +33,13 @@ interface WikiRenameInput {
   readonly newPath: string
   readonly newTitle: string
   readonly expectedVersion: string
-  /** The head the plan is made from and the rename is guarded by: any change to Memory since
-   *  refuses the rename. */
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
   readonly commit: WikiCommitIdentity
 }
 
 export interface WikiRenameMethods {
-  /** The pages and links a rename would change, refused by every rule its commit would meet;
-   *  saves nothing. */
   readonly planRename: (input: WikiRenameInput) => Effect.Effect<WikiRenamePlan, WikiError>
-  /** Saves that plan as one commit. */
   readonly rename: (input: WikiRenameInput) => Effect.Effect<WikiRenamePlan, WikiError>
 }
 
@@ -58,7 +47,7 @@ const linkTarget = (path: string, keepExtension: boolean): string => {
   if (keepExtension) return path
   if (isReadme(path)) {
     const directory = posix.dirname(path)
-    return directory === "." ? posix.basename(path, ".md") : directory
+    return directory === PATH_SEGMENT.current ? posix.basename(path, ".md") : directory
   }
   return path.endsWith(".md") ? path.slice(0, -3) : path
 }
@@ -69,7 +58,7 @@ const requireRenamable = Effect.fn("WikiRename.requireRenamable")(function* (
   newPath: string
 ): Effect.fn.Return<void, WikiError> {
   const { pageId } = current.page
-  if (current.page.lifecycle !== "active") {
+  if (current.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) {
     return yield* wikiError("rename", "invalid", "Only active Memory pages can be renamed", {
       pageId
     })
@@ -101,7 +90,7 @@ const requireRenamable = Effect.fn("WikiRename.requireRenamable")(function* (
       snapshot.wholeSet.some(
         (record) =>
           record.page.pageId !== pageId &&
-          record.page.lifecycle === "active" &&
+          record.page.lifecycle === WIKI_PAGE_LIFECYCLE.active &&
           record.resource.path.startsWith(prefix)
       )
     ) {
@@ -131,7 +120,7 @@ const renamePlan = Effect.fn("WikiRename.plan")(function* (
   let pageCount = 0
 
   for (const record of pages) {
-    if (record.page.lifecycle !== "active") continue
+    if (record.page.lifecycle !== WIKI_PAGE_LIFECYCLE.active) continue
     const replacements = new Map()
     for (const token of pageWikiLinks(record)) {
       if (

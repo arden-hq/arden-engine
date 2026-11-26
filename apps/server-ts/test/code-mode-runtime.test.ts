@@ -206,7 +206,7 @@ it("keeps branch names through a replay without changing any call id", async () 
 })
 
 it("retains phase occurrences and exact child attempts despite duplicate agent labels", async () => {
-  const progress: import("../src/workflows/runtime/script-runtime.js").ScriptProgress[] = []
+  const progress: import("../src/workflows/runtime/script-outcome.js").ScriptProgress[] = []
   const outcome = await executeScript({
     code: `phase("Review"); await agent("first", { label: "Reviewer" });
       phase("Review"); await agent("second", { label: "Reviewer" });

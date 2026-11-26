@@ -1,11 +1,15 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { Metadata } from "../../contracts/messages.js"
-import type {
-  ModelProvider,
-  ModelProviderSession,
-  ModelStreamItem,
-  CompletionResponse,
-  ModelProviderRequest
+import {
+  DELIVERY_MODE,
+  isCompletionResponse,
+  STEERING_MODE,
+  type ModelCapabilities,
+  type ModelProvider,
+  type ModelProviderSession,
+  type ModelStreamItem,
+  type CompletionResponse,
+  type ModelProviderRequest
 } from "../../contracts/provider.js"
 import {
   raceAbort,
@@ -18,17 +22,35 @@ import {
 } from "../kit/index.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { abortAfter, every } from "@arden-hq/std/timer"
-import { OpenAiResponsesProviderError } from "./errors.js"
-import { asRecord, type RawResponseEvent } from "./items.js"
+import { isResponseErrorCode, OpenAiResponsesProviderError, RESPONSE_ERROR_CODE } from "./errors.js"
+import {
+  asRecord,
+  INCOMPLETE_REASON,
+  incompleteReason,
+  RESPONSE_EVENT_TYPE,
+  RESPONSE_ITEM_TYPE,
+  type RawResponseEvent
+} from "./items.js"
 import { makePayload, responsesRoute } from "./request.js"
 import { makeEventMapper, responseCode, responseFailureMessage } from "./response.js"
 import {
+  continuationInput,
   incrementalInput,
   responseContinuation,
   type ResponseContinuation
 } from "./continuation.js"
 
-/** Hosts supply the platform socket and authentication headers; Loop owns the protocol. */
+const RESPONSES_TRANSPORT = { sse: "sse", websocket: "websocket" } as const
+export type ResponsesTransport = (typeof RESPONSES_TRANSPORT)[keyof typeof RESPONSES_TRANSPORT]
+
+const NEXT_REQUEST = { create: "create", automatic: "automatic", required: "required" } as const
+type NextRequest = (typeof NEXT_REQUEST)[keyof typeof NEXT_REQUEST]
+
+const STEER = { submitted: "submitted", accepted: "accepted" } as const
+
+const isPortable = (capabilities: ModelCapabilities): boolean =>
+  capabilities.steering !== STEERING_MODE.native && capabilities.asyncTools !== DELIVERY_MODE.native
+
 export interface ResponsesWebSocket {
   readonly isClosed: () => boolean
   readonly events: AsyncIterable<unknown>
@@ -53,7 +75,7 @@ export const openResponsesSession = (options: {
   readonly maxAttempts: number
   readonly idleTimeoutMs: number
   readonly capabilities: NonNullable<ModelProvider["capabilities"]>
-  readonly transport: (model: string) => "sse" | "websocket"
+  readonly transport: (model: string) => ResponsesTransport
   readonly cacheScopeHeader?: string
   readonly fallback: ModelProvider["stream"]
 }): ModelProviderSession => {
@@ -62,13 +84,13 @@ export const openResponsesSession = (options: {
     | { readonly socket: ResponsesWebSocket; readonly events: AsyncIterator<unknown> }
     | undefined
   let saved: RawResponseEvent | undefined
-  let next: "create" | "automatic" | "required" = "create"
+  let next: NextRequest = NEXT_REQUEST.create
   let responseId: string | undefined
   let priorInput: ReadonlyArray<Metadata> = []
   let steeredInput: ReadonlyArray<Metadata> = []
   let pending:
-    | { readonly kind: "submitted"; readonly target: string }
-    | { readonly kind: "accepted"; readonly target: string; readonly id: string }
+    | { readonly kind: typeof STEER.submitted; readonly target: string }
+    | { readonly kind: typeof STEER.accepted; readonly target: string; readonly id: string }
     | undefined
   let route: { readonly model: string; readonly cacheScope: string | undefined } | undefined
   let previous: ResponseContinuation | undefined
@@ -79,7 +101,7 @@ export const openResponsesSession = (options: {
     connection = undefined
     saved = undefined
     pending = undefined
-    next = "create"
+    next = NEXT_REQUEST.create
     responseId = undefined
     priorInput = []
     steeredInput = []
@@ -97,12 +119,7 @@ export const openResponsesSession = (options: {
       (route.model !== request.model || route.cacheScope !== request.cacheScope)
     )
       close()
-    if (
-      capabilities.steering !== "native" &&
-      capabilities.asyncTools !== "native" &&
-      connection?.socket.isClosed()
-    )
-      close()
+    if (isPortable(capabilities) && connection?.socket.isClosed()) close()
     route = { model: request.model, cacheScope: request.cacheScope }
     const signal = AbortSignal.any([
       lifetime.signal,
@@ -119,14 +136,15 @@ export const openResponsesSession = (options: {
       responsesRoute(capabilities)
     )
     const delta =
-      capabilities.steering === "native" || previous === undefined
+      capabilities.steering === STEERING_MODE.native || previous === undefined
         ? undefined
         : incrementalInput(payload, previous)
     const additionalInput = continuationInput(payload.input, priorInput, steeredInput)
-    const automatic = next === "automatic"
+    const automatic = next === NEXT_REQUEST.automatic
     const carry = automatic ? additionalInput.filter((item) => item.role === ROLE.user) : []
     const deferredOutputs =
-      automatic && additionalInput.some((item) => item.type === "function_call_output")
+      automatic &&
+      additionalInput.some((item) => item.type === RESPONSE_ITEM_TYPE.functionCallOutput)
     const onAbort = () => connection?.socket.close()
     signal.addEventListener("abort", onAbort, { once: true })
     let polling = false
@@ -145,7 +163,7 @@ export const openResponsesSession = (options: {
     let pollWork = Promise.resolve()
     const poll = () => {
       if (
-        capabilities.steering !== "native" ||
+        capabilities.steering !== STEERING_MODE.native ||
         !generating ||
         polling ||
         pending !== undefined ||
@@ -159,7 +177,7 @@ export const openResponsesSession = (options: {
         const messages = (await request.steering?.take()) ?? []
         if (messages.length === 0 || signal.aborted) return
         if (target === undefined) return
-        pending = { kind: "submitted", target }
+        pending = { kind: STEER.submitted, target }
         const input = makePayload(
           { ...request, messages, tools: [], deferredTools: [] },
           options.modelPrefix,
@@ -201,11 +219,11 @@ export const openResponsesSession = (options: {
     }
     try {
       connection ??= await connect()
-      if (next !== "automatic") {
+      if (next !== NEXT_REQUEST.automatic) {
         const { stream: _, ...body } = payload
-        if (next === "required" && responseId !== undefined) {
+        if (next === NEXT_REQUEST.required && responseId !== undefined) {
           const input = additionalInput
-          if (!input.some((item) => item.type === "function_call_output"))
+          if (!input.some((item) => item.type === RESPONSE_ITEM_TYPE.functionCallOutput))
             throw new OpenAiResponsesProviderError("Steering continuation requires tool output")
           connection.socket.send({
             type: "response.create",
@@ -225,7 +243,7 @@ export const openResponsesSession = (options: {
                 })
           })
       }
-      next = "create"
+      next = NEXT_REQUEST.create
       priorInput = payload.input
       while (true) {
         if (pollFailure !== undefined) throw pollFailure.cause
@@ -253,13 +271,12 @@ export const openResponsesSession = (options: {
         const event = asRecord(read.value)
         if (event === null || typeof event.type !== "string")
           throw new OpenAiResponsesProviderError("Invalid OpenAI WebSocket event")
-        if (event.type.startsWith("response.") && event.type !== "response.created")
+        if (event.type.startsWith("response.") && event.type !== RESPONSE_EVENT_TYPE.created)
           progressed = true
         if (
-          event.type === "error" &&
-          responseCode(event) === "native_turn_context_mismatch" &&
-          capabilities.steering !== "native" &&
-          capabilities.asyncTools !== "native" &&
+          event.type === RESPONSE_EVENT_TYPE.error &&
+          responseCode(event) === RESPONSE_ERROR_CODE.nativeTurnContextMismatch &&
+          isPortable(capabilities) &&
           !automatic &&
           !progressed &&
           !recoveredRejections.has("context")
@@ -280,8 +297,8 @@ export const openResponsesSession = (options: {
           continue
         }
         if (
-          event.type === "error" &&
-          responseCode(event) === "previous_response_not_found" &&
+          event.type === RESPONSE_EVENT_TYPE.error &&
+          responseCode(event) === RESPONSE_ERROR_CODE.previousResponseNotFound &&
           delta !== undefined &&
           !progressed &&
           !recoveredRejections.has("missing")
@@ -292,17 +309,12 @@ export const openResponsesSession = (options: {
           connection.socket.send({ type: "response.create", ...body })
           continue
         }
-        if (
-          event.type === "error" &&
-          ["native_turn_context_mismatch", "previous_response_not_found"].includes(
-            responseCode(event) ?? ""
-          )
-        )
+        if (event.type === RESPONSE_EVENT_TYPE.error && isResponseErrorCode(responseCode(event)))
           throw new OpenAiResponsesProviderError(responseFailureMessage(event))
-        if (event.type === "response.created") {
+        if (event.type === RESPONSE_EVENT_TYPE.created) {
           if (terminal !== undefined) {
             saved = event
-            next = "automatic"
+            next = NEXT_REQUEST.automatic
             yield { ...terminal, continuation: true }
             return
           }
@@ -310,13 +322,13 @@ export const openResponsesSession = (options: {
           if (typeof response?.id !== "string")
             throw new OpenAiResponsesProviderError("Missing OpenAI response identity")
           responseId = response.id
-          if (automatic || pending?.kind === "accepted") {
+          if (automatic || pending?.kind === STEER.accepted) {
             pending = undefined
             steeredInput = []
           }
           generating = true
           if (carry.length > 0) {
-            pending = { kind: "submitted", target: responseId }
+            pending = { kind: STEER.submitted, target: responseId }
             steeredInput = carry
             connection.socket.send({
               type: "response.steer",
@@ -325,7 +337,7 @@ export const openResponsesSession = (options: {
             })
           } else poll()
         }
-        if (event.type === "response.steer.accepted") {
+        if (event.type === RESPONSE_EVENT_TYPE.steerAccepted) {
           const steer = asRecord(event.steer)
           if (
             pending === undefined ||
@@ -334,10 +346,10 @@ export const openResponsesSession = (options: {
           ) {
             throw new OpenAiResponsesProviderError("Unexpected steering acknowledgement")
           }
-          pending = { kind: "accepted", target: pending.target, id: steer.id }
+          pending = { kind: STEER.accepted, target: pending.target, id: steer.id }
           continue
         }
-        if (event.type === "response.steer.failed") {
+        if (event.type === RESPONSE_EVENT_TYPE.steerFailed) {
           pending = undefined
           failedSteer = true
           if (terminal !== undefined) {
@@ -346,40 +358,41 @@ export const openResponsesSession = (options: {
           }
           continue
         }
-        if (event.type === "response.steer.pending") {
+        if (event.type === RESPONSE_EVENT_TYPE.steerPending) {
           if (terminal === undefined)
             throw new OpenAiResponsesProviderError("Steering pending without a completed response")
-          next = "required"
+          next = NEXT_REQUEST.required
           yield { ...terminal, continuation: true }
           return
         }
         const isTerminal =
-          event.type === "response.completed" || event.type === "response.incomplete"
+          event.type === RESPONSE_EVENT_TYPE.completed ||
+          event.type === RESPONSE_EVENT_TYPE.incomplete
         if (isTerminal) {
           generating = false
           await pollWork
           terminalRaw = event
         }
-        const details = asRecord(asRecord(event.response)?.incomplete_details)
+        const steered = incompleteReason(event) === INCOMPLETE_REASON.steered
         const mapped =
-          event.type === "response.incomplete" && details?.reason === "steered"
-            ? map({ ...event, type: "response.completed" })
+          event.type === RESPONSE_EVENT_TYPE.incomplete && steered
+            ? map({ ...event, type: RESPONSE_EVENT_TYPE.completed })
             : map(event)
         for (const item of mapped) {
-          if (item._tag === "Completed") terminal = item
+          if (isCompletionResponse(item)) terminal = item
           else {
             yield item
           }
         }
         if (terminal !== undefined && pending === undefined) {
-          if (terminalRaw?.type === "response.incomplete" && details?.reason === "steered") {
+          if (terminalRaw?.type === RESPONSE_EVENT_TYPE.incomplete && steered) {
             throw new OpenAiResponsesProviderError("Steered response has no tracked steering input")
           }
           const completedId = asRecord(terminalRaw?.response)?.id
           previous =
-            terminalRaw?.type === "response.completed" &&
+            terminalRaw?.type === RESPONSE_EVENT_TYPE.completed &&
             typeof completedId === "string" &&
-            capabilities.steering !== "native"
+            capabilities.steering !== STEERING_MODE.native
               ? responseContinuation({
                   payload,
                   message: terminal.message,
@@ -411,7 +424,7 @@ export const openResponsesSession = (options: {
       close()
     },
     stream: async function* (request): AsyncGenerator<ModelStreamItem> {
-      if (options.transport(request.model) !== "websocket" || socketUnavailable) {
+      if (options.transport(request.model) !== RESPONSES_TRANSPORT.websocket || socketUnavailable) {
         close()
         yield* await options.fallback(request)
         return
@@ -426,8 +439,8 @@ export const openResponsesSession = (options: {
       for (let attempt = 1; ; attempt++) {
         signal.throwIfAborted()
         const capabilities = await options.capabilities(request.model)
-        const boundary = next === "create" && pending === undefined
-        const portable = capabilities.steering !== "native" && capabilities.asyncTools !== "native"
+        const boundary = next === NEXT_REQUEST.create && pending === undefined
+        const portable = isPortable(capabilities)
         try {
           const refresh = forceRefresh
           forceRefresh = false
@@ -487,24 +500,4 @@ class ConnectionFailure extends Error {
   constructor(cause: unknown) {
     super("OpenAI WebSocket connection failed", { cause })
   }
-}
-
-const continuationInput = (
-  input: ReadonlyArray<Metadata>,
-  previous: ReadonlyArray<Metadata>,
-  steered: ReadonlyArray<Metadata>
-): ReadonlyArray<Metadata> => {
-  const seen = new Map<string, number>()
-  for (const item of [...previous, ...steered]) {
-    const key = JSON.stringify(item)
-    seen.set(key, (seen.get(key) ?? 0) + 1)
-  }
-  return input.filter((item) => {
-    if (item.role !== ROLE.user && item.type !== "function_call_output") return false
-    const key = JSON.stringify(item)
-    const count = seen.get(key) ?? 0
-    if (count === 0) return true
-    seen.set(key, count - 1)
-    return false
-  })
 }

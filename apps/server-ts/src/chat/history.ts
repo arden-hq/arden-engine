@@ -73,10 +73,6 @@ interface ContextBudgetInput {
 
 type ContextBudget = HistoryResponse["context_budget"]
 
-/** A Chat's history as its rows give it, before the context budget, which
- * comes from model settings on the writer rather than from the Chat. Every
- * statement of `read` runs on a reader, so a snapshot transaction holds it
- * to one commit. */
 export interface HistoryRead {
   readonly history: HistoryRows
   readonly budget: ContextBudgetInput

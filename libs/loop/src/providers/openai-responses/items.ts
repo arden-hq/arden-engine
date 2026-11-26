@@ -1,43 +1,101 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { SemanticResponseError } from "../kit/index.js"
 import { isRecord } from "@arden-hq/std/json"
+import { isAssistantTextPhase, type AssistantTextPhase } from "../../contracts/messages.js"
 
-type ItemStatus = "in_progress" | "completed" | "incomplete"
-type MessagePhase = "commentary" | "final_answer"
+export const RESPONSE_ITEM_TYPE = {
+  message: "message",
+  reasoning: "reasoning",
+  functionCall: "function_call",
+  functionCallOutput: "function_call_output",
+  webSearchCall: "web_search_call",
+  toolSearchCall: "tool_search_call",
+  toolSearchOutput: "tool_search_output"
+} as const
+
+export const ITEM_STATUS = {
+  inProgress: "in_progress",
+  completed: "completed",
+  incomplete: "incomplete"
+} as const
+type ItemStatus = (typeof ITEM_STATUS)[keyof typeof ITEM_STATUS]
+
+export const RESPONSE_PART_TYPE = {
+  outputText: "output_text",
+  refusal: "refusal",
+  summaryText: "summary_text",
+  reasoningText: "reasoning_text"
+} as const
+
+export const TOOL_SEARCH_EXECUTION = { server: "server", client: "client" } as const
+
+export const RESPONSE_EVENT_TYPE = {
+  created: "response.created",
+  outputTextDelta: "response.output_text.delta",
+  refusalDelta: "response.refusal.delta",
+  reasoningSummaryTextDelta: "response.reasoning_summary_text.delta",
+  reasoningTextDelta: "response.reasoning_text.delta",
+  outputItemAdded: "response.output_item.added",
+  outputItemDone: "response.output_item.done",
+  functionCallArgumentsDelta: "response.function_call_arguments.delta",
+  functionCallArgumentsDone: "response.function_call_arguments.done",
+  completed: "response.completed",
+  incomplete: "response.incomplete",
+  failed: "response.failed",
+  done: "response.done",
+  steerAccepted: "response.steer.accepted",
+  steerFailed: "response.steer.failed",
+  steerPending: "response.steer.pending",
+  error: "error"
+} as const
+type ResponseEventType = (typeof RESPONSE_EVENT_TYPE)[keyof typeof RESPONSE_EVENT_TYPE]
+const RESPONSE_EVENT_TYPES: ReadonlySet<unknown> = new Set(Object.values(RESPONSE_EVENT_TYPE))
+export const isResponseEventType = (value: unknown): value is ResponseEventType =>
+  RESPONSE_EVENT_TYPES.has(value)
+
+export const INCOMPLETE_REASON = {
+  maxOutputTokens: "max_output_tokens",
+  contentFilter: "content_filter",
+  steered: "steered"
+} as const
+type IncompleteReason = (typeof INCOMPLETE_REASON)[keyof typeof INCOMPLETE_REASON]
+const INCOMPLETE_REASONS: ReadonlySet<unknown> = new Set(Object.values(INCOMPLETE_REASON))
+const isIncompleteReason = (value: unknown): value is IncompleteReason =>
+  INCOMPLETE_REASONS.has(value)
 
 interface OutputTextPart {
-  readonly type: "output_text"
+  readonly type: typeof RESPONSE_PART_TYPE.outputText
   readonly text: string
   readonly annotations: ReadonlyArray<unknown>
   readonly logprobs: ReadonlyArray<unknown>
 }
 
 interface RefusalPart {
-  readonly type: "refusal"
+  readonly type: typeof RESPONSE_PART_TYPE.refusal
   readonly refusal: string
 }
 
 interface SummaryPart {
-  readonly type: "summary_text"
+  readonly type: typeof RESPONSE_PART_TYPE.summaryText
   readonly text: string
 }
 
 interface ReasoningTextPart {
-  readonly type: "reasoning_text"
+  readonly type: typeof RESPONSE_PART_TYPE.reasoningText
   readonly text: string
 }
 
 interface MessageOutputItem {
   readonly id: string
-  readonly type: "message"
+  readonly type: typeof RESPONSE_ITEM_TYPE.message
   readonly role: typeof ROLE.assistant
   readonly content: ReadonlyArray<OutputTextPart | RefusalPart>
   readonly status: ItemStatus
-  readonly phase?: MessagePhase | null
+  readonly phase?: AssistantTextPhase | null
 }
 
 export interface ReasoningOutputItem {
-  readonly type: "reasoning"
+  readonly type: typeof RESPONSE_ITEM_TYPE.reasoning
   readonly id: string
   readonly encrypted_content?: string | null
   readonly summary: ReadonlyArray<SummaryPart>
@@ -48,19 +106,17 @@ export interface ReasoningOutputItem {
 interface FunctionCallOutputItem {
   readonly async?: boolean
   readonly id?: string
-  readonly type: "function_call"
+  readonly type: typeof RESPONSE_ITEM_TYPE.functionCall
   readonly call_id: string
   readonly name: string
-  /** Set when the called tool was loaded through tool search inside a namespace. */
   readonly namespace?: string
   readonly arguments: string
   readonly status: ItemStatus
 }
 
-/** The model asking the client to search deferred tools; the response ends here. */
 export interface ToolSearchCallOutputItem {
   readonly id: string
-  readonly type: "tool_search_call"
+  readonly type: typeof RESPONSE_ITEM_TYPE.toolSearchCall
   readonly call_id: string | null
   readonly execution: string
   readonly arguments: unknown
@@ -70,7 +126,7 @@ export interface ToolSearchCallOutputItem {
 export interface WebSearchOutputItem {
   readonly [key: string]: unknown
   readonly id: string
-  readonly type: "web_search_call"
+  readonly type: typeof RESPONSE_ITEM_TYPE.webSearchCall
   readonly status: ItemStatus
   readonly action?: Readonly<Record<string, unknown>>
 }
@@ -84,7 +140,7 @@ export type OutputItem =
 
 export interface ToolSearchCallInputItem {
   readonly [key: string]: unknown
-  readonly type: "tool_search_call"
+  readonly type: typeof RESPONSE_ITEM_TYPE.toolSearchCall
   readonly call_id: string | null
   readonly execution: string
   readonly arguments: unknown
@@ -92,7 +148,7 @@ export interface ToolSearchCallInputItem {
 
 export interface ToolSearchOutputInputItem {
   readonly [key: string]: unknown
-  readonly type: "tool_search_output"
+  readonly type: typeof RESPONSE_ITEM_TYPE.toolSearchOutput
   readonly call_id: string | null
   readonly status: string
   readonly execution: string
@@ -101,7 +157,6 @@ export interface ToolSearchOutputInputItem {
 
 export type StoredResponseItem = OutputItem | ToolSearchCallInputItem | ToolSearchOutputInputItem
 
-/** Wire-format input entries; kept structurally open like the wire itself. */
 export type InputItem = Readonly<Record<string, unknown>>
 
 export interface ResponseUsage {
@@ -111,7 +166,6 @@ export interface ResponseUsage {
     readonly cache_write_tokens: number
   }
   readonly output_tokens: number
-  /** The spend the usage reports (`reportedCost`); Codex and OpenAI report none. */
   readonly cost: number | undefined
 }
 
@@ -123,36 +177,36 @@ export interface ResponseShape {
 export type RawResponseEvent = Readonly<Record<string, unknown>>
 
 export const WEB_SEARCH_TOOL_NAME = "web_search"
-/** This provider's key in an assistant message's `provider_state`. */
 export const PROVIDER_STATE_KEY = "openai-responses"
-/** This wire's name in a message origin. */
 export const API = "openai-responses"
 
 export const asRecord = (value: unknown): Readonly<Record<string, unknown>> | null =>
   isRecord(value) ? value : null
 
+export const incompleteReason = (event: RawResponseEvent | undefined): IncompleteReason | null => {
+  const reason = asRecord(asRecord(event?.response)?.incomplete_details)?.reason
+  return isIncompleteReason(reason) ? reason : null
+}
+
 export const stringValue = (value: unknown): string | null =>
   typeof value === "string" ? value : null
 
 const itemStatus = (value: unknown): ItemStatus =>
-  value === "in_progress" || value === "incomplete" ? value : "completed"
+  value === ITEM_STATUS.inProgress || value === ITEM_STATUS.incomplete
+    ? value
+    : ITEM_STATUS.completed
 
 export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputItem => {
   const raw = asRecord(value)
   const type = raw === null ? null : stringValue(raw.type)
-  if (raw !== null && type === "message" && Array.isArray(raw.content)) {
+  if (raw !== null && type === RESPONSE_ITEM_TYPE.message && Array.isArray(raw.content)) {
     const phase = raw.phase
-    if (
-      phase !== undefined &&
-      phase !== null &&
-      phase !== "commentary" &&
-      phase !== "final_answer"
-    ) {
+    if (phase !== undefined && phase !== null && !isAssistantTextPhase(phase)) {
       throw new SemanticResponseError("OpenAI returned an invalid message phase")
     }
     const content = raw.content.map((partValue): OutputTextPart | RefusalPart => {
       const part = asRecord(partValue)
-      if (part?.type === "output_text" && typeof part.text === "string") {
+      if (part?.type === RESPONSE_PART_TYPE.outputText && typeof part.text === "string") {
         return {
           type: "output_text",
           text: part.text,
@@ -160,7 +214,7 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
           logprobs: Array.isArray(part.logprobs) ? part.logprobs : []
         }
       }
-      if (part?.type === "refusal" && typeof part.refusal === "string") {
+      if (part?.type === RESPONSE_PART_TYPE.refusal && typeof part.refusal === "string") {
         return { type: "refusal", refusal: part.refusal }
       }
       throw new SemanticResponseError("OpenAI returned invalid message content")
@@ -174,11 +228,11 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
       ...(phase === undefined ? {} : { phase })
     }
   }
-  if (raw !== null && type === "reasoning") {
+  if (raw !== null && type === RESPONSE_ITEM_TYPE.reasoning) {
     const summary = Array.isArray(raw.summary)
       ? raw.summary.map((partValue): SummaryPart => {
           const part = asRecord(partValue)
-          if (part?.type !== "summary_text" || typeof part.text !== "string") {
+          if (part?.type !== RESPONSE_PART_TYPE.summaryText || typeof part.text !== "string") {
             throw new SemanticResponseError("OpenAI returned invalid reasoning summary content")
           }
           return { type: "summary_text", text: part.text }
@@ -187,7 +241,7 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
     const content = Array.isArray(raw.content)
       ? raw.content.map((partValue): ReasoningTextPart => {
           const part = asRecord(partValue)
-          if (part?.type !== "reasoning_text" || typeof part.text !== "string") {
+          if (part?.type !== RESPONSE_PART_TYPE.reasoningText || typeof part.text !== "string") {
             throw new SemanticResponseError("OpenAI returned invalid reasoning content")
           }
           return { type: "reasoning_text", text: part.text }
@@ -206,7 +260,7 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
   }
   if (
     raw !== null &&
-    type === "function_call" &&
+    type === RESPONSE_ITEM_TYPE.functionCall &&
     typeof raw.call_id === "string" &&
     typeof raw.name === "string" &&
     typeof raw.arguments === "string"
@@ -224,7 +278,7 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
   }
   if (
     raw !== null &&
-    type === "tool_search_call" &&
+    type === RESPONSE_ITEM_TYPE.toolSearchCall &&
     typeof raw.execution === "string" &&
     (typeof raw.call_id === "string" || raw.call_id === null || raw.call_id === undefined)
   ) {
@@ -237,7 +291,7 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
       status: itemStatus(raw.status)
     }
   }
-  if (raw !== null && type === "web_search_call") {
+  if (raw !== null && type === RESPONSE_ITEM_TYPE.webSearchCall) {
     if (raw.action !== undefined && asRecord(raw.action) === null) {
       throw new SemanticResponseError("OpenAI returned an invalid web search action")
     }
@@ -258,7 +312,7 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
 }
 
 const partText = (part: OutputTextPart | RefusalPart): string =>
-  part.type === "output_text" ? part.text : part.refusal
+  part.type === RESPONSE_PART_TYPE.outputText ? part.text : part.refusal
 
 export const messageItemText = (item: MessageOutputItem): string =>
   item.content.map(partText).join("")

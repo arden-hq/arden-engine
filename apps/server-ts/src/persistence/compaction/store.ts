@@ -5,8 +5,10 @@ import type { StoredMessageEnvelope, TranscriptMessageDraft } from "../transcrip
 
 export type ContextCompactionOperation = "measure" | "snapshot" | "commit"
 
+export const CONTEXT_COMPACTION_PURPOSE = { idle: "idle" } as const
+
 export interface ContextCompactionSnapshotInput {
-  readonly purpose?: "idle"
+  readonly purpose?: typeof CONTEXT_COMPACTION_PURPOSE.idle
   readonly sessionId: string
   readonly runId?: string
 }
@@ -27,7 +29,6 @@ export interface ContextCompactionSnapshot {
   readonly modelId: string | null
   readonly reasoningEffort: string | null
   readonly messages: ReadonlyArray<StoredMessageEnvelope>
-  /** Which user messages in `messages` are the owner's own words. */
   readonly ownerWords: ReadonlySet<string>
   readonly contextVersion: string
   readonly metadata: JsonObject
@@ -35,7 +36,7 @@ export interface ContextCompactionSnapshot {
 }
 
 export interface ContextCompactionCommitInput {
-  readonly purpose?: "idle"
+  readonly purpose?: typeof CONTEXT_COMPACTION_PURPOSE.idle
   readonly sessionId: string
   readonly runId?: string
   readonly expectedContextGeneration: number

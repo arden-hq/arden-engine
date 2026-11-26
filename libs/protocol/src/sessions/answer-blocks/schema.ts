@@ -17,7 +17,6 @@ export const AnswerBlockStatesSchema: Schema.Codec<AnswerBlockStates> = withExtr
 
 export const SaveAnswerBlockInputSchema = Schema.Struct({ state: AnswerBlockValuesSchema })
 
-/** @internal Compile-time check that the schema and the type agree. */
 export type SavedAnswerBlockAgrees = Assert<
   Agrees<typeof SavedAnswerBlockSchema.Type, SavedAnswerBlock>
 >

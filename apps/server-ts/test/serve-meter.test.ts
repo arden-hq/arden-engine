@@ -53,7 +53,6 @@ it("counts every model request into the usage file and refuses past the limit, a
       costUsd: null,
       budgetExhausted: false
     })
-    // A second start on the same folder goes on counting.
     const second = meteredProvider(route(), { file, maxModelRequests: 2, toolSearch: undefined })
     await drain(second)
     await expect(drain(second)).rejects.toThrow(REQUEST_LIMIT_REACHED)
@@ -62,7 +61,6 @@ it("counts every model request into the usage file and refuses past the limit, a
       promptTokens: 14,
       budgetExhausted: true
     })
-    // Tool search is turned off only when the settings say so.
     expect((await first.capabilities?.("m"))?.toolSearch).toBe("none")
     expect((await second.capabilities?.("m"))?.toolSearch).toBe("client")
   } finally {
@@ -95,7 +93,6 @@ it("sums the cost providers report into the usage file, and says null once a req
     await drain(priced)
     await drain(priced)
     expect(await read()).toMatchObject({ modelRequests: 2, costUsd: 0.0004 + 0.0001 })
-    // A restart goes on summing; one request without a cost makes the total unknown for good.
     const mixed = meteredProvider(costing([0.0002, undefined, 0.0003]), {
       file,
       maxModelRequests: undefined,

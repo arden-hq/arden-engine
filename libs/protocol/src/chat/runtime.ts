@@ -105,36 +105,37 @@ export interface SessionRuntimeSnapshot extends JsonRecord {
   readonly latest_event_seq: number
   readonly checkpoint_seq: number
   readonly active_run: RuntimeRun
-  /**
-   * Work that still owns the Session context, by the same predicates that make
-   * the server refuse an edit or a clear. Wider than `active_run`: a stale
-   * pending run under a newer settled one, a live Workflow, or a tool still out
-   * are all invisible to `active_run` yet all block the mutation.
-   */
   readonly blocking_work: boolean
   readonly pending_approvals: ReadonlyArray<RuntimeApprovalSnapshot>
   readonly pending_connections: ReadonlyArray<RuntimeConnectionSnapshot>
 }
 
-/**
- * The Run statuses the code writes. The `chat_runs` CHECK still also allows
- * `backgrounded` and `failed` on purpose: nothing writes them (migration 0138
- * turned old `failed` rows into `error`), and dropping them from the CHECK
- * means rewriting the large table, which would break the migration time limit.
- */
-export type RuntimeRunStatus =
-  | "pending"
-  | "running"
-  | "interrupted"
-  | "error"
-  | "cancelled"
-  | "completed"
+export const RUN_STATUS = {
+  pending: "pending",
+  running: "running",
+  interrupted: "interrupted",
+  error: "error",
+  cancelled: "cancelled",
+  completed: "completed"
+} as const
 
-export type ConnectionState =
-  | "not_configured"
-  | "disabled"
-  | "auth_required"
-  | "scope_required"
-  | "degraded"
+export type RuntimeRunStatus = (typeof RUN_STATUS)[keyof typeof RUN_STATUS]
 
-export type ConnectionAction = "oauth" | "credentials" | "enable" | "settings"
+export const CONNECTION_STATE = {
+  notConfigured: "not_configured",
+  disabled: "disabled",
+  authRequired: "auth_required",
+  scopeRequired: "scope_required",
+  degraded: "degraded"
+} as const
+
+export type ConnectionState = (typeof CONNECTION_STATE)[keyof typeof CONNECTION_STATE]
+
+export const CONNECTION_ACTION = {
+  oauth: "oauth",
+  credentials: "credentials",
+  enable: "enable",
+  settings: "settings"
+} as const
+
+export type ConnectionAction = (typeof CONNECTION_ACTION)[keyof typeof CONNECTION_ACTION]

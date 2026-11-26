@@ -9,7 +9,6 @@ const decoder = new TextDecoder("utf-8", { fatal: true })
 
 export const utf8 = (text: string): Uint8Array => encoder.encode(text)
 
-/** Throws on invalid UTF-8. */
 export const fromUtf8 = (bytes: Uint8Array): string => decoder.decode(bytes)
 
 export const concat = (...parts: readonly Uint8Array[]): Uint8Array => {
@@ -56,7 +55,6 @@ export const toB64url = (bytes: Uint8Array): string => {
   return out
 }
 
-/** Strict: rejects padding, the standard alphabet's `+`/`/` and non-canonical tails. */
 export const fromB64url = (text: string): Uint8Array => {
   if (text.length % 4 === 1) throw new Error("invalid base64url")
   const out = new Uint8Array(Math.floor((text.length * 3) / 4))

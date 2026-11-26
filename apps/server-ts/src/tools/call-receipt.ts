@@ -30,7 +30,6 @@ const isNamedList = (
   resource: NamedResource | ReadonlyArray<NamedResource>
 ): resource is ReadonlyArray<NamedResource> => Array.isArray(resource)
 
-/** The link to the chat with this id, or undefined when that chat no longer exists. */
 export const chatLinkOf = async (
   sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">,
   sessionId: string,

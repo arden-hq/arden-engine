@@ -303,8 +303,6 @@ export const receipt = (
   clientId: input.clientId
 })
 
-/** One quote keeps the shape every stored row and request hash already has;
- *  several are a list. */
 function storedReply(replyTo: NonNullable<ChatSendInput["replyTo"]>) {
   const quotes = chatReplyContexts(replyTo).map((quoted) => ({
     messageId: quoted.messageId,

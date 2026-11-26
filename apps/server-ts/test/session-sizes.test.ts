@@ -50,8 +50,6 @@ const saved = (database: DatabaseSync) => ({
     .all()
 })
 
-// The Storage page reads chat sizes from numbers that triggers keep. After
-// every kind of change they must equal a fresh count of the rows.
 it("saved chat sizes equal a recount after inserts, edits, moves of messages and runs, and deletes", () => {
   const database = new DatabaseSync(":memory:")
   try {

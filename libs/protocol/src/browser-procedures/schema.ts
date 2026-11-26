@@ -1,12 +1,31 @@
 import { Schema } from "effect"
 
+export const BROWSER_PROCEDURE_STATUS = {
+  candidate: "candidate",
+  accepted: "accepted",
+  suspended: "suspended",
+  disabled: "disabled"
+} as const
+
+export type BrowserProcedureStatus =
+  (typeof BROWSER_PROCEDURE_STATUS)[keyof typeof BROWSER_PROCEDURE_STATUS]
+
+export const BROWSER_PROCEDURE_JOB_STATUS = {
+  pending: "pending",
+  running: "running",
+  failed: "failed"
+} as const
+
+export type BrowserProcedureJobStatus =
+  (typeof BROWSER_PROCEDURE_JOB_STATUS)[keyof typeof BROWSER_PROCEDURE_JOB_STATUS]
+
 export const BrowserProcedureSummarySchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   description: Schema.String,
   origin: Schema.String,
   profile_ref: Schema.String,
-  status: Schema.Literals(["candidate", "accepted", "suspended", "disabled"]),
+  status: Schema.Literals(Object.values(BROWSER_PROCEDURE_STATUS)),
   revision: Schema.Int,
   success_count: Schema.Int,
   failure_count: Schema.Int,
@@ -24,9 +43,16 @@ export const BrowserProcedureDetailSchema = Schema.Struct({
 export const BrowserProcedureJobSchema = Schema.Union([
   Schema.Struct({
     id: Schema.String,
-    status: Schema.Union([Schema.Literal("pending"), Schema.Literal("running")])
+    status: Schema.Union([
+      Schema.Literal(BROWSER_PROCEDURE_JOB_STATUS.pending),
+      Schema.Literal(BROWSER_PROCEDURE_JOB_STATUS.running)
+    ])
   }),
-  Schema.Struct({ id: Schema.String, status: Schema.Literal("failed"), error: Schema.String })
+  Schema.Struct({
+    id: Schema.String,
+    status: Schema.Literal(BROWSER_PROCEDURE_JOB_STATUS.failed),
+    error: Schema.String
+  })
 ])
 export const BrowserProcedureListSchema = Schema.Struct({
   enabled: Schema.Boolean,

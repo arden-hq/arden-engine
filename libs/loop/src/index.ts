@@ -1,10 +1,3 @@
-/**
- * The root export surface of @arden-hq/loop. The subpath exports are the
- * bundled providers ("./providers/openai-responses", "./providers/chat-completions")
- * and "./provider-kit" (what a provider needs besides these contracts);
- * everything else imports the root.
- */
-
 export { pendingBackgroundCalls } from "./agent/background-tools.js"
 export { isConversationalInput, isHumanMessage } from "./agent/interactions.js"
 export type { InputEnvelope } from "./agent/interactions.js"
@@ -23,10 +16,13 @@ export {
   HookError,
   InvalidAgentConfigError,
   InvalidModelResponseError,
+  LOOP_ERROR_TAG,
   LoopError,
   ModelProviderError,
   ModelRequestMiddlewareError,
+  PAUSE_REASON,
   PauseRequested,
+  PROVIDER_ERROR_CODE,
   ProtocolContractError,
   StructuredOutputError,
   UnsupportedStructuredOutputError,
@@ -37,18 +33,52 @@ export {
   providerErrorCode,
   toToolFailure
 } from "./errors.js"
-export type { AgentError, ProviderErrorCode, ToolFailure } from "./errors.js"
+export type {
+  AgentError,
+  LoopErrorTag,
+  PauseReason,
+  ProviderErrorCode,
+  ToolFailure
+} from "./errors.js"
 
 export {
   addCost,
+  DELIVERY_MODE,
   MODEL_PROVIDER_PROTOCOL,
+  MODEL_STREAM_ITEM_TAG,
+  REASONING_EFFORT,
+  STEERING_MODE,
+  STRUCTURED_OUTPUT_SUPPORT,
+  TOOL_SEARCH_MODE,
   ToolChoice,
   usageInputTokens
 } from "./contracts/provider.js"
+export { FinishReason } from "./contracts/provider.js"
+export type {
+  DeliveryMode,
+  ModelStreamItemTag,
+  ReasoningEffort,
+  SteeringMode,
+  StructuredOutputSupport,
+  ToolSearchMode
+} from "./contracts/provider.js"
+export {
+  ASSISTANT_OUTPUT_PART_TYPE,
+  ASSISTANT_TEXT_PHASE,
+  CONTENT_BLOCK_TYPE,
+  TOOL_CALL_TYPE,
+  TOOL_EXECUTION
+} from "./contracts/messages.js"
 export { decodeMessage } from "./internal/validate.js"
 export { makeRunBudget } from "./agent/budget.js"
 
-export { createTool, createToolset, INVALID_ARGUMENTS_OUTCOME } from "./tools/tool.js"
+export {
+  createTool,
+  createToolset,
+  INVALID_ARGUMENTS_OUTCOME,
+  TOOL_APPROVAL_DECISION,
+  TOOL_APPROVAL_POLICY
+} from "./tools/tool.js"
 export type {
   CreateToolsetOptions,
   JsonSchemaConverter,
@@ -57,6 +87,7 @@ export type {
   ToolApprovalCall,
   ToolApprovalDecision,
   ToolApprovalGate,
+  ToolApprovalPolicy,
   ToolApprovalPrompt,
   ToolContext,
   ToolDefinition,
@@ -80,10 +111,12 @@ export type { ToolSearchDocument, ToolSearchStrategy } from "./tools/search.js"
 export type {
   AssistantMessage,
   AssistantOutputPart,
+  AssistantOutputPartType,
   AssistantTextPhase,
   AudioContent,
   ChatMessage,
   ContentBlock,
+  ContentBlockType,
   ContextContent,
   FunctionCall,
   ImageContent,
@@ -112,6 +145,8 @@ export type {
   TextContent,
   AsyncToolLaunch,
   ToolCall,
+  ToolCallType,
+  ToolExecution,
   ToolResultMessage,
   UserMessage
 } from "./contracts/messages.js"
@@ -143,7 +178,6 @@ export type {
 } from "./contracts/tools.js"
 export type {
   CompletionResponse,
-  FinishReason,
   ModelCapabilities,
   ImageInput,
   ImageInputLimits,
@@ -165,8 +199,10 @@ export type {
   OutputItemReady,
   Usage
 } from "./contracts/provider.js"
+export { AGENT_EVENT_TAG, StopReason } from "./contracts/events.js"
 export type {
   AgentEvent,
+  AgentEventTag,
   AgentHooks,
   AgentStreamEvent,
   EventBase,
@@ -183,7 +219,6 @@ export type {
   RunBudgetOptions,
   RunBudgetSnapshot,
   RunPolicy,
-  StopReason,
   TextDelta,
   TextEnded,
   TextPhaseResolved,

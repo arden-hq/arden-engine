@@ -342,7 +342,6 @@ const markdownDirectories = async (directory: string): Promise<ReadonlyArray<str
     .map((entry) => entry.name)
     .sort()
 
-/** Claude Code names a project's folder after its path: `-Users-me-src-app` is `src-app`. */
 const projectName = (folder: string): string => folder.replace(/^-(?:Users|home)-[^-]+-/, "")
 
 const slug = (name: string): string =>

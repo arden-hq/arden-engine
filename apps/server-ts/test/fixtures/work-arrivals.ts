@@ -6,11 +6,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
+import type { Row } from "effect/unstable/sql/SqlConnection"
+import type { Statement } from "effect/unstable/sql/Statement"
 import type { ChatSendInput } from "../../src/chat/message-input.js"
 import { ChatMessage } from "../../src/chat/message.js"
 import type { ChatRunner } from "../../src/chat/runner-contract.js"
 import type { ChatWriteStore } from "../../src/persistence/chat/store.js"
 import type { RunDelivery } from "../../src/persistence/deliveries/model.js"
+import type { StorageStartupError } from "../../src/persistence/service.js"
+import type { SqlitePersistence } from "../../src/persistence/sqlite/layer.js"
 import { PersistenceWriteQueue } from "../../src/persistence/write-queue.js"
 import { diagnosticsLayer } from "../../src/runtime/diagnostics.js"
 import { ServerLifecycle } from "../../src/runtime/lifecycle.js"
@@ -37,7 +41,10 @@ export const arrivalsLayer = (options: {
   readonly runner: ChatRunner
   readonly events?: Array<OperationalEvent>
   readonly lifecycle?: Layer.Layer<never>
-}) =>
+}): Layer.Layer<
+  SqlitePersistence | ChatMessage | SqlClient.SqlClient | SqliteClient.SqliteClient,
+  StorageStartupError
+> =>
   ChatMessage.layer({ runner: options.runner }).pipe(
     Layer.provide(noModelProvider),
     Layer.provide(TerminalSessions.layer),
@@ -97,7 +104,9 @@ export const holdChat = Effect.fn(function* (
 
 export const deliveryIdOf = (name: string): string => sha256Hex(name)
 
-export const insertOriginChat = (sql: SqlClient.SqlClient) => sql`INSERT INTO sessions (
+export const insertOriginChat = (
+  sql: SqlClient.SqlClient
+): Statement<Row> => sql`INSERT INTO sessions (
     session_id, public_ref, name, started_at, last_activity, session_type
   ) VALUES ('origin', 'origin-ref', 'Origin', ${at}, ${at}, 'chat')`
 
@@ -149,28 +158,33 @@ export const insertPendingArrival = Effect.fn(function* (
 
 export const resultSendInput = (delivery: RunDelivery): ChatSendInput => toSendInput(delivery)
 
-export const readDelivery = (sql: SqlClient.SqlClient, deliveryId: string) =>
-  sql<{
-    readonly status: string
-    readonly delivered_at: string | null
-    readonly destinations: string
-    readonly attempt_count: number
-    readonly next_attempt_at: string | null
-    readonly last_error: string | null
-    readonly session_id: string | null
-  }>`SELECT status, delivered_at, destinations, attempt_count, next_attempt_at, last_error,
+interface DeliveryRow {
+  readonly status: string
+  readonly delivered_at: string | null
+  readonly destinations: string
+  readonly attempt_count: number
+  readonly next_attempt_at: string | null
+  readonly last_error: string | null
+  readonly session_id: string | null
+}
+
+export const readDelivery = (
+  sql: SqlClient.SqlClient,
+  deliveryId: string
+): Statement<DeliveryRow> =>
+  sql<DeliveryRow>`SELECT status, delivered_at, destinations, attempt_count, next_attempt_at, last_error,
       json_extract(payload, '$.sessionId') AS session_id
     FROM automation_deliveries WHERE delivery_id = ${deliveryId}`
 
 const strandedAt = "2026-11-01T00:00:05.000Z"
 
-export const strandDelivery = (sql: SqlClient.SqlClient, deliveryId: string) =>
+export const strandDelivery = (sql: SqlClient.SqlClient, deliveryId: string): Statement<Row> =>
   sql`UPDATE automation_deliveries SET status = 'pending', delivered_at = NULL,
       destinations = '[]', attempt_count = 3, next_attempt_at = ${strandedAt},
       last_error = 'Seeded pending beside its receipt'
     WHERE delivery_id = ${deliveryId}`
 
-export const stranded = (sessionId: string) => ({
+export const stranded = (sessionId: string): DeliveryRow => ({
   status: "pending",
   delivered_at: null,
   destinations: "[]",

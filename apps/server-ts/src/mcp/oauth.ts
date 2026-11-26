@@ -1,6 +1,7 @@
 import { after, type Timer } from "@arden-hq/std/timer"
 import { mcpOAuthRedirectUri } from "@arden-hq/protocol/mcp"
 import type {
+  AuthResult,
   OAuthClientProvider,
   OAuthDiscoveryState
 } from "@modelcontextprotocol/sdk/client/auth.js"
@@ -149,20 +150,38 @@ const storedIssuer = (credentials: McpOAuthCredentials): string | undefined => {
   }
 }
 
-const credentialField = (scope: "client" | "tokens" | "discovery"): keyof McpOAuthCredentials => {
-  switch (scope) {
-    case "client":
-      return "client_information"
-    case "tokens":
-      return "tokens"
-    case "discovery":
-      return "discovery"
-  }
+const AUTH_RESULT = { authorized: "AUTHORIZED", redirect: "REDIRECT" } as const satisfies Record<
+  string,
+  AuthResult
+>
+
+export const isAuthorized = (result: AuthResult): result is typeof AUTH_RESULT.authorized =>
+  result === AUTH_RESULT.authorized
+
+const INVALIDATION_SCOPE = {
+  all: "all",
+  client: "client",
+  tokens: "tokens",
+  verifier: "verifier",
+  discovery: "discovery"
+} as const
+
+type InvalidationScope = (typeof INVALIDATION_SCOPE)[keyof typeof INVALIDATION_SCOPE]
+
+const CREDENTIAL_FIELD: Record<
+  Exclude<InvalidationScope, typeof INVALIDATION_SCOPE.all | typeof INVALIDATION_SCOPE.verifier>,
+  keyof McpOAuthCredentials
+> = {
+  client: "client_information",
+  tokens: "tokens",
+  discovery: "discovery"
 }
 
+const CREDENTIAL_STATE = { persistent: "persistent", pending: "pending" } as const
+
 type CredentialState =
-  | { readonly kind: "persistent" }
-  | { readonly kind: "pending"; readonly credentials: McpOAuthCredentials }
+  | { readonly kind: typeof CREDENTIAL_STATE.persistent }
+  | { readonly kind: typeof CREDENTIAL_STATE.pending; readonly credentials: McpOAuthCredentials }
 
 export interface McpOAuthProviderOptions {
   readonly target: McpOAuthVaultTarget
@@ -199,7 +218,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
   }
 
   private read(): Promise<McpOAuthCredentials> {
-    if (this.credentialState.kind === "pending") {
+    if (this.credentialState.kind === CREDENTIAL_STATE.pending) {
       return Promise.resolve(this.credentialState.credentials)
     }
     return this.options.credentials.run(this.options.target.credentialKey, () => this.readStored())
@@ -210,7 +229,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
       credentials: McpOAuthCredentials
     ) => McpOAuthCredentials | Promise<McpOAuthCredentials>
   ): Promise<void> {
-    if (this.credentialState.kind === "pending") {
+    if (this.credentialState.kind === CREDENTIAL_STATE.pending) {
       this.credentialState = {
         kind: "pending",
         credentials: await operation(this.credentialState.credentials)
@@ -280,7 +299,6 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (typeof expiresAt === "number") {
       value.expires_in = Math.max(0, Math.floor(expiresAt - currentMillis() / 1_000))
     }
-    // Arden's binding predates the SDK's issuer field; expose the same trusted identity.
     const parsed = OAuthTokensSchema.safeParse({
       ...value,
       ...(typeof boundIssuer === "string" ? { issuer: boundIssuer } : {})
@@ -331,7 +349,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
   async commitInteractiveAuthorization(): Promise<void> {
     if (
-      this.credentialState.kind !== "pending" ||
+      this.credentialState.kind !== CREDENTIAL_STATE.pending ||
       this.credentialState.credentials.tokens === undefined
     ) {
       throw new Error("MCP OAuth authorization did not return tokens")
@@ -357,11 +375,9 @@ export class McpOAuthProvider implements OAuthClientProvider {
     return this.codeVerifierValue
   }
 
-  async invalidateCredentials(
-    scope: "all" | "client" | "tokens" | "verifier" | "discovery"
-  ): Promise<void> {
-    if (scope === "all") {
-      if (this.credentialState.kind === "pending") {
+  async invalidateCredentials(scope: InvalidationScope): Promise<void> {
+    if (scope === INVALIDATION_SCOPE.all) {
+      if (this.credentialState.kind === CREDENTIAL_STATE.pending) {
         this.credentialState = { kind: "pending", credentials: {} }
       } else {
         await this.options.credentials.run(this.options.target.credentialKey, () =>
@@ -372,12 +388,12 @@ export class McpOAuthProvider implements OAuthClientProvider {
       this.stateValue = undefined
       return
     }
-    if (scope === "verifier") {
+    if (scope === INVALIDATION_SCOPE.verifier) {
       this.codeVerifierValue = undefined
       return
     }
-    if (scope === "client" && this.options.staticOAuth !== undefined) return
-    await this.mutate((credentials) => without(credentials, credentialField(scope)))
+    if (scope === INVALIDATION_SCOPE.client && this.options.staticOAuth !== undefined) return
+    await this.mutate((credentials) => without(credentials, CREDENTIAL_FIELD[scope]))
   }
 
   private validateDiscoveryState(state: OAuthDiscoveryState): void {

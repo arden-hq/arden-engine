@@ -7,8 +7,6 @@ import type {
 } from "@arden-hq/protocol/chat"
 import {
   cancelTarget,
-  connectionDeferredText,
-  connectionResultText,
   decisionFields,
   messageExtras,
   outputSchemaOf,
@@ -21,6 +19,7 @@ import {
 } from "./request-mapping.js"
 import {
   CANCEL_TARGET,
+  CHAT_SENT_FROM,
   chatDelivery,
   historyWindow,
   RELAY_COMMAND,
@@ -32,50 +31,31 @@ import { HttpServerRequest } from "effect/unstable/http"
 import { ChatEventStream } from "../../chat/events.js"
 import { ChatMessage } from "../../chat/message.js"
 import { QueueHold } from "../../chat/queue-dispatch-runtime.js"
-import {
-  ChatMessageConflictError,
-  mapToolStoreError,
-  type ChatMessageFailure
-} from "../../chat/message-errors.js"
-import { DeferredCalls } from "../../tools/deferred-calls.js"
+import { mapToolStoreError } from "../../chat/message-errors.js"
+import { DEFERRED_DECISION, DeferredCalls } from "../../tools/deferred-calls.js"
 import { ChatHistory } from "../../chat/history.js"
-import {
-  ChatHistoryInvalidCursor,
-  ChatSessionNotFound,
-  ChatTurnNotFound,
-  type ChatHistoryFailure
-} from "../../chat/history-errors.js"
-import { connectionChecks } from "../../connections/check.js"
-import type { ConnectionCheckError } from "../../connections/recovery.js"
-import {
-  ChatWriteConflictError,
-  ChatWriteStore,
-  type ChatWriteFailure
-} from "../../persistence/chat/store.js"
-import { ToolExecutionStore, ToolExecutionStoreError } from "../../persistence/tools/store.js"
+import { ChatWriteStore } from "../../persistence/chat/store.js"
+import { ToolExecutionStoreError } from "../../persistence/tools/store.js"
 import { ToolHistoryQueries } from "../../persistence/tools/history-queries.js"
 import { grantedOnlyInTheApp } from "@arden-hq/protocol/tools"
 import { ArdenApi } from "../api.js"
+import { connectionDecisions } from "./connections.js"
+import { historyError, messageError, queueError } from "./errors.js"
 import { ServerConfig } from "../../config/service.js"
-import { CallerIsTheApp, LocalCaller } from "../middleware/local-only.js"
+import { CallerIsTheApp, LOCAL_CALLER, LocalCaller } from "../middleware/local-only.js"
 import { isRequestId } from "../middleware/request-id.js"
 import {
   CHAT_OPEN_TIMING_REQUEST_HEADER,
+  CHAT_OPEN_TIMING_REQUESTED,
   CHAT_OPEN_TIMING_RESPONSE_HEADER
 } from "@arden-hq/protocol/chat-open-timing"
 import { formatChatOpenServerTiming } from "../../chat/open-timing.js"
 import { ServerToolRegistry } from "../../tools/registry.js"
-import {
-  failStore,
-  OutputSchemaRejected,
-  StoreConflict,
-  StoreInvalid,
-  storeErrorToHttp
-} from "../errors.js"
+import { failStore, OutputSchemaRejected, StoreInvalid } from "../errors.js"
 import { ModelProviderService } from "../../models/provider.js"
 import { outputSchemaProblem } from "../../models/structured-output.js"
 import { commandLineApprovalMode } from "@arden-hq/protocol/permissions"
-import { makeCaptureRouter, type RouterDecision } from "../../routing/capture.js"
+import { makeCaptureRouter, ROUTER_DECISION, type RouterDecision } from "../../routing/capture.js"
 import { Decisions } from "../../models/decisions/service.js"
 import { SpaceStore } from "../../persistence/spaces/store.js"
 import { ModelStore } from "../../persistence/models/store.js"
@@ -84,53 +64,7 @@ import { SummaryStore } from "../../persistence/summaries/store.js"
 import { WorkStore } from "../../persistence/work/store.js"
 import { keptCapture, makeSessionCreation } from "../../sessions/create.js"
 
-const historyError = (
-  error: ChatHistoryFailure
-): HttpApiError.BadRequest | HttpApiError.NotFound | HttpApiError.InternalServerError => {
-  if (error instanceof ChatHistoryInvalidCursor) return new HttpApiError.BadRequest({})
-  if (error instanceof ChatSessionNotFound || error instanceof ChatTurnNotFound) {
-    return new HttpApiError.NotFound({})
-  }
-  return new HttpApiError.InternalServerError({})
-}
-
 const PHONE_NEEDS_UPDATE = "Update Arden on your iPhone to approve or deny from it."
-
-const messageError = (error: ChatMessageFailure) => {
-  if (error instanceof ChatMessageConflictError) return new StoreConflict({})
-  if (error.reason === "runner") return new HttpApiError.InternalServerError({})
-  return storeErrorToHttp({ reason: error.reason, message: error.message })
-}
-
-const queueError = (error: ChatWriteFailure) => {
-  if (error instanceof ChatWriteConflictError) return new StoreConflict({})
-  if (error.reason === "terminal") return new HttpApiError.InternalServerError({})
-  return storeErrorToHttp({ reason: error.reason, message: error.message })
-}
-
-type ConnectionResultHttpError =
-  | StoreConflict
-  | StoreInvalid
-  | HttpApiError.NotFound
-  | HttpApiError.UnprocessableEntity
-  | HttpApiError.ServiceUnavailable
-  | HttpApiError.InternalServerError
-
-const connectionStoreError = (error: ToolExecutionStoreError): ConnectionResultHttpError => {
-  if (error.reason === "blocked") return new StoreConflict({})
-  return storeErrorToHttp({ reason: error.reason, message: error.message })
-}
-
-const connectionCheckError = (error: ConnectionCheckError): ConnectionResultHttpError => {
-  switch (error.reason) {
-    case "rejected":
-      return new HttpApiError.UnprocessableEntity({})
-    case "unavailable":
-      return new HttpApiError.ServiceUnavailable({})
-    case "storage":
-      return new HttpApiError.InternalServerError({})
-  }
-}
 
 export const ChatHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -141,11 +75,10 @@ export const ChatHandlers = HttpApiBuilder.group(
     const models = yield* ModelProviderService
     const history = yield* ChatHistory
     const events = yield* ChatEventStream
-    const checkConnection = yield* connectionChecks
-    const tools = yield* ToolExecutionStore
     const toolRegistry = yield* ServerToolRegistry
     const deferred = yield* DeferredCalls
     const toolHistory = yield* ToolHistoryQueries
+    const connections = yield* connectionDecisions
 
     const refuseAppOnlyGrant = Effect.fn("ChatHandlers.refuseAppOnlyGrant")(function* (payload: {
       readonly run_id: string
@@ -184,8 +117,9 @@ export const ChatHandlers = HttpApiBuilder.group(
     const captureTarget = Effect.fn("ChatHandlers.captureTarget")(function* (
       decision: RouterDecision
     ) {
-      if (decision.kind === "move") return { sessionId: decision.sessionId, name: decision.name }
-      if (decision.kind === "keep") return undefined
+      if (decision.kind === ROUTER_DECISION.move)
+        return { sessionId: decision.sessionId, name: decision.name }
+      if (decision.kind === ROUTER_DECISION.keep) return undefined
       for (const space of [decision, ...decision.later]) {
         const opened = yield* sessionStore
           .ensureSpaceConversation(space.spaceId)
@@ -199,16 +133,15 @@ export const ChatHandlers = HttpApiBuilder.group(
       requested: ChatApprovalMode | undefined,
       sentFrom: ChatSentFrom | undefined
     ) {
-      // A server started with one approval mode runs every message in it.
       if (fixedApprovalMode !== undefined)
         return {
           approvalMode: fixedApprovalMode,
-          sentFrom: (yield* LocalCaller) === "cli" ? ("cli" as const) : sentFrom
+          sentFrom: (yield* LocalCaller) === LOCAL_CALLER.cli ? CHAT_SENT_FROM.cli : sentFrom
         }
-      if ((yield* LocalCaller) !== "cli") return { approvalMode: requested, sentFrom }
+      if ((yield* LocalCaller) !== LOCAL_CALLER.cli) return { approvalMode: requested, sentFrom }
       return {
         approvalMode: commandLineApprovalMode(requested),
-        sentFrom: "cli" as const
+        sentFrom: CHAT_SENT_FROM.cli
       }
     })
 
@@ -235,7 +168,8 @@ export const ChatHandlers = HttpApiBuilder.group(
               kind: "moved" as const,
               session_id: target.sessionId,
               name: target.name,
-              line: decision.kind === "keep" ? "Added your screenshot." : decision.line,
+              line:
+                decision.kind === ROUTER_DECISION.keep ? "Added your screenshot." : decision.line,
               client_id: clientId
             }
           }
@@ -310,12 +244,15 @@ export const ChatHandlers = HttpApiBuilder.group(
       .handle("toolResult", ({ payload }) =>
         Effect.flatMap(LocalCaller, (caller) => {
           const commandId =
-            (caller === "phone" || caller === "other") &&
+            (caller === LOCAL_CALLER.phone || caller === LOCAL_CALLER.other) &&
             payload.command.kind === RELAY_COMMAND.command
               ? payload.command.id
               : undefined
           const fields = decisionFields(payload)
-          if ((caller === "phone" || commandId !== undefined) && fields.askedAt === undefined)
+          if (
+            (caller === LOCAL_CALLER.phone || commandId !== undefined) &&
+            fields.askedAt === undefined
+          )
             return Effect.fail(new StoreInvalid({ detail: PHONE_NEEDS_UPDATE }))
           return refuseAppOnlyGrant({ ...payload, approved: fields.approved })
             .pipe(
@@ -331,7 +268,7 @@ export const ChatHandlers = HttpApiBuilder.group(
             .pipe(
               Effect.mapError(mapToolStoreError),
               Effect.flatMap((decided) =>
-                decided === "decided"
+                decided === DEFERRED_DECISION.decided
                   ? Effect.succeed({ status: "ok" } as const)
                   : message.resolveTool({
                       runId: payload.run_id,
@@ -351,89 +288,8 @@ export const ChatHandlers = HttpApiBuilder.group(
             )
         })
       )
-      .handle(
-        "connectionResult",
-        Effect.fn("ChatHandlers.connectionResult")(function* ({ payload }) {
-          const pending = yield* tools
-            .pendingConnection({
-              runId: payload.run_id,
-              toolCallId: payload.tool_id
-            })
-            .pipe(Effect.mapError(connectionStoreError))
-          if (pending === null) return yield* new HttpApiError.NotFound({})
-          if (pending.snapshot.connection_id !== payload.connection_id) {
-            return yield* new HttpApiError.Conflict({})
-          }
-          if (payload.approved) {
-            yield* checkConnection(pending).pipe(Effect.mapError(connectionCheckError))
-          }
-          if (pending.snapshot.decision_delivery === "deferred") {
-            const decided = yield* deferred
-              .decide({
-                runId: payload.run_id,
-                toolCallId: payload.tool_id,
-                approved: payload.approved,
-                result: connectionDeferredText(payload.result)
-              })
-              .pipe(Effect.mapError(connectionStoreError))
-            if (decided !== "decided") return yield* new HttpApiError.Conflict({})
-            return { status: "ok" } as const
-          }
-          return yield* message
-            .resolveTool({
-              runId: payload.run_id,
-              toolId: payload.tool_id,
-              approved: payload.approved,
-              result: connectionResultText(payload.result, payload.approved)
-            })
-            .pipe(Effect.mapError(messageError))
-        })
-      )
-      .handle(
-        "connectionResume",
-        Effect.fn("ChatHandlers.connectionResume")(function* () {
-          const pending = yield* tools
-            .allPendingConnections()
-            .pipe(Effect.mapError(connectionStoreError))
-          const resumed = yield* Effect.filter(pending, (decision) =>
-            Effect.gen(function* () {
-              yield* checkConnection(decision)
-              if (decision.snapshot.decision_delivery === "deferred") {
-                yield* deferred.decide({
-                  runId: decision.snapshot.run_id,
-                  toolCallId: decision.snapshot.tool_id,
-                  approved: true,
-                  result: ""
-                })
-              } else {
-                yield* message.resolveTool({
-                  runId: decision.snapshot.run_id,
-                  toolId: decision.snapshot.tool_id,
-                  approved: true,
-                  result: "connected"
-                })
-              }
-              return true
-            }).pipe(
-              Effect.catchTag("ConnectionCheckError", () => Effect.succeed(false)),
-              Effect.catch((error) =>
-                Effect.logWarning("Connection resume skipped a paused call", {
-                  runId: decision.snapshot.run_id,
-                  toolId: decision.snapshot.tool_id,
-                  error
-                }).pipe(Effect.as(false))
-              )
-            )
-          )
-          return {
-            resumed: resumed.map(({ snapshot }) => ({
-              run_id: snapshot.run_id,
-              tool_id: snapshot.tool_id,
-              connection_id: snapshot.connection_id
-            }))
-          }
-        })
-      )
+      .handle("connectionResult", connections.result)
+      .handle("connectionResume", connections.resume)
       .handle("history", ({ query }) => {
         const input: HistoryRouteOptions = {
           sessionId: query.session_id,
@@ -524,7 +380,8 @@ export const ChatHandlers = HttpApiBuilder.group(
             ? request.headers["x-request-id"]
             : undefined
           const collectTiming =
-            request.headers[CHAT_OPEN_TIMING_REQUEST_HEADER] === "1" && requestId !== undefined
+            request.headers[CHAT_OPEN_TIMING_REQUEST_HEADER] === CHAT_OPEN_TIMING_REQUESTED &&
+            requestId !== undefined
           const opened = yield* events
             .open({ sessionId: params.sessionId, requestId, collectTiming })
             .pipe(

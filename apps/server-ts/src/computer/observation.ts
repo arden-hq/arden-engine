@@ -1,7 +1,7 @@
-import { NativeAxActions } from "./contract.js"
+import { NativeAxActions, type NativeAxAction } from "./contract.js"
 import { Schema } from "effect"
 
-const axActions = new Map<string, string>(Object.entries(NativeAxActions))
+const axActions = new Map<string, NativeAxAction>(Object.entries(NativeAxActions))
 const isArray = Schema.is(Schema.Array(Schema.Json))
 const isJson = Schema.is(Schema.Json)
 const isObject = Schema.is(Schema.Record(Schema.String, Schema.Json))

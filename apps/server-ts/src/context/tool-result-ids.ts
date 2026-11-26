@@ -1,10 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage } from "@arden-hq/loop"
 
-// Providers carry the call id out of band (the Responses API's `call_id`), so
-// the model never reads it; this puts it in front of each result the model
-// could bind.
-
 const toolResultIdLine = (toolCallId: string): string => `[call id: ${toolCallId}]`
 
 const looksLikeJson = (content: string): boolean => {

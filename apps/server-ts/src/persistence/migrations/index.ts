@@ -200,25 +200,16 @@ import { lifecycleEventLinks } from "./0199_lifecycle_event_links.js"
 import { sessionSnapshotStates } from "./0200_session_snapshot_states.js"
 import { memoryContextStates } from "./0201_memory_context_states.js"
 
-/**
- * How a migration keeps every reference whole. A whole-database check reads
- * every table that holds a reference, gigabytes on a long-used database, so a
- * migration names the narrowest one that is still sound.
- * - `enforced`: foreign keys stay on while `up` runs, so SQLite refuses a
- *   broken reference at the write that would make it. For a migration that
- *   adds tables, columns or indexes, rewrites values, or drops a table nothing
- *   references; never one that drops a table another table references (with
- *   enforcement on, that DROP runs each child table's ON DELETE). A test in
- *   schema-migrations.test.ts runs every migration and holds it to this.
- * - `rebuilds`: `up` drops and recreates `tables`, so it runs with foreign
- *   keys off; the runner then checks those tables and every table that
- *   references them.
- * - `whole`: foreign keys off, then the whole database is checked.
- */
+export const FOREIGN_KEY_CHECK = {
+  enforced: "enforced",
+  rebuilds: "rebuilds",
+  whole: "whole"
+} as const
+
 export type MigrationForeignKeys =
-  | { readonly kind: "enforced" }
-  | { readonly kind: "rebuilds"; readonly tables: ReadonlyArray<string> }
-  | { readonly kind: "whole" }
+  | { readonly kind: typeof FOREIGN_KEY_CHECK.enforced }
+  | { readonly kind: typeof FOREIGN_KEY_CHECK.rebuilds; readonly tables: ReadonlyArray<string> }
+  | { readonly kind: typeof FOREIGN_KEY_CHECK.whole }
 
 export interface Migration {
   readonly version: number

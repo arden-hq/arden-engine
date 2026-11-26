@@ -174,8 +174,6 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionRead
           AND json_extract(record.data_json, '$.question_id') = +q.question_id)
     LEFT JOIN space_tasks AS task ON task.item_id = json_extract(r.metadata_json, '$.run_context.task.item_id')
     LEFT JOIN spaces AS space ON space.space_id = task.space_id`
-  // Only an unanswered, unclosed question can be open: this reads the short
-  // list in idx_run_questions_unsettled, whose condition it repeats word for word.
   const openSelect = sql`${select} WHERE q.resolution IS NULL AND q.closed_at IS NULL`
 
   const get = Effect.fn(function* (id: string) {

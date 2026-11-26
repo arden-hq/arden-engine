@@ -1,20 +1,9 @@
 import { resultDataEntry } from "../runs/stored-question-data.js"
-import {
-  storedCard,
-  approvalDiff,
-  approvalPreview,
-  askerOf,
-  storedRulePlaces
-} from "./run-approvals.js"
 import { refreshChangeEvidence, withNestedCallFacts, withScriptState } from "./change-evidence.js"
-import { disposableForkSql } from "../schema/fork-disposition.js"
 import { CODE_MODE_TOOL, SPAWN_AGENT_TOOL, nestedCallNesting } from "../tools/tool-roles.js"
 import type { RuntimeApprovalSnapshot } from "@arden-hq/protocol/chat"
-import { Effect, Option, Predicate, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
+import { Effect, Option, Schema } from "effect"
 import type { PendingConnectionDecision } from "../../connections/recovery.js"
-import { JsonObjectSchema } from "../json.js"
-import { grantFolderOf } from "../permissions/grant-folder.js"
 import type {
   ToolHistoryQueries,
   AgentAssignment,
@@ -27,7 +16,6 @@ import { ToolExecutionStore, ToolExecutionStoreError } from "../tools/store.js"
 import { decodeJson } from "./json.js"
 import { pendingDecisionCards, visiblePendingDecisionCards } from "./pending-decision-cards.js"
 import type { PersistenceDeps } from "./deps.js"
-import { decisionLineageSql } from "../schema/decision-visibility.js"
 import { type ApprovalRow, toolError, decodePendingConnection } from "./tool-rows.js"
 import { resultToolStatusList } from "./status-sets.js"
 import {
@@ -36,7 +24,16 @@ import {
   PersistedToolResultSchema,
   withWholeDataAndHost
 } from "./tool-result-storage.js"
-import { sessionAncestors, sessionDescendants } from "./tree-walk.js"
+import {
+  decodePendingApprovals,
+  descendantSessionIds,
+  indexedVisibilityReady,
+  legacySideOutcomeRows,
+  orderedDecisionRows,
+  validDescendantSessionIds,
+  validatePendingLineage
+} from "./tool-pending-support.js"
+import { makePendingConnections } from "./tool-pending-connections.js"
 
 interface ToolHistoryResultRow {
   readonly run_id: string
@@ -44,7 +41,6 @@ interface ToolHistoryResultRow {
   readonly tool_call_id: string
   readonly tool_name: string
   readonly result_json: string
-  /** The stored row when it left fields out (`OMITTING_ROW_SQL`). */
   readonly omitting_json: string | null
   readonly started_at: string
   readonly ended_at: string | null
@@ -54,8 +50,6 @@ const ToolExecutionHistoryInputSchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,
   toolCallIds: Schema.Array(Schema.NonEmptyString)
 })
-
-const DescendantSessionIdsSchema = Schema.Array(Schema.NonEmptyString)
 
 const PendingConnectionLookupSchema = Schema.Struct({
   runId: Schema.NonEmptyString,
@@ -78,10 +72,10 @@ export const makeToolHistory = ({
   ToolExecutionStore["Service"],
   "priorResults" | "pendingConnection" | "allPendingConnections"
 > => {
-  // History reads (a chat opening) run on a reader, inside its snapshot when
-  // there is one; the lookups for tool execution stay on the writer.
   const sql = writer.sql
   const historySql = reader
+  const { pendingConnections, allPendingConnections, pendingDescendantConnections } =
+    makePendingConnections({ sql, historySql })
   const agentAssignment = Effect.fn("SqliteToolExecutionStore.agentAssignment")(function* (
     sessionId: string
   ): Effect.fn.Return<AgentAssignment | undefined, ToolExecutionStoreError> {
@@ -181,7 +175,6 @@ export const makeToolHistory = ({
               )
             )
           )
-          // A slim row that left fields out sends the whole data and host, as a whole row did.
           const result = yield* writer
             .withToolResults(withWholeDataAndHost(stored, row.omitting_json))
             .pipe(Effect.mapError((cause) => toolError("history", "storage", cause.message)))
@@ -272,51 +265,6 @@ export const makeToolHistory = ({
     }
   })
 
-  const decodePendingApprovals = (rows: ReadonlyArray<ApprovalRow>) =>
-    Effect.forEach(
-      rows,
-      Effect.fn("SqliteToolExecutionStore.decodePendingApproval")(function* (row) {
-        if (row.kind !== "tool_approval" && row.kind !== "tool_outcome") {
-          return yield* toolError(
-            "pending_approvals",
-            "corrupt",
-            "Stored tool approval kind is invalid"
-          )
-        }
-        const payload = yield* decodeJson(JsonObjectSchema, row.payload_json).pipe(
-          Effect.mapError((cause) =>
-            toolError(
-              "pending_approvals",
-              "corrupt",
-              "Stored tool approval payload is corrupt",
-              { runId: row.run_id, toolCallId: row.tool_call_id },
-              cause
-            )
-          )
-        )
-        const optionalBoolean = (key: string): boolean | undefined =>
-          Predicate.isBoolean(payload[key]) ? payload[key] : undefined
-        const rulePlaces = storedRulePlaces(payload)
-        return {
-          tool_id: row.tool_call_id,
-          tool_name: row.tool_name,
-          source: row.source ?? "run",
-          preview: approvalPreview(row.preview),
-          diff: approvalDiff(row.diff),
-          status: "pending",
-          requested_at: row.requested_at,
-          run_id: row.run_id,
-          session_id: row.session_id,
-          action: row.action,
-          rule_places: rulePlaces,
-          can_attach_folder_to_space: optionalBoolean("can_attach_folder_to_space") === true,
-          grant_folder: grantFolderOf(row.tool_name, payload.approval_data),
-          card: storedCard(payload.presentation),
-          asker: askerOf(row.work_json ?? null)
-        } satisfies RuntimeApprovalSnapshot
-      })
-    )
-
   const pendingApprovals = Effect.fn("SqliteToolExecutionStore.pendingApprovals")(function* (
     sessionId: string
   ): Effect.fn.Return<ReadonlyArray<RuntimeApprovalSnapshot>, ToolExecutionStoreError> {
@@ -347,209 +295,6 @@ export const makeToolHistory = ({
     yield* validatePendingLineage(historySql, rows, "pending_approvals")
     return yield* decodePendingApprovals(rows)
   })
-
-  const descendantSessionIds = Effect.fn("SqliteToolExecutionStore.descendantSessionIds")(
-    function* (
-      db: SqlClient.SqlClient,
-      sessionId: string
-    ): Effect.fn.Return<ReadonlyArray<string>, ToolExecutionStoreError> {
-      const rows = yield* db<{ readonly session_id: string }>`
-      WITH RECURSIVE ${sessionDescendants(db, {
-        name: "descendants",
-        from: db`SELECT session_id FROM sessions WHERE session_id = ${sessionId}`,
-        where: db`child.session_type = 'agent'`
-      })}
-      SELECT session_id FROM descendants WHERE session_id != ${sessionId}
-    `.pipe(
-        Effect.mapError((cause) =>
-          toolError(
-            "pending_approvals",
-            "storage",
-            "Could not list child agent sessions",
-            undefined,
-            cause
-          )
-        )
-      )
-      return rows.map((row) => row.session_id)
-    }
-  )
-
-  const indexedVisibilityReady = Effect.fn("SqliteToolExecutionStore.indexedVisibilityReady")(
-    function* (
-      db: SqlClient.SqlClient,
-      viewerSessionId: string,
-      operation: "pending_approvals" | "pending_connections"
-    ): Effect.fn.Return<boolean, ToolExecutionStoreError> {
-      const rows = yield* db<{ readonly finished_at: string | null }>`
-        SELECT finished_at FROM data_backfills
-        WHERE name = 'pending_decision_visibility_v2'`.pipe(
-        Effect.mapError((cause) =>
-          toolError(
-            "pending_approvals",
-            "storage",
-            "Could not read decision index readiness",
-            undefined,
-            cause
-          )
-        )
-      )
-      if (rows[0]?.finished_at == null) return false
-      const unresolved = yield* db`
-        WITH RECURSIVE sources(session_id, source_kind, decision_kind) AS (
-          SELECT source.session_id, 'run', source.kind
-          FROM pending_decision_visibility_unresolved AS unresolved
-          JOIN tool_approvals AS source ON source.run_id = unresolved.run_id
-            AND source.tool_call_id = unresolved.tool_call_id
-          WHERE unresolved.source_kind = 'run' AND source.status = 'pending'
-            AND CASE WHEN json_valid(source.payload_json) THEN ${
-              operation === "pending_connections"
-                ? db`json_extract(source.payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
-                : db`COALESCE(json_extract(source.payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
-            } ELSE 1 END
-          UNION ALL
-          SELECT source.session_id, 'deferred', 'tool_approval'
-          FROM pending_decision_visibility_unresolved AS unresolved
-          JOIN deferred_tool_calls AS source ON source.run_id = unresolved.run_id
-            AND source.tool_call_id = unresolved.tool_call_id
-          WHERE unresolved.source_kind = 'deferred' AND source.status = 'pending'
-            AND CASE WHEN json_valid(source.payload_json) THEN ${
-              operation === "pending_connections"
-                ? db`json_extract(source.payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
-                : db`COALESCE(json_extract(source.payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
-            } ELSE 1 END
-        ), ${sessionAncestors(db, {
-          name: "lineage",
-          from: db`SELECT session_id FROM sources JOIN sessions USING(session_id)`,
-          where: db`child.session_type = 'agent'`,
-          root: true
-        })}
-        SELECT 1 FROM lineage WHERE session_id = ${viewerSessionId}
-        UNION ALL
-        SELECT 1 FROM lineage
-        JOIN sessions AS session ON session.session_id = lineage.session_id
-        JOIN sources AS source ON source.session_id = lineage.root_session_id
-        JOIN session_fork_requests AS fork ON fork.child_session_id = lineage.session_id
-          AND fork.state = 'ready' AND json_valid(fork.request_json)
-          AND ${db.literal(disposableForkSql("fork"))}
-        JOIN sessions AS owner ON owner.session_id = fork.source_session_id
-          AND owner.session_type = 'chat'
-        WHERE session.session_type = 'chat' AND source.source_kind = 'run'
-          AND source.decision_kind = 'tool_outcome'
-          AND owner.session_id = ${viewerSessionId}
-        LIMIT 1
-      `.pipe(
-        Effect.mapError((cause) =>
-          toolError(
-            operation,
-            "storage",
-            "Could not check unresolved decision ownership",
-            undefined,
-            cause
-          )
-        )
-      )
-      if (unresolved.length > 0)
-        return yield* toolError(operation, "corrupt", "Stored decision ownership is invalid")
-      return true
-    }
-  )
-
-  const legacySideOutcomeRows = Effect.fn("SqliteToolExecutionStore.legacySideOutcomeRows")(
-    function* (
-      db: SqlClient.SqlClient,
-      viewerSessionId: string,
-      connection: boolean
-    ): Effect.fn.Return<ReadonlyArray<ApprovalRow>, ToolExecutionStoreError> {
-      const rows = yield* db<ApprovalRow>`
-        WITH RECURSIVE ${sessionDescendants(db, {
-          name: "side_tree",
-          from: db`SELECT fork.child_session_id AS session_id FROM session_fork_requests AS fork
-            CROSS JOIN sessions AS side ON side.session_id = fork.child_session_id
-              AND side.session_type = 'chat'
-            WHERE fork.source_session_id = ${viewerSessionId} AND fork.state = 'ready'
-              AND json_valid(fork.request_json)
-              AND ${db.literal(disposableForkSql("fork"))}`,
-          where: db`child.session_type = 'agent'`
-        })}
-        SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
-          preview, diff, status, requested_at, resolved_at, expires_at,
-          result_feedback, kind, payload_json, resolution_json, source
-        FROM (${pendingDecisionCards(db)})
-        WHERE session_id IN (SELECT session_id FROM side_tree)
-          AND source = 'run' AND kind = 'tool_outcome'
-          AND ${
-            connection
-              ? db`json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
-              : db`COALESCE(json_extract(payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
-          }
-        ORDER BY requested_at, run_id, tool_call_id
-      `.pipe(
-        Effect.mapError((cause) =>
-          toolError(
-            connection ? "pending_connections" : "pending_approvals",
-            "storage",
-            "Could not load Side outcome recovery",
-            undefined,
-            cause
-          )
-        )
-      )
-      return rows
-    }
-  )
-
-  const orderedDecisionRows = (rows: ReadonlyArray<ApprovalRow>): ReadonlyArray<ApprovalRow> =>
-    [...rows].sort(
-      (a, b) =>
-        a.requested_at.localeCompare(b.requested_at) ||
-        a.run_id.localeCompare(b.run_id) ||
-        a.tool_call_id.localeCompare(b.tool_call_id) ||
-        (a.source ?? "run").localeCompare(b.source ?? "run")
-    )
-
-  const validDescendantSessionIds = (
-    ids: ReadonlyArray<string>,
-    operation: "pending_approvals" | "pending_connections"
-  ) =>
-    Schema.decodeUnknownEffect(DescendantSessionIdsSchema)(ids).pipe(
-      Effect.mapError((cause) =>
-        toolError(operation, "invalid", "Invalid session id", undefined, cause)
-      )
-    )
-
-  const validatePendingLineage = Effect.fn("SqliteToolExecutionStore.validatePendingLineage")(
-    function* (
-      db: SqlClient.SqlClient,
-      rows: ReadonlyArray<ApprovalRow>,
-      operation: "pending_approvals" | "pending_connections"
-    ): Effect.fn.Return<void, ToolExecutionStoreError> {
-      for (const sourceSessionId of new Set(rows.map((row) => row.session_id))) {
-        const lineage = yield* db
-          .unsafe<{
-            readonly session_type: string
-            readonly edge_valid: number
-          }>(decisionLineageSql("?"), [sourceSessionId])
-          .pipe(
-            Effect.mapError((cause) =>
-              toolError(
-                operation,
-                "storage",
-                "Could not check decision ownership",
-                undefined,
-                cause
-              )
-            )
-          )
-        if (
-          lineage.length === 0 ||
-          lineage.some((row) => row.edge_valid !== 1) ||
-          !lineage.some((row) => row.session_type !== "agent")
-        )
-          return yield* toolError(operation, "corrupt", "Stored decision ownership is invalid")
-      }
-    }
-  )
 
   const pendingDescendantApprovals = Effect.fn(
     "SqliteToolExecutionStore.pendingDescendantApprovals"
@@ -606,156 +351,6 @@ export const makeToolHistory = ({
     )
     yield* validatePendingLineage(historySql, [...rows, ...sideRows], "pending_approvals")
     return yield* decodePendingApprovals(orderedDecisionRows([...rows, ...sideRows]))
-  })
-
-  const decodePendingConnections = (rows: ReadonlyArray<ApprovalRow>) =>
-    Effect.forEach(
-      rows,
-      Effect.fn("SqliteToolExecutionStore.decodePendingConnectionRow")(function* (row) {
-        const decision = yield* decodePendingConnection(row, "pending_connections")
-        if (decision === null) {
-          return yield* toolError(
-            "pending_connections",
-            "corrupt",
-            "Stored pending connection is missing recovery data",
-            { runId: row.run_id, toolCallId: row.tool_call_id }
-          )
-        }
-        return decision
-      })
-    )
-
-  const pendingConnections = Effect.fn("SqliteToolExecutionStore.pendingConnections")(function* (
-    sessionId: string
-  ): Effect.fn.Return<ReadonlyArray<PendingConnectionDecision>, ToolExecutionStoreError> {
-    const validSessionId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(sessionId).pipe(
-      Effect.mapError((cause) =>
-        toolError("pending_connections", "invalid", "Invalid session id", undefined, cause)
-      )
-    )
-    const rows = yield* historySql<ApprovalRow>`
-      SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
-             preview, diff, status, requested_at, resolved_at, expires_at,
-             result_feedback, kind, payload_json, resolution_json, source
-      FROM (${pendingDecisionCards(historySql)})
-      WHERE session_id = ${validSessionId}
-        AND json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'
-      ORDER BY requested_at, run_id, tool_call_id
-    `.pipe(
-      Effect.mapError((cause) =>
-        toolError(
-          "pending_connections",
-          "storage",
-          "Could not list pending connections",
-          undefined,
-          cause
-        )
-      )
-    )
-    yield* validatePendingLineage(historySql, rows, "pending_connections")
-    return yield* decodePendingConnections(rows)
-  })
-
-  const allPendingConnections = Effect.fn("SqliteToolExecutionStore.allPendingConnections")(
-    function* (): Effect.fn.Return<
-      ReadonlyArray<PendingConnectionDecision>,
-      ToolExecutionStoreError
-    > {
-      const rows = yield* sql<ApprovalRow>`
-      SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
-             preview, diff, status, requested_at, resolved_at, expires_at,
-             result_feedback, kind, payload_json, resolution_json, source
-      FROM (${pendingDecisionCards(sql)})
-      WHERE json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'
-      ORDER BY requested_at, run_id, tool_call_id
-    `.pipe(
-        Effect.mapError((cause) =>
-          toolError(
-            "pending_connections",
-            "storage",
-            "Could not list pending connections",
-            undefined,
-            cause
-          )
-        )
-      )
-      const decisions = yield* Effect.forEach(rows, (row) =>
-        Effect.gen(function* () {
-          yield* validatePendingLineage(sql, [row], "pending_connections")
-          return (yield* decodePendingConnections([row]))[0]
-        }).pipe(
-          Effect.catchTag("ToolExecutionStoreError", (error) => {
-            if (error.reason !== "corrupt") return Effect.fail(error)
-            return Effect.logWarning("Connection resume skipped a corrupt paused call", {
-              runId: row.run_id,
-              toolId: row.tool_call_id,
-              sessionId: row.session_id,
-              source: row.source,
-              reason: error.reason,
-              message: error.message
-            }).pipe(Effect.as(undefined))
-          })
-        )
-      )
-      return decisions.filter(Predicate.isNotUndefined)
-    }
-  )
-
-  const pendingDescendantConnections = Effect.fn(
-    "SqliteToolExecutionStore.pendingDescendantConnections"
-  )(function* (
-    sessionId: string
-  ): Effect.fn.Return<ReadonlyArray<PendingConnectionDecision>, ToolExecutionStoreError> {
-    if (yield* indexedVisibilityReady(historySql, sessionId, "pending_connections")) {
-      const rows = yield* historySql<ApprovalRow>`
-        SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
-               preview, diff, status, requested_at, resolved_at, expires_at,
-               result_feedback, kind, payload_json, resolution_json, source
-        FROM (${visiblePendingDecisionCards(historySql, sessionId)})
-        WHERE session_id != ${sessionId}
-          AND json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'
-        ORDER BY requested_at, run_id, tool_call_id, source
-      `.pipe(
-        Effect.mapError((cause) =>
-          toolError(
-            "pending_connections",
-            "storage",
-            "Could not list pending connections",
-            undefined,
-            cause
-          )
-        )
-      )
-      return yield* decodePendingConnections(rows)
-    }
-    const descendantIds = yield* descendantSessionIds(historySql, sessionId)
-    const ids = yield* validDescendantSessionIds(descendantIds, "pending_connections")
-    const sideRows = yield* legacySideOutcomeRows(historySql, sessionId, true)
-    if (ids.length === 0) {
-      yield* validatePendingLineage(historySql, sideRows, "pending_connections")
-      return yield* decodePendingConnections(orderedDecisionRows(sideRows))
-    }
-    const rows = yield* historySql<ApprovalRow>`
-      SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
-             preview, diff, status, requested_at, resolved_at, expires_at,
-             result_feedback, kind, payload_json, resolution_json, source
-      FROM (${pendingDecisionCards(historySql)})
-      WHERE session_id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
-        AND json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'
-      ORDER BY session_id, requested_at, run_id, tool_call_id
-    `.pipe(
-      Effect.mapError((cause) =>
-        toolError(
-          "pending_connections",
-          "storage",
-          "Could not list pending connections",
-          undefined,
-          cause
-        )
-      )
-    )
-    yield* validatePendingLineage(historySql, [...rows, ...sideRows], "pending_connections")
-    return yield* decodePendingConnections(orderedDecisionRows([...rows, ...sideRows]))
   })
 
   const pendingConnection = Effect.fn("SqliteToolExecutionStore.pendingConnection")(

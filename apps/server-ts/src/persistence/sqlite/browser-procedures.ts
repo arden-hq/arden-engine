@@ -101,18 +101,10 @@ const decode = Effect.fn("BrowserProcedures.decode")(function* (
   }
 })
 
-/** A run the check can judge for good: it has ended and nothing in it is
- * still going, so its tool calls cannot change. */
 const SETTLED_CANDIDATE_SQL = `r.status NOT IN ${statusSqlList(ACTIVE_RUN_STATUSES)}
     AND NOT EXISTS (SELECT 1 FROM tool_calls t WHERE t.run_id = r.run_id AND t.status IN ${statusSqlList(UNRESOLVED_TOOL_STATUSES)})
     AND NOT EXISTS (SELECT 1 FROM code_mode_scripts s WHERE s.origin_run_id = r.run_id AND s.status = 'running')`
 
-/**
- * Finished runs that used the browser and have no learning job yet. It reads
- * browser_procedure_candidates, the runs with a browser tool call that the
- * check has not judged, and reaches each run by its id. Before, it walked
- * every completed run, after every run and every 30 seconds.
- */
 const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_procedure_jobs(id, run_id, status, created_at, updated_at)
   SELECT r.run_id, r.run_id, 'pending', ?, ? FROM browser_procedure_candidates c
   CROSS JOIN chat_runs r ON r.run_id = c.run_id
@@ -126,8 +118,6 @@ const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_procedure_j
         AND NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded' AND extra.tool_call_id IN ${descendantCallsOfColumns("used.run_id", "used.tool_call_id")})))
   ORDER BY r.ended_at DESC`
 
-/** Drops every judged run from the list: a settled run has its job by now or
- * will never get one, so the list holds only runs still going. */
 const BROWSER_PROCEDURE_SETTLE_SQL = `DELETE FROM browser_procedure_candidates
   WHERE run_id IN (SELECT c.run_id FROM browser_procedure_candidates c
     CROSS JOIN chat_runs r ON r.run_id = c.run_id WHERE ${SETTLED_CANDIDATE_SQL})`
@@ -203,7 +193,6 @@ export const makeBrowserProcedureStore = (deps: WriterDeps): BrowserProcedureSto
       )
   })
   const enqueue = Effect.fn("BrowserProcedures.enqueue")(function* () {
-    // Nothing waits: the usual case, answered by a read of an empty table.
     const waiting = yield* reader<{
       readonly waiting: number
     }>`SELECT 1 AS waiting FROM browser_procedure_candidates LIMIT 1`

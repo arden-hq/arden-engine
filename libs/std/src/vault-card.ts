@@ -1,41 +1,38 @@
-/**
- * The rules of payment cards saved in Arden's Vault: what each field may hold, which brand a
- * number is, the card's safe title ("Visa ending 4242"), every spelling of its number a page may
- * show, and how an amount reads. One implementation for the desktop's main process (the store,
- * the fill and its scrub), its Vault page (the dialogs) and the server (what the agent reads and
- * the pay card). The number and the security code never leave the main process; only the safe
- * fields (brand, last 4, expiry, name on card, billing contact) do.
- */
+export const CARD_FIELD = {
+  number: "number",
+  expiry: "expiry",
+  securityCode: "securityCode",
+  nameOnCard: "nameOnCard",
+  billingContactId: "billingContactId"
+} as const
+export type CardField = (typeof CARD_FIELD)[keyof typeof CARD_FIELD]
+export const CARD_FIELDS: ReadonlyArray<CardField> = Object.values(CARD_FIELD)
 
-/** The fields the add dialog shows, in its order. Editing changes only the last three. */
-export const CARD_FIELDS = [
-  "number",
-  "expiry",
-  "securityCode",
-  "nameOnCard",
-  "billingContactId"
-] as const
-export type CardField = (typeof CARD_FIELDS)[number]
+export const CARD_BRAND = {
+  visa: "Visa",
+  mastercard: "Mastercard",
+  americanExpress: "American Express",
+  card: "Card"
+} as const
+export type CardBrand = (typeof CARD_BRAND)[keyof typeof CARD_BRAND]
 
-export type CardBrand = "Visa" | "Mastercard" | "American Express" | "Card"
-
-/** Why a field was refused, for the dialog's message under it. */
-export type CardIssue =
-  | "missing"
-  | "not_number"
-  | "not_valid"
-  | "not_expiry"
-  | "expired"
-  | "not_code"
-  | "too_long"
-  | "not_one_line"
+export const CARD_ISSUE = {
+  missing: "missing",
+  notNumber: "not_number",
+  notValid: "not_valid",
+  notExpiry: "not_expiry",
+  expired: "expired",
+  notCode: "not_code",
+  tooLong: "too_long",
+  notOneLine: "not_one_line"
+} as const
+export type CardIssue = (typeof CARD_ISSUE)[keyof typeof CARD_ISSUE]
 
 export interface CardExpiry {
   readonly month: number
   readonly year: number
 }
 
-/** A card as the main process stores it. Never sent to the engine or the renderer. */
 export interface CardDetails {
   readonly number: string
   readonly expiry: CardExpiry
@@ -44,7 +41,6 @@ export interface CardDetails {
   readonly billingContactId?: string
 }
 
-/** What the agent and the Vault page see of a card. */
 export interface CardSafeFields {
   readonly brand: CardBrand
   readonly last4: string
@@ -56,23 +52,20 @@ export interface CardSafeFields {
 const MAX_NAME_LENGTH = 128
 const CONTACT_ID = /^[0-9a-f]{24}$/
 
-/** The number's digits, with the spaces and dashes a person types between groups removed. */
 export function cardDigits(typed: string): string | undefined {
   const digits = typed.replace(/[ \-]/g, "")
   return /^[0-9]+$/.test(digits) ? digits : undefined
 }
 
-/** The brand from the number's first digits: Visa 4, Mastercard 51–55 and 2221–2720, Amex 34 and 37. */
 export function cardBrand(digits: string): CardBrand {
-  if (/^4/.test(digits)) return "Visa"
-  if (/^3[47]/.test(digits)) return "American Express"
+  if (/^4/.test(digits)) return CARD_BRAND.visa
+  if (/^3[47]/.test(digits)) return CARD_BRAND.americanExpress
   const two = Number(digits.slice(0, 2))
   const four = Number(digits.slice(0, 4))
-  if ((two >= 51 && two <= 55) || (four >= 2221 && four <= 2720)) return "Mastercard"
-  return "Card"
+  if ((two >= 51 && two <= 55) || (four >= 2221 && four <= 2720)) return CARD_BRAND.mastercard
+  return CARD_BRAND.card
 }
 
-/** The Luhn check every card number passes. */
 export function passesLuhn(digits: string): boolean {
   if (!/^[0-9]+$/.test(digits)) return false
   let sum = 0
@@ -87,19 +80,18 @@ export function passesLuhn(digits: string): boolean {
   return sum % 10 === 0
 }
 
-/** The security code's length: 4 digits for American Express, 3 for every other brand. */
 export const securityCodeLength = (brand: CardBrand): number =>
-  brand === "American Express" ? 4 : 3
+  brand === CARD_BRAND.americanExpress ? 4 : 3
 
 function numberIssue(typed: string): CardIssue | undefined {
   if (typed.trim().length === 0) return "missing"
   const digits = cardDigits(typed.trim())
   if (digits === undefined || digits.length < 12 || digits.length > 19) return "not_number"
-  if (cardBrand(digits) === "American Express" && digits.length !== 15) return "not_valid"
+  if (cardBrand(digits) === CARD_BRAND.americanExpress && digits.length !== 15)
+    return CARD_ISSUE.notValid
   return passesLuhn(digits) ? undefined : "not_valid"
 }
 
-/** "08/28", "8/28", "08 / 28" or "08/2028", read as month and four-digit year. */
 export function readExpiry(typed: string): CardExpiry | undefined {
   const match = /^\s*([0-9]{1,2})\s*\/\s*([0-9]{2}|[0-9]{4})\s*$/.exec(typed)
   if (match === null) return undefined
@@ -108,7 +100,6 @@ export function readExpiry(typed: string): CardExpiry | undefined {
   return month >= 1 && month <= 12 ? { month, year } : undefined
 }
 
-/** Whether a card still works in `now`'s month: it expires at the end of its month. */
 export const expiryCurrent = (expiry: CardExpiry, now: Date): boolean =>
   expiry.year > now.getFullYear() ||
   (expiry.year === now.getFullYear() && expiry.month >= now.getMonth() + 1)
@@ -145,11 +136,6 @@ export type CardRead =
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
 const notText = (value: unknown): boolean => value !== undefined && typeof value !== "string"
 
-/**
- * Reads a new card as typed in the add dialog: every field but the billing address is required;
- * the number passes Luhn; the expiry is this month or later; the security code has the brand's
- * length. Every refused field is named, so the dialog shows them all at once.
- */
 export function readCard(
   input: Readonly<Partial<Record<CardField, unknown>>>,
   now: Date
@@ -192,7 +178,6 @@ export type CardChangeRead =
     }
   | { readonly kind: "refused"; readonly issues: Readonly<Partial<Record<CardField, CardIssue>>> }
 
-/** Reads what the edit dialog may change: Expires, Name on card and Billing address. */
 export function readCardChange(
   input: Readonly<Partial<Record<"expiry" | "nameOnCard" | "billingContactId", unknown>>>,
   now: Date
@@ -221,31 +206,28 @@ export function readCardChange(
   }
 }
 
-/** Why one typed field is refused, or undefined: the same check `readCard` makes. */
 export function cardFieldIssue(
   field: CardField,
   typed: string,
   context: { readonly number: string; readonly now: Date }
 ): CardIssue | undefined {
   switch (field) {
-    case "number":
+    case CARD_FIELD.number:
       return numberIssue(typed)
-    case "expiry":
+    case CARD_FIELD.expiry:
       return expiryIssue(typed, context.now)
-    case "securityCode":
+    case CARD_FIELD.securityCode:
       return codeIssue(typed, cardBrand(cardDigits(context.number.trim()) ?? ""))
-    case "nameOnCard":
+    case CARD_FIELD.nameOnCard:
       return nameIssue(typed)
-    case "billingContactId":
+    case CARD_FIELD.billingContactId:
       return billingIssue(typed)
   }
 }
 
-/** "08/28". */
 export const expiryText = (expiry: CardExpiry): string =>
   `${String(expiry.month).padStart(2, "0")}/${String(expiry.year % 100).padStart(2, "0")}`
 
-/** What may be shown of a stored card: never the number or the security code. */
 export function cardSafeFields(card: CardDetails): CardSafeFields {
   return {
     brand: cardBrand(card.number),
@@ -256,19 +238,15 @@ export function cardSafeFields(card: CardDetails): CardSafeFields {
   }
 }
 
-/** "Visa ending 4242"; a number of no known brand is a "Card ending 4242". */
 export const cardTitle = (card: Pick<CardSafeFields, "brand" | "last4">): string =>
   `${card.brand} ending ${card.last4}`
 
-export type AmountRead =
-  | { readonly kind: "ok"; readonly text: string }
-  | { readonly kind: "refused" }
+export const AMOUNT_READ = { ok: "ok", refused: "refused" } as const
 
-/**
- * An amount to pay as the card says it: "84.20" in "USD" reads "$84.20". The amount is a plain
- * decimal above zero with no more decimals than the currency has; the currency is a three-letter
- * code the system knows.
- */
+export type AmountRead =
+  | { readonly kind: typeof AMOUNT_READ.ok; readonly text: string }
+  | { readonly kind: typeof AMOUNT_READ.refused }
+
 export function readAmount(amount: string, currency: string): AmountRead {
   const code = currency.trim().toUpperCase()
   if (!/^[A-Z]{3}$/.test(code) || !knownCurrency(code)) return { kind: "refused" }

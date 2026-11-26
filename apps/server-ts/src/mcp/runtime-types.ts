@@ -7,7 +7,7 @@ import {
   type RuntimeEntry,
   type McpLiveEvents,
   type ConnectOptions
-} from "./runtime.js"
+} from "./runtime-state.js"
 
 export interface McpRuntime {
   readonly get: (name: string) => RuntimeEntry | undefined

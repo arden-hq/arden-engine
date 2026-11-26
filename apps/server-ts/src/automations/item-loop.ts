@@ -19,7 +19,6 @@ interface ItemLoop<K extends HandlerItemKind> {
   readonly kind: K
   readonly next: () => Effect.Effect<HandlerItemDataOf<K> | "idle" | "advance", Error>
   readonly commit: (data: HandlerItemDataOf<K>) => Effect.Effect<void, Error>
-  /** Moves the position past an item the Automation gave up on, without its work, and names it. */
   readonly skip: (data: HandlerItemDataOf<K>) => Effect.Effect<string, Error>
   readonly summary: (item: HandlerItem | undefined) => string
   readonly cancelled: string

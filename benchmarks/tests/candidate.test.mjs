@@ -9,7 +9,7 @@ import { join, resolve } from "node:path"
 const root = resolve(import.meta.dirname, "../..")
 const modes = ["plain", "memory", "tool", "decline", "restart", "budget", "compaction", "timeout"]
 for (const mode of modes)
-  test(`real candidate: ${mode}`, { timeout: 60000 }, async () => {
+  test(`real candidate: ${mode}`, { timeout: mode === "timeout" ? 120000 : 60000 }, async () => {
     const withHistory = mode === "memory"
     const directory = await mkdtemp(join(tmpdir(), "arden-benchmark-"))
     const requests = []
@@ -21,8 +21,6 @@ for (const mode of modes)
       if (mode === "timeout") return
       const offered = (name) => request.tools?.some((tool) => tool.name === name)
       const outputs = request.input.filter((item) => item.type === "function_call_output")
-      // The tool call this request answers with, if any. `decline` makes a Space
-      // and then archives it: archiving always asks on a card.
       let call
       if (mode === "tool" && outputs.length === 0 && offered("exec_command"))
         call = {
@@ -91,7 +89,6 @@ for (const mode of modes)
             status: "completed",
             output: [item],
             usage: {
-              // Past the compaction trigger, so the compaction mode compacts.
               input_tokens: mode === "compaction" ? 30000 : 7,
               output_tokens: 2,
               total_tokens: 9
@@ -110,9 +107,7 @@ for (const mode of modes)
       model: "fixture",
       reasoningEffort: null,
       contextLimit: 32000,
-      // The limit counts from the runner's start. Server start and one rule per
-      // tool come first; the limit must fall after the chat starts.
-      timeoutMs: mode === "timeout" ? 15000 : 40000,
+      timeoutMs: 40000,
       maxModelRequests: mode === "budget" ? 1 : 30,
       tools: { tool: ["spawn_agent", "exec_command"], decline: ["space_create"] }[mode] ?? [],
       memory: withHistory
@@ -214,8 +209,6 @@ for (const mode of modes)
         )
       }
       if (mode === "tool") {
-        // Only the profile's tools, the ones no rule can hide, and Arden's own
-        // bookkeeping tools reach the model.
         const names = new Set(
           requests.flatMap((request) => request.tools ?? []).map((tool) => tool.name)
         )
@@ -248,10 +241,10 @@ for (const mode of modes)
         )
       if (withHistory)
         assert.ok(
-          (await readFile(join(directory, "output/memory-capture.json"), "utf8")).includes("done")
+          JSON.parse(await readFile(join(directory, "output/memory-capture.json"), "utf8")).every(
+            (run) => run.status === "completed"
+          )
         )
-      // The server's own record of the context each run was built with: Memory
-      // and related chats run only when the profile turns memory on.
       const context = JSON.parse(await readFile(join(directory, "output/context-0.json"), "utf8"))
       assert.ok(context.runs.length > 0)
       for (const run of context.runs) {
@@ -263,7 +256,6 @@ for (const mode of modes)
         assert.equal(skipped.includes("memory"), !withHistory, JSON.stringify(run.stages))
       }
       assert.ok(requests.length > 0)
-      // The folder sentence leads every prompt.
       assert.ok(
         requests.some((request) => JSON.stringify(request.input).includes("Your working folder is"))
       )

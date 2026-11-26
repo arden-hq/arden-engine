@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, type SchemaAST } from "effect"
 import type { JsonRecord } from "../common/json.js"
 import { IsoDateTimeStringSchema, withExtras } from "../common/schema.js"
 
@@ -168,7 +168,7 @@ export const limitSettingsResponse = (settings: LimitSettings): LimitSettingsWir
   automation_limits: settings.automationLimits
 })
 
-const strict = { onExcessProperty: "error" } as const
+const strict: SchemaAST.ParseOptions = { onExcessProperty: "error" }
 
 export const decodeLimitSettingsPatchRequestEffect = (
   value: unknown

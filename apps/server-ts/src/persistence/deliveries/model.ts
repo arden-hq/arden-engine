@@ -13,6 +13,13 @@ import type { ChatImageInput } from "@arden-hq/protocol/chat"
 
 export type ChatForwardedSource = typeof ChatForwardedSourceSchema.Type
 
+export const RUN_DELIVERY_KIND = {
+  result: "result",
+  answer: "answer",
+  connection: "connection",
+  thread: "thread",
+  update: "update"
+} as const
 const deliveryFields = {
   progress: Schema.optionalKey(Schema.Boolean),
   timeout: Schema.optionalKey(Schema.Literal(true)),
@@ -43,15 +50,18 @@ const deliveryFields = {
   )
 }
 export const RunDeliveryPayloadSchema = Schema.Union([
-  Schema.Struct({ ...deliveryFields, kind: Schema.Literals(["result", "answer"]) }),
   Schema.Struct({
     ...deliveryFields,
-    kind: Schema.Literal("connection"),
+    kind: Schema.Literals([RUN_DELIVERY_KIND.result, RUN_DELIVERY_KIND.answer])
+  }),
+  Schema.Struct({
+    ...deliveryFields,
+    kind: Schema.Literal(RUN_DELIVERY_KIND.connection),
     connection: ConnectionArrivalSchema
   }),
   Schema.Struct({
     ...deliveryFields,
-    kind: Schema.Literal("thread"),
+    kind: Schema.Literal(RUN_DELIVERY_KIND.thread),
     revision: Schema.Int,
     forwarded: Schema.Struct({
       sessionId: Schema.NonEmptyString,
@@ -59,7 +69,7 @@ export const RunDeliveryPayloadSchema = Schema.Union([
     })
   }),
   Schema.Struct({
-    kind: Schema.Literal("update"),
+    kind: Schema.Literal(RUN_DELIVERY_KIND.update),
     sessionId: Schema.NonEmptyString,
     source: Schema.Union([
       Schema.Struct({ kind: Schema.Literal("ending"), runId: Schema.NonEmptyString }),

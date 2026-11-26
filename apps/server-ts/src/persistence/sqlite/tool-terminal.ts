@@ -9,10 +9,9 @@ import { writeError } from "./chat-write-errors.js"
 import { recoverTerminalToolMessages } from "./tool-transcript.js"
 import {
   loadSettledRunToolExecutionsInTransaction,
-  markRunToolExecutionsUncertainInTransaction,
-  settleUnstartedToolWorkForTerminalInTransaction,
-  type RunEnding
+  settleUnstartedToolWorkForTerminalInTransaction
 } from "./tool-receipts.js"
+import { markRunToolExecutionsUncertainInTransaction, type RunEnding } from "./tool-uncertainty.js"
 import { messageTurnIdSql } from "./message-turns.js"
 
 export const settleTerminalToolsInTransaction = Effect.fn("Chat.settleTerminalTools")(function* (

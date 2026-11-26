@@ -1,26 +1,20 @@
-import type { GoogleAccount, GoogleGrant, GoogleServiceId } from "./contracts.js"
+import {
+  GOOGLE_AUTHORIZATION_STATUS,
+  GOOGLE_SERVICE_ID,
+  type GoogleAccount,
+  type GoogleGrant,
+  type GoogleServiceId
+} from "./contracts.js"
 
 interface GoogleGrantScopes {
   readonly service: GoogleServiceId
-  /** The scope Arden asks Google for. */
   readonly request: string
-  /** Every scope that already allows the same calls; `request` is one of them. */
   readonly satisfiedBy: ReadonlyArray<string>
 }
 
-/**
- * The scopes behind each optional grant. `users.drafts.create` accepts
- * `gmail.compose`, `gmail.modify` or full mail access (Gmail API reference);
- * Arden asks only for `gmail.compose`. `users.threads.modify` and
- * `users.threads.trash` accept `gmail.modify` or full mail access.
- * `calendarList.list` and `.get` accept `calendar.calendarlist(.readonly)`,
- * `calendar.readonly` or `calendar`; `freebusy.query` accepts
- * `calendar.freebusy`, `calendar.events.freebusy`, `calendar.readonly` or
- * `calendar` (Calendar API reference).
- */
 export const GOOGLE_GRANTS: Readonly<Record<GoogleGrant, GoogleGrantScopes>> = {
   drive_read: {
-    service: "google_drive",
+    service: GOOGLE_SERVICE_ID.googleDrive,
     request: "https://www.googleapis.com/auth/drive.readonly",
     satisfiedBy: [
       "https://www.googleapis.com/auth/drive.readonly",
@@ -28,12 +22,12 @@ export const GOOGLE_GRANTS: Readonly<Record<GoogleGrant, GoogleGrantScopes>> = {
     ]
   },
   drive_manage: {
-    service: "google_drive",
+    service: GOOGLE_SERVICE_ID.googleDrive,
     request: "https://www.googleapis.com/auth/drive",
     satisfiedBy: ["https://www.googleapis.com/auth/drive"]
   },
   gmail_drafts: {
-    service: "gmail",
+    service: GOOGLE_SERVICE_ID.gmail,
     request: "https://www.googleapis.com/auth/gmail.compose",
     satisfiedBy: [
       "https://www.googleapis.com/auth/gmail.compose",
@@ -42,12 +36,12 @@ export const GOOGLE_GRANTS: Readonly<Record<GoogleGrant, GoogleGrantScopes>> = {
     ]
   },
   gmail_modify: {
-    service: "gmail",
+    service: GOOGLE_SERVICE_ID.gmail,
     request: "https://www.googleapis.com/auth/gmail.modify",
     satisfiedBy: ["https://www.googleapis.com/auth/gmail.modify", "https://mail.google.com/"]
   },
   calendar_list: {
-    service: "calendar",
+    service: GOOGLE_SERVICE_ID.calendar,
     request: "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     satisfiedBy: [
       "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
@@ -57,7 +51,7 @@ export const GOOGLE_GRANTS: Readonly<Record<GoogleGrant, GoogleGrantScopes>> = {
     ]
   },
   calendar_freebusy: {
-    service: "calendar",
+    service: GOOGLE_SERVICE_ID.calendar,
     request: "https://www.googleapis.com/auth/calendar.freebusy",
     satisfiedBy: [
       "https://www.googleapis.com/auth/calendar.freebusy",
@@ -68,13 +62,12 @@ export const GOOGLE_GRANTS: Readonly<Record<GoogleGrant, GoogleGrantScopes>> = {
   }
 }
 
-/** True when the account's authorization for the grant's service is ready and Google granted it. */
 export const googleAccountHasGrant = (account: GoogleAccount, grant: GoogleGrant): boolean => {
   const { service, satisfiedBy } = GOOGLE_GRANTS[grant]
   const authorization = account.authorizations.find((item) => item.service === service)
   return (
     authorization !== undefined &&
-    authorization.status === "ready" &&
+    authorization.status === GOOGLE_AUTHORIZATION_STATUS.ready &&
     satisfiedBy.some((scope) => authorization.scopes.includes(scope))
   )
 }

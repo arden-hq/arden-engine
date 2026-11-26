@@ -8,10 +8,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { RevisionStorageError } from "../src/domain/errors.js"
 import { encodeUtf8 } from "../src/domain/format.js"
 import { ChangeSet, Create, Update } from "../src/domain/model.js"
-import {
-  ManagedFileRepository,
-  type ManagedFileRepositoryShape
-} from "../src/repository/service.js"
+import { ManagedFileRepository } from "../src/repository/service.js"
+import { type ManagedFileRepositoryShape } from "../src/repository/service-types.js"
 import { managedFileRepositoryNodeLayer } from "../src/storage/node.js"
 import { firstOf, requireVersion, useRepository } from "./kit.js"
 

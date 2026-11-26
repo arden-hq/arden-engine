@@ -4,7 +4,7 @@ import type { McpEvent } from "@arden-hq/protocol/mcp"
 import { type Cause, Context, Effect, Fiber, Option, Queue, Scope } from "effect"
 
 import { errorMessage } from "@arden-hq/std/errors"
-import type { McpLiveEvents } from "../runtime.js"
+import type { McpLiveEvents } from "../runtime-state.js"
 import { McpEventRequestError, type McpEventStreamEnd } from "../channel.js"
 import { pollMcpEvents } from "./requests.js"
 import { EVENT_ERROR_CODES, type McpEventOccurrence, type McpStreamSignal } from "./wire.js"

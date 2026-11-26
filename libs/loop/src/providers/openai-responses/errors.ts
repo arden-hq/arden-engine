@@ -1,7 +1,6 @@
 import type { ProviderErrorCode } from "../../errors.js"
 import { classifyRejection, httpRejection, ProviderError } from "../kit/index.js"
 
-/** The public failure type of this provider. Deliberately NOT a LoopError. */
 export class OpenAiResponsesProviderError extends ProviderError {
   override readonly name = "OpenAiResponsesProviderError"
 
@@ -10,12 +9,15 @@ export class OpenAiResponsesProviderError extends ProviderError {
   }
 }
 
-/**
- * The response failures OpenAI names itself, mapped onto the host taxonomy.
- * Membership is also what makes a `response.failed` terminal: anything not
- * listed here is a missing, new, overloaded, or server-side code that spends
- * the retry budget instead.
- */
+export const RESPONSE_ERROR_CODE = {
+  nativeTurnContextMismatch: "native_turn_context_mismatch",
+  previousResponseNotFound: "previous_response_not_found"
+} as const
+type ResponseErrorCode = (typeof RESPONSE_ERROR_CODE)[keyof typeof RESPONSE_ERROR_CODE]
+const RESPONSE_ERROR_CODES: ReadonlySet<string | null> = new Set(Object.values(RESPONSE_ERROR_CODE))
+export const isResponseErrorCode = (value: string | null): value is ResponseErrorCode =>
+  RESPONSE_ERROR_CODES.has(value)
+
 export const TERMINAL_RESPONSE_CODES: Readonly<Record<string, ProviderErrorCode>> = {
   bio_policy: "provider_error",
   content_filter: "provider_error",
@@ -29,6 +31,5 @@ export const TERMINAL_RESPONSE_CODES: Readonly<Record<string, ProviderErrorCode>
   usage_not_included: "provider_error"
 }
 
-/** The failure code of a non-OK HTTP status, from the body when one was read. */
 export const statusFailureCode = (status: number, detail: string | null): ProviderErrorCode =>
   classifyRejection(httpRejection(status, detail ?? undefined), TERMINAL_RESPONSE_CODES)

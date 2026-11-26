@@ -5,26 +5,19 @@ import { execFile } from "node:child_process"
 import type { CallEffects } from "../execution/tool-effect.js"
 import { toolRefusal } from "./tool-failure.js"
 
-/** The helper waits up to two minutes for the owner to answer macOS's own access prompt. */
 const HELPER_TIMEOUT_MS = 150_000
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
 export const MAC_APPS_SOURCE = "_mac_apps"
-/** One change at a time: the three apps share one store on the Mac. */
 export const MAC_APPS_WRITE_GROUP = "mac_apps_write"
 
 export interface MacAppsHelperOptions {
-  /** The desktop app's `arden-apple` program. The desktop sets ARDEN_APPLE_APPS_HELPER. */
   readonly path?: string | undefined
   readonly platform?: NodeJS.Platform
   readonly timeoutMs?: number
 }
 
 export interface MacAppsHelper {
-  /**
-   * Runs one helper command and returns the JSON it prints. A change passes
-   * its `effects`, so the call's receipt says whether the change was made.
-   */
   readonly run: (
     args: ReadonlyArray<string>,
     options: { readonly signal: AbortSignal; readonly effects?: CallEffects }
@@ -60,7 +53,6 @@ export const makeMacAppsHelper = ({
     }
     const fault = Option.flatMap(parseJson(lastLine(outcome.stderr)), decodeFault)
     if (Option.isNone(fault)) throw unreadable(effects !== undefined)
-    // The helper reports a fault before it saves anything.
     effects?.failed()
     throw toolRefusal(
       toolWords(fault.value.message),
@@ -100,7 +92,6 @@ const execute = (
 const FaultSchema = Schema.Struct({ error: Schema.String, message: Schema.String })
 const decodeFault = Schema.decodeUnknownOption(FaultSchema)
 
-/** No fault here is worth the same call again: each needs the owner or other arguments. */
 const FAULT_PREVIEWS: Readonly<Record<string, string>> = {
   not_asked: "macOS did not ask for access",
   denied: "Access is off",
@@ -128,7 +119,6 @@ const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknow
 
 const lastLine = (text: string): string => text.trimEnd().split("\n").at(-1) ?? ""
 
-/** The helper's commands and options, as the tools and parameters the model has. */
 const COMMAND_TOOLS: Readonly<Record<string, string>> = {
   "calendar list": "mac_calendar_list_calendars",
   "calendar events": "mac_calendar_search",
@@ -155,12 +145,10 @@ const toolWords = (message: string): string =>
       Object.hasOwn(OPTION_PARAMETERS, option) ? (OPTION_PARAMETERS[option] ?? option) : option
     )
 
-/** One `--name value` pair of the helper, or nothing when the value was not given. */
 export const helperOption = (
   name: string,
   value: string | number | undefined
 ): ReadonlyArray<string> => (value === undefined ? [] : [`--${name}`, String(value)])
 
-/** Text from the owner's apps, quoted so it reads as data. */
 export const quotedLines = (text: string): ReadonlyArray<string> =>
   text.split(/\r?\n/u).map((line) => `> ${line}`)

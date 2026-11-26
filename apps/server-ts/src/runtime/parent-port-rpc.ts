@@ -5,18 +5,41 @@ export interface ParentPortSender {
   readonly postMessage: (message: unknown) => void
 }
 
+export const PARENT_PORT_RESPONSE = { value: "value", error: "error", invalid: "invalid" } as const
+
 export type ParentPortResponse<T, E> =
-  | { readonly kind: "value"; readonly requestId: string; readonly value: T }
-  | { readonly kind: "error"; readonly requestId: string; readonly error: E }
-  | { readonly kind: "invalid"; readonly requestId: string }
+  | {
+      readonly kind: typeof PARENT_PORT_RESPONSE.value
+      readonly requestId: string
+      readonly value: T
+    }
+  | {
+      readonly kind: typeof PARENT_PORT_RESPONSE.error
+      readonly requestId: string
+      readonly error: E
+    }
+  | { readonly kind: typeof PARENT_PORT_RESPONSE.invalid; readonly requestId: string }
+
+export const PARENT_PORT_FAILURE = {
+  aborted: "aborted",
+  timeout: "timeout",
+  stopped: "stopped",
+  dispatch_failed: "dispatch_failed",
+  invalid_response: "invalid_response",
+  rejected: "rejected"
+} as const
 
 export type ParentPortFailure<E> =
-  | { readonly kind: "aborted"; readonly dispatched: boolean; readonly reason: unknown }
-  | { readonly kind: "timeout" }
-  | { readonly kind: "stopped" }
-  | { readonly kind: "dispatch_failed"; readonly cause: unknown }
-  | { readonly kind: "invalid_response" }
-  | { readonly kind: "rejected"; readonly error: E }
+  | {
+      readonly kind: typeof PARENT_PORT_FAILURE.aborted
+      readonly dispatched: boolean
+      readonly reason: unknown
+    }
+  | { readonly kind: typeof PARENT_PORT_FAILURE.timeout }
+  | { readonly kind: typeof PARENT_PORT_FAILURE.stopped }
+  | { readonly kind: typeof PARENT_PORT_FAILURE.dispatch_failed; readonly cause: unknown }
+  | { readonly kind: typeof PARENT_PORT_FAILURE.invalid_response }
+  | { readonly kind: typeof PARENT_PORT_FAILURE.rejected; readonly error: E }
 
 export interface ParentPortRpcOptions<T, E> {
   readonly type: string
@@ -87,16 +110,24 @@ export const createParentPortRpc = <T, E>(
     const { signal } = call
     if (signal?.aborted === true) {
       return Promise.reject(
-        call.fail({ kind: "aborted", dispatched: false, reason: signal.reason })
+        call.fail({ kind: PARENT_PORT_FAILURE.aborted, dispatched: false, reason: signal.reason })
       )
     }
     const requestId = randomUUID()
     return new Promise<T>((resolve, reject) => {
       const onAbort = (): void =>
-        cancel(requestId, { kind: "aborted", dispatched: true, reason: signal?.reason })
-      const timer = after(options.timeoutMs, () => cancel(requestId, { kind: "timeout" }), {
-        unref: true
-      })
+        cancel(requestId, {
+          kind: PARENT_PORT_FAILURE.aborted,
+          dispatched: true,
+          reason: signal?.reason
+        })
+      const timer = after(
+        options.timeoutMs,
+        () => cancel(requestId, { kind: PARENT_PORT_FAILURE.timeout }),
+        {
+          unref: true
+        }
+      )
       pending.set(requestId, {
         resolve,
         reject,
@@ -108,7 +139,7 @@ export const createParentPortRpc = <T, E>(
       try {
         port.postMessage({ type: options.type, requestId, ...payload })
       } catch (cause) {
-        fail(requestId, { kind: "dispatch_failed", cause })
+        fail(requestId, { kind: PARENT_PORT_FAILURE.dispatch_failed, cause })
       }
     })
   }
@@ -117,21 +148,22 @@ export const createParentPortRpc = <T, E>(
     const response = options.decode(input)
     if (response === undefined) return false
     switch (response.kind) {
-      case "value": {
+      case PARENT_PORT_RESPONSE.value: {
         take(response.requestId)?.resolve(response.value)
         return true
       }
-      case "error":
-        fail(response.requestId, { kind: "rejected", error: response.error })
+      case PARENT_PORT_RESPONSE.error:
+        fail(response.requestId, { kind: PARENT_PORT_FAILURE.rejected, error: response.error })
         return true
-      case "invalid":
-        fail(response.requestId, { kind: "invalid_response" })
+      case PARENT_PORT_RESPONSE.invalid:
+        fail(response.requestId, { kind: PARENT_PORT_FAILURE.invalid_response })
         return true
     }
   }
 
   const abortAll = (): void => {
-    for (const requestId of [...pending.keys()]) cancel(requestId, { kind: "stopped" })
+    for (const requestId of [...pending.keys()])
+      cancel(requestId, { kind: PARENT_PORT_FAILURE.stopped })
   }
 
   return { request, handleMessage, abortAll }
