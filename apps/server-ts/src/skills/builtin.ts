@@ -25,6 +25,7 @@ const BUILT_IN_SKILL_NAMES = [
   "google-setup",
   "space-work",
   "arden-internals",
+  "automation-design",
   "work-coordination",
   "fan-out",
   "visualize",
