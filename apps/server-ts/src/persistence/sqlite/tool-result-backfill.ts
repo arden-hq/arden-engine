@@ -53,6 +53,7 @@ const swapRows = Effect.fn("ToolResults.slimBackfillSwap")(function* (
  */
 export const slimToolResultsBackfill: PreparedBackfill = {
   name: "slim_tool_results",
+  landed: "2026-11-13",
   prepare: Effect.fn("ToolResults.slimBackfillPrepare")(function* ({ cursor, limit, reader }) {
     if ((yield* ToolResultObjects) === undefined)
       return Effect.succeed({ converted: 0, next: undefined })

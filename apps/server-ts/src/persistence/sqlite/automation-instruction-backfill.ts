@@ -15,6 +15,7 @@ const NAME = "automation_instruction_provenance"
 
 export const automationInstructionBackfill: Backfill = {
   name: NAME,
+  landed: "2026-11-09",
   chunk: Effect.fn("AutomationInstruction.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     if (cursor === undefined || cursor.startsWith("calls:")) {

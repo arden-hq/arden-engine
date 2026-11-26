@@ -106,6 +106,7 @@ export const readScriptExecutions = Effect.fn("ScriptJournal.executions")(functi
 
 export const scriptProgressBackfill: Backfill = {
   name: "script_execution_progress",
+  landed: "2026-11-09",
   chunk: Effect.fn("ScriptProgress.backfill")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{

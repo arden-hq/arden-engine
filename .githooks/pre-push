@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+head=$(git rev-parse HEAD)
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+  if [ "$(git rev-parse "$local_sha^{commit}")" != "$head" ]; then
+    echo "pre-push: $local_ref is not the checked-out commit. Check it out and push from there, so the checks run on what you push." >&2
+    exit 1
+  fi
+done
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: the checkout has uncommitted or untracked files. Commit or remove them, so the checks run on what you push." >&2
+  exit 1
+fi
+git fetch --quiet --no-tags origin main
+node tooling/checks-only-tighten.mjs "$(git merge-base HEAD origin/main)"
+exec just check

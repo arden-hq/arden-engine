@@ -10,6 +10,7 @@ const KEY_MESSAGE_COPIES_BACKFILL = "key_message_copies"
  * the transcript keeps its copy. Cursor: the last key rowid looked at. */
 export const keyMessageCopiesBackfill: Backfill = {
   name: KEY_MESSAGE_COPIES_BACKFILL,
+  landed: "2026-11-13",
   chunk: Effect.fn("KeyMessageCopies.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const after = cursor === undefined ? 0 : Number(cursor)

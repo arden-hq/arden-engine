@@ -21,6 +21,7 @@ const upperCase = (
   failOnCalls: ReadonlySet<number> = new Set()
 ): Backfill => ({
   name: "upper_case",
+  landed: "2026-11-22",
   chunk: ({ cursor, limit }) =>
     Effect.gen(function* () {
       calls.push(cursor)
